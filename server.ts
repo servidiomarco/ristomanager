@@ -1,0 +1,253 @@
+import express from 'express';
+import cors from 'cors';
+import pool, { createSchema } from './db.js';
+
+const app = express();
+const port = 3000;
+
+app.use(cors());
+app.use(express.json());
+
+// Reservations
+app.get('/reservations', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM reservations ORDER BY reservation_time DESC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/reservations', async (req, res) => {
+    try {
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status } = req.body;
+        const result = await pool.query(
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/reservations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status } = req.body;
+        const result = await pool.query(
+            'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9 WHERE id = $10 RETURNING *',
+            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/reservations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// Tables
+app.get('/tables', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM tables ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/tables', async (req, res) => {
+    try {
+        const { name, shape, seats, x, y, room_id, status } = req.body;
+        const result = await pool.query(
+            'INSERT INTO tables (name, shape, seats, x, y, room_id, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [name, shape, seats, x, y, room_id, status]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/tables/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, shape, seats, x, y, room_id, status } = req.body;
+        const result = await pool.query(
+            'UPDATE tables SET name = $1, shape = $2, seats = $3, x = $4, y = $5, room_id = $6, status = $7 WHERE id = $8 RETURNING *',
+            [name, shape, seats, x, y, room_id, status, id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/tables/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM tables WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// Rooms
+app.get('/rooms', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM rooms ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/rooms', async (req, res) => {
+    try {
+        const { name, width, height } = req.body;
+        const result = await pool.query(
+            'INSERT INTO rooms (name, width, height) VALUES ($1, $2, $3) RETURNING *',
+            [name, width, height]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/rooms/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// Dishes
+app.get('/dishes', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM dishes ORDER BY category, name');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/dishes', async (req, res) => {
+    try {
+        const { name, description, price, category, allergens } = req.body;
+        const result = await pool.query(
+            'INSERT INTO dishes (name, description, price, category, allergens) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [name, description, price, category, allergens]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/dishes/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// Banquet Menus
+app.get('/banquet-menus', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM banquet_menus ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/banquet-menus', async (req, res) => {
+    try {
+        const { name, description, price_per_person, dish_ids } = req.body;
+        const result = await pool.query(
+            'INSERT INTO banquet_menus (name, description, price_per_person, dish_ids) VALUES ($1, $2, $3, $4) RETURNING *',
+            [name, description, price_per_person, dish_ids]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/banquet-menus/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, description, price_per_person, dish_ids } = req.body;
+        const result = await pool.query(
+            'UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4 WHERE id = $5 RETURNING *',
+            [name, description, price_per_person, dish_ids, id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/banquet-menus/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+const startServer = async () => {
+    try {
+        await createSchema();
+        app.listen(port, () => {
+            console.log(`Server listening at http://localhost:${port}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+};
+
+startServer();
