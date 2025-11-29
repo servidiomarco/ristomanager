@@ -1,6 +1,8 @@
 import { Reservation, Table, Room, Dish, BanquetMenu } from '../types';
 
-const API_URL = 'http://localhost:3000';
+// const API_URL = 'http://localhost:3000';
+const API_URL = process.env.VITE_API_URL ?? 'http://localhost:3000';
+
 
 export const getReservations = async (): Promise<Reservation[]> => {
   const response = await fetch(`${API_URL}/reservations`);
