@@ -1,12 +1,18 @@
 
 import { Pool } from 'pg';
 
+// const pool = new Pool({
+//   user: 'postgres',
+//   host: 'localhost',
+//   database: 'ristomanager',
+//   password: 'postgres',
+//   port: 5432,
+// });
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'ristomanager',
-  password: 'postgres',
-  port: 5432,
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false, // Required for Neon
+    },
 });
 
 export const createSchema = async () => {
