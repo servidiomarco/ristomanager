@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
+COPY tsconfig*.json ./
 
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
@@ -13,7 +13,7 @@ RUN npm ci
 # Copy source files
 COPY server.ts db.ts ./
 
-# Build TypeScript
+# Build TypeScript to JavaScript
 RUN npm run build:server
 
 # Production stage
