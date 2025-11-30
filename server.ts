@@ -5,7 +5,25 @@ import pool, { createSchema } from './db.js';
 const app = express();
 const port = 3000;
 
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://ristomanager-production.up.railway.app',
+  'https://ristomanager-phi.vercel.app',
+  // Add your Vercel frontend URL here
+  // e.g. 'https://your-vercel-app.vercel.app'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Reservations
