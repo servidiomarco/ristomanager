@@ -1,7 +1,9 @@
 import { Reservation, Table, Room, Dish, BanquetMenu } from '../types';
 
 // Use import.meta.env for Vite frontend environment variables
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL =import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
+
 
 
 export const getReservations = async (): Promise<Reservation[]> => {
