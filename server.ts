@@ -13,22 +13,33 @@ const httpServer = createServer(app);
 // Socket service instance (initialized in startServer)
 let socketService: SocketService;
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://ristomanager-production.up.railway.app',
-  'https://ristomanager-phi.vercel.app',
-  // Add your Vercel frontend URL here
-  // e.g. 'https://your-vercel-app.vercel.app'
-];
-
+// Flexible CORS configuration
 const corsOptions = {
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    if (allowedOrigins.indexOf(origin!) !== -1 || !origin) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) {
+      return callback(null, true);
     }
-  }
+
+    // Allow localhost for development
+    if (origin.includes('localhost')) {
+      return callback(null, true);
+    }
+
+    // Allow all Vercel deployment URLs
+    if (origin.includes('vercel.app')) {
+      return callback(null, true);
+    }
+
+    // Allow Railway URLs
+    if (origin.includes('railway.app')) {
+      return callback(null, true);
+    }
+
+    // Reject other origins
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
 };
 
 app.use(cors(corsOptions));
