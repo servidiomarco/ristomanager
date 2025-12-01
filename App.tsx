@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
+import { useSocket } from './hooks/useSocket';
 
 import {
   getReservations,
@@ -43,6 +44,9 @@ const App: React.FC = () => {
   // Toast/Snackbar State
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // Socket.IO connection
+  const { socket, isConnected } = useSocket();
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -77,25 +81,100 @@ const App: React.FC = () => {
       }, 3000);
   };
 
-  // Simulated Real-time Events
+  // Socket.IO Real-time Event Listeners
   useEffect(() => {
-      const interval = setInterval(() => {
-          // 10% chance to trigger a fake incoming reservation or payment
-          if (Math.random() > 0.9) {
-             const newNotif: Notification = {
-                 id: Math.random().toString(),
-                 title: 'Aggiornamento Stato',
-                 message: 'Un pagamento acconto è stato ricevuto per il tavolo T2.',
-                 type: 'success',
-                 timestamp: new Date(),
-                 read: false
-             };
-             setNotifications(prev => [newNotif, ...prev]);
-             addToast('Nuovo aggiornamento ricevuto', 'info');
-          }
-      }, 30000);
-      return () => clearInterval(interval);
-  }, []);
+    if (!socket) return;
+
+    // Reservation events
+    socket.on('reservation:created', (reservation: Reservation) => {
+      setReservations(prev => [...prev, reservation]);
+      addToast(`Nuova prenotazione: ${reservation.customer_name}`, 'info');
+    });
+
+    socket.on('reservation:updated', (reservation: Reservation) => {
+      setReservations(prev =>
+        prev.map(r => r.id === reservation.id ? reservation : r)
+      );
+      addToast(`Prenotazione aggiornata: ${reservation.customer_name}`, 'info');
+    });
+
+    socket.on('reservation:deleted', (id: number) => {
+      setReservations(prev => prev.filter(r => r.id !== id));
+      addToast('Prenotazione eliminata', 'info');
+    });
+
+    // Table events
+    socket.on('table:created', (table: Table) => {
+      setTables(prev => [...prev, table]);
+    });
+
+    socket.on('table:updated', (table: Table) => {
+      setTables(prev =>
+        prev.map(t => t.id === table.id ? table : t)
+      );
+    });
+
+    socket.on('table:deleted', (id: number) => {
+      setTables(prev => prev.filter(t => t.id !== id));
+    });
+
+    // Room events
+    socket.on('room:created', (room: Room) => {
+      setRooms(prev => [...prev, room]);
+    });
+
+    socket.on('room:deleted', (id: number) => {
+      setRooms(prev => prev.filter(r => r.id !== id));
+    });
+
+    // Dish events
+    socket.on('dish:created', (dish: Dish) => {
+      setDishes(prev => [...prev, dish]);
+    });
+
+    socket.on('dish:updated', (dish: Dish) => {
+      setDishes(prev =>
+        prev.map(d => d.id === dish.id ? dish : d)
+      );
+    });
+
+    socket.on('dish:deleted', (id: number) => {
+      setDishes(prev => prev.filter(d => d.id !== id));
+    });
+
+    // Banquet Menu events
+    socket.on('banquet:created', (menu: BanquetMenu) => {
+      setBanquetMenus(prev => [...prev, menu]);
+    });
+
+    socket.on('banquet:updated', (menu: BanquetMenu) => {
+      setBanquetMenus(prev =>
+        prev.map(m => m.id === menu.id ? menu : m)
+      );
+    });
+
+    socket.on('banquet:deleted', (id: number) => {
+      setBanquetMenus(prev => prev.filter(m => m.id !== id));
+    });
+
+    // Cleanup all event listeners on unmount
+    return () => {
+      socket.off('reservation:created');
+      socket.off('reservation:updated');
+      socket.off('reservation:deleted');
+      socket.off('table:created');
+      socket.off('table:updated');
+      socket.off('table:deleted');
+      socket.off('room:created');
+      socket.off('room:deleted');
+      socket.off('dish:created');
+      socket.off('dish:updated');
+      socket.off('dish:deleted');
+      socket.off('banquet:created');
+      socket.off('banquet:updated');
+      socket.off('banquet:deleted');
+    };
+  }, [socket]);
 
   // --- Floor Plan Logic ---
   const handleUpdateTable = async (updatedTable: Table) => {
@@ -258,6 +337,15 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+      {/* Connection Status Indicator */}
+      <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
+        isConnected
+          ? 'bg-emerald-100 text-emerald-700'
+          : 'bg-red-100 text-red-700 animate-pulse'
+      }`}>
+        {isConnected ? '🟢 Live' : '🔴 Offline'}
+      </div>
+
       {/* Sidebar */}
       <aside className="w-20 lg:w-64 bg-white border-r border-slate-200 flex flex-col transition-all duration-300 z-20 relative">
         <div className="h-16 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-100">
