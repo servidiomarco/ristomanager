@@ -11,7 +11,8 @@ COPY tsconfig*.json ./
 RUN npm ci
 
 # Copy source files
-COPY server.ts db.ts ./
+COPY server.ts db.ts types.ts ./
+COPY services ./services
 
 # Build TypeScript to JavaScript
 RUN npm run build:server
@@ -30,12 +31,8 @@ RUN npm ci --only=production
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
 
-# Expose port 3000
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})" || exit 1
+# Expose port (Railway will use PORT env var)
+EXPOSE ${PORT:-3000}
 
 # Start the server
 CMD ["node", "dist/server.js"]
