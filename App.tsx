@@ -6,6 +6,7 @@ import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { useSocket } from './hooks/useSocket';
+import { offlineQueue } from './services/offlineQueue';
 
 import {
   getReservations,
@@ -157,6 +158,37 @@ const App: React.FC = () => {
       setBanquetMenus(prev => prev.filter(m => m.id !== id));
     });
 
+    // Connection/Disconnection handlers with offline queue
+    socket.on('connect', async () => {
+      console.log('✅ Socket connected - flushing offline queue');
+
+      // Show reconnection toast
+      addToast('Connessione ristabilita', 'success');
+
+      // Flush offline queue if there are pending operations
+      if (!offlineQueue.isEmpty()) {
+        const queueSize = offlineQueue.size();
+        addToast(`Sincronizzazione di ${queueSize} operazioni in sospeso...`, 'info');
+
+        const result = await offlineQueue.flush();
+
+        if (result.success > 0) {
+          addToast(`✓ ${result.success} operazioni sincronizzate con successo`, 'success');
+        }
+        if (result.failed > 0) {
+          addToast(`⚠ ${result.failed} operazioni non riuscite`, 'error');
+        }
+
+        // Refresh all data after sync
+        fetchData();
+      }
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('⚠️ Socket disconnected:', reason);
+      addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error');
+    });
+
     // Cleanup all event listeners on unmount
     return () => {
       socket.off('reservation:created');
@@ -173,6 +205,8 @@ const App: React.FC = () => {
       socket.off('banquet:created');
       socket.off('banquet:updated');
       socket.off('banquet:deleted');
+      socket.off('connect');
+      socket.off('disconnect');
     };
   }, [socket]);
 
