@@ -343,8 +343,8 @@ const startServer = async () => {
         socketService = new SocketService(httpServer);
         console.log('Socket.IO initialized');
 
-        httpServer.listen(port, () => {
-            console.log(`Server with WebSocket support listening at http://localhost:${port}`);
+        httpServer.listen(Number(port), '0.0.0.0', () => {
+            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);
