@@ -1,9 +1,17 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import pool, { createSchema } from './db.js';
+import { SocketService } from './services/socketService.js';
 
 const app = express();
 const port = 3000;
+
+// Create HTTP server from Express app
+const httpServer = createServer(app);
+
+// Socket service instance (initialized in startServer)
+let socketService: SocketService;
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -44,7 +52,12 @@ app.post('/reservations', async (req, res) => {
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
             [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status]
         );
-        res.status(201).json(result.rows[0]);
+        const newReservation = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastReservationCreated(newReservation);
+
+        res.status(201).json(newReservation);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -59,7 +72,12 @@ app.put('/reservations/:id', async (req, res) => {
             'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9 WHERE id = $10 RETURNING *',
             [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, id]
         );
-        res.json(result.rows[0]);
+        const updatedReservation = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastReservationUpdated(updatedReservation);
+
+        res.json(updatedReservation);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -70,6 +88,10 @@ app.delete('/reservations/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
+
+        // Broadcast to all connected clients
+        socketService.broadcastReservationDeleted(Number(id));
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -96,7 +118,12 @@ app.post('/tables', async (req, res) => {
             'INSERT INTO tables (name, shape, seats, x, y, room_id, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [name, shape, seats, x, y, room_id, status]
         );
-        res.status(201).json(result.rows[0]);
+        const newTable = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastTableCreated(newTable);
+
+        res.status(201).json(newTable);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -111,7 +138,12 @@ app.put('/tables/:id', async (req, res) => {
             'UPDATE tables SET name = $1, shape = $2, seats = $3, x = $4, y = $5, room_id = $6, status = $7 WHERE id = $8 RETURNING *',
             [name, shape, seats, x, y, room_id, status, id]
         );
-        res.json(result.rows[0]);
+        const updatedTable = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastTableUpdated(updatedTable);
+
+        res.json(updatedTable);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -122,6 +154,10 @@ app.delete('/tables/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM tables WHERE id = $1', [id]);
+
+        // Broadcast to all connected clients
+        socketService.broadcastTableDeleted(Number(id));
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -148,7 +184,12 @@ app.post('/rooms', async (req, res) => {
             'INSERT INTO rooms (name, width, height) VALUES ($1, $2, $3) RETURNING *',
             [name, width, height]
         );
-        res.status(201).json(result.rows[0]);
+        const newRoom = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastRoomCreated(newRoom);
+
+        res.status(201).json(newRoom);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -159,6 +200,10 @@ app.delete('/rooms/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+
+        // Broadcast to all connected clients
+        socketService.broadcastRoomDeleted(Number(id));
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -185,7 +230,12 @@ app.post('/dishes', async (req, res) => {
             'INSERT INTO dishes (name, description, price, category, allergens) VALUES ($1, $2, $3, $4, $5) RETURNING *',
             [name, description, price, category, allergens]
         );
-        res.status(201).json(result.rows[0]);
+        const newDish = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastDishCreated(newDish);
+
+        res.status(201).json(newDish);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -196,6 +246,10 @@ app.delete('/dishes/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
+
+        // Broadcast to all connected clients
+        socketService.broadcastDishDeleted(Number(id));
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -222,7 +276,12 @@ app.post('/banquet-menus', async (req, res) => {
             'INSERT INTO banquet_menus (name, description, price_per_person, dish_ids) VALUES ($1, $2, $3, $4) RETURNING *',
             [name, description, price_per_person, dish_ids]
         );
-        res.status(201).json(result.rows[0]);
+        const newMenu = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastBanquetCreated(newMenu);
+
+        res.status(201).json(newMenu);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -237,7 +296,12 @@ app.put('/banquet-menus/:id', async (req, res) => {
             'UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4 WHERE id = $5 RETURNING *',
             [name, description, price_per_person, dish_ids, id]
         );
-        res.json(result.rows[0]);
+        const updatedMenu = result.rows[0];
+
+        // Broadcast to all connected clients
+        socketService.broadcastBanquetUpdated(updatedMenu);
+
+        res.json(updatedMenu);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -248,6 +312,10 @@ app.delete('/banquet-menus/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);
+
+        // Broadcast to all connected clients
+        socketService.broadcastBanquetDeleted(Number(id));
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -259,8 +327,13 @@ app.delete('/banquet-menus/:id', async (req, res) => {
 const startServer = async () => {
     try {
         await createSchema();
-        app.listen(port, () => {
-            console.log(`Server listening at http://localhost:${port}`);
+
+        // Initialize Socket.IO
+        socketService = new SocketService(httpServer);
+        console.log('Socket.IO initialized');
+
+        httpServer.listen(port, () => {
+            console.log(`Server with WebSocket support listening at http://localhost:${port}`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);
