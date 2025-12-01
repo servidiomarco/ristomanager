@@ -8,11 +8,22 @@ export class SocketService {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: [
-          'http://localhost:5173',
-          'https://ristomanager-production.up.railway.app',
-          'https://ristomanager-phi.vercel.app'
-        ],
+        origin: (origin, callback) => {
+          // Allow requests with no origin (mobile apps, Postman, etc.)
+          if (!origin) return callback(null, true);
+
+          // Allow localhost for development
+          if (origin.includes('localhost')) return callback(null, true);
+
+          // Allow all Vercel deployment URLs
+          if (origin.includes('vercel.app')) return callback(null, true);
+
+          // Allow Railway URLs
+          if (origin.includes('railway.app')) return callback(null, true);
+
+          // Reject other origins
+          callback(new Error('Not allowed by CORS'));
+        },
         methods: ['GET', 'POST'],
         credentials: true
       },
