@@ -211,14 +211,29 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 return;
             }
 
-            // Get the element's current visual position (with transform applied)
-            const elementRect = draggedElementRef.current.getBoundingClientRect();
-            const canvasRect = canvasRef.current.getBoundingClientRect();
+            // Parse the current transform to get the translation
+            const transform = window.getComputedStyle(draggedElementRef.current).transform;
+            let translateX = 0;
+            let translateY = 0;
 
-            // Calculate position relative to canvas
-            // Element's position in canvas = element's viewport position - canvas's viewport position
-            const finalX = Math.round(elementRect.left - canvasRect.left);
-            const finalY = Math.round(elementRect.top - canvasRect.top);
+            if (transform && transform !== 'none') {
+                const matrix = transform.match(/matrix\((.+)\)/);
+                if (matrix) {
+                    const values = matrix[1].split(', ');
+                    translateX = parseFloat(values[4]) || 0;
+                    translateY = parseFloat(values[5]) || 0;
+                }
+            }
+
+            // Calculate final position: original position + transform delta
+            const finalX = Math.round(dragState.originalPos.x + translateX);
+            const finalY = Math.round(dragState.originalPos.y + translateY);
+
+            console.log('Drop position:', {
+                original: dragState.originalPos,
+                transform: { translateX, translateY },
+                final: { finalX, finalY }
+            });
 
             // Ensure positions don't go negative
             const clampedX = Math.max(0, finalX);
