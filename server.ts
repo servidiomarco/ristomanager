@@ -379,8 +379,11 @@ const startServer = async () => {
         }
 
         // Start HTTP server LAST (after everything is set up)
-        httpServer.listen(Number(port), '0.0.0.0', () => {
-            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
+        httpServer.listen(Number(port), () => {
+            console.log(`Server listening on port ${port}`);
+        }).on('error', (error) => {
+            console.error('Failed to start server:', error);
+            process.exit(1);
         });
     } catch (error) {
         console.error('Failed to start server:', error);
