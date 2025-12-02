@@ -50,8 +50,26 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'RistoManager API is running' });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  const health = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    server: 'running',
+    database: 'unknown',
+    socketio: socketService ? 'initialized' : 'not initialized'
+  };
+
+  // Check database connection
+  try {
+    await pool.query('SELECT 1');
+    health.database = 'connected';
+  } catch (err) {
+    health.database = 'disconnected';
+    health.status = 'degraded';
+  }
+
+  const statusCode = health.status === 'ok' ? 200 : 503;
+  res.status(statusCode).json(health);
 });
 
 // Reservations
@@ -346,15 +364,24 @@ app.delete('/banquet-menus/:id', async (req, res) => {
 
 const startServer = async () => {
     try {
-        await createSchema();
+        // Start HTTP server first so Railway can detect the service is running
+        httpServer.listen(Number(port), '0.0.0.0', () => {
+            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
+        });
 
         // Initialize Socket.IO
         socketService = new SocketService(httpServer);
         console.log('Socket.IO initialized');
 
-        httpServer.listen(Number(port), '0.0.0.0', () => {
-            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
-        });
+        // Try to initialize database schema (non-blocking)
+        try {
+            await createSchema();
+            console.log('Database schema initialized');
+        } catch (dbError) {
+            console.error('Database initialization failed:', dbError);
+            console.error('Server will continue running, but database operations will fail');
+            console.error('Please ensure DATABASE_URL environment variable is set correctly');
+        }
     } catch (error) {
         console.error('Failed to start server:', error);
         process.exit(1);
