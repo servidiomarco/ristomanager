@@ -66,12 +66,18 @@ export const createTable = async (table: Omit<Table, 'id'>): Promise<Table> => {
 };
 
 export const updateTable = async (id: number, table: Partial<Table>): Promise<Table> => {
+  console.log('apiService.updateTable - Sending to backend:', id, 'Data:', JSON.stringify(table, null, 2));
+
   const response = await fetch(`${API_URL}/tables/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(table),
   });
-  return response.json();
+
+  const result = await response.json();
+  console.log('apiService.updateTable - Backend returned:', JSON.stringify(result, null, 2));
+
+  return result;
 };
 
 export const deleteTable = async (id: number): Promise<void> => {
