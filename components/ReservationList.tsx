@@ -449,13 +449,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
 
                             <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
-                                <div className="text-right mr-4">
+                                {/* Totale Stimato - Hidden for now */}
+                                {/* <div className="text-right mr-4">
                                     <p className="text-xs text-slate-400">Totale Stimato</p>
                                     <p className="text-xl font-bold text-slate-800">
                                         €{menu ? (menu.price_per_person * res.guests).toFixed(2) : '0.00'}
                                     </p>
-                                </div>
-                                
+                                </div> */}
+
                                 <div className="flex items-center gap-2">
                                     {/* Confirmation Actions */}
                                     <button 
@@ -484,7 +485,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                     <div className="w-px h-6 bg-slate-200 mx-1"></div>
 
-                                    {res.payment_status !== PaymentStatus.PAID_FULL && (
+                                    {/* Payment button - Hidden for now */}
+                                    {/* {res.payment_status !== PaymentStatus.PAID_FULL && (
                                         <button
                                             onClick={() => handlePaymentAction(res)}
                                             className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
@@ -492,7 +494,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         >
                                             <CreditCard className="h-5 w-5" />
                                         </button>
-                                    )}
+                                    )} */}
 
                                     <button
                                         onClick={() => handleToggleArrivalStatus(res)}

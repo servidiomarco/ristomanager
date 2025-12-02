@@ -34,8 +34,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedTables, setSelectedTables] = useState<number[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [isSelectionMode, setIsSelectionMode] = useState(false); 
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [draggedTableId, setDraggedTableId] = useState<number | null>(null);
+  const [tempTablePositions, setTempTablePositions] = useState<{ [key: number]: { x: number; y: number } }>({});
   
   // Room Management State
   const [isAddingRoom, setIsAddingRoom] = useState(false);
@@ -157,23 +158,91 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const deltaX = e.clientX - dragStart.x;
     const deltaY = e.clientY - dragStart.y;
-    
-    const table = tables.find(t => t.id === draggedTableId);
-    if (!table || table.is_locked) return; 
 
-    onUpdateTable({
-        ...table,
-        x: table.x + deltaX,
-        y: table.y + deltaY
-    });
+    const table = tables.find(t => t.id === draggedTableId);
+    if (!table || table.is_locked) return;
+
+    // Update temporary position for smooth dragging
+    const currentPos = tempTablePositions[draggedTableId] || { x: table.x, y: table.y };
+    setTempTablePositions(prev => ({
+        ...prev,
+        [draggedTableId]: {
+            x: currentPos.x + deltaX,
+            y: currentPos.y + deltaY
+        }
+    }));
 
     setDragStart({ x: e.clientX, y: e.clientY });
   };
 
   const handleMouseUp = () => {
+    // Save final position to backend if we were dragging
+    if (isDragging && draggedTableId) {
+        const table = tables.find(t => t.id === draggedTableId);
+        const tempPos = tempTablePositions[draggedTableId];
+        if (table && tempPos) {
+            onUpdateTable({
+                ...table,
+                x: tempPos.x,
+                y: tempPos.y
+            });
+        }
+        // Clear temp position
+        setTempTablePositions(prev => {
+            const newPos = { ...prev };
+            delete newPos[draggedTableId];
+            return newPos;
+        });
+    }
+
     setIsDragging(false);
     setDraggedTableId(null);
     setDragStart(null);
+  };
+
+  // Touch event handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent, tableId: number) => {
+    e.stopPropagation();
+    const touch = e.touches[0];
+    const table = tables.find(t => t.id === tableId);
+
+    if (table?.is_locked || (table?.temp_lock_expires_at && table.temp_lock_expires_at > Date.now())) {
+        return;
+    }
+
+    if (!selectedTables.includes(tableId)) {
+        setSelectedTables([tableId]);
+    }
+
+    setIsDragging(true);
+    setDraggedTableId(tableId);
+    setDragStart({ x: touch.clientX, y: touch.clientY });
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging || !draggedTableId || !dragStart) return;
+
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - dragStart.x;
+    const deltaY = touch.clientY - dragStart.y;
+
+    const table = tables.find(t => t.id === draggedTableId);
+    if (!table || table.is_locked) return;
+
+    const currentPos = tempTablePositions[draggedTableId] || { x: table.x, y: table.y };
+    setTempTablePositions(prev => ({
+        ...prev,
+        [draggedTableId]: {
+            x: currentPos.x + deltaX,
+            y: currentPos.y + deltaY
+        }
+    }));
+
+    setDragStart({ x: touch.clientX, y: touch.clientY });
+  };
+
+  const handleTouchEnd = () => {
+    handleMouseUp(); // Reuse mouse up logic
   };
 
   const handleAddTable = (shape: TableShape) => {
@@ -254,9 +323,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const renderTableShape = (table: Table) => {
     const isSelected = selectedTables.includes(table.id);
-    const dynamicStatus = getDynamicTableStatus(table); 
+    const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
-    
+
+    // Use temp position if dragging, otherwise use table position
+    const displayPos = tempTablePositions[table.id] || { x: table.x, y: table.y };
+
     // Calculate remaining time if temp locked
     let timerDisplay = null;
     if (table.temp_lock_expires_at && table.temp_lock_expires_at > Date.now()) {
@@ -274,16 +346,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     };
 
     const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
-    
+
+    // Responsive table sizes - smaller on mobile
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const sizeMultiplier = isMobile ? 0.6 : 1;
+
     let shapeStyles = {};
 
     if (table.shape === TableShape.CIRCLE) {
-      shapeStyles = { borderRadius: '50%', width: '80px', height: '80px' };
+      const size = 80 * sizeMultiplier;
+      shapeStyles = { borderRadius: '50%', width: `${size}px`, height: `${size}px` };
     } else if (table.shape === TableShape.SQUARE) {
-      shapeStyles = { borderRadius: '8px', width: '80px', height: '80px' };
+      const size = 80 * sizeMultiplier;
+      shapeStyles = { borderRadius: '8px', width: `${size}px`, height: `${size}px` };
     } else {
-      const width = Math.max(100, table.seats * 15); 
-      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: '80px' };
+      const width = Math.max(100, table.seats * 15) * sizeMultiplier;
+      const height = 80 * sizeMultiplier;
+      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${height}px` };
     }
 
     return (
@@ -291,12 +370,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         key={table.id}
         className={baseClasses}
         style={{
-          left: table.x,
-          top: table.y,
+          left: displayPos.x,
+          top: displayPos.y,
           ...shapeStyles,
           zIndex: isSelected ? 10 : 1
         }}
         onMouseDown={(e) => handleMouseDown(e, table.id)}
+        onTouchStart={(e) => handleTouchStart(e, table.id)}
       >
         <span className="font-bold text-sm flex items-center gap-1">
             {table.is_locked && <Lock size={10} className="text-slate-400" />}
@@ -331,7 +411,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const singleSelectedTable = selectedTables.length === 1 ? tables.find(t => t.id === selectedTables[0]) : null;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] p-4 gap-4" onMouseUp={handleMouseUp} onMouseMove={handleMouseMove}>
+    <div
+      className="flex flex-col h-[calc(100vh-64px)] p-4 gap-4"
+      onMouseUp={handleMouseUp}
+      onMouseMove={handleMouseMove}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* Toolbar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 pb-1">
