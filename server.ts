@@ -343,27 +343,29 @@ app.delete('/banquet-menus/:id', async (req, res) => {
 
 const startServer = async () => {
     try {
-        // Initialize Socket.IO BEFORE starting the server
-        socketService = new SocketService(httpServer);
-        console.log('Socket.IO initialized');
-
-        // Try to initialize database schema (non-blocking)
-        try {
-            await createSchema();
-            console.log('Database schema initialized');
-        } catch (dbError) {
-            console.error('Database initialization failed:', dbError);
-            console.error('Server will continue running, but database operations will fail');
-            console.error('Please ensure DATABASE_URL environment variable is set correctly');
-        }
-
-        // Start HTTP server LAST (after everything is set up)
+        // Start HTTP server FIRST to ensure it can accept connections
         const portNumber = Number(port);
         console.log(`Attempting to start server on port ${portNumber}...`);
 
         httpServer.listen(portNumber, () => {
             console.log(`✅ Server listening on port ${portNumber}`);
             console.log(`✅ Server ready to accept connections`);
+
+            // Initialize Socket.IO AFTER server is listening
+            try {
+                socketService = new SocketService(httpServer);
+                console.log('✅ Socket.IO initialized');
+            } catch (socketError) {
+                console.error('Socket.IO initialization failed:', socketError);
+            }
+
+            // Initialize database schema in background
+            createSchema()
+                .then(() => console.log('✅ Database schema initialized'))
+                .catch((dbError) => {
+                    console.error('Database initialization failed:', dbError);
+                    console.error('Server will continue running, but database operations may fail');
+                });
         }).on('error', (error) => {
             console.error('❌ Failed to start server:', error);
             process.exit(1);
