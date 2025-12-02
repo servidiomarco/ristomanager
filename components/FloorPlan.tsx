@@ -201,26 +201,33 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dragState = dragStateRef.current;
 
     // Save final position to backend if we were dragging
-    if (dragState.isDragging && dragState.tableId !== null) {
+    if (dragState.isDragging && dragState.tableId !== null && canvasRef.current) {
         const table = tables.find(t => t.id === dragState.tableId);
 
-        if (table && dragState.originalPos) {
+        if (table && dragState.originalPos && draggedElementRef.current) {
             // Validate table.id is a proper number
             if (typeof table.id !== 'number' || isNaN(table.id)) {
                 console.error('Invalid table ID in handleMouseUp:', table.id, table);
                 return;
             }
 
-            // Calculate final position
-            const deltaX = dragState.currentX - dragState.startX;
-            const deltaY = dragState.currentY - dragState.startY;
-            const finalX = Math.round(dragState.originalPos.x + deltaX);
-            const finalY = Math.round(dragState.originalPos.y + deltaY);
+            // Get the element's current visual position (with transform applied)
+            const elementRect = draggedElementRef.current.getBoundingClientRect();
+            const canvasRect = canvasRef.current.getBoundingClientRect();
+
+            // Calculate position relative to canvas
+            // Element's position in canvas = element's viewport position - canvas's viewport position
+            const finalX = Math.round(elementRect.left - canvasRect.left);
+            const finalY = Math.round(elementRect.top - canvasRect.top);
+
+            // Ensure positions don't go negative
+            const clampedX = Math.max(0, finalX);
+            const clampedY = Math.max(0, finalY);
 
             const updatedTable = {
                 ...table,
-                x: finalX,
-                y: finalY
+                x: clampedX,
+                y: clampedY
             };
 
             // Optimistically update the table position in parent state first
