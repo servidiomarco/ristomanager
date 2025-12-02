@@ -7,8 +7,22 @@ import { SocketService } from './services/socketService.js';
 const app = express();
 const port = process.env.PORT || 3000;
 
+console.log('🔍 Environment check:');
+console.log('  - NODE_ENV:', process.env.NODE_ENV);
+console.log('  - PORT from env:', process.env.PORT);
+console.log('  - Using port:', port);
+
 // Create HTTP server from Express app
 const httpServer = createServer(app);
+
+// Add connection and error logging to HTTP server
+httpServer.on('connection', (socket) => {
+  console.log('📥 New connection established');
+});
+
+httpServer.on('clientError', (err, socket) => {
+  console.error('❌ Client error:', err.message);
+});
 
 // Socket service instance (initialized in startServer)
 let socketService: SocketService | undefined;
@@ -347,8 +361,10 @@ const startServer = async () => {
         const portNumber = Number(port);
         console.log(`Attempting to start server on port ${portNumber}...`);
 
-        httpServer.listen(portNumber, () => {
+        httpServer.listen(portNumber, '0.0.0.0', () => {
+            const addr = httpServer.address();
             console.log(`✅ Server listening on port ${portNumber}`);
+            console.log(`✅ Server address:`, addr);
             console.log(`✅ Server ready to accept connections`);
 
             // TEMPORARILY DISABLE Socket.IO for testing
