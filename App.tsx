@@ -279,18 +279,22 @@ const App: React.FC = () => {
     }
 
     try {
-      const selectedTables = tables.filter(t => tableIds.includes(t.id));
+      console.log('handleMergeTables called with tableIds:', tableIds);
+
+      // Get tables in the same order as tableIds
+      const selectedTables = tableIds.map(id => tables.find(t => t.id === id)).filter(Boolean) as Table[];
 
       console.log('Merging tables:', selectedTables.map(t => `${t.name} (ID: ${t.id})`));
 
-      // Use the first table as the primary table
+      // Use the first table ID as the primary table
+      const primaryTableId = tableIds[0];
       const primaryTable = selectedTables[0];
       const otherTableIds = tableIds.slice(1);
 
       // Calculate total seats
       const totalSeats = selectedTables.reduce((sum, t) => sum + t.seats, 0);
 
-      // Create combined name
+      // Create combined name - use the order from selectedTables
       const combinedName = selectedTables.map(t => t.name).join('+');
 
       console.log('Primary table:', primaryTable.name, 'ID:', primaryTable.id);
