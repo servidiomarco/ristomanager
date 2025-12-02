@@ -66,7 +66,7 @@ const App: React.FC = () => {
       const seenTableIds = new Set();
       const uniqueTables = tablesData.filter(table => {
         if (seenTableIds.has(table.id)) {
-          console.warn('Duplicate table ID found:', table.id, table);
+          console.warn('Duplicate table ID found during fetchData:', table.id, table);
           return false;
         }
         seenTableIds.add(table.id);
@@ -74,10 +74,11 @@ const App: React.FC = () => {
       });
 
       if (uniqueTables.length < tablesData.length) {
-        console.error(`Found ${tablesData.length - uniqueTables.length} duplicate table(s)`);
+        console.error(`Found ${tablesData.length - uniqueTables.length} duplicate table(s) during fetchData`);
       }
 
       // Debug: Log tables with merged_with info
+      console.log('Fetched tables from backend:', uniqueTables.map(t => `${t.name}(${t.id})`));
       uniqueTables.forEach(table => {
         if (table.merged_with && table.merged_with.length > 0) {
           console.log('Loaded merged table:', table.name, 'ID:', table.id, 'merged_with:', table.merged_with, 'type:', typeof table.merged_with[0]);
@@ -133,9 +134,12 @@ const App: React.FC = () => {
     });
 
     socket.on('table:updated', (table: Table) => {
-      setTables(prev =>
-        prev.map(t => t.id === table.id ? table : t)
-      );
+      console.log('Socket received table:updated for table:', table.name, 'ID:', table.id, 'merged_with:', table.merged_with);
+      setTables(prev => {
+        const updated = prev.map(t => t.id === table.id ? table : t);
+        console.log('Tables after socket update:', updated.map(t => `${t.name}(${t.id})`));
+        return updated;
+      });
     });
 
     socket.on('table:deleted', (id: number) => {

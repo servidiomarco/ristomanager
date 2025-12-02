@@ -66,6 +66,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
+  // Debug: Log all tables
+  useEffect(() => {
+    const roomTables = tables.filter(t => t.room_id === activeRoomId);
+    const tableIds = roomTables.map(t => t.id);
+    const uniqueIds = new Set(tableIds);
+
+    if (tableIds.length !== uniqueIds.size) {
+      console.error('DUPLICATE TABLE IDs DETECTED IN STATE!');
+      console.error('All table IDs:', tableIds);
+      console.error('Duplicate tables:', roomTables.filter((t, i, arr) =>
+        arr.findIndex(t2 => t2.id === t.id) !== i
+      ));
+    }
+
+    roomTables.forEach(t => {
+      if (t.merged_with && t.merged_with.length > 0) {
+        console.log(`Table ${t.name} (ID: ${t.id}) has merged_with:`, t.merged_with);
+      }
+    });
+  }, [tables, activeRoomId]);
+
   // Filter tables for the current room and hide merged tables
   const currentTables = tables
     .filter(t => t.room_id === activeRoomId)
