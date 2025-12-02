@@ -26,7 +26,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().substring(0, 16));
-  const [selectedShift, setSelectedShift] = useState<Shift>(Shift.DINNER);
+  const [selectedShift, setSelectedShift] = useState<Shift | 'ALL'>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
@@ -67,7 +67,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Filter Logic for Main List
   const filteredReservations = reservations.filter(r => {
     const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
-    const matchesShift = r.shift === selectedShift;
+    const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
     const matchesStatus = filterStatus === 'ALL' ? true : r.payment_status === filterStatus;
     const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
     return matchesDate && matchesStatus && matchesShift && matchesSearch;
@@ -314,13 +314,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
             {/* Main Shift Toggle */}
             <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
-                <button 
+                <button
+                    onClick={() => setSelectedShift('ALL')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    Tutte
+                </button>
+                <button
                     onClick={() => setSelectedShift(Shift.LUNCH)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                        Pranzo
+                    <Sun className="h-4 w-4" /> Pranzo
                 </button>
-                <button 
+                <button
                     onClick={() => setSelectedShift(Shift.DINNER)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
@@ -344,16 +350,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
             <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 px-3 border-r border-slate-200 relative group">
+                <div className="flex items-center gap-2 px-3 relative group">
                     <Calendar className="text-indigo-500 h-5 w-5 absolute left-3 pointer-events-none" />
-                    <input 
+                    <input
                     type="datetime-local"
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
                     className="outline-none text-slate-700 font-medium bg-transparent pl-8 cursor-pointer py-2"
                     />
                 </div>
-                <select 
+                {/* Status filter hidden for now */}
+                {/* <select
                     className="outline-none text-slate-600 text-sm bg-transparent pr-2 py-2"
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
@@ -362,7 +369,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <option value={PaymentStatus.PENDING}>In Attesa</option>
                     <option value={PaymentStatus.PAID_DEPOSIT}>Acconto Versato</option>
                     <option value={PaymentStatus.PAID_FULL}>Saldato</option>
-                </select>
+                </select> */}
             </div>
       </div>
 
@@ -372,11 +379,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {filteredReservations.length === 0 ? (
                 <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-300">
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
-                    {selectedShift === Shift.LUNCH ? <Sun className="h-8 w-8 text-amber-400" /> : <Moon className="h-8 w-8 text-indigo-400" />}
+                    {selectedShift === Shift.LUNCH ? <Sun className="h-8 w-8 text-amber-400" /> : selectedShift === Shift.DINNER ? <Moon className="h-8 w-8 text-indigo-400" /> : <Calendar className="h-8 w-8 text-slate-400" />}
                     </div>
                     <h3 className="text-lg font-medium text-slate-900">Nessuna prenotazione</h3>
-                    <p className="text-slate-500">Non ci sono prenotazioni per il turno di <b>{selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}</b> in questa data.</p>
-                    <button 
+                    <p className="text-slate-500">
+                        Non ci sono prenotazioni{selectedShift === 'ALL' ? '' : ` per il turno di <b>${selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}</b>`} in questa data.
+                    </p>
+                    <button
                         onClick={handleOpenNew}
                         className="mt-4 px-4 py-2 bg-white border border-slate-200 shadow-sm rounded-lg text-indigo-600 font-medium hover:bg-slate-50 transition-colors"
                     >
