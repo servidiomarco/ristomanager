@@ -59,19 +59,34 @@ export class SocketService {
   }
 
   // Reservation broadcast methods
-  broadcastReservationCreated(reservation: Reservation) {
-    this.io.emit('reservation:created', reservation);
-    console.log(`Broadcasting reservation:created for ${reservation.customer_name}`);
+  broadcastReservationCreated(reservation: Reservation, excludeSocketId?: string) {
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit('reservation:created', reservation);
+      console.log(`Broadcasting reservation:created for ${reservation.customer_name} (excluding ${excludeSocketId})`);
+    } else {
+      this.io.emit('reservation:created', reservation);
+      console.log(`Broadcasting reservation:created for ${reservation.customer_name}`);
+    }
   }
 
-  broadcastReservationUpdated(reservation: Reservation) {
-    this.io.emit('reservation:updated', reservation);
-    console.log(`Broadcasting reservation:updated for ${reservation.customer_name}`);
+  broadcastReservationUpdated(reservation: Reservation, excludeSocketId?: string) {
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit('reservation:updated', reservation);
+      console.log(`Broadcasting reservation:updated for ${reservation.customer_name} (excluding ${excludeSocketId})`);
+    } else {
+      this.io.emit('reservation:updated', reservation);
+      console.log(`Broadcasting reservation:updated for ${reservation.customer_name}`);
+    }
   }
 
-  broadcastReservationDeleted(id: number) {
-    this.io.emit('reservation:deleted', id);
-    console.log(`Broadcasting reservation:deleted for ID ${id}`);
+  broadcastReservationDeleted(id: number, excludeSocketId?: string) {
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit('reservation:deleted', id);
+      console.log(`Broadcasting reservation:deleted for ID ${id} (excluding ${excludeSocketId})`);
+    } else {
+      this.io.emit('reservation:deleted', id);
+      console.log(`Broadcasting reservation:deleted for ID ${id}`);
+    }
   }
 
   // Table broadcast methods

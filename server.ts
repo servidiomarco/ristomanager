@@ -62,8 +62,9 @@ app.post('/reservations', async (req, res) => {
         );
         const newReservation = result.rows[0];
 
-        // Broadcast to all connected clients
-        if (socketService) socketService.broadcastReservationCreated(newReservation);
+        // Broadcast to all connected clients except the one who created it
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
 
         res.status(201).json(newReservation);
     } catch (err) {
@@ -82,8 +83,9 @@ app.put('/reservations/:id', async (req, res) => {
         );
         const updatedReservation = result.rows[0];
 
-        // Broadcast to all connected clients
-        if (socketService) socketService.broadcastReservationUpdated(updatedReservation);
+        // Broadcast to all connected clients except the one who updated it
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastReservationUpdated(updatedReservation, socketId);
 
         res.json(updatedReservation);
     } catch (err) {
@@ -97,8 +99,9 @@ app.delete('/reservations/:id', async (req, res) => {
         const { id } = req.params;
         await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
 
-        // Broadcast to all connected clients
-        if (socketService) socketService.broadcastReservationDeleted(Number(id));
+        // Broadcast to all connected clients except the one who deleted it
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastReservationDeleted(Number(id), socketId);
 
         res.status(204).send();
     } catch (err) {
