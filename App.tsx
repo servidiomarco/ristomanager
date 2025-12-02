@@ -77,6 +77,13 @@ const App: React.FC = () => {
         console.error(`Found ${tablesData.length - uniqueTables.length} duplicate table(s)`);
       }
 
+      // Debug: Log tables with merged_with info
+      uniqueTables.forEach(table => {
+        if (table.merged_with && table.merged_with.length > 0) {
+          console.log('Loaded merged table:', table.name, 'ID:', table.id, 'merged_with:', table.merged_with, 'type:', typeof table.merged_with[0]);
+        }
+      });
+
       setRooms(roomsData);
       setTables(uniqueTables);
       setDishes(dishesData);
@@ -274,6 +281,8 @@ const App: React.FC = () => {
     try {
       const selectedTables = tables.filter(t => tableIds.includes(t.id));
 
+      console.log('Merging tables:', selectedTables.map(t => `${t.name} (ID: ${t.id})`));
+
       // Use the first table as the primary table
       const primaryTable = selectedTables[0];
       const otherTableIds = tableIds.slice(1);
@@ -284,6 +293,9 @@ const App: React.FC = () => {
       // Create combined name
       const combinedName = selectedTables.map(t => t.name).join('+');
 
+      console.log('Primary table:', primaryTable.name, 'ID:', primaryTable.id);
+      console.log('Other table IDs to merge:', otherTableIds);
+
       // Update the primary table with merged data
       const updatedPrimaryTable = {
         ...primaryTable,
@@ -292,11 +304,14 @@ const App: React.FC = () => {
         merged_with: otherTableIds
       };
 
+      console.log('Updated primary table:', updatedPrimaryTable);
+
       // Optimistic update
       setTables(prev => prev.map(t => t.id === primaryTable.id ? updatedPrimaryTable : t));
 
       // Sync with backend
-      await updateTable(primaryTable.id, updatedPrimaryTable);
+      const result = await updateTable(primaryTable.id, updatedPrimaryTable);
+      console.log('Backend response:', result);
 
       addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
     } catch (error) {

@@ -72,9 +72,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     .filter(t => {
       // Hide tables that are merged into another table
       // A table is hidden if its ID appears in another table's merged_with array
-      const isMergedIntoAnother = tables.some(other =>
-        other.merged_with && other.merged_with.includes(t.id)
-      );
+      const isMergedIntoAnother = tables.some(other => {
+        if (other.merged_with && other.merged_with.length > 0) {
+          // Convert both to numbers for comparison (in case of type mismatch)
+          const mergedIds = other.merged_with.map(id => Number(id));
+          const tableId = Number(t.id);
+          const isIncluded = mergedIds.includes(tableId);
+
+          if (isIncluded) {
+            console.log(`Table ${t.name} (ID: ${tableId}) is merged into table ${other.name} (merged_with: [${mergedIds}])`);
+          }
+
+          return isIncluded;
+        }
+        return false;
+      });
       return !isMergedIntoAnother;
     });
 
@@ -688,13 +700,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </button>
             )}
             
-            {selectedTables.length === 1 && tables.find(t => t.id === selectedTables[0])?.merged_with && !singleSelectedTable?.is_locked && (
-                <button 
+            {selectedTables.length === 1 && singleSelectedTable?.merged_with && singleSelectedTable.merged_with.length > 0 && !singleSelectedTable?.is_locked && (
+                <button
                     onClick={() => {
                         onSplitTable(selectedTables[0]);
                         setSelectedTables([]);
                     }}
                     className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 font-medium text-sm"
+                    title={`Dividi tavoli: ${singleSelectedTable.name}`}
                 >
                 <Scissors size={16} /> Dividi
                 </button>
