@@ -61,8 +61,24 @@ const App: React.FC = () => {
         getBanquetMenus(),
         getReservations(),
       ]);
+
+      // Check for duplicate table IDs and filter them out
+      const seenTableIds = new Set();
+      const uniqueTables = tablesData.filter(table => {
+        if (seenTableIds.has(table.id)) {
+          console.warn('Duplicate table ID found:', table.id, table);
+          return false;
+        }
+        seenTableIds.add(table.id);
+        return true;
+      });
+
+      if (uniqueTables.length < tablesData.length) {
+        console.error(`Found ${tablesData.length - uniqueTables.length} duplicate table(s)`);
+      }
+
       setRooms(roomsData);
-      setTables(tablesData);
+      setTables(uniqueTables);
       setDishes(dishesData);
       setBanquetMenus(banquetMenusData);
       setReservations(reservationsData);

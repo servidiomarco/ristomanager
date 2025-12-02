@@ -180,11 +180,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     if (isDragging && draggedTableId) {
         const table = tables.find(t => t.id === draggedTableId);
         const tempPos = tempTablePositions[draggedTableId];
+
         if (table && tempPos) {
+            // Validate table.id is a proper number
+            if (typeof table.id !== 'number' || isNaN(table.id)) {
+                console.error('Invalid table ID in handleMouseUp:', table.id, table);
+                return;
+            }
+
             onUpdateTable({
                 ...table,
-                x: tempPos.x,
-                y: tempPos.y
+                x: Math.round(tempPos.x),
+                y: Math.round(tempPos.y)
             });
         }
         // Clear temp position
@@ -322,6 +329,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const renderTableShape = (table: Table) => {
+    // Ensure table.id is a valid number
+    if (!table.id || typeof table.id !== 'number') {
+      console.error('Invalid table ID:', table);
+      return null;
+    }
+
     const isSelected = selectedTables.includes(table.id);
     const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
