@@ -7,22 +7,8 @@ import { SocketService } from './services/socketService.js';
 const app = express();
 const port = process.env.PORT || 3000;
 
-console.log('🔍 Environment check:');
-console.log('  - NODE_ENV:', process.env.NODE_ENV);
-console.log('  - PORT from env:', process.env.PORT);
-console.log('  - Using port:', port);
-
 // Create HTTP server from Express app
 const httpServer = createServer(app);
-
-// Add connection and error logging to HTTP server
-httpServer.on('connection', (socket) => {
-  console.log('📥 New connection established');
-});
-
-httpServer.on('clientError', (err, socket) => {
-  console.error('❌ Client error:', err.message);
-});
 
 // Socket service instance (initialized in startServer)
 let socketService: SocketService | undefined;
@@ -36,9 +22,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Request logging middleware for debugging
+// Request logging middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - Origin: ${req.get('origin') || 'none'}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -48,15 +34,12 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  console.log('[HEALTH] Health check endpoint called');
-  // Absolute simplest response possible
-  res.writeHead(200, {
-    'Content-Type': 'text/plain',
-    'Content-Length': '2'
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    server: 'running',
+    socketio: socketService ? 'initialized' : 'not initialized'
   });
-  res.write('OK');
-  res.end();
-  console.log('[HEALTH] Response sent');
 });
 
 // Reservations
@@ -351,24 +334,20 @@ app.delete('/banquet-menus/:id', async (req, res) => {
 
 const startServer = async () => {
     try {
-        // Start HTTP server FIRST to ensure it can accept connections
+        // Start HTTP server
         const portNumber = Number(port);
-        console.log(`Attempting to start server on port ${portNumber}...`);
+        console.log(`Starting server on port ${portNumber}...`);
 
         httpServer.listen(portNumber, '0.0.0.0', () => {
-            const addr = httpServer.address();
             console.log(`✅ Server listening on port ${portNumber}`);
-            console.log(`✅ Server address:`, addr);
-            console.log(`✅ Server ready to accept connections`);
 
-            // TEMPORARILY DISABLE Socket.IO for testing
-            console.log('⚠️ Socket.IO disabled for testing');
-            // try {
-            //     socketService = new SocketService(httpServer);
-            //     console.log('✅ Socket.IO initialized');
-            // } catch (socketError) {
-            //     console.error('Socket.IO initialization failed:', socketError);
-            // }
+            // Initialize Socket.IO
+            try {
+                socketService = new SocketService(httpServer);
+                console.log('✅ Socket.IO initialized');
+            } catch (socketError) {
+                console.error('Socket.IO initialization failed:', socketError);
+            }
 
             // Initialize database schema in background
             createSchema()
