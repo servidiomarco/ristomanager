@@ -229,12 +229,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const finalX = Math.round(dragState.originalPos.x + translateX);
             const finalY = Math.round(dragState.originalPos.y + translateY);
 
-            console.log('Drop position:', {
-                original: dragState.originalPos,
-                transform: { translateX, translateY },
-                final: { finalX, finalY }
-            });
-
             // Ensure positions don't go negative
             const clampedX = Math.max(0, finalX);
             const clampedY = Math.max(0, finalY);
