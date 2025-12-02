@@ -11,7 +11,7 @@ const port = process.env.PORT || 3000;
 const httpServer = createServer(app);
 
 // Socket service instance (initialized in startServer)
-let socketService: SocketService;
+let socketService: SocketService | undefined;
 
 // Flexible CORS configuration - temporarily allow all for debugging
 const corsOptions = {
@@ -40,7 +40,7 @@ app.get('/health', (req, res) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       server: 'running',
-      socketio: socketService ? 'initialized' : 'not initialized'
+      socketio: socketService ? 'initialized' : 'disabled for testing'
     };
     console.log('[HEALTH] Sending response:', JSON.stringify(response));
     res.status(200).json(response);
@@ -72,7 +72,7 @@ app.post('/reservations', async (req, res) => {
         const newReservation = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastReservationCreated(newReservation);
+        if (socketService) socketService.broadcastReservationCreated(newReservation);
 
         res.status(201).json(newReservation);
     } catch (err) {
@@ -92,7 +92,7 @@ app.put('/reservations/:id', async (req, res) => {
         const updatedReservation = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastReservationUpdated(updatedReservation);
+        if (socketService) socketService.broadcastReservationUpdated(updatedReservation);
 
         res.json(updatedReservation);
     } catch (err) {
@@ -107,7 +107,7 @@ app.delete('/reservations/:id', async (req, res) => {
         await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
 
         // Broadcast to all connected clients
-        socketService.broadcastReservationDeleted(Number(id));
+        if (socketService) socketService.broadcastReservationDeleted(Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -138,7 +138,7 @@ app.post('/tables', async (req, res) => {
         const newTable = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastTableCreated(newTable);
+        if (socketService) socketService.broadcastTableCreated(newTable);
 
         res.status(201).json(newTable);
     } catch (err) {
@@ -158,7 +158,7 @@ app.put('/tables/:id', async (req, res) => {
         const updatedTable = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastTableUpdated(updatedTable);
+        if (socketService) socketService.broadcastTableUpdated(updatedTable);
 
         res.json(updatedTable);
     } catch (err) {
@@ -173,7 +173,7 @@ app.delete('/tables/:id', async (req, res) => {
         await pool.query('DELETE FROM tables WHERE id = $1', [id]);
 
         // Broadcast to all connected clients
-        socketService.broadcastTableDeleted(Number(id));
+        if (socketService) socketService.broadcastTableDeleted(Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -204,7 +204,7 @@ app.post('/rooms', async (req, res) => {
         const newRoom = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastRoomCreated(newRoom);
+        if (socketService) socketService.broadcastRoomCreated(newRoom);
 
         res.status(201).json(newRoom);
     } catch (err) {
@@ -219,7 +219,7 @@ app.delete('/rooms/:id', async (req, res) => {
         await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
 
         // Broadcast to all connected clients
-        socketService.broadcastRoomDeleted(Number(id));
+        if (socketService) socketService.broadcastRoomDeleted(Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -250,7 +250,7 @@ app.post('/dishes', async (req, res) => {
         const newDish = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastDishCreated(newDish);
+        if (socketService) socketService.broadcastDishCreated(newDish);
 
         res.status(201).json(newDish);
     } catch (err) {
@@ -265,7 +265,7 @@ app.delete('/dishes/:id', async (req, res) => {
         await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
 
         // Broadcast to all connected clients
-        socketService.broadcastDishDeleted(Number(id));
+        if (socketService) socketService.broadcastDishDeleted(Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -296,7 +296,7 @@ app.post('/banquet-menus', async (req, res) => {
         const newMenu = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastBanquetCreated(newMenu);
+        if (socketService) socketService.broadcastBanquetCreated(newMenu);
 
         res.status(201).json(newMenu);
     } catch (err) {
@@ -316,7 +316,7 @@ app.put('/banquet-menus/:id', async (req, res) => {
         const updatedMenu = result.rows[0];
 
         // Broadcast to all connected clients
-        socketService.broadcastBanquetUpdated(updatedMenu);
+        if (socketService) socketService.broadcastBanquetUpdated(updatedMenu);
 
         res.json(updatedMenu);
     } catch (err) {
@@ -331,7 +331,7 @@ app.delete('/banquet-menus/:id', async (req, res) => {
         await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);
 
         // Broadcast to all connected clients
-        socketService.broadcastBanquetDeleted(Number(id));
+        if (socketService) socketService.broadcastBanquetDeleted(Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -351,13 +351,14 @@ const startServer = async () => {
             console.log(`✅ Server listening on port ${portNumber}`);
             console.log(`✅ Server ready to accept connections`);
 
-            // Initialize Socket.IO AFTER server is listening
-            try {
-                socketService = new SocketService(httpServer);
-                console.log('✅ Socket.IO initialized');
-            } catch (socketError) {
-                console.error('Socket.IO initialization failed:', socketError);
-            }
+            // TEMPORARILY DISABLE Socket.IO for testing
+            console.log('⚠️ Socket.IO disabled for testing');
+            // try {
+            //     socketService = new SocketService(httpServer);
+            //     console.log('✅ Socket.IO initialized');
+            // } catch (socketError) {
+            //     console.error('Socket.IO initialization failed:', socketError);
+            // }
 
             // Initialize database schema in background
             createSchema()
