@@ -45,6 +45,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Request logging middleware for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
 // Health check endpoint for Railway
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'RistoManager API is running' });
@@ -379,10 +385,14 @@ const startServer = async () => {
         }
 
         // Start HTTP server LAST (after everything is set up)
-        httpServer.listen(Number(port), () => {
-            console.log(`Server listening on port ${port}`);
+        const portNumber = Number(port);
+        console.log(`Attempting to start server on port ${portNumber}...`);
+
+        httpServer.listen(portNumber, () => {
+            console.log(`✅ Server listening on port ${portNumber}`);
+            console.log(`✅ Server ready to accept connections`);
         }).on('error', (error) => {
-            console.error('Failed to start server:', error);
+            console.error('❌ Failed to start server:', error);
             process.exit(1);
         });
     } catch (error) {
