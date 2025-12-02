@@ -228,12 +228,18 @@ const App: React.FC = () => {
 
   // --- Floor Plan Logic ---
   const handleUpdateTable = async (updatedTable: Table) => {
+    // Optimistic update - update state immediately for instant UI feedback
+    setTables(prev => prev.map(t => t.id === updatedTable.id ? updatedTable : t));
+
     try {
+      // Then sync with backend
       const returnedTable = await updateTable(updatedTable.id as number, updatedTable);
+      // Update again with server data in case something changed
       setTables(prev => prev.map(t => t.id === returnedTable.id ? returnedTable : t));
     } catch (error) {
       console.error("Error updating table:", error);
       addToast('Error updating table', 'error');
+      // Note: Could revert optimistic update here if needed
     }
   };
 
