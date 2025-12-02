@@ -56,26 +56,14 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'RistoManager API is running' });
 });
 
-app.get('/health', async (req, res) => {
-  const health = {
+app.get('/health', (req, res) => {
+  // Quick health check without database query (to avoid timeouts)
+  res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     server: 'running',
-    database: 'unknown',
     socketio: socketService ? 'initialized' : 'not initialized'
-  };
-
-  // Check database connection
-  try {
-    await pool.query('SELECT 1');
-    health.database = 'connected';
-  } catch (err) {
-    health.database = 'disconnected';
-    health.status = 'degraded';
-  }
-
-  const statusCode = health.status === 'ok' ? 200 : 503;
-  res.status(statusCode).json(health);
+  });
 });
 
 // Reservations
