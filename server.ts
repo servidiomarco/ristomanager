@@ -144,12 +144,47 @@ app.post('/tables', async (req, res) => {
 app.put('/tables/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, shape, seats, x, y, room_id, status, is_locked, merged_with, temp_lock_expires_at } = req.body;
-        const result = await pool.query(
-            'UPDATE tables SET name = $1, shape = $2, seats = $3, x = $4, y = $5, room_id = $6, status = $7, is_locked = $8, merged_with = $9, temp_lock_expires_at = $10 WHERE id = $11 RETURNING *',
-            [name, shape, seats, x, y, room_id, status, is_locked, merged_with, temp_lock_expires_at, id]
-        );
+
+        console.log('PUT /tables/:id - Request body:', JSON.stringify(req.body, null, 2));
+
+        // Build dynamic update query based on provided fields
+        const fields = [];
+        const values = [];
+        let paramIndex = 1;
+
+        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at'];
+
+        allowedFields.forEach(field => {
+            if (req.body.hasOwnProperty(field)) {
+                fields.push(`${field} = $${paramIndex}`);
+
+                // Special handling for merged_with - ensure it's null if undefined/empty
+                if (field === 'merged_with') {
+                    const mergedWith = req.body[field];
+                    values.push(mergedWith && Array.isArray(mergedWith) && mergedWith.length > 0 ? mergedWith : null);
+                    console.log('Setting merged_with to:', values[values.length - 1]);
+                } else {
+                    values.push(req.body[field]);
+                }
+
+                paramIndex++;
+            }
+        });
+
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        values.push(id);
+        const query = `UPDATE tables SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
+
+        console.log('SQL Query:', query);
+        console.log('Values:', values);
+
+        const result = await pool.query(query, values);
         const updatedTable = result.rows[0];
+
+        console.log('Updated table merged_with:', updatedTable.merged_with);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
@@ -157,7 +192,7 @@ app.put('/tables/:id', async (req, res) => {
 
         res.json(updatedTable);
     } catch (err) {
-        console.error(err);
+        console.error('Error updating table:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
