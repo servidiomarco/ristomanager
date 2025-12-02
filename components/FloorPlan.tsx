@@ -33,10 +33,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   });
   const [selectedTables, setSelectedTables] = useState<number[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [draggedTableId, setDraggedTableId] = useState<number | null>(null);
-  const [tempTablePositions, setTempTablePositions] = useState<{ [key: number]: { x: number; y: number } }>({});
+
+  // Use refs for drag state to avoid re-renders during drag
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    tableId: number | null;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    originalPos: { x: number; y: number } | null;
+  }>({
+    isDragging: false,
+    tableId: null,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    originalPos: null
+  });
+
+  const draggedElementRef = useRef<HTMLDivElement | null>(null);
   
   // Room Management State
   const [isAddingRoom, setIsAddingRoom] = useState(false);
@@ -123,15 +141,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return TableStatus.FREE;
   };
 
-  const handleMouseDown = (e: React.MouseEvent, tableId: number) => {
+  const handleMouseDown = (e: React.MouseEvent, tableId: number, element: HTMLDivElement) => {
     e.stopPropagation();
-    
+
     const table = tables.find(t => t.id === tableId);
-    
+
     // Handle multi-select
     if (e.ctrlKey || e.metaKey || isSelectionMode) {
         setSelectedTables(prev => prev.includes(tableId) ? prev.filter(id => id !== tableId) : [...prev, tableId]);
-        return; 
+        return;
     }
 
     // If locked or temporarily locked, select but DO NOT drag
@@ -141,74 +159,95 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         if (!selectedTables.includes(tableId)) {
              setSelectedTables([tableId]);
         }
-        return; 
+        return;
     }
 
     if (!selectedTables.includes(tableId)) {
         setSelectedTables([tableId]);
     }
 
+    // Initialize drag using refs
+    dragStateRef.current = {
+      isDragging: true,
+      tableId: tableId,
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      originalPos: table ? { x: table.x, y: table.y } : null
+    };
+    draggedElementRef.current = element;
     setIsDragging(true);
-    setDraggedTableId(tableId);
-    setDragStart({ x: e.clientX, y: e.clientY });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !draggedTableId || !dragStart || !canvasRef.current) return;
+    const dragState = dragStateRef.current;
+    if (!dragState.isDragging || !draggedElementRef.current) return;
 
-    const deltaX = e.clientX - dragStart.x;
-    const deltaY = e.clientY - dragStart.y;
+    // Calculate delta from start position
+    const deltaX = e.clientX - dragState.startX;
+    const deltaY = e.clientY - dragState.startY;
 
-    const table = tables.find(t => t.id === draggedTableId);
-    if (!table || table.is_locked) return;
+    // Apply CSS transform for smooth visual dragging (no React re-render)
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    draggedElementRef.current.style.zIndex = '100';
 
-    // Update temporary position for smooth dragging
-    const currentPos = tempTablePositions[draggedTableId] || { x: table.x, y: table.y };
-    setTempTablePositions(prev => ({
-        ...prev,
-        [draggedTableId]: {
-            x: currentPos.x + deltaX,
-            y: currentPos.y + deltaY
-        }
-    }));
-
-    setDragStart({ x: e.clientX, y: e.clientY });
+    // Update current position in ref
+    dragState.currentX = e.clientX;
+    dragState.currentY = e.clientY;
   };
 
   const handleMouseUp = () => {
-    // Save final position to backend if we were dragging
-    if (isDragging && draggedTableId) {
-        const table = tables.find(t => t.id === draggedTableId);
-        const tempPos = tempTablePositions[draggedTableId];
+    const dragState = dragStateRef.current;
 
-        if (table && tempPos) {
+    // Save final position to backend if we were dragging
+    if (dragState.isDragging && dragState.tableId !== null) {
+        const table = tables.find(t => t.id === dragState.tableId);
+
+        if (table && dragState.originalPos) {
             // Validate table.id is a proper number
             if (typeof table.id !== 'number' || isNaN(table.id)) {
                 console.error('Invalid table ID in handleMouseUp:', table.id, table);
                 return;
             }
 
+            // Calculate final position
+            const deltaX = dragState.currentX - dragState.startX;
+            const deltaY = dragState.currentY - dragState.startY;
+            const finalX = Math.round(dragState.originalPos.x + deltaX);
+            const finalY = Math.round(dragState.originalPos.y + deltaY);
+
+            // Clear CSS transform
+            if (draggedElementRef.current) {
+                draggedElementRef.current.style.transform = '';
+                draggedElementRef.current.style.zIndex = '';
+            }
+
+            // Update table position
             onUpdateTable({
                 ...table,
-                x: Math.round(tempPos.x),
-                y: Math.round(tempPos.y)
+                x: finalX,
+                y: finalY
             });
         }
-        // Clear temp position
-        setTempTablePositions(prev => {
-            const newPos = { ...prev };
-            delete newPos[draggedTableId];
-            return newPos;
-        });
     }
 
+    // Reset drag state
+    dragStateRef.current = {
+      isDragging: false,
+      tableId: null,
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      currentY: 0,
+      originalPos: null
+    };
+    draggedElementRef.current = null;
     setIsDragging(false);
-    setDraggedTableId(null);
-    setDragStart(null);
   };
 
   // Touch event handlers for mobile
-  const handleTouchStart = (e: React.TouchEvent, tableId: number) => {
+  const handleTouchStart = (e: React.TouchEvent, tableId: number, element: HTMLDivElement) => {
     e.stopPropagation();
     const touch = e.touches[0];
     const table = tables.find(t => t.id === tableId);
@@ -221,31 +260,35 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         setSelectedTables([tableId]);
     }
 
+    // Initialize drag using refs
+    dragStateRef.current = {
+      isDragging: true,
+      tableId: tableId,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      currentX: touch.clientX,
+      currentY: touch.clientY,
+      originalPos: table ? { x: table.x, y: table.y } : null
+    };
+    draggedElementRef.current = element;
     setIsDragging(true);
-    setDraggedTableId(tableId);
-    setDragStart({ x: touch.clientX, y: touch.clientY });
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging || !draggedTableId || !dragStart) return;
+    const dragState = dragStateRef.current;
+    if (!dragState.isDragging || !draggedElementRef.current) return;
 
     const touch = e.touches[0];
-    const deltaX = touch.clientX - dragStart.x;
-    const deltaY = touch.clientY - dragStart.y;
+    const deltaX = touch.clientX - dragState.startX;
+    const deltaY = touch.clientY - dragState.startY;
 
-    const table = tables.find(t => t.id === draggedTableId);
-    if (!table || table.is_locked) return;
+    // Apply CSS transform for smooth visual dragging
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    draggedElementRef.current.style.zIndex = '100';
 
-    const currentPos = tempTablePositions[draggedTableId] || { x: table.x, y: table.y };
-    setTempTablePositions(prev => ({
-        ...prev,
-        [draggedTableId]: {
-            x: currentPos.x + deltaX,
-            y: currentPos.y + deltaY
-        }
-    }));
-
-    setDragStart({ x: touch.clientX, y: touch.clientY });
+    // Update current position in ref
+    dragState.currentX = touch.clientX;
+    dragState.currentY = touch.clientY;
   };
 
   const handleTouchEnd = () => {
@@ -339,9 +382,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
 
-    // Use temp position if dragging, otherwise use table position
-    const displayPos = tempTablePositions[table.id] || { x: table.x, y: table.y };
-
     // Calculate remaining time if temp locked
     let timerDisplay = null;
     if (table.temp_lock_expires_at && table.temp_lock_expires_at > Date.now()) {
@@ -383,13 +423,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         key={table.id}
         className={baseClasses}
         style={{
-          left: displayPos.x,
-          top: displayPos.y,
+          left: table.x,
+          top: table.y,
           ...shapeStyles,
           zIndex: isSelected ? 10 : 1
         }}
-        onMouseDown={(e) => handleMouseDown(e, table.id)}
-        onTouchStart={(e) => handleTouchStart(e, table.id)}
+        onMouseDown={(e) => {
+          const element = e.currentTarget as HTMLDivElement;
+          handleMouseDown(e, table.id, element);
+        }}
+        onTouchStart={(e) => {
+          const element = e.currentTarget as HTMLDivElement;
+          handleTouchStart(e, table.id, element);
+        }}
       >
         <span className="font-bold text-sm flex items-center gap-1">
             {table.is_locked && <Lock size={10} className="text-slate-400" />}
