@@ -217,17 +217,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const finalX = Math.round(dragState.originalPos.x + deltaX);
             const finalY = Math.round(dragState.originalPos.y + deltaY);
 
-            // Clear CSS transform
-            if (draggedElementRef.current) {
-                draggedElementRef.current.style.transform = '';
-                draggedElementRef.current.style.zIndex = '';
-            }
-
-            // Update table position
-            onUpdateTable({
+            const updatedTable = {
                 ...table,
                 x: finalX,
                 y: finalY
+            };
+
+            // Optimistically update the table position in parent state first
+            // This ensures the table stays in place when we clear the transform
+            onUpdateTable(updatedTable);
+
+            // Clear CSS transform after a tiny delay to let React update
+            requestAnimationFrame(() => {
+                if (draggedElementRef.current) {
+                    draggedElementRef.current.style.transform = '';
+                    draggedElementRef.current.style.zIndex = '';
+                }
             });
         }
     }
