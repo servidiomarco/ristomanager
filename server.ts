@@ -13,32 +13,9 @@ const httpServer = createServer(app);
 // Socket service instance (initialized in startServer)
 let socketService: SocketService;
 
-// Flexible CORS configuration
+// Flexible CORS configuration - temporarily allow all for debugging
 const corsOptions = {
-  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    // Allow localhost for development
-    if (origin.includes('localhost')) {
-      return callback(null, true);
-    }
-
-    // Allow all Vercel deployment URLs
-    if (origin.includes('vercel.app')) {
-      return callback(null, true);
-    }
-
-    // Allow Railway URLs
-    if (origin.includes('railway.app')) {
-      return callback(null, true);
-    }
-
-    // Reject other origins
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: true,  // Allow all origins temporarily
   credentials: true
 };
 
@@ -47,7 +24,7 @@ app.use(express.json());
 
 // Request logging middleware for debugging
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - Origin: ${req.get('origin') || 'none'}`);
   next();
 });
 
@@ -57,13 +34,21 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  // Quick health check without database query (to avoid timeouts)
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    server: 'running',
-    socketio: socketService ? 'initialized' : 'not initialized'
-  });
+  console.log('[HEALTH] Health check endpoint called');
+  try {
+    const response = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      server: 'running',
+      socketio: socketService ? 'initialized' : 'not initialized'
+    };
+    console.log('[HEALTH] Sending response:', JSON.stringify(response));
+    res.status(200).json(response);
+    console.log('[HEALTH] Response sent successfully');
+  } catch (error) {
+    console.error('[HEALTH] Error in health endpoint:', error);
+    res.status(500).json({ error: 'Health check failed' });
+  }
 });
 
 // Reservations
