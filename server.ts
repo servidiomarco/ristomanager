@@ -364,12 +364,7 @@ app.delete('/banquet-menus/:id', async (req, res) => {
 
 const startServer = async () => {
     try {
-        // Start HTTP server first so Railway can detect the service is running
-        httpServer.listen(Number(port), '0.0.0.0', () => {
-            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
-        });
-
-        // Initialize Socket.IO
+        // Initialize Socket.IO BEFORE starting the server
         socketService = new SocketService(httpServer);
         console.log('Socket.IO initialized');
 
@@ -382,6 +377,11 @@ const startServer = async () => {
             console.error('Server will continue running, but database operations will fail');
             console.error('Please ensure DATABASE_URL environment variable is set correctly');
         }
+
+        // Start HTTP server LAST (after everything is set up)
+        httpServer.listen(Number(port), '0.0.0.0', () => {
+            console.log(`Server with WebSocket support listening on 0.0.0.0:${port}`);
+        });
     } catch (error) {
         console.error('Failed to start server:', error);
         process.exit(1);
