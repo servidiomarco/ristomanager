@@ -82,10 +82,24 @@ export const createSchema = async () => {
                 total_amount DECIMAL(10, 2),
                 banquet_menu_id INTEGER REFERENCES banquet_menus(id),
                 enable_reminder BOOLEAN DEFAULT true,
-                reminder_sent BOOLEAN DEFAULT false
+                reminder_sent BOOLEAN DEFAULT false,
+                arrival_status VARCHAR(50) DEFAULT 'WAITING'
             );
         `);
-        
+
+        // Add arrival_status column to existing tables if it doesn't exist
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'reservations' AND column_name = 'arrival_status'
+                ) THEN
+                    ALTER TABLE reservations ADD COLUMN arrival_status VARCHAR(50) DEFAULT 'WAITING';
+                END IF;
+            END $$;
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

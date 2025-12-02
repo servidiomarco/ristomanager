@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck } from 'lucide-react';
 
 interface ReservationListProps {
   reservations: Reservation[];
@@ -50,7 +50,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       payment_status: PaymentStatus.PENDING,
       table_id: undefined,
       enable_reminder: true,
-      reminder_sent: false
+      reminder_sent: false,
+      arrival_status: ArrivalStatus.WAITING
   });
 
   useEffect(() => {
@@ -125,6 +126,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${res.customer_name}`, 'success');
   };
 
+  const handleToggleArrivalStatus = (res: Reservation) => {
+      const newStatus = res.arrival_status === ArrivalStatus.WAITING ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING;
+      onUpdateReservation({ ...res, arrival_status: newStatus });
+      showToast(
+          newStatus === ArrivalStatus.ARRIVED
+              ? `${res.customer_name} è arrivato`
+              : `${res.customer_name} è in attesa`,
+          'success'
+      );
+  };
+
   const handleEditClick = (res: Reservation) => {
       const formattedReservation = {
         ...res,
@@ -148,11 +160,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         customer_name: '',
         guests: 2,
         reservation_time: selectedDate,
-        shift: selectedShift,
+        shift: selectedShift === 'ALL' ? Shift.DINNER : selectedShift,
         payment_status: PaymentStatus.PENDING,
         table_id: undefined,
         enable_reminder: true,
-        reminder_sent: false
+        reminder_sent: false,
+        arrival_status: ArrivalStatus.WAITING
       });
       setModalRoomFilter('ALL');
       setIsEditing(false);
@@ -396,9 +409,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 filteredReservations.map(res => {
                     const table = tables.find(t => t.id === res.table_id);
                     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
-                    
+                    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+                    const borderColor = arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
+
                     return (
-                        <div key={res.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div key={res.id} className={`bg-white p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
                             <div className="flex-1">
                                 <div className="flex items-center gap-3 mb-1">
                                     <h3 className="font-bold text-lg text-slate-800">{res.customer_name}</h3>
@@ -469,7 +484,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div className="w-px h-6 bg-slate-200 mx-1"></div>
 
                                     {res.payment_status !== PaymentStatus.PAID_FULL && (
-                                        <button 
+                                        <button
                                             onClick={() => handlePaymentAction(res)}
                                             className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
                                             title="Registra Pagamento"
@@ -477,7 +492,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             <CreditCard className="h-5 w-5" />
                                         </button>
                                     )}
-                                    <button 
+
+                                    <button
+                                        onClick={() => handleToggleArrivalStatus(res)}
+                                        className={`p-2 rounded-lg transition-colors ${
+                                            arrivalStatus === ArrivalStatus.ARRIVED
+                                                ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                                                : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                        }`}
+                                        title={arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                    >
+                                        <UserCheck className="h-5 w-5" />
+                                    </button>
+
+                                    <button
                                         onClick={() => handleEditClick(res)}
                                         className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                                         title="Modifica"

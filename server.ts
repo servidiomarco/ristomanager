@@ -55,10 +55,10 @@ app.get('/reservations', async (req, res) => {
 
 app.post('/reservations', async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
         const result = await pool.query(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status]
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status || 'WAITING']
         );
         const newReservation = result.rows[0];
 
@@ -76,10 +76,10 @@ app.post('/reservations', async (req, res) => {
 app.put('/reservations/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
         const result = await pool.query(
-            'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9 WHERE id = $10 RETURNING *',
-            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, id]
+            'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
+            [customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, id]
         );
         const updatedReservation = result.rows[0];
 

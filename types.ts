@@ -67,6 +67,11 @@ export enum Shift {
   DINNER = 'DINNER'
 }
 
+export enum ArrivalStatus {
+  WAITING = 'WAITING',      // In attesa - green border
+  ARRIVED = 'ARRIVED'       // Arrivato - orange border
+}
+
 export interface Reservation {
   id: number;
   customer_name: string;
@@ -83,6 +88,7 @@ export interface Reservation {
   banquet_menu_id?: number;
   enable_reminder?: boolean;
   reminder_sent?: boolean;
+  arrival_status?: ArrivalStatus;
 }
 
 export interface Notification {
