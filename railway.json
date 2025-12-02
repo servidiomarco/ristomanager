@@ -8,6 +8,8 @@
     "restartPolicyMaxRetries": 5,
     "numReplicas": 1,
     "memory": "512MB",
-    "cpu": "500m"
+    "cpu": "500m",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 100
   }
 }

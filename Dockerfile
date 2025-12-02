@@ -31,8 +31,8 @@ RUN npm ci --only=production
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
 
-# Expose port (Railway will use PORT env var)
-EXPOSE ${PORT:-3000}
+# Expose port 8080 (Railway's default)
+EXPOSE 8080
 
 # Start the server
 CMD ["node", "dist/server.js"]
