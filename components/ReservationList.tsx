@@ -127,7 +127,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const handleToggleArrivalStatus = (res: Reservation) => {
-      const newStatus = res.arrival_status === ArrivalStatus.WAITING ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING;
+      const currentStatus = res.arrival_status || ArrivalStatus.WAITING;
+      const newStatus = currentStatus === ArrivalStatus.WAITING ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING;
       onUpdateReservation({ ...res, arrival_status: newStatus });
       showToast(
           newStatus === ArrivalStatus.ARRIVED
