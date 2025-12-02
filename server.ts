@@ -144,15 +144,16 @@ app.post('/tables', async (req, res) => {
 app.put('/tables/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, shape, seats, x, y, room_id, status } = req.body;
+        const { name, shape, seats, x, y, room_id, status, is_locked, merged_with, temp_lock_expires_at } = req.body;
         const result = await pool.query(
-            'UPDATE tables SET name = $1, shape = $2, seats = $3, x = $4, y = $5, room_id = $6, status = $7 WHERE id = $8 RETURNING *',
-            [name, shape, seats, x, y, room_id, status, id]
+            'UPDATE tables SET name = $1, shape = $2, seats = $3, x = $4, y = $5, room_id = $6, status = $7, is_locked = $8, merged_with = $9, temp_lock_expires_at = $10 WHERE id = $11 RETURNING *',
+            [name, shape, seats, x, y, room_id, status, is_locked, merged_with, temp_lock_expires_at, id]
         );
         const updatedTable = result.rows[0];
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastTableUpdated(updatedTable);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastTableUpdated(updatedTable, socketId);
 
         res.json(updatedTable);
     } catch (err) {

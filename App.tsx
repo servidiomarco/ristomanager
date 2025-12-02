@@ -265,14 +265,83 @@ const App: React.FC = () => {
     }
   };
 
-  const handleMergeTables = (tableIds: number[]) => {
-    console.log('Merging tables:', tableIds);
-    addToast('La funzionalità di unione non è ancora implementata.', 'info');
+  const handleMergeTables = async (tableIds: number[]) => {
+    if (tableIds.length < 2) {
+      addToast('Seleziona almeno 2 tavoli da unire', 'error');
+      return;
+    }
+
+    try {
+      const selectedTables = tables.filter(t => tableIds.includes(t.id));
+
+      // Use the first table as the primary table
+      const primaryTable = selectedTables[0];
+      const otherTableIds = tableIds.slice(1);
+
+      // Calculate total seats
+      const totalSeats = selectedTables.reduce((sum, t) => sum + t.seats, 0);
+
+      // Create combined name
+      const combinedName = selectedTables.map(t => t.name).join('+');
+
+      // Update the primary table with merged data
+      const updatedPrimaryTable = {
+        ...primaryTable,
+        name: combinedName,
+        seats: totalSeats,
+        merged_with: otherTableIds
+      };
+
+      // Optimistic update
+      setTables(prev => prev.map(t => t.id === primaryTable.id ? updatedPrimaryTable : t));
+
+      // Sync with backend
+      await updateTable(primaryTable.id, updatedPrimaryTable);
+
+      addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
+    } catch (error) {
+      console.error('Error merging tables:', error);
+      addToast('Errore durante l\'unione dei tavoli', 'error');
+    }
   };
 
-  const handleSplitTable = (tableId: number) => {
-    console.log('Splitting table:', tableId);
-    addToast('La funzionalità di divisione non è ancora implementata.', 'info');
+  const handleSplitTable = async (tableId: number) => {
+    try {
+      const table = tables.find(t => t.id === tableId);
+      if (!table || !table.merged_with || table.merged_with.length === 0) {
+        addToast('Questo tavolo non è unito', 'error');
+        return;
+      }
+
+      // Get all the original tables that were merged
+      const allMergedIds = [table.id, ...table.merged_with];
+      const allMergedTables = tables.filter(t => allMergedIds.includes(t.id));
+
+      // Calculate seats per table (divide equally)
+      const seatsPerTable = Math.floor(table.seats / allMergedIds.length);
+
+      // Split the name back (e.g., "T1+T2+T3" -> ["T1", "T2", "T3"])
+      const originalNames = table.name.split('+');
+
+      // Update the primary table to remove merge
+      const updatedPrimaryTable = {
+        ...table,
+        name: originalNames[0] || table.name.split('+')[0],
+        seats: seatsPerTable,
+        merged_with: []
+      };
+
+      // Optimistic update
+      setTables(prev => prev.map(t => t.id === table.id ? updatedPrimaryTable : t));
+
+      // Sync with backend
+      await updateTable(table.id, updatedPrimaryTable);
+
+      addToast('Tavoli divisi con successo', 'success');
+    } catch (error) {
+      console.error('Error splitting table:', error);
+      addToast('Errore durante la divisione dei tavoli', 'error');
+    }
   };
 
   const handleAddRoom = async (roomName: string) => {

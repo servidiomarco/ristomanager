@@ -65,7 +65,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [tick, setTick] = useState(0);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const currentTables = tables.filter(t => t.room_id === activeRoomId);
+
+  // Filter tables for the current room and hide merged tables
+  const currentTables = tables
+    .filter(t => t.room_id === activeRoomId)
+    .filter(t => {
+      // Hide tables that are merged into another table
+      // A table is hidden if its ID appears in another table's merged_with array
+      const isMergedIntoAnother = tables.some(other =>
+        other.merged_with && other.merged_with.includes(t.id)
+      );
+      return !isMergedIntoAnother;
+    });
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -400,6 +411,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const isSelected = selectedTables.includes(table.id);
     const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
+    const isMerged = table.merged_with && table.merged_with.length > 0;
 
     // Calculate remaining time if temp locked
     let timerDisplay = null;
@@ -480,6 +492,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {timerDisplay && (
             <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
                 <Timer size={8} /> {timerDisplay}
+            </div>
+        )}
+
+        {/* Merged Table Badge */}
+        {isMerged && !timerDisplay && (
+            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                <Combine size={8} />
             </div>
         )}
       </div>
