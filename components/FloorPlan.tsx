@@ -233,23 +233,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const clampedX = Math.max(0, finalX);
             const clampedY = Math.max(0, finalY);
 
+            // Clear CSS transform BEFORE updating state
+            // This prevents the transform from being applied on top of the new position
+            draggedElementRef.current.style.transform = '';
+            draggedElementRef.current.style.zIndex = '';
+
             const updatedTable = {
                 ...table,
                 x: clampedX,
                 y: clampedY
             };
 
-            // Optimistically update the table position in parent state first
-            // This ensures the table stays in place when we clear the transform
+            // Update the table position
             onUpdateTable(updatedTable);
-
-            // Clear CSS transform after a tiny delay to let React update
-            requestAnimationFrame(() => {
-                if (draggedElementRef.current) {
-                    draggedElementRef.current.style.transform = '';
-                    draggedElementRef.current.style.zIndex = '';
-                }
-            });
         }
     }
 
