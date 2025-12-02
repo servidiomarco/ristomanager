@@ -136,7 +136,13 @@ const App: React.FC = () => {
     socket.on('table:updated', (table: Table) => {
       console.log('Socket received table:updated for table:', table.name, 'ID:', table.id, 'merged_with:', table.merged_with);
       setTables(prev => {
-        const updated = prev.map(t => t.id === table.id ? table : t);
+        // Remove any duplicates first
+        const uniqueTables = prev.filter((t, index, self) =>
+          self.findIndex(t2 => t2.id === t.id) === index
+        );
+
+        // Update the table
+        const updated = uniqueTables.map(t => t.id === table.id ? table : t);
         console.log('Tables after socket update:', updated.map(t => `${t.name}(${t.id})`));
         return updated;
       });
@@ -240,13 +246,25 @@ const App: React.FC = () => {
   // --- Floor Plan Logic ---
   const handleUpdateTable = async (updatedTable: Table) => {
     // Optimistic update - update state immediately for instant UI feedback
-    setTables(prev => prev.map(t => t.id === updatedTable.id ? updatedTable : t));
+    setTables(prev => {
+      // Remove duplicates
+      const uniqueTables = prev.filter((t, index, self) =>
+        self.findIndex(t2 => t2.id === t.id) === index
+      );
+      return uniqueTables.map(t => t.id === updatedTable.id ? updatedTable : t);
+    });
 
     try {
       // Then sync with backend
       const returnedTable = await updateTable(updatedTable.id as number, updatedTable);
       // Update again with server data in case something changed
-      setTables(prev => prev.map(t => t.id === returnedTable.id ? returnedTable : t));
+      setTables(prev => {
+        // Remove duplicates
+        const uniqueTables = prev.filter((t, index, self) =>
+          self.findIndex(t2 => t2.id === t.id) === index
+        );
+        return uniqueTables.map(t => t.id === returnedTable.id ? returnedTable : t);
+      });
     } catch (error) {
       console.error("Error updating table:", error);
       addToast('Error updating table', 'error');
@@ -314,15 +332,27 @@ const App: React.FC = () => {
 
       console.log('Updated primary table:', updatedPrimaryTable);
 
-      // Optimistic update
-      setTables(prev => prev.map(t => t.id === primaryTable.id ? updatedPrimaryTable : t));
+      // Optimistic update - with deduplication
+      setTables(prev => {
+        // Remove duplicates
+        const uniqueTables = prev.filter((t, index, self) =>
+          self.findIndex(t2 => t2.id === t.id) === index
+        );
+        return uniqueTables.map(t => t.id === primaryTable.id ? updatedPrimaryTable : t);
+      });
 
       // Sync with backend
       const result = await updateTable(primaryTable.id, updatedPrimaryTable);
       console.log('Backend response:', result);
 
       // Update with backend response to ensure we have the exact data
-      setTables(prev => prev.map(t => t.id === result.id ? result : t));
+      setTables(prev => {
+        // Remove duplicates
+        const uniqueTables = prev.filter((t, index, self) =>
+          self.findIndex(t2 => t2.id === t.id) === index
+        );
+        return uniqueTables.map(t => t.id === result.id ? result : t);
+      });
 
       addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
     } catch (error) {
