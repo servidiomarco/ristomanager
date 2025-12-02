@@ -380,8 +380,8 @@ const App: React.FC = () => {
         {isConnected ? '🟢 Live' : '🔴 Offline'}
       </div>
 
-      {/* Sidebar */}
-      <aside className="w-20 lg:w-64 bg-white border-r border-slate-200 flex flex-col transition-all duration-300 z-20 relative">
+      {/* Sidebar - Hidden on mobile, visible on lg+ */}
+      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 flex-col transition-all duration-300 z-20 relative">
         <div className="h-16 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-100">
           <div className="bg-indigo-600 p-2 rounded-lg">
              <ChefHat className="text-white h-6 w-6" />
@@ -435,8 +435,8 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto relative">
+      {/* Main Content - Add bottom padding on mobile for bottom nav */}
+      <main className="flex-1 overflow-y-auto relative pb-20 lg:pb-0">
         {/* Header with Notification Center */}
         <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6">
            <span className="font-bold text-lg lg:hidden">RistoManager AI</span>
@@ -538,8 +538,44 @@ const App: React.FC = () => {
            </div>
         )}
 
+        {/* Bottom Navigation - Visible only on mobile */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 lg:hidden z-30">
+          <div className="flex items-center justify-around py-2">
+            <BottomNavItem
+              icon={<LayoutDashboard size={24} />}
+              label="Dashboard"
+              active={view === ViewState.DASHBOARD}
+              onClick={() => setView(ViewState.DASHBOARD)}
+            />
+            <BottomNavItem
+              icon={<Calendar size={24} />}
+              label="Prenotazioni"
+              active={view === ViewState.RESERVATIONS}
+              onClick={() => setView(ViewState.RESERVATIONS)}
+            />
+            <BottomNavItem
+              icon={<Grid size={24} />}
+              label="Sala"
+              active={view === ViewState.FLOOR_PLAN}
+              onClick={() => setView(ViewState.FLOOR_PLAN)}
+            />
+            <BottomNavItem
+              icon={<MenuIcon size={24} />}
+              label="Menu"
+              active={view === ViewState.MENU}
+              onClick={() => setView(ViewState.MENU)}
+            />
+            <BottomNavItem
+              icon={<Settings size={24} />}
+              label="Altro"
+              active={view === ViewState.SETTINGS}
+              onClick={() => setView(ViewState.SETTINGS)}
+            />
+          </div>
+        </nav>
+
         {/* Global Toasts */}
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+        <div className="fixed bottom-20 lg:bottom-4 right-4 z-50 flex flex-col gap-2">
             {toasts.map(toast => (
                 <div 
                     key={toast.id}
@@ -567,16 +603,33 @@ const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, 
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${
-      active 
-        ? 'bg-indigo-50 text-indigo-600' 
+      active
+        ? 'bg-indigo-50 text-indigo-600'
         : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
     }`}
   >
     <span className={`${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
       {icon}
     </span>
-    <span className="hidden lg:block font-medium text-sm">{label}</span>
-    {active && <ChevronRight className="ml-auto h-4 w-4 lg:block hidden" />}
+    <span className="font-medium text-sm">{label}</span>
+    {active && <ChevronRight className="ml-auto h-4 w-4" />}
+  </button>
+);
+
+// Helper Component for Bottom Navigation
+const BottomNavItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
+  <button
+    onClick={onClick}
+    className={`flex flex-col items-center justify-center px-3 py-2 min-w-[60px] transition-colors duration-200 ${
+      active
+        ? 'text-indigo-600'
+        : 'text-slate-400'
+    }`}
+  >
+    {icon}
+    <span className={`text-[10px] mt-1 font-medium ${active ? 'text-indigo-600' : 'text-slate-500'}`}>
+      {label}
+    </span>
   </button>
 );
 
