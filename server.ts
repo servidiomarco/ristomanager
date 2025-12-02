@@ -49,20 +49,14 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   console.log('[HEALTH] Health check endpoint called');
-  try {
-    const response = {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      server: 'running',
-      socketio: socketService ? 'initialized' : 'disabled for testing'
-    };
-    console.log('[HEALTH] Sending response:', JSON.stringify(response));
-    res.status(200).json(response);
-    console.log('[HEALTH] Response sent successfully');
-  } catch (error) {
-    console.error('[HEALTH] Error in health endpoint:', error);
-    res.status(500).json({ error: 'Health check failed' });
-  }
+  // Absolute simplest response possible
+  res.writeHead(200, {
+    'Content-Type': 'text/plain',
+    'Content-Length': '2'
+  });
+  res.write('OK');
+  res.end();
+  console.log('[HEALTH] Response sent');
 });
 
 // Reservations
