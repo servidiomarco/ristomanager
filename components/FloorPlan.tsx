@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive } from 'lucide-react';
 
@@ -233,19 +234,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const clampedX = Math.max(0, finalX);
             const clampedY = Math.max(0, finalY);
 
-            // Clear CSS transform BEFORE updating state
-            // This prevents the transform from being applied on top of the new position
-            draggedElementRef.current.style.transform = '';
-            draggedElementRef.current.style.zIndex = '';
-
             const updatedTable = {
                 ...table,
                 x: clampedX,
                 y: clampedY
             };
 
-            // Update the table position
-            onUpdateTable(updatedTable);
+            // Force synchronous update to prevent snap-back
+            flushSync(() => {
+                onUpdateTable(updatedTable);
+            });
+
+            // Clear transform after DOM has been updated with new position
+            draggedElementRef.current.style.transform = '';
+            draggedElementRef.current.style.zIndex = '';
         }
     }
 
