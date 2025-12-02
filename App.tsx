@@ -317,6 +317,9 @@ const App: React.FC = () => {
       const result = await updateTable(primaryTable.id, updatedPrimaryTable);
       console.log('Backend response:', result);
 
+      // Update with backend response to ensure we have the exact data
+      setTables(prev => prev.map(t => t.id === result.id ? result : t));
+
       addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
     } catch (error) {
       console.error('Error merging tables:', error);
