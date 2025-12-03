@@ -209,13 +209,81 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
   }
 
+  const handleTableSelection = (table: Table) => {
+      const guests = formData.guests || 1;
+
+      // Check if table is too small
+      if (table.seats < guests) {
+          // Find suitable alternatives
+          const suitableTables = tables
+              .filter(t => t.seats >= guests)
+              .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
+              .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)
+              // Hide merged tables
+              .filter(t => {
+                  const isMergedIntoAnother = tables.some(other => {
+                      if (other.merged_with && other.merged_with.length > 0) {
+                          return other.merged_with.map(id => Number(id)).includes(Number(t.id));
+                      }
+                      return false;
+                  });
+                  return !isMergedIntoAnother;
+              })
+              .sort((a, b) => a.seats - b.seats);
+
+          if (suitableTables.length > 0) {
+              const suggestions = suitableTables.slice(0, 3).map(t => {
+                  const room = rooms.find(r => r.id === t.room_id);
+                  return `${t.name} (${t.seats} posti, ${room?.name})`;
+              }).join(', ');
+
+              const proceed = window.confirm(
+                  `⚠️ ATTENZIONE: Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\n` +
+                  `Tavoli disponibili con capienza adeguata:\n${suggestions}\n\n` +
+                  `Vuoi comunque assegnare ${table.name}?`
+              );
+
+              if (!proceed) {
+                  showToast('Selezione annullata. Scegli un tavolo più grande.', 'info');
+                  return;
+              }
+          } else {
+              // No suitable tables available - warn but allow
+              const proceed = window.confirm(
+                  `⚠️ Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\n` +
+                  `Non ci sono tavoli disponibili più grandi.\n\n` +
+                  `Vuoi comunque procedere?`
+              );
+
+              if (!proceed) {
+                  showToast('Selezione annullata.', 'info');
+                  return;
+              }
+          }
+      }
+
+      // Assign the table
+      setFormData({...formData, table_id: table.id});
+      setSelectedTablesForMerge([]);
+  };
+
   const handleAutoAssign = () => {
       if (!formData.guests || !formData.reservation_time || !formData.shift) return;
-      
+
       const availableTables = tables
         .filter(t => t.seats >= (formData.guests || 0))
         .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
         .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)
+        // Hide merged tables
+        .filter(t => {
+            const isMergedIntoAnother = tables.some(other => {
+                if (other.merged_with && other.merged_with.length > 0) {
+                    return other.merged_with.map(id => Number(id)).includes(Number(t.id));
+                }
+                return false;
+            });
+            return !isMergedIntoAnother;
+        })
         .sort((a, b) => a.seats - b.seats);
 
       if (availableTables.length > 0) {
@@ -872,9 +940,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                         : [...prev, table.id]
                                                                 );
                                                             } else {
-                                                                // Normal single select for reservation
-                                                                setFormData({...formData, table_id: table.id});
-                                                                setSelectedTablesForMerge([]);
+                                                                // Normal single select for reservation - with validation
+                                                                handleTableSelection(table);
                                                             }
                                                         }}
                                                         className={`
