@@ -47,7 +47,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
-  const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]); 
+  const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
+
+  // Confirmation modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    suggestions?: string[];
+    onConfirm: () => void;
+    onCancel: () => void;
+  } | null>(null); 
 
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
@@ -234,35 +244,45 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           if (suitableTables.length > 0) {
               const suggestions = suitableTables.slice(0, 3).map(t => {
                   const room = rooms.find(r => r.id === t.room_id);
-                  return `${t.name} (${t.seats} posti, ${room?.name})`;
-              }).join(', ');
+                  return `${t.name} - ${t.seats} posti (${room?.name})`;
+              });
 
-              const proceed = window.confirm(
-                  `⚠️ ATTENZIONE: Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\n` +
-                  `Tavoli disponibili con capienza adeguata:\n${suggestions}\n\n` +
-                  `Vuoi comunque assegnare ${table.name}?`
-              );
-
-              if (!proceed) {
-                  showToast('Selezione annullata. Scegli un tavolo più grande.', 'info');
-                  return;
-              }
+              setConfirmModal({
+                  isOpen: true,
+                  title: '⚠️ Capienza Insufficiente',
+                  message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.`,
+                  suggestions: suggestions,
+                  onConfirm: () => {
+                      setFormData({...formData, table_id: table.id});
+                      setSelectedTablesForMerge([]);
+                      setConfirmModal(null);
+                  },
+                  onCancel: () => {
+                      showToast('Selezione annullata. Scegli un tavolo più grande.', 'info');
+                      setConfirmModal(null);
+                  }
+              });
           } else {
               // No suitable tables available - warn but allow
-              const proceed = window.confirm(
-                  `⚠️ Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\n` +
-                  `Non ci sono tavoli disponibili più grandi.\n\n` +
-                  `Vuoi comunque procedere?`
-              );
-
-              if (!proceed) {
-                  showToast('Selezione annullata.', 'info');
-                  return;
-              }
+              setConfirmModal({
+                  isOpen: true,
+                  title: '⚠️ Capienza Insufficiente',
+                  message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\nNon ci sono tavoli disponibili più grandi.`,
+                  onConfirm: () => {
+                      setFormData({...formData, table_id: table.id});
+                      setSelectedTablesForMerge([]);
+                      setConfirmModal(null);
+                  },
+                  onCancel: () => {
+                      showToast('Selezione annullata.', 'info');
+                      setConfirmModal(null);
+                  }
+              });
           }
+          return;
       }
 
-      // Assign the table
+      // Assign the table (if capacity is sufficient)
       setFormData({...formData, table_id: table.id});
       setSelectedTablesForMerge([]);
   };
@@ -1040,6 +1060,56 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all"
                     >
                         {isEditing ? 'Salva Modifiche' : 'Conferma Prenotazione'}
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmModal?.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-6 border-b border-slate-100">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <span className="text-2xl">{confirmModal.title}</span>
+                    </h3>
+                </div>
+
+                <div className="p-6 space-y-4">
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+                        {confirmModal.message}
+                    </p>
+
+                    {confirmModal.suggestions && confirmModal.suggestions.length > 0 && (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                            <p className="text-sm font-semibold text-indigo-900 mb-2">
+                                Tavoli disponibili con capienza adeguata:
+                            </p>
+                            <ul className="space-y-2">
+                                {confirmModal.suggestions.map((suggestion, index) => (
+                                    <li key={index} className="flex items-center gap-2 text-indigo-700">
+                                        <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+                                        <span className="text-sm font-medium">{suggestion}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                    <button
+                        onClick={confirmModal.onCancel}
+                        className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-medium hover:bg-white transition-colors"
+                    >
+                        Annulla
+                    </button>
+                    <button
+                        onClick={confirmModal.onConfirm}
+                        className="px-5 py-2.5 bg-amber-600 text-white rounded-xl font-medium hover:bg-amber-700 shadow-lg shadow-amber-200 transition-all"
+                    >
+                        Procedi Comunque
                     </button>
                 </div>
             </div>
