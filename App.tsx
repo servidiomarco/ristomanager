@@ -130,7 +130,15 @@ const App: React.FC = () => {
 
     // Table events
     socket.on('table:created', (table: Table) => {
-      setTables(prev => [...prev, table]);
+      console.log('Socket received table:created for table:', table.name, 'ID:', table.id);
+      setTables(prev => {
+        // Check if table already exists (avoid duplicates from API response)
+        if (prev.some(t => t.id === table.id)) {
+          console.log('Table already exists, skipping duplicate add');
+          return prev;
+        }
+        return [...prev, table];
+      });
     });
 
     socket.on('table:updated', (table: Table) => {
