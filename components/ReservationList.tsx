@@ -361,12 +361,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
 
+      // Responsive table sizes - smaller on mobile
+      const baseSize = window.innerWidth < 640 ? 45 : 80; // 45px on mobile, 80px on desktop
+      const baseWidth = window.innerWidth < 640 ? 60 : 100; // For rectangles
+
       let shapeStyles = {};
-      if (table.shape === TableShape.CIRCLE) shapeStyles = { borderRadius: '50%', width: '80px', height: '80px' };
-      else if (table.shape === TableShape.SQUARE) shapeStyles = { borderRadius: '8px', width: '80px', height: '80px' };
-      else { 
-          const width = Math.max(100, table.seats * 15);
-          shapeStyles = { borderRadius: '8px', width: `${width}px`, height: '80px' };
+      if (table.shape === TableShape.CIRCLE) {
+          shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+      } else if (table.shape === TableShape.SQUARE) {
+          shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+      } else {
+          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 640 ? 8 : 15));
+          shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
       }
 
       return (
@@ -658,16 +664,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
           return (
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[600px] animate-in fade-in duration-300">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] animate-in fade-in duration-300">
                   {/* Room Selector for Map */}
-                  <div className="flex gap-2 mb-4 border-b border-slate-100 pb-2">
+                  <div className="flex gap-2 mb-4 border-b border-slate-100 pb-2 overflow-x-auto scrollbar-hide">
                       {rooms.map(room => (
                           <button
                               key={room.id}
                               onClick={() => setActiveMapRoomId(room.id)}
-                              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${ 
-                                  activeMapRoomId === room.id 
-                                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' 
+                              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
+                                  activeMapRoomId === room.id
+                                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
                                   : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
                               }`}
                           >
@@ -677,11 +683,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   </div>
 
                   {/* Map Canvas */}
-                  <div 
-                    className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-hidden"
-                    style={{ 
+                  <div
+                    className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto"
+                    style={{
                         backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                        backgroundSize: '20px 20px'
+                        backgroundSize: window.innerWidth < 640 ? '15px 15px' : '20px 20px'
                     }}
                   >
                        {tablesInRoom.map(renderMapTable)}
