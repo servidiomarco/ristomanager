@@ -148,8 +148,8 @@ app.put('/tables/:id', async (req, res) => {
         console.log('PUT /tables/:id - Request body:', JSON.stringify(req.body, null, 2));
 
         // Build dynamic update query based on provided fields
-        const fields = [];
-        const values = [];
+        const fields: string[] = [];
+        const values: any[] = [];
         let paramIndex = 1;
 
         const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at'];

@@ -95,10 +95,15 @@ export class SocketService {
     console.log(`Broadcasting table:created for ${table.name}`);
   }
 
-  broadcastTableUpdated(table: Table) {
-    // Broadcast to all clients and to specific room
-    this.io.emit('table:updated', table);
-    this.io.to(`room:${table.room_id}`).emit('table:updated', table);
+  broadcastTableUpdated(table: Table, excludeSocketId?: string) {
+    // Broadcast to all clients except the originating socket
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit('table:updated', table);
+      this.io.to(`room:${table.room_id}`).except(excludeSocketId).emit('table:updated', table);
+    } else {
+      this.io.emit('table:updated', table);
+      this.io.to(`room:${table.room_id}`).emit('table:updated', table);
+    }
     console.log(`Broadcasting table:updated for ${table.name}`);
   }
 
