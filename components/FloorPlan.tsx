@@ -484,22 +484,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
 
-    // Responsive table sizes - smaller on mobile
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const sizeMultiplier = isMobile ? 0.6 : 1;
+    // Responsive table sizes - smaller on mobile (< 640px like ReservationList)
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    const baseSize = isMobile ? 45 : 80;
+    const baseWidth = isMobile ? 60 : 100;
+    const seatMultiplier = isMobile ? 8 : 15;
 
     let shapeStyles = {};
 
     if (table.shape === TableShape.CIRCLE) {
-      const size = 80 * sizeMultiplier;
-      shapeStyles = { borderRadius: '50%', width: `${size}px`, height: `${size}px` };
+      shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
     } else if (table.shape === TableShape.SQUARE) {
-      const size = 80 * sizeMultiplier;
-      shapeStyles = { borderRadius: '8px', width: `${size}px`, height: `${size}px` };
+      shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
     } else {
-      const width = Math.max(100, table.seats * 15) * sizeMultiplier;
-      const height = 80 * sizeMultiplier;
-      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${height}px` };
+      const width = Math.max(baseWidth, table.seats * seatMultiplier);
+      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
     }
 
     return (
@@ -570,7 +569,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     >
       {/* Toolbar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 z-20">
-        <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0 pb-1">
           {rooms.map(room => (
             <button
               key={room.id}
@@ -578,9 +577,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-2 ${
-                  activeRoomId === room.id 
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200' 
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
+                  activeRoomId === room.id
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
                   : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
               }`}
             >
