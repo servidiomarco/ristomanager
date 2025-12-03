@@ -90,6 +90,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Filter tables for the current room and hide merged tables
   const currentTables = tables
     .filter(t => t.room_id === activeRoomId)
+    // Deduplicate first - keep only the first occurrence of each ID
+    .filter((t, index, self) => self.findIndex(t2 => t2.id === t.id) === index)
     .filter(t => {
       // Hide tables that are merged into another table
       // A table is hidden if its ID appears in another table's merged_with array
