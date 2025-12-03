@@ -361,9 +361,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
 
-      // Responsive table sizes - smaller on mobile
-      const baseSize = window.innerWidth < 640 ? 45 : 80; // 45px on mobile, 80px on desktop
-      const baseWidth = window.innerWidth < 640 ? 60 : 100; // For rectangles
+      // Responsive table sizes - smaller on mobile and tablets
+      const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
+      const baseWidth = window.innerWidth < 768 ? 60 : 100; // For rectangles
 
       let shapeStyles = {};
       if (table.shape === TableShape.CIRCLE) {
@@ -371,7 +371,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       } else if (table.shape === TableShape.SQUARE) {
           shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
       } else {
-          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 640 ? 8 : 15));
+          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
           shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
       }
 
@@ -687,7 +687,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto"
                     style={{
                         backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                        backgroundSize: window.innerWidth < 640 ? '15px 15px' : '20px 20px'
+                        backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
                     }}
                   >
                        {tablesInRoom.map(renderMapTable)}

@@ -484,8 +484,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
 
-    // Responsive table sizes - smaller on mobile (< 640px like ReservationList)
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    // Responsive table sizes - smaller on mobile and tablets (< 768px)
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     const baseSize = isMobile ? 45 : 80;
     const baseWidth = isMobile ? 60 : 100;
     const seatMultiplier = isMobile ? 8 : 15;
