@@ -90,8 +90,13 @@ export class SocketService {
   }
 
   // Table broadcast methods
-  broadcastTableCreated(table: Table) {
-    this.io.emit('table:created', table);
+  broadcastTableCreated(table: Table, excludeSocketId?: string) {
+    // Broadcast to all clients except the originating socket
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit('table:created', table);
+    } else {
+      this.io.emit('table:created', table);
+    }
     console.log(`Broadcasting table:created for ${table.name}`);
   }
 

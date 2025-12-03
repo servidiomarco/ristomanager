@@ -131,8 +131,9 @@ app.post('/tables', async (req, res) => {
         );
         const newTable = result.rows[0];
 
-        // Broadcast to all connected clients
-        if (socketService) socketService.broadcastTableCreated(newTable);
+        // Broadcast to all connected clients except the one who created it
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastTableCreated(newTable, socketId);
 
         res.status(201).json(newTable);
     } catch (err) {
