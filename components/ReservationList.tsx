@@ -54,9 +54,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     isOpen: boolean;
     title: string;
     message: string;
-    suggestions?: string[];
+    suggestions?: Array<{ label: string; table: Table }>;
     onConfirm: () => void;
     onCancel: () => void;
+    onSelectSuggestion?: (table: Table) => void;
   } | null>(null); 
 
   const [formData, setFormData] = useState<Partial<Reservation>>({
@@ -244,7 +245,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           if (suitableTables.length > 0) {
               const suggestions = suitableTables.slice(0, 3).map(t => {
                   const room = rooms.find(r => r.id === t.room_id);
-                  return `${t.name} - ${t.seats} posti (${room?.name})`;
+                  return {
+                      label: `${t.name} - ${t.seats} posti (${room?.name})`,
+                      table: t
+                  };
               });
 
               setConfirmModal({
@@ -256,10 +260,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       setFormData({...formData, table_id: table.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
+                      showToast(`Tavolo ${table.name} assegnato`, 'success');
                   },
                   onCancel: () => {
                       showToast('Selezione annullata. Scegli un tavolo più grande.', 'info');
                       setConfirmModal(null);
+                  },
+                  onSelectSuggestion: (suggestedTable: Table) => {
+                      setFormData({...formData, table_id: suggestedTable.id});
+                      setSelectedTablesForMerge([]);
+                      setConfirmModal(null);
+                      showToast(`Tavolo ${suggestedTable.name} assegnato automaticamente`, 'success');
                   }
               });
           } else {
@@ -1083,17 +1094,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                     {confirmModal.suggestions && confirmModal.suggestions.length > 0 && (
                         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-                            <p className="text-sm font-semibold text-indigo-900 mb-2">
+                            <p className="text-sm font-semibold text-indigo-900 mb-3">
                                 Tavoli disponibili con capienza adeguata:
                             </p>
-                            <ul className="space-y-2">
+                            <div className="space-y-2">
                                 {confirmModal.suggestions.map((suggestion, index) => (
-                                    <li key={index} className="flex items-center gap-2 text-indigo-700">
-                                        <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                                        <span className="text-sm font-medium">{suggestion}</span>
-                                    </li>
+                                    <button
+                                        key={index}
+                                        onClick={() => confirmModal.onSelectSuggestion?.(suggestion.table)}
+                                        className="w-full flex items-center justify-between gap-3 p-3 bg-white border-2 border-indigo-300 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all group"
+                                    >
+                                        <div className="flex items-center gap-2 text-indigo-700">
+                                            <Armchair size={16} className="text-indigo-500" />
+                                            <span className="text-sm font-medium">{suggestion.label}</span>
+                                        </div>
+                                        <div className="text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Check size={18} />
+                                        </div>
+                                    </button>
                                 ))}
-                            </ul>
+                            </div>
                         </div>
                     )}
                 </div>
