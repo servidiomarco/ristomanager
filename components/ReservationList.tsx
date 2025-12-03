@@ -540,7 +540,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       {/* --- MAP VIEW --- */}
       {viewMode === 'MAP' && (() => {
-          const tablesInRoom = tables.filter(t => t.room_id === activeMapRoomId);
+          const tablesInRoom = tables
+              .filter(t => t.room_id === activeMapRoomId)
+              // Hide tables that are merged into another table
+              .filter(t => {
+                  const isMergedIntoAnother = tables.some(other => {
+                      if (other.merged_with && other.merged_with.length > 0) {
+                          const mergedIds = other.merged_with.map(id => Number(id));
+                          const tableId = Number(t.id);
+                          return mergedIds.includes(tableId);
+                      }
+                      return false;
+                  });
+                  return !isMergedIntoAnother;
+              });
           const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
@@ -747,13 +760,53 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </span>
                                     </p>
                                 </div>
-                                <button 
-                                    type="button"
-                                    onClick={handleAutoAssign}
-                                    className="text-xs flex items-center gap-1 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-medium border border-indigo-100"
-                                >
-                                    <Wand2 className="h-3 w-3" /> Auto-assegna
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleAutoAssign}
+                                        className="text-xs flex items-center gap-1 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-medium border border-indigo-100"
+                                    >
+                                        <Wand2 className="h-3 w-3" /> Auto-assegna
+                                    </button>
+
+                                    {/* Show merge button if multiple tables are selected */}
+                                    {selectedTablesForMerge.length >= 2 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await onMergeTables(selectedTablesForMerge);
+                                                    showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
+                                                    setSelectedTablesForMerge([]);
+                                                } catch (error) {
+                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="text-xs flex items-center gap-1 bg-purple-50 text-purple-700 px-3 py-1.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-100"
+                                        >
+                                            <Combine className="h-3 w-3" /> Unisci ({selectedTablesForMerge.length})
+                                        </button>
+                                    )}
+
+                                    {/* Show divide button if selected table is merged */}
+                                    {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await onSplitTable(selectedTableObj.id);
+                                                    showToast('Tavoli divisi con successo', 'success');
+                                                    setFormData({...formData, table_id: undefined});
+                                                } catch (error) {
+                                                    showToast('Errore durante la divisione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="text-xs flex items-center gap-1 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors font-medium border border-amber-100"
+                                        >
+                                            <Scissors className="h-3 w-3" /> Dividi
+                                        </button>
+                                    )}
+                                </div>
                              </div>
 
                              {/* Room Tabs for Modal */}
@@ -782,31 +835,70 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div key={room.id} className="mb-6 last:mb-0">
                                         <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 sticky top-0 bg-slate-50 py-1 z-10">{room.name}</h4>
                                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-                                                                                         {tables.filter(t => t.room_id === room.id).map(table => {
+                                                                                         {tables
+                                                .filter(t => t.room_id === room.id)
+                                                // Hide tables that are merged into another table
+                                                .filter(t => {
+                                                    const isMergedIntoAnother = tables.some(other => {
+                                                        if (other.merged_with && other.merged_with.length > 0) {
+                                                            const mergedIds = other.merged_with.map(id => Number(id));
+                                                            const tableId = Number(t.id);
+                                                            return mergedIds.includes(tableId);
+                                                        }
+                                                        return false;
+                                                    });
+                                                    return !isMergedIntoAnother;
+                                                })
+                                                .map(table => {
                                                 const occupiedReservation = getReservationForTableInForm(table.id);
                                                 const isOccupied = !!occupiedReservation;
                                                 const isSelected = formData.table_id === table.id;
+                                                const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
                                                 const fitsGuests = table.seats >= (formData.guests || 1);
+                                                const isMerged = table.merged_with && table.merged_with.length > 0;
 
                                                 return (
                                                     <button
                                                         key={table.id}
                                                         type="button"
                                                         disabled={isOccupied}
-                                                        onClick={() => setFormData({...formData, table_id: table.id})}
+                                                        onClick={(e) => {
+                                                            if (e.ctrlKey || e.metaKey) {
+                                                                // Multi-select mode for merging
+                                                                e.preventDefault();
+                                                                setSelectedTablesForMerge(prev =>
+                                                                    prev.includes(table.id)
+                                                                        ? prev.filter(id => id !== table.id)
+                                                                        : [...prev, table.id]
+                                                                );
+                                                            } else {
+                                                                // Normal single select for reservation
+                                                                setFormData({...formData, table_id: table.id});
+                                                                setSelectedTablesForMerge([]);
+                                                            }
+                                                        }}
                                                         className={`
                                                             relative p-3 rounded-xl border-2 text-center transition-all group
-                                                            ${isSelected 
-                                                                ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-200 z-10' 
-                                                                : isOccupied 
-                                                                    ? 'border-red-500 bg-red-100 opacity-90 cursor-not-allowed' 
-                                                                    : fitsGuests 
-                                                                        ? 'border-white bg-white shadow-sm hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5' 
-                                                                        : 'border-slate-200 bg-slate-100 opacity-50'
+                                                            ${isSelectedForMerge
+                                                                ? 'border-purple-600 bg-purple-50 ring-2 ring-purple-200 z-10'
+                                                                : isSelected
+                                                                    ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-200 z-10'
+                                                                    : isOccupied
+                                                                        ? 'border-red-500 bg-red-100 opacity-90 cursor-not-allowed'
+                                                                        : fitsGuests
+                                                                            ? 'border-white bg-white shadow-sm hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5'
+                                                                            : 'border-slate-200 bg-slate-100 opacity-50'
                                                             }
                                                         `}
                                                     >
-                                                        <div className={`text-sm font-bold ${isSelected ? 'text-indigo-700' : isOccupied ? 'text-red-900' : 'text-slate-700'}`}>
+                                                        {/* Merged Table Badge */}
+                                                        {isMerged && !isOccupied && (
+                                                            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white z-20">
+                                                                <Combine size={8} />
+                                                            </div>
+                                                        )}
+
+                                                        <div className={`text-sm font-bold ${isSelectedForMerge ? 'text-purple-700' : isSelected ? 'text-indigo-700' : isOccupied ? 'text-red-900' : 'text-slate-700'}`}>
                                                             {table.name}
                                                         </div>
                                                         <div className={`text-[10px] flex justify-center items-center gap-1 mt-1 ${isOccupied ? 'text-red-800' : 'text-slate-500'}`}>
@@ -824,8 +916,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                 </div>
                                                             </>
                                                         )}
-                                                        {isSelected && (
-                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm">
+                                                        {isSelected && !isSelectedForMerge && (
+                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm z-20">
+                                                                <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
+                                                            </div>
+                                                        )}
+                                                        {isSelectedForMerge && (
+                                                            <div className="absolute -top-2 -right-2 bg-purple-600 text-white rounded-full p-0.5 shadow-sm z-20">
                                                                 <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
                                                             </div>
                                                         )}
@@ -841,11 +938,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 )}
                              </div>
-                             <div className="mt-3 flex flex-wrap gap-4 text-[10px] text-slate-500 px-1">
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-white border border-slate-200 shadow-sm rounded"></div> Libero</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-indigo-50 border-2 border-indigo-600 rounded"></div> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-200 border border-slate-200 rounded"></div> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-100 border border-slate-200 rounded opacity-50"></div> Capienza Insufficiente</div>
+                             <div className="mt-3 flex flex-col gap-2 px-1">
+                                 <div className="flex flex-wrap gap-4 text-[10px] text-slate-500">
+                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-white border border-slate-200 shadow-sm rounded"></div> Libero</div>
+                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-indigo-50 border-2 border-indigo-600 rounded"></div> Selezionato</div>
+                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-purple-50 border-2 border-purple-600 rounded"></div> Multi-selezione</div>
+                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-200 border border-slate-200 rounded"></div> Occupato</div>
+                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-100 border border-slate-200 rounded opacity-50"></div> Capienza Insufficiente</div>
+                                     <div className="flex items-center gap-1.5">
+                                         <div className="w-3 h-3 bg-indigo-600 text-white rounded-full flex items-center justify-center">
+                                             <Combine size={6} className="text-white" />
+                                         </div>
+                                         Tavolo Unito
+                                     </div>
+                                 </div>
+                                 <div className="text-[10px] text-slate-400 italic">
+                                     💡 Tieni premuto Ctrl (o Cmd su Mac) mentre clicchi per selezionare più tavoli da unire
+                                 </div>
                              </div>
                         </div>
                     </form>

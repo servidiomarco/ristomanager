@@ -3,6 +3,8 @@ import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive } from 'lucide-react';
 
+console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
+
 interface FloorPlanProps {
   rooms: Room[];
   tables: Table[];
@@ -28,6 +30,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onAddRoom,
   onDeleteRoom
 }) => {
+  console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
+
   const [activeRoomId, setActiveRoomId] = useState<number>(() => {
     const firstRoom = rooms[0];
     return typeof firstRoom?.id === 'number' ? firstRoom.id : 0;
@@ -88,6 +92,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   }, [tables, activeRoomId]);
 
   // Filter tables for the current room and hide merged tables
+  console.log('🔍 STARTING FILTER - activeRoomId:', activeRoomId, 'Total tables:', tables.length);
+
   const currentTables = tables
     .filter(t => t.room_id === activeRoomId)
     // Deduplicate first - keep only the first occurrence of each ID
@@ -103,15 +109,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           const isIncluded = mergedIds.includes(tableId);
 
           if (isIncluded) {
-            console.log(`Table ${t.name} (ID: ${tableId}) is merged into table ${other.name} (merged_with: [${mergedIds}])`);
+            console.log(`Table ${t.name} (ID: ${tableId}) is merged into table ${other.name} (merged_with: [${mergedIds}]) - WILL BE HIDDEN`);
           }
 
           return isIncluded;
         }
         return false;
       });
+
+      if (isMergedIntoAnother) {
+        console.log(`❌ HIDING Table ${t.name} (ID: ${t.id}) because it's merged into another table`);
+      } else if (t.merged_with && t.merged_with.length > 0) {
+        console.log(`✅ SHOWING Table ${t.name} (ID: ${t.id}) - this is the PRIMARY merged table with merged_with: [${t.merged_with}]`);
+      }
+
       return !isMergedIntoAnother;
     });
+
+  // Debug: Log final filtered tables
+  useEffect(() => {
+    console.log('📋 FINAL currentTables after filtering:', currentTables.map(t => `${t.name} (ID: ${t.id})`));
+  }, [currentTables, activeRoomId]);
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
