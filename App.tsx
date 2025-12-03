@@ -644,7 +644,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.RESERVATIONS && (
-            <ReservationList 
+            <ReservationList
                 reservations={reservations}
                 banquetMenus={banquetMenus}
                 tables={tables}
@@ -652,6 +652,9 @@ const App: React.FC = () => {
                 onUpdateReservation={handleUpdateReservation}
                 onAddReservation={handleAddReservation}
                 onDeleteReservation={handleDeleteReservation}
+                onMergeTables={handleMergeTables}
+                onSplitTable={handleSplitTable}
+                onUpdateTable={handleUpdateTable}
                 showToast={addToast}
             />
         )}

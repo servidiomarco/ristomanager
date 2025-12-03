@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors } from 'lucide-react';
 
 interface ReservationListProps {
   reservations: Reservation[];
@@ -10,6 +10,9 @@ interface ReservationListProps {
   onUpdateReservation: (r: Reservation) => void;
   onAddReservation: (r: Omit<Reservation, 'id'>) => void;
   onDeleteReservation: (id: number) => void;
+  onMergeTables: (tableIds: number[]) => Promise<void>;
+  onSplitTable: (tableId: number) => Promise<void>;
+  onUpdateTable: (table: Table) => Promise<void>;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -21,6 +24,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onUpdateReservation,
   onAddReservation,
   onDeleteReservation,
+  onMergeTables,
+  onSplitTable,
+  onUpdateTable,
   showToast
 }) => {
   // Main View State
@@ -40,7 +46,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL'); 
+  const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
+  const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]); 
 
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
