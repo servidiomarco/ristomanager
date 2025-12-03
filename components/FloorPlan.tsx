@@ -568,8 +568,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Toolbar */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 z-20">
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0 pb-1">
+      <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
               key={room.id}
@@ -577,7 +577,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
+              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
                   : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
