@@ -735,18 +735,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome Cliente</label>
                                 <input
                                     required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                                     value={formData.customer_name}
                                     onChange={e => setFormData({...formData, customer_name: e.target.value})}
                                     placeholder="Mario Rossi"
                                 />
                             </div>
-                             
+
                             <div className="grid grid-cols-2 gap-3 sm:gap-4">
                                  <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Telefono</label>
                                     <input
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                                         value={formData.phone || ''}
                                         onChange={e => setFormData({...formData, phone: e.target.value})}
                                         placeholder="333..."
@@ -756,7 +756,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Email</label>
                                     <input
                                         type="email"
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
                                         placeholder="cliente@mail.com"
@@ -771,7 +771,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <input
                                             type="datetime-local"
                                             required
-                                            className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 pl-8 sm:pl-10 text-xs sm:text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white cursor-pointer"
+                                            className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 pl-8 sm:pl-10 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white cursor-pointer"
                                             value={formData.reservation_time}
                                             onChange={e => setFormData({...formData, reservation_time: e.target.value})}
                                         />
@@ -805,7 +805,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     type="number"
                                     min="1"
                                     required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-sm sm:text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                                     value={formData.guests || ''}
                                     onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
                                 />
@@ -814,7 +814,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Menu Banchetto</label>
                                 <select
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                                     value={formData.banquet_menu_id || ''}
                                     onChange={e => setFormData({...formData, banquet_menu_id: e.target.value ? parseInt(e.target.value) : undefined})}
                                 >
@@ -835,7 +835,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
                                 <textarea
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-16 sm:h-20 text-xs sm:text-sm bg-white"
+                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-16 sm:h-20 text-base bg-white"
                                     placeholder="Intolleranze, seggiolone..."
                                     value={formData.notes || ''}
                                     onChange={e => setFormData({...formData, notes: e.target.value})}
