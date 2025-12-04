@@ -19,6 +19,7 @@
     "@types/pg": "^8.15.6",
     "@types/socket.io": "^3.0.1",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "lucide-react": "^0.554.0",
     "pg": "^8.16.3",

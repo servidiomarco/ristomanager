@@ -1,9 +1,12 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
 import pool, { createSchema } from './db.js';
 import { SocketService } from './services/socketService.js';
-import { Shift } from './types.js';
+import { Shift, PaymentStatus } from './types.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -452,13 +455,14 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
 
         // Create reservation in database
         const result = await pool.query(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, arrival_status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [
                 bookingData.name,
                 `${bookingData.date}T${bookingData.time}`,
                 shift,
                 bookingData.guests,
                 phoneNumber,
+                PaymentStatus.PENDING,
                 'WAITING'
             ]
         );
