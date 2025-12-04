@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import cors from 'cors';
 import pool, { createSchema } from './db.js';
 import { SocketService } from './services/socketService.js';
+import { Shift } from './types.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -41,6 +42,44 @@ app.get('/health', (req, res) => {
     socketio: socketService ? 'initialized' : 'not initialized'
   });
 });
+
+// ============================================
+// WHATSAPP WEBHOOK ENDPOINTS (Vonage)
+// ============================================
+
+// Vonage WhatsApp inbound messages webhook
+app.post('/webhook/vonage-inbound', async (req, res) => {
+    console.log('[Vonage] Incoming message:', JSON.stringify(req.body, null, 2));
+
+    try {
+        const { from, to, message } = req.body;
+
+        // Acknowledge immediately to Vonage
+        res.status(200).send();
+
+        // Process message asynchronously
+        if (message?.content?.type === 'text') {
+            await processWhatsAppBooking(from, message.content.text);
+        } else {
+            console.log('[Vonage] Non-text message received, ignoring');
+        }
+
+    } catch (error) {
+        console.error('[Vonage] Error processing message:', error);
+        // Still respond 200 to Vonage to avoid retries
+        res.status(200).send();
+    }
+});
+
+// Vonage WhatsApp status updates webhook
+app.post('/webhook/vonage-status', (req, res) => {
+    console.log('[Vonage] Message status:', JSON.stringify(req.body, null, 2));
+    res.status(200).send();
+});
+
+// ============================================
+// EXISTING ENDPOINTS
+// ============================================
 
 // Reservations
 app.get('/reservations', async (req, res) => {
@@ -370,6 +409,183 @@ app.delete('/banquet-menus/:id', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+// ============================================
+// WHATSAPP HELPER FUNCTIONS
+// ============================================
+
+// Process WhatsApp booking message
+async function processWhatsAppBooking(phoneNumber: string, messageText: string) {
+    console.log(`[WhatsApp] Processing booking from ${phoneNumber}: ${messageText}`);
+
+    // Parse the message
+    const bookingData = parseBookingMessage(messageText);
+
+    if (!bookingData) {
+        await sendVonageWhatsApp(phoneNumber,
+            "❌ Non ho capito il messaggio. Per favore usa questo formato:\n\n" +
+            "DATA ORA OSPITI NOME\n\n" +
+            "Esempio: 15/12 20:00 4 Marco Rossi"
+        );
+        return;
+    }
+
+    // Check if we have all required info
+    const missingFields = [];
+    if (!bookingData.date) missingFields.push("data");
+    if (!bookingData.time) missingFields.push("ora");
+    if (!bookingData.guests) missingFields.push("numero ospiti");
+    if (!bookingData.name) missingFields.push("nome");
+
+    if (missingFields.length > 0) {
+        await sendVonageWhatsApp(phoneNumber,
+            `⚠️ Mancano alcune informazioni: ${missingFields.join(", ")}\n\n` +
+            "Per favore invia: DATA ORA OSPITI NOME\n\n" +
+            "Esempio: 15/12 20:00 4 Marco Rossi"
+        );
+        return;
+    }
+
+    try {
+        // Determine shift based on time
+        const shift = determineShift(bookingData.time);
+
+        // Create reservation in database
+        const result = await pool.query(
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, arrival_status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [
+                bookingData.name,
+                `${bookingData.date}T${bookingData.time}`,
+                shift,
+                bookingData.guests,
+                phoneNumber,
+                'WAITING'
+            ]
+        );
+
+        const newReservation = result.rows[0];
+
+        // Broadcast via Socket.IO
+        if (socketService) {
+            socketService.broadcastReservationCreated(newReservation);
+        }
+
+        // Format date nicely for confirmation
+        const [year, month, day] = bookingData.date.split('-');
+        const formattedDate = `${day}/${month}/${year}`;
+
+        // Send WhatsApp confirmation
+        await sendVonageWhatsApp(phoneNumber,
+            `✅ *Prenotazione Confermata!*\n\n` +
+            `📅 Data: ${formattedDate}\n` +
+            `🕐 Ora: ${bookingData.time}\n` +
+            `👥 Ospiti: ${bookingData.guests}\n` +
+            `👤 Nome: ${bookingData.name}\n` +
+            `🍽️ Turno: ${shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}\n\n` +
+            `Grazie ${bookingData.name.split(' ')[0]}! Ti aspettiamo! 🎉`
+        );
+
+        console.log(`[WhatsApp] ✅ Reservation created successfully for ${bookingData.name}`);
+
+    } catch (error) {
+        console.error('[WhatsApp] Error creating reservation:', error);
+        await sendVonageWhatsApp(phoneNumber,
+            "❌ Si è verificato un errore durante la creazione della prenotazione.\n\n" +
+            "Per favore riprova o contattaci telefonicamente."
+        );
+    }
+}
+
+// Parse booking message (supports both structured and natural language)
+function parseBookingMessage(text: string): { date: string | null, time: string | null, guests: number | null, name: string | null } | null {
+    if (!text || text.trim().length === 0) return null;
+
+    // Try structured format first: "15/12 20:00 4 Marco Rossi"
+    const structuredMatch = text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)\s+(\d{1,2}:\d{2})\s+(\d+)\s+(.+)/i);
+    if (structuredMatch) {
+        return {
+            date: normalizeDate(structuredMatch[1]),
+            time: structuredMatch[2],
+            guests: parseInt(structuredMatch[3]),
+            name: structuredMatch[4].trim()
+        };
+    }
+
+    // Try natural language patterns
+    const dateMatch = text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/);
+    const timeMatch = text.match(/(\d{1,2}:\d{2})/);
+    const guestsMatch = text.match(/(\d+)\s*(?:persone?|ospiti?|pax)/i);
+    const nameMatch = text.match(/(?:nome[:\s]+|per\s+)([A-Za-zÀ-ÿ\s]+?)(?:\s+tel|\s+\d|$)/i);
+
+    if (dateMatch || timeMatch || guestsMatch || nameMatch) {
+        return {
+            date: dateMatch ? normalizeDate(dateMatch[1]) : null,
+            time: timeMatch ? timeMatch[1] : null,
+            guests: guestsMatch ? parseInt(guestsMatch[1]) : null,
+            name: nameMatch ? nameMatch[1].trim() : null
+        };
+    }
+
+    return null;
+}
+
+// Normalize date to YYYY-MM-DD format
+function normalizeDate(dateStr: string): string {
+    const parts = dateStr.split('/');
+    const day = parts[0].padStart(2, '0');
+    const month = parts[1].padStart(2, '0');
+    const year = parts[2] || new Date().getFullYear().toString();
+    return `${year}-${month}-${day}`;
+}
+
+// Determine shift (LUNCH or DINNER) based on time
+function determineShift(time: string): Shift {
+    const hour = parseInt(time.split(':')[0]);
+    return (hour >= 11 && hour < 17) ? Shift.LUNCH : Shift.DINNER;
+}
+
+// Send WhatsApp message via Vonage API
+async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
+    const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
+    const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
+    const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
+
+    if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
+        console.error('[Vonage] Missing configuration. Set VONAGE_API_KEY, VONAGE_API_SECRET, and VONAGE_WHATSAPP_NUMBER');
+        return;
+    }
+
+    try {
+        const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
+
+        const response = await fetch('https://messages-sandbox.nexmo.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Basic ${auth}`
+            },
+            body: JSON.stringify({
+                from: VONAGE_WHATSAPP_NUMBER,
+                to: to,
+                message_type: 'text',
+                text: text,
+                channel: 'whatsapp'
+            })
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`Vonage API error: ${response.status} - ${errorBody}`);
+        }
+
+        const result = await response.json();
+        console.log(`[Vonage] ✅ Message sent to ${to}`, result);
+
+    } catch (error) {
+        console.error('[Vonage] ❌ Error sending message:', error);
+        throw error;
+    }
+}
 
 
 const startServer = async () => {
