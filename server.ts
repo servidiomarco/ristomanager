@@ -615,6 +615,12 @@ async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
         return;
     }
 
+    // Ensure phone number is in E.164 format (with + prefix)
+    const formattedTo = to.startsWith('+') ? to : `+${to}`;
+    const formattedFrom = VONAGE_WHATSAPP_NUMBER.startsWith('+') ? VONAGE_WHATSAPP_NUMBER : `+${VONAGE_WHATSAPP_NUMBER}`;
+
+    console.log(`[Vonage] Sending message to ${formattedTo} from ${formattedFrom}`);
+
     try {
         const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
 
@@ -625,8 +631,8 @@ async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
                 'Authorization': `Basic ${auth}`
             },
             body: JSON.stringify({
-                from: VONAGE_WHATSAPP_NUMBER,
-                to: to,
+                from: formattedFrom,
+                to: formattedTo,
                 message_type: 'text',
                 text: text,
                 channel: 'whatsapp'
