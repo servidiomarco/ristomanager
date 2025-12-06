@@ -55,14 +55,27 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
     console.log('[Vonage] Incoming message:', JSON.stringify(req.body, null, 2));
 
     try {
-        const { from, to, message } = req.body;
-
         // Acknowledge immediately to Vonage
         res.status(200).send();
 
-        // Process message asynchronously
-        if (message?.content?.type === 'text') {
-            await processWhatsAppBooking(from, message.content.text);
+        // Vonage sends two different formats:
+        // Format 1 (actual): { from, message_type: "text", text: "..." }
+        // Format 2 (sandbox): { from, message: { content: { type: "text", text: "..." } } }
+
+        const from = req.body.from;
+        let messageText = null;
+
+        // Check actual Vonage format first
+        if (req.body.message_type === 'text' && req.body.text) {
+            messageText = req.body.text;
+        }
+        // Check sandbox/alternative format
+        else if (req.body.message?.content?.type === 'text') {
+            messageText = req.body.message.content.text;
+        }
+
+        if (messageText) {
+            await processWhatsAppBooking(from, messageText);
         } else {
             console.log('[Vonage] Non-text message received, ignoring');
         }
