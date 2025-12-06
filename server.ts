@@ -463,17 +463,23 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     }
 
     try {
+        // TypeScript assertions - we've already validated these fields exist
+        const date = bookingData.date!;
+        const time = bookingData.time!;
+        const name = bookingData.name!;
+        const guests = bookingData.guests!;
+
         // Determine shift based on time
-        const shift = determineShift(bookingData.time);
+        const shift = determineShift(time);
 
         // Create reservation in database
         const result = await pool.query(
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [
-                bookingData.name,
-                `${bookingData.date}T${bookingData.time}`,
+                name,
+                `${date}T${time}`,
                 shift,
-                bookingData.guests,
+                guests,
                 phoneNumber,
                 PaymentStatus.PENDING,
                 'WAITING'
@@ -488,21 +494,21 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         }
 
         // Format date nicely for confirmation
-        const [year, month, day] = bookingData.date.split('-');
+        const [year, month, day] = date.split('-');
         const formattedDate = `${day}/${month}/${year}`;
 
         // Send WhatsApp confirmation
         await sendVonageWhatsApp(phoneNumber,
             `✅ *Prenotazione Confermata!*\n\n` +
             `📅 Data: ${formattedDate}\n` +
-            `🕐 Ora: ${bookingData.time}\n` +
-            `👥 Ospiti: ${bookingData.guests}\n` +
-            `👤 Nome: ${bookingData.name}\n` +
+            `🕐 Ora: ${time}\n` +
+            `👥 Ospiti: ${guests}\n` +
+            `👤 Nome: ${name}\n` +
             `🍽️ Turno: ${shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}\n\n` +
-            `Grazie ${bookingData.name.split(' ')[0]}! Ti aspettiamo! 🎉`
+            `Grazie ${name.split(' ')[0]}! Ti aspettiamo! 🎉`
         );
 
-        console.log(`[WhatsApp] ✅ Reservation created successfully for ${bookingData.name}`);
+        console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}`);
 
     } catch (error) {
         console.error('[WhatsApp] Error creating reservation:', error);
