@@ -191,7 +191,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         </span>
                         </td>
                         <td className="px-6 py-4 font-medium text-slate-700">
-                        € {dish.price.toFixed(2)}
+                        € {Number(dish.price).toFixed(2)}
                         </td>
                         <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1">
