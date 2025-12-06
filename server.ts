@@ -165,6 +165,53 @@ app.delete('/reservations/:id', async (req, res) => {
     }
 });
 
+// Send WhatsApp confirmation for reservation
+app.post('/reservations/:id/confirm-whatsapp', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get reservation details
+        const result = await pool.query(
+            'SELECT customer_name, reservation_time, guests, phone FROM reservations WHERE id = $1',
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Reservation not found' });
+        }
+
+        const reservation = result.rows[0];
+
+        if (!reservation.phone) {
+            return res.status(400).json({ error: 'No phone number for this reservation' });
+        }
+
+        // Format date and time in Italian format
+        const reservationDate = new Date(reservation.reservation_time);
+        const day = String(reservationDate.getDate()).padStart(2, '0');
+        const month = String(reservationDate.getMonth() + 1).padStart(2, '0');
+        const year = reservationDate.getFullYear();
+        const hours = String(reservationDate.getHours()).padStart(2, '0');
+        const minutes = String(reservationDate.getMinutes()).padStart(2, '0');
+
+        const formattedDate = `${day}/${month}/${year}`;
+        const formattedTime = `${hours}:${minutes}`;
+
+        // Send WhatsApp confirmation
+        await sendVonageWhatsApp(
+            reservation.phone,
+            `La prenotazione per ${formattedDate} ${formattedTime} e' confermata. A presto!`
+        );
+
+        console.log(`[WhatsApp] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
+
+        res.json({ success: true, message: 'Confirmation sent via WhatsApp' });
+    } catch (err) {
+        console.error('Error sending WhatsApp confirmation:', err);
+        res.status(500).json({ error: 'Failed to send confirmation' });
+    }
+});
+
 
 // Tables
 app.get('/tables', async (req, res) => {
@@ -469,6 +516,11 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         const name = bookingData.name!;
         const guests = bookingData.guests!;
 
+        // Send immediate acknowledgment
+        await sendVonageWhatsApp(phoneNumber,
+            "Grazie per la richiesta di prenotazione, a breve ricevera la conferma della disponibilita del tavolo per la data e ora richiesta."
+        );
+
         // Determine shift based on time
         const shift = determineShift(time);
 
@@ -493,22 +545,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
             socketService.broadcastReservationCreated(newReservation);
         }
 
-        // Format date nicely for confirmation
-        const [year, month, day] = date.split('-');
-        const formattedDate = `${day}/${month}/${year}`;
-
-        // Send WhatsApp confirmation
-        await sendVonageWhatsApp(phoneNumber,
-            `✅ *Prenotazione Confermata!*\n\n` +
-            `📅 Data: ${formattedDate}\n` +
-            `🕐 Ora: ${time}\n` +
-            `👥 Ospiti: ${guests}\n` +
-            `👤 Nome: ${name}\n` +
-            `🍽️ Turno: ${shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}\n\n` +
-            `Grazie ${name.split(' ')[0]}! Ti aspettiamo! 🎉`
-        );
-
-        console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}`);
+        console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}. Waiting for manual confirmation.`);
 
     } catch (error) {
         console.error('[WhatsApp] Error creating reservation:', error);
