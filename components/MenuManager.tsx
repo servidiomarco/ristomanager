@@ -2,23 +2,27 @@
 
 import React, { useState } from 'react';
 import { Dish, BanquetMenu, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Utensils, BookOpen, Check } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check } from 'lucide-react';
 
 interface MenuManagerProps {
   dishes: Dish[];
   banquetMenus: BanquetMenu[];
   onAddDish: (dish: Omit<Dish, 'id'>) => void;
+  onUpdateDish: (id: number, dish: Partial<Dish>) => void;
   onDeleteDish: (id: number) => void;
   onAddBanquetMenu: (menu: Omit<BanquetMenu, 'id'>) => void;
+  onUpdateBanquetMenu: (id: number, menu: Partial<BanquetMenu>) => void;
   onDeleteBanquetMenu: (id: number) => void;
 }
 
-export const MenuManager: React.FC<MenuManagerProps> = ({ 
-    dishes, 
+export const MenuManager: React.FC<MenuManagerProps> = ({
+    dishes,
     banquetMenus,
-    onAddDish, 
+    onAddDish,
+    onUpdateDish,
     onDeleteDish,
     onAddBanquetMenu,
+    onUpdateBanquetMenu,
     onDeleteBanquetMenu
 }) => {
   console.log("MenuManager: banquetMenus prop received:", banquetMenus);
@@ -26,7 +30,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
-  
+  const [isEditingDish, setIsEditingDish] = useState(false);
+  const [isEditingBanquet, setIsEditingBanquet] = useState(false);
+  const [editingDishId, setEditingDishId] = useState<number | null>(null);
+  const [editingBanquetId, setEditingBanquetId] = useState<number | null>(null);
+
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
     name: '',
@@ -47,32 +55,80 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleAddDishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDish.name || !newDish.price) return;
-    
-    onAddDish({
-      name: newDish.name!,
-      description: newDish.description || '',
-      price: Number(newDish.price),
-      category: newDish.category || 'Antipasti',
-      allergens: newDish.allergens || []
-    } as Dish);
-    
+
+    if (isEditingDish && editingDishId !== null) {
+      onUpdateDish(editingDishId, {
+        name: newDish.name!,
+        description: newDish.description || '',
+        price: Number(newDish.price),
+        category: newDish.category || 'Antipasti',
+        allergens: newDish.allergens || []
+      });
+    } else {
+      onAddDish({
+        name: newDish.name!,
+        description: newDish.description || '',
+        price: Number(newDish.price),
+        category: newDish.category || 'Antipasti',
+        allergens: newDish.allergens || []
+      } as Dish);
+    }
+
     setIsDishFormOpen(false);
+    setIsEditingDish(false);
+    setEditingDishId(null);
     setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [] });
+  };
+
+  const handleEditDish = (dish: Dish) => {
+    setNewDish({
+      name: dish.name,
+      description: dish.description,
+      price: dish.price,
+      category: dish.category,
+      allergens: dish.allergens
+    });
+    setEditingDishId(dish.id);
+    setIsEditingDish(true);
+    setIsDishFormOpen(true);
   };
 
   const handleAddBanquetSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if(!newBanquet.name || !newBanquet.price_per_person) return;
 
-      onAddBanquetMenu({
+      if (isEditingBanquet && editingBanquetId !== null) {
+        onUpdateBanquetMenu(editingBanquetId, {
           name: newBanquet.name!,
           description: newBanquet.description || '',
           price_per_person: Number(newBanquet.price_per_person),
           dish_ids: newBanquet.dish_ids || []
-      } as BanquetMenu);
+        });
+      } else {
+        onAddBanquetMenu({
+            name: newBanquet.name!,
+            description: newBanquet.description || '',
+            price_per_person: Number(newBanquet.price_per_person),
+            dish_ids: newBanquet.dish_ids || []
+        } as BanquetMenu);
+      }
 
       setIsBanquetFormOpen(false);
+      setIsEditingBanquet(false);
+      setEditingBanquetId(null);
       setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [] });
+  };
+
+  const handleEditBanquet = (menu: BanquetMenu) => {
+    setNewBanquet({
+      name: menu.name,
+      description: menu.description,
+      price_per_person: menu.price_per_person,
+      dish_ids: menu.dish_ids
+    });
+    setEditingBanquetId(menu.id);
+    setIsEditingBanquet(true);
+    setIsBanquetFormOpen(true);
   };
 
   const toggleDishInBanquet = (dishId: number) => {
@@ -203,12 +259,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                        <button 
-                            onClick={() => onDeleteDish(dish.id)}
-                            className="text-slate-400 hover:text-rose-600 transition-colors p-1 rounded-full hover:bg-rose-50"
-                        >
-                            <Trash2 className="h-5 w-5" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                            <button
+                                onClick={() => handleEditDish(dish)}
+                                className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-full hover:bg-indigo-50"
+                            >
+                                <Edit2 className="h-5 w-5" />
+                            </button>
+                            <button
+                                onClick={() => onDeleteDish(dish.id)}
+                                className="text-slate-400 hover:text-rose-600 transition-colors p-1 rounded-full hover:bg-rose-50"
+                            >
+                                <Trash2 className="h-5 w-5" />
+                            </button>
+                        </div>
                         </td>
                     </tr>
                     ))}
@@ -222,12 +286,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
-                      <button 
-                          onClick={() => onDeleteBanquetMenu(menu.id)}
-                          className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                          <Trash2 className="h-5 w-5" />
-                      </button>
+                      <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                              onClick={() => handleEditBanquet(menu)}
+                              className="text-slate-300 hover:text-indigo-500 transition-colors"
+                          >
+                              <Edit2 className="h-5 w-5" />
+                          </button>
+                          <button
+                              onClick={() => onDeleteBanquetMenu(menu.id)}
+                              className="text-slate-300 hover:text-rose-500 transition-colors"
+                          >
+                              <Trash2 className="h-5 w-5" />
+                          </button>
+                      </div>
                       <div className="flex justify-between items-start mb-4">
                           <div>
                               <h3 className="font-bold text-lg text-slate-800">{menu.name}</h3>

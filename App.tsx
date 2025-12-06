@@ -433,18 +433,30 @@ const App: React.FC = () => {
   // --- Menu Logic ---
   const handleAddDish = async (dish: Omit<Dish, 'id'>) => {
     try {
-        const returnedDish = await createDish(dish);
-        setDishes(prev => [...prev, returnedDish]);
+        await createDish(dish);
+        // Socket.IO will handle adding to state via dish:created event
         addToast('Piatto aggiunto al menu', 'success');
     } catch (error) {
         console.error("Error adding dish:", error);
         addToast('Error adding dish', 'error');
     }
   };
+
+  const handleUpdateDish = async (id: number, dish: Partial<Dish>) => {
+    try {
+        await updateDish(id, dish);
+        // Socket.IO will handle updating state via dish:updated event
+        addToast('Piatto aggiornato', 'success');
+    } catch (error) {
+        console.error("Error updating dish:", error);
+        addToast('Error updating dish', 'error');
+    }
+  };
+
   const handleDeleteDish = async (id: number) => {
     try {
         await deleteDish(id);
-        setDishes(prev => prev.filter(d => d.id !== id));
+        // Socket.IO will handle removing from state via dish:deleted event
         addToast('Piatto rimosso', 'success');
     } catch (error) {
         console.error("Error deleting dish:", error);
@@ -454,19 +466,30 @@ const App: React.FC = () => {
 
   const handleAddBanquet = async (menu: Omit<BanquetMenu, 'id'>) => {
     try {
-        const returnedMenu = await createBanquetMenu(menu);
-        setBanquetMenus(prev => [...prev, returnedMenu]);
+        await createBanquetMenu(menu);
+        // Socket.IO will handle adding to state via banquet:created event
         addToast('Menu banchetto creato', 'success');
     } catch (error) {
         console.error("Error adding banquet menu:", error);
         addToast('Error adding banquet menu', 'error');
     }
     };
-    
+
+  const handleUpdateBanquet = async (id: number, menu: Partial<BanquetMenu>) => {
+    try {
+        await updateBanquetMenu(id, menu);
+        // Socket.IO will handle updating state via banquet:updated event
+        addToast('Menu banchetto aggiornato', 'success');
+    } catch (error) {
+        console.error("Error updating banquet menu:", error);
+        addToast('Error updating banquet menu', 'error');
+    }
+  };
+
   const handleDeleteBanquet = async (id: number) => {
     try {
         await deleteBanquetMenu(id);
-        setBanquetMenus(prev => prev.filter(m => m.id !== id));
+        // Socket.IO will handle removing from state via banquet:deleted event
         addToast('Menu banchetto eliminato', 'success');
     } catch (error) {
         console.error("Error deleting banquet menu:", error);
@@ -675,12 +698,14 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.MENU && (
-          <MenuManager 
+          <MenuManager
             dishes={dishes}
             banquetMenus={banquetMenus}
             onAddDish={handleAddDish}
+            onUpdateDish={handleUpdateDish}
             onDeleteDish={handleDeleteDish}
             onAddBanquetMenu={handleAddBanquet}
+            onUpdateBanquetMenu={handleUpdateBanquet}
             onDeleteBanquetMenu={handleDeleteBanquet}
           />
         )}
