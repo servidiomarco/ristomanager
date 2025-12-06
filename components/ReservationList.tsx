@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check } from 'lucide-react';
+import { sendWhatsAppConfirmation } from '../services/apiService';
 
 interface ReservationListProps {
   reservations: Reservation[];
@@ -108,18 +109,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     });
   };
 
-  const handleSendWhatsapp = (res: Reservation) => {
+  const handleSendWhatsapp = async (res: Reservation) => {
       if (!res.phone) {
-          // Try fallback or alert
-          window.open('https://wa.me/');
-          showToast('Numero di telefono mancante, apro WhatsApp Web.', 'info');
+          showToast('Numero di telefono mancante per questa prenotazione.', 'error');
           return;
       }
-      
-      const msg = `Gentile ${res.customer_name}, confermiamo la prenotazione presso RistoManager per il ${new Date(res.reservation_time).toLocaleString()} per ${res.guests} persone. A presto!`;
-      const url = `https://wa.me/${res.phone}?text=${encodeURIComponent(msg)}`;
-      window.open(url, '_blank');
-      showToast('WhatsApp aperto per l\'invio', 'success');
+
+      try {
+          await sendWhatsAppConfirmation(res.id);
+          showToast(`Conferma WhatsApp inviata a ${res.customer_name}`, 'success');
+      } catch (error) {
+          console.error('Error sending WhatsApp confirmation:', error);
+          showToast('Errore durante l\'invio della conferma WhatsApp', 'error');
+      }
   };
 
   const handleSendEmail = (res: Reservation) => {

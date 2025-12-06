@@ -167,3 +167,17 @@ export const deleteBanquetMenu = async (id: number): Promise<void> => {
         headers: getHeaders(false),
     });
 };
+
+export const sendWhatsAppConfirmation = async (reservationId: number): Promise<{ success: boolean; message: string }> => {
+    const response = await fetch(`${API_URL}/reservations/${reservationId}/confirm-whatsapp`, {
+        method: 'POST',
+        headers: getHeaders(),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to send WhatsApp confirmation' }));
+        throw new Error(errorData.error || 'Failed to send WhatsApp confirmation');
+    }
+
+    return response.json();
+};
