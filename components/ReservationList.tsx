@@ -44,6 +44,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [rooms, activeMapRoomId]);
 
+  // Auto-switch from 'ALL' to a specific shift when in LIST view
+  useEffect(() => {
+    if (viewMode === 'LIST' && selectedShift === 'ALL') {
+      const hour = new Date().getHours();
+      setSelectedShift(hour >= 11 && hour < 17 ? Shift.LUNCH : Shift.DINNER);
+    }
+  }, [viewMode, selectedShift]);
+
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -442,12 +450,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
             {/* Main Shift Toggle */}
             <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
-                <button
-                    onClick={() => setSelectedShift('ALL')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Tutte
-                </button>
+                {viewMode === 'MAP' && (
+                    <button
+                        onClick={() => setSelectedShift('ALL')}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Tutte
+                    </button>
+                )}
                 <button
                     onClick={() => setSelectedShift(Shift.LUNCH)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
