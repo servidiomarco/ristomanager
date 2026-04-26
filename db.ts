@@ -18,8 +18,24 @@ const pool = new Pool({
     } : false,
 });
 
-export const createSchema = async () => {
-    const client = await pool.connect();
+// Retry logic for schema creation
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 3000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export const createSchema = async (retryCount = 0): Promise<void> => {
+    let client;
+    try {
+        client = await pool.connect();
+    } catch (connectionError) {
+        if (retryCount < MAX_RETRIES) {
+            console.log(`Database connection failed, retrying in ${RETRY_DELAY_MS}ms... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+            await sleep(RETRY_DELAY_MS);
+            return createSchema(retryCount + 1);
+        }
+        throw connectionError;
+    }
     try {
         await client.query('BEGIN');
 
