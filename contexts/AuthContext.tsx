@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
 import { PermissionService, Permission } from '../auth/permissions';
+import { socketClient } from '../services/socketClient';
 
 interface AuthContextType {
   user: User | null;
@@ -32,6 +33,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const currentUser = await authApiService.getCurrentUser();
           if (currentUser) {
             setUser(currentUser);
+            // Connect socket for already authenticated user
+            socketClient.connect();
           } else {
             authApiService.clearAuth();
           }
@@ -49,11 +52,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (credentials: LoginCredentials) => {
     const response = await authApiService.login(credentials);
     setUser(response.user);
+    // Reconnect socket with the new auth token
+    socketClient.reconnectWithToken();
   }, []);
 
   const logout = useCallback(async () => {
     await authApiService.logout();
     setUser(null);
+    // Disconnect socket on logout
+    socketClient.disconnect();
   }, []);
 
   const hasPermission = useCallback((permission: Permission): boolean => {
