@@ -131,7 +131,13 @@ const App: React.FC = () => {
 
     // Reservation events
     socket.on('reservation:created', (reservation: Reservation) => {
-      setReservations(prev => [...prev, reservation]);
+      setReservations(prev => {
+        // Avoid duplicates - check if already exists
+        if (prev.some(r => r.id === reservation.id)) {
+          return prev;
+        }
+        return [...prev, reservation];
+      });
       addToast(`Nuova prenotazione: ${reservation.customer_name}`, 'info');
     });
 
@@ -181,7 +187,12 @@ const App: React.FC = () => {
 
     // Room events
     socket.on('room:created', (room: Room) => {
-      setRooms(prev => [...prev, room]);
+      setRooms(prev => {
+        if (prev.some(r => r.id === room.id)) {
+          return prev;
+        }
+        return [...prev, room];
+      });
     });
 
     socket.on('room:deleted', (id: number) => {
@@ -190,7 +201,12 @@ const App: React.FC = () => {
 
     // Dish events
     socket.on('dish:created', (dish: Dish) => {
-      setDishes(prev => [...prev, dish]);
+      setDishes(prev => {
+        if (prev.some(d => d.id === dish.id)) {
+          return prev;
+        }
+        return [...prev, dish];
+      });
     });
 
     socket.on('dish:updated', (dish: Dish) => {
