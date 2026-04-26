@@ -85,35 +85,20 @@ export class SocketService {
     });
   }
 
-  // Reservation broadcast methods
-  broadcastReservationCreated(reservation: Reservation, excludeSocketId?: string) {
-    if (excludeSocketId) {
-      this.io.except(excludeSocketId).emit('reservation:created', reservation);
-      console.log(`Broadcasting reservation:created for ${reservation.customer_name} (excluding ${excludeSocketId})`);
-    } else {
-      this.io.emit('reservation:created', reservation);
-      console.log(`Broadcasting reservation:created for ${reservation.customer_name}`);
-    }
+  // Reservation broadcast methods - emit to ALL clients (duplicate prevention on client side)
+  broadcastReservationCreated(reservation: Reservation, _excludeSocketId?: string) {
+    this.io.emit('reservation:created', reservation);
+    console.log(`Broadcasting reservation:created for ${reservation.customer_name}`);
   }
 
-  broadcastReservationUpdated(reservation: Reservation, excludeSocketId?: string) {
-    if (excludeSocketId) {
-      this.io.except(excludeSocketId).emit('reservation:updated', reservation);
-      console.log(`Broadcasting reservation:updated for ${reservation.customer_name} (excluding ${excludeSocketId})`);
-    } else {
-      this.io.emit('reservation:updated', reservation);
-      console.log(`Broadcasting reservation:updated for ${reservation.customer_name}`);
-    }
+  broadcastReservationUpdated(reservation: Reservation, _excludeSocketId?: string) {
+    this.io.emit('reservation:updated', reservation);
+    console.log(`Broadcasting reservation:updated for ${reservation.customer_name}`);
   }
 
-  broadcastReservationDeleted(id: number, excludeSocketId?: string) {
-    if (excludeSocketId) {
-      this.io.except(excludeSocketId).emit('reservation:deleted', id);
-      console.log(`Broadcasting reservation:deleted for ID ${id} (excluding ${excludeSocketId})`);
-    } else {
-      this.io.emit('reservation:deleted', id);
-      console.log(`Broadcasting reservation:deleted for ID ${id}`);
-    }
+  broadcastReservationDeleted(id: number, _excludeSocketId?: string) {
+    this.io.emit('reservation:deleted', id);
+    console.log(`Broadcasting reservation:deleted for ID ${id}`);
   }
 
   // Table broadcast methods
