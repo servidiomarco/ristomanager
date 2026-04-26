@@ -6,13 +6,28 @@ const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://ristomanager-prod
 // Token storage key (must match authApiService)
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
 
+type SocketChangeCallback = (socket: Socket | null, connected: boolean) => void;
+
 class SocketClient {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
+  private changeCallbacks: Set<SocketChangeCallback> = new Set();
 
   private getToken(): string | null {
     return localStorage.getItem(ACCESS_TOKEN_KEY);
+  }
+
+  // Subscribe to socket changes
+  onSocketChange(callback: SocketChangeCallback): () => void {
+    this.changeCallbacks.add(callback);
+    // Return unsubscribe function
+    return () => this.changeCallbacks.delete(callback);
+  }
+
+  private notifyChange() {
+    const connected = this.socket?.connected ?? false;
+    this.changeCallbacks.forEach(cb => cb(this.socket, connected));
   }
 
   connect() {
@@ -53,7 +68,9 @@ class SocketClient {
       this.socket.disconnect();
       this.socket = null;
     }
-    return this.connect();
+    const newSocket = this.connect();
+    this.notifyChange();
+    return newSocket;
   }
 
   private setupConnectionHandlers() {
@@ -62,10 +79,12 @@ class SocketClient {
     this.socket.on('connect', () => {
       console.log('✅ Socket connected:', this.socket?.id);
       this.reconnectAttempts = 0;
+      this.notifyChange();
     });
 
     this.socket.on('disconnect', (reason) => {
       console.warn('⚠️ Socket disconnected:', reason);
+      this.notifyChange();
 
       // Automatic reconnection handled by socket.io
       if (reason === 'io server disconnect') {

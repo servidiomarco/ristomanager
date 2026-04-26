@@ -3,45 +3,28 @@ import { socketClient } from '../services/socketClient';
 import type { Socket } from 'socket.io-client';
 
 export const useSocket = () => {
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(() => socketClient.getSocket());
+  const [isConnected, setIsConnected] = useState(() => socketClient.isConnected());
 
   useEffect(() => {
-    // Connect to socket on mount (returns null if no auth token)
-    const socketInstance = socketClient.connect();
-    setSocket(socketInstance);
+    // Subscribe to socket changes (connect/disconnect/reconnect)
+    const unsubscribe = socketClient.onSocketChange((newSocket, connected) => {
+      setSocket(newSocket);
+      setIsConnected(connected);
+      console.log('useSocket: Socket changed, connected:', connected);
+    });
 
-    // If no socket (not authenticated), skip event handlers
-    if (!socketInstance) {
-      setIsConnected(false);
-      return;
+    // Try to connect on mount (returns null if no auth token)
+    const socketInstance = socketClient.connect();
+    if (socketInstance) {
+      setSocket(socketInstance);
+      setIsConnected(socketInstance.connected);
     }
 
-    // Setup connection state handlers
-    const handleConnect = () => {
-      setIsConnected(true);
-      console.log('useSocket: Connected');
-    };
-
-    const handleDisconnect = () => {
-      setIsConnected(false);
-      console.log('useSocket: Disconnected');
-    };
-
-    socketInstance.on('connect', handleConnect);
-    socketInstance.on('disconnect', handleDisconnect);
-
-    // Set initial connection state
-    setIsConnected(socketInstance.connected);
-
-    // Cleanup on unmount
     return () => {
-      socketInstance.off('connect', handleConnect);
-      socketInstance.off('disconnect', handleDisconnect);
-      // Note: We don't disconnect here because socket is a singleton
-      // It should remain connected for the lifetime of the app
+      unsubscribe();
     };
-  }, []); // Empty dependency array - run once on mount
+  }, []);
 
   return { socket, isConnected };
 };
