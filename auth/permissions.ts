@@ -1,4 +1,4 @@
-import { UserRole, ViewState } from '../types';
+import { UserRole, ViewState } from '../types.js';
 
 // Permission types
 export type Permission =
