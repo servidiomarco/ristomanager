@@ -3,6 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Cache bust - update this to force rebuild
+ARG CACHEBUST=1
+
 # Copy package files
 COPY package*.json ./
 COPY tsconfig*.json ./
@@ -10,7 +13,7 @@ COPY tsconfig*.json ./
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
 
-# Copy source files
+# Copy ALL source files (not selective to avoid missing files)
 COPY server.ts db.ts types.ts ./
 COPY services ./services
 COPY auth ./auth
