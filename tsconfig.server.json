@@ -14,6 +14,6 @@
     "outDir": "./dist",
     "rootDir": "./"
   },
-  "include": ["server.ts", "db.ts"],
+  "include": ["server.ts", "db.ts", "types.ts", "auth/**/*.ts", "services/socketService.ts"],
   "exclude": ["node_modules", "dist"]
 }

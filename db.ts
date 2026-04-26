@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { Pool } from 'pg';
+import bcrypt from 'bcryptjs';
 
 // const pool = new Pool({
 //   user: 'postgres',
@@ -101,6 +102,39 @@ export const createSchema = async () => {
                 END IF;
             END $$;
         `);
+
+        // ============================================
+        // USERS TABLE FOR AUTHENTICATION
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                full_name VARCHAR(255) NOT NULL,
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMPTZ,
+                refresh_token_hash VARCHAR(255)
+            );
+        `);
+
+        // Seed default owner account if no users exist
+        const userCount = await client.query('SELECT COUNT(*) FROM users');
+        if (parseInt(userCount.rows[0].count) === 0) {
+            const defaultPassword = process.env.DEFAULT_OWNER_PASSWORD || 'admin123';
+            const salt = await bcrypt.genSalt(12);
+            const passwordHash = await bcrypt.hash(defaultPassword, salt);
+
+            await client.query(
+                `INSERT INTO users (email, password_hash, full_name, role)
+                 VALUES ($1, $2, $3, $4)`,
+                ['admin@ristomanager.com', passwordHash, 'Admin Owner', 'OWNER']
+            );
+            console.log('Default owner account created: admin@ristomanager.com');
+        }
 
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');

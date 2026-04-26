@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info } from 'lucide-react';
-import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast } from './types';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users } from 'lucide-react';
+import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
+import { LoginPage } from './components/LoginPage';
+import { UserManagement } from './components/UserManagement';
 import { useSocket } from './hooks/useSocket';
 import { offlineQueue } from './services/offlineQueue';
+import { socketClient } from './services/socketClient';
+import { useAuth } from './contexts/AuthContext';
 
 import {
   getReservations,
@@ -22,6 +26,7 @@ import {
   deleteRoom,
   getDishes,
   createDish,
+  updateDish,
   deleteDish,
   getBanquetMenus,
   createBanquetMenu,
@@ -30,14 +35,16 @@ import {
 } from './services/apiService';
 
 const App: React.FC = () => {
+  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission } = useAuth();
+
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
-  
+
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [banquetMenus, setBanquetMenus] = useState<BanquetMenu[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  
+
   // Notification State
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -45,12 +52,24 @@ const App: React.FC = () => {
   // Toast/Snackbar State
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // User management modal state
+  const [showUserManagement, setShowUserManagement] = useState(false);
+
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
 
+  // Reconnect socket when user logs in
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (isAuthenticated) {
+      socketClient.reconnectWithToken();
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+    }
+  }, [isAuthenticated]);
 
   const fetchData = async () => {
     try {
@@ -547,8 +566,41 @@ const App: React.FC = () => {
     }
   }
 
+  // Show loading spinner while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-500">Caricamento...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show login page if not authenticated
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  // Get role display name
+  const getRoleDisplayName = (role: UserRole): string => {
+    const roleNames: Record<UserRole, string> = {
+      [UserRole.OWNER]: 'Proprietario',
+      [UserRole.MANAGER]: 'Manager',
+      [UserRole.WAITER]: 'Cameriere',
+      [UserRole.KITCHEN]: 'Cucina'
+    };
+    return roleNames[role] || role;
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+      {/* User Management Modal */}
+      {showUserManagement && canManageUsers() && (
+        <UserManagement onClose={() => setShowUserManagement(false)} />
+      )}
+
       {/* Connection Status Indicator */}
       <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
         isConnected
@@ -568,47 +620,76 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 py-6 space-y-2 px-3">
-          <SidebarItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Dashboard" 
-            active={view === ViewState.DASHBOARD} 
-            onClick={() => setView(ViewState.DASHBOARD)} 
-          />
-          <SidebarItem 
-            icon={<Calendar size={20} />} 
-            label="Prenotazioni" 
-            active={view === ViewState.RESERVATIONS} 
-            onClick={() => setView(ViewState.RESERVATIONS)} 
-          />
-          <SidebarItem 
-            icon={<Grid size={20} />} 
-            label="Sala & Tavoli" 
-            active={view === ViewState.FLOOR_PLAN} 
-            onClick={() => setView(ViewState.FLOOR_PLAN)} 
-          />
-          <SidebarItem 
-            icon={<MenuIcon size={20} />} 
-            label="Menu & Banchetti" 
-            active={view === ViewState.MENU} 
-            onClick={() => setView(ViewState.MENU)} 
-          />
-          <SidebarItem 
-            icon={<Settings size={20} />} 
-            label="Impostazioni" 
-            active={view === ViewState.SETTINGS} 
-            onClick={() => setView(ViewState.SETTINGS)} 
-          />
+          {canAccessView(ViewState.DASHBOARD) && (
+            <SidebarItem
+              icon={<LayoutDashboard size={20} />}
+              label="Dashboard"
+              active={view === ViewState.DASHBOARD}
+              onClick={() => setView(ViewState.DASHBOARD)}
+            />
+          )}
+          {canAccessView(ViewState.RESERVATIONS) && (
+            <SidebarItem
+              icon={<Calendar size={20} />}
+              label="Prenotazioni"
+              active={view === ViewState.RESERVATIONS}
+              onClick={() => setView(ViewState.RESERVATIONS)}
+            />
+          )}
+          {canAccessView(ViewState.FLOOR_PLAN) && (
+            <SidebarItem
+              icon={<Grid size={20} />}
+              label="Sala & Tavoli"
+              active={view === ViewState.FLOOR_PLAN}
+              onClick={() => setView(ViewState.FLOOR_PLAN)}
+            />
+          )}
+          {canAccessView(ViewState.MENU) && (
+            <SidebarItem
+              icon={<MenuIcon size={20} />}
+              label="Menu & Banchetti"
+              active={view === ViewState.MENU}
+              onClick={() => setView(ViewState.MENU)}
+            />
+          )}
+          {canAccessView(ViewState.SETTINGS) && (
+            <SidebarItem
+              icon={<Settings size={20} />}
+              label="Impostazioni"
+              active={view === ViewState.SETTINGS}
+              onClick={() => setView(ViewState.SETTINGS)}
+            />
+          )}
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-100 space-y-2">
+          {/* User Management Button (Owner only) */}
+          {canManageUsers() && (
+            <button
+              onClick={() => setShowUserManagement(true)}
+              className="w-full flex items-center gap-3 px-3 py-2 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl transition-all"
+            >
+              <Users size={20} />
+              <span className="text-sm font-medium">Gestione Utenti</span>
+            </button>
+          )}
+
+          {/* User Info */}
           <div className="hidden lg:flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-             <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
-               AD
-             </div>
-             <div className="flex-1">
-               <p className="text-sm font-medium text-slate-700">Admin User</p>
-               <p className="text-xs text-slate-400">Manager</p>
-             </div>
+            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+              {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-700 truncate">{user?.full_name || 'Utente'}</p>
+              <p className="text-xs text-slate-400">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+            </div>
+            <button
+              onClick={logout}
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              title="Esci"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
@@ -724,35 +805,52 @@ const App: React.FC = () => {
         {/* Bottom Navigation - Visible only on mobile */}
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 lg:hidden z-30">
           <div className="flex items-center justify-around py-2">
+            {canAccessView(ViewState.DASHBOARD) && (
+              <BottomNavItem
+                icon={<LayoutDashboard size={24} />}
+                label="Dashboard"
+                active={view === ViewState.DASHBOARD}
+                onClick={() => setView(ViewState.DASHBOARD)}
+              />
+            )}
+            {canAccessView(ViewState.RESERVATIONS) && (
+              <BottomNavItem
+                icon={<Calendar size={24} />}
+                label="Prenotazioni"
+                active={view === ViewState.RESERVATIONS}
+                onClick={() => setView(ViewState.RESERVATIONS)}
+              />
+            )}
+            {canAccessView(ViewState.FLOOR_PLAN) && (
+              <BottomNavItem
+                icon={<Grid size={24} />}
+                label="Sala"
+                active={view === ViewState.FLOOR_PLAN}
+                onClick={() => setView(ViewState.FLOOR_PLAN)}
+              />
+            )}
+            {canAccessView(ViewState.MENU) && (
+              <BottomNavItem
+                icon={<MenuIcon size={24} />}
+                label="Menu"
+                active={view === ViewState.MENU}
+                onClick={() => setView(ViewState.MENU)}
+              />
+            )}
+            {canAccessView(ViewState.SETTINGS) && (
+              <BottomNavItem
+                icon={<Settings size={24} />}
+                label="Altro"
+                active={view === ViewState.SETTINGS}
+                onClick={() => setView(ViewState.SETTINGS)}
+              />
+            )}
+            {/* Mobile logout button */}
             <BottomNavItem
-              icon={<LayoutDashboard size={24} />}
-              label="Dashboard"
-              active={view === ViewState.DASHBOARD}
-              onClick={() => setView(ViewState.DASHBOARD)}
-            />
-            <BottomNavItem
-              icon={<Calendar size={24} />}
-              label="Prenotazioni"
-              active={view === ViewState.RESERVATIONS}
-              onClick={() => setView(ViewState.RESERVATIONS)}
-            />
-            <BottomNavItem
-              icon={<Grid size={24} />}
-              label="Sala"
-              active={view === ViewState.FLOOR_PLAN}
-              onClick={() => setView(ViewState.FLOOR_PLAN)}
-            />
-            <BottomNavItem
-              icon={<MenuIcon size={24} />}
-              label="Menu"
-              active={view === ViewState.MENU}
-              onClick={() => setView(ViewState.MENU)}
-            />
-            <BottomNavItem
-              icon={<Settings size={24} />}
-              label="Altro"
-              active={view === ViewState.SETTINGS}
-              onClick={() => setView(ViewState.SETTINGS)}
+              icon={<LogOut size={24} />}
+              label="Esci"
+              active={false}
+              onClick={logout}
             />
           </div>
         </nav>

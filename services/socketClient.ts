@@ -3,12 +3,27 @@ import { io, Socket } from 'socket.io-client';
 // Use environment variable or default to production URL
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://ristomanager-production.up.railway.app';
 
+// Token storage key (must match authApiService)
+const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
+
 class SocketClient {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
 
+  private getToken(): string | null {
+    return localStorage.getItem(ACCESS_TOKEN_KEY);
+  }
+
   connect() {
+    const token = this.getToken();
+
+    // Don't connect without a token
+    if (!token) {
+      console.log('📡 No auth token, skipping Socket.IO connection');
+      return null;
+    }
+
     // Return existing socket if already connected
     if (this.socket?.connected) {
       return this.socket;
@@ -22,11 +37,23 @@ class SocketClient {
       reconnectionAttempts: this.maxReconnectAttempts,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000
+      timeout: 20000,
+      auth: {
+        token
+      }
     });
 
     this.setupConnectionHandlers();
     return this.socket;
+  }
+
+  // Reconnect with new token (after login)
+  reconnectWithToken() {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    return this.connect();
   }
 
   private setupConnectionHandlers() {

@@ -7,9 +7,15 @@ export const useSocket = () => {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    // Connect to socket on mount
+    // Connect to socket on mount (returns null if no auth token)
     const socketInstance = socketClient.connect();
     setSocket(socketInstance);
+
+    // If no socket (not authenticated), skip event handlers
+    if (!socketInstance) {
+      setIsConnected(false);
+      return;
+    }
 
     // Setup connection state handlers
     const handleConnect = () => {

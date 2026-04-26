@@ -1,10 +1,11 @@
 import { Reservation, Table, Room, Dish, BanquetMenu } from '../types';
 import { socketClient } from './socketClient';
+import { authApiService } from './authApiService';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = "https://ristomanager-production.up.railway.app";
 
-// Helper function to get headers with socket ID
+// Helper function to get headers with socket ID and auth token
 const getHeaders = (includeContentType = true): HeadersInit => {
   const headers: HeadersInit = {};
 
@@ -18,11 +19,19 @@ const getHeaders = (includeContentType = true): HeadersInit => {
     headers['X-Socket-ID'] = socketId;
   }
 
+  // Add authorization header
+  const token = authApiService.getAccessToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   return headers;
 };
 
 export const getReservations = async (): Promise<Reservation[]> => {
-  const response = await fetch(`${API_URL}/reservations`);
+  const response = await fetch(`${API_URL}/reservations`, {
+    headers: getHeaders(false)
+  });
   return response.json();
 };
 
@@ -52,7 +61,9 @@ export const deleteReservation = async (id: number): Promise<void> => {
 };
 
 export const getTables = async (): Promise<Table[]> => {
-  const response = await fetch(`${API_URL}/tables`);
+  const response = await fetch(`${API_URL}/tables`, {
+    headers: getHeaders(false)
+  });
   return response.json();
 };
 
@@ -88,7 +99,9 @@ export const deleteTable = async (id: number): Promise<void> => {
 };
 
 export const getRooms = async (): Promise<Room[]> => {
-  const response = await fetch(`${API_URL}/rooms`);
+  const response = await fetch(`${API_URL}/rooms`, {
+    headers: getHeaders(false)
+  });
   return response.json();
 };
 
@@ -109,7 +122,9 @@ export const deleteRoom = async (id: number): Promise<void> => {
 };
 
 export const getDishes = async (): Promise<Dish[]> => {
-    const response = await fetch(`${API_URL}/dishes`);
+    const response = await fetch(`${API_URL}/dishes`, {
+        headers: getHeaders(false)
+    });
     return response.json();
 };
 
@@ -139,7 +154,9 @@ export const deleteDish = async (id: number): Promise<void> => {
 };
 
 export const getBanquetMenus = async (): Promise<BanquetMenu[]> => {
-    const response = await fetch(`${API_URL}/banquet-menus`);
+    const response = await fetch(`${API_URL}/banquet-menus`, {
+        headers: getHeaders(false)
+    });
     return response.json();
 };
 

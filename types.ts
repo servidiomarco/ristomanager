@@ -113,3 +113,43 @@ export enum ViewState {
   RESERVATIONS = 'RESERVATIONS',
   SETTINGS = 'SETTINGS'
 }
+
+// ============================================
+// USER & AUTHENTICATION TYPES
+// ============================================
+
+export enum UserRole {
+  OWNER = 'OWNER',
+  MANAGER = 'MANAGER',
+  WAITER = 'WAITER',
+  KITCHEN = 'KITCHEN'
+}
+
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  last_login?: string;
+}
+
+export interface AuthUser extends User {
+  token: string;
+  refreshToken: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface TokenPayload {
+  userId: number;
+  email: string;
+  role: UserRole;
+  iat: number;
+  exp: number;
+}

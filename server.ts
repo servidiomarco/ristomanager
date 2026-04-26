@@ -6,7 +6,9 @@ import { createServer } from 'http';
 import cors from 'cors';
 import pool, { createSchema } from './db.js';
 import { SocketService } from './services/socketService.js';
-import { Shift, PaymentStatus } from './types.js';
+import { Shift, PaymentStatus, UserRole } from './types.js';
+import authRoutes from './auth/authRoutes.js';
+import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -45,6 +47,11 @@ app.get('/health', (req, res) => {
     socketio: socketService ? 'initialized' : 'not initialized'
   });
 });
+
+// ============================================
+// AUTHENTICATION ROUTES
+// ============================================
+app.use('/auth', authRoutes);
 
 // ============================================
 // WHATSAPP WEBHOOK ENDPOINTS (Vonage)
@@ -94,11 +101,11 @@ app.post('/webhook/vonage-status', (req, res) => {
 });
 
 // ============================================
-// EXISTING ENDPOINTS
+// PROTECTED ENDPOINTS
 // ============================================
 
-// Reservations
-app.get('/reservations', async (req, res) => {
+// Reservations - require authentication
+app.get('/reservations', authenticate, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM reservations ORDER BY reservation_time DESC');
         res.json(result.rows);
@@ -108,7 +115,7 @@ app.get('/reservations', async (req, res) => {
     }
 });
 
-app.post('/reservations', async (req, res) => {
+app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
         const result = await pool.query(
@@ -128,7 +135,7 @@ app.post('/reservations', async (req, res) => {
     }
 });
 
-app.put('/reservations/:id', async (req, res) => {
+app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
@@ -149,7 +156,7 @@ app.put('/reservations/:id', async (req, res) => {
     }
 });
 
-app.delete('/reservations/:id', async (req, res) => {
+app.delete('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
@@ -166,7 +173,7 @@ app.delete('/reservations/:id', async (req, res) => {
 });
 
 // Send WhatsApp confirmation for reservation
-app.post('/reservations/:id/confirm-whatsapp', async (req, res) => {
+app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -213,8 +220,8 @@ app.post('/reservations/:id/confirm-whatsapp', async (req, res) => {
 });
 
 
-// Tables
-app.get('/tables', async (req, res) => {
+// Tables - require authentication
+app.get('/tables', authenticate, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM tables ORDER BY name');
         res.json(result.rows);
@@ -224,7 +231,7 @@ app.get('/tables', async (req, res) => {
     }
 });
 
-app.post('/tables', async (req, res) => {
+app.post('/tables', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { name, shape, seats, x, y, room_id, status } = req.body;
         const result = await pool.query(
@@ -244,7 +251,7 @@ app.post('/tables', async (req, res) => {
     }
 });
 
-app.put('/tables/:id', async (req, res) => {
+app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'), async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -300,7 +307,7 @@ app.put('/tables/:id', async (req, res) => {
     }
 });
 
-app.delete('/tables/:id', async (req, res) => {
+app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM tables WHERE id = $1', [id]);
@@ -316,8 +323,8 @@ app.delete('/tables/:id', async (req, res) => {
 });
 
 
-// Rooms
-app.get('/rooms', async (req, res) => {
+// Rooms - require authentication
+app.get('/rooms', authenticate, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM rooms ORDER BY name');
         res.json(result.rows);
@@ -327,7 +334,7 @@ app.get('/rooms', async (req, res) => {
     }
 });
 
-app.post('/rooms', async (req, res) => {
+app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { name, width, height } = req.body;
         const result = await pool.query(
@@ -346,7 +353,7 @@ app.post('/rooms', async (req, res) => {
     }
 });
 
-app.delete('/rooms/:id', async (req, res) => {
+app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
@@ -362,8 +369,8 @@ app.delete('/rooms/:id', async (req, res) => {
 });
 
 
-// Dishes
-app.get('/dishes', async (req, res) => {
+// Dishes - require authentication
+app.get('/dishes', authenticate, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM dishes ORDER BY category, name');
         res.json(result.rows);
@@ -373,7 +380,7 @@ app.get('/dishes', async (req, res) => {
     }
 });
 
-app.post('/dishes', async (req, res) => {
+app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens } = req.body;
         const result = await pool.query(
@@ -392,7 +399,27 @@ app.post('/dishes', async (req, res) => {
     }
 });
 
-app.delete('/dishes/:id', async (req, res) => {
+app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, description, price, category, allergens } = req.body;
+        const result = await pool.query(
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5 WHERE id = $6 RETURNING *',
+            [name, description, price, category, allergens, id]
+        );
+        const updatedDish = result.rows[0];
+
+        // Broadcast to all connected clients
+        if (socketService) socketService.broadcastDishUpdated(updatedDish);
+
+        res.json(updatedDish);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
@@ -408,8 +435,8 @@ app.delete('/dishes/:id', async (req, res) => {
 });
 
 
-// Banquet Menus
-app.get('/banquet-menus', async (req, res) => {
+// Banquet Menus - require authentication
+app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM banquet_menus ORDER BY name');
         res.json(result.rows);
@@ -419,7 +446,7 @@ app.get('/banquet-menus', async (req, res) => {
     }
 });
 
-app.post('/banquet-menus', async (req, res) => {
+app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price_per_person, dish_ids } = req.body;
         const result = await pool.query(
@@ -438,7 +465,7 @@ app.post('/banquet-menus', async (req, res) => {
     }
 });
 
-app.put('/banquet-menus/:id', async (req, res) => {
+app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
         const { name, description, price_per_person, dish_ids } = req.body;
@@ -458,7 +485,7 @@ app.put('/banquet-menus/:id', async (req, res) => {
     }
 });
 
-app.delete('/banquet-menus/:id', async (req, res) => {
+app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);

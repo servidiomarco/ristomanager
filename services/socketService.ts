@@ -1,6 +1,12 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
-import type { Reservation, Table, Room, Dish, BanquetMenu } from '../types.js';
+import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole } from '../types.js';
+import { AuthService, TokenPayload } from '../auth/authService.js';
+
+// Extended socket type with user data
+interface AuthenticatedSocket extends Socket {
+  user?: TokenPayload;
+}
 
 export class SocketService {
   private io: SocketIOServer;
@@ -32,12 +38,33 @@ export class SocketService {
       pingInterval: 25000
     });
 
+    this.setupAuthMiddleware();
     this.setupEventHandlers();
   }
 
+  private setupAuthMiddleware() {
+    // Socket.IO authentication middleware
+    this.io.use((socket: AuthenticatedSocket, next) => {
+      const token = socket.handshake.auth.token || socket.handshake.query.token;
+
+      if (!token) {
+        return next(new Error('Authentication required'));
+      }
+
+      const payload = AuthService.verifyAccessToken(token as string);
+      if (!payload) {
+        return next(new Error('Invalid or expired token'));
+      }
+
+      // Attach user data to socket
+      socket.user = payload;
+      next();
+    });
+  }
+
   private setupEventHandlers() {
-    this.io.on('connection', (socket) => {
-      console.log(`[${new Date().toISOString()}] Client connected: ${socket.id}`);
+    this.io.on('connection', (socket: AuthenticatedSocket) => {
+      console.log(`[${new Date().toISOString()}] Client connected: ${socket.id} (User: ${socket.user?.email}, Role: ${socket.user?.role})`);
 
       socket.emit('connection:acknowledged', socket.id);
 
