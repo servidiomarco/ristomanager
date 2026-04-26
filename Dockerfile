@@ -13,6 +13,7 @@ RUN npm ci
 # Copy source files
 COPY server.ts db.ts types.ts ./
 COPY services ./services
+COPY auth ./auth
 
 # Build TypeScript to JavaScript
 RUN npm run build:server
