@@ -547,7 +547,7 @@ const App: React.FC = () => {
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>) => {
     try {
       const returnedRes = await createReservation(newRes);
-      setReservations(prev => [...prev, returnedRes]);
+      // Don't add to state here - socket event will handle it to avoid duplicates
       setNotifications(prev => [{
         id: Math.random().toString(),
         title: 'Nuova Prenotazione',
