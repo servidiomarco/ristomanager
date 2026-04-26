@@ -3,23 +3,26 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Cache bust - update this to force rebuild
-ARG CACHEBUST=1
-
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 COPY tsconfig*.json ./
 
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
 
-# Copy ALL source files (not selective to avoid missing files)
+# Copy ALL TypeScript source files
 COPY server.ts db.ts types.ts ./
-COPY services ./services
 COPY auth ./auth
+COPY services ./services
+
+# Verify auth directory exists
+RUN ls -la auth/
 
 # Build TypeScript to JavaScript
 RUN npm run build:server
+
+# Verify auth was compiled
+RUN ls -la dist/auth/
 
 # Production stage
 FROM node:20-alpine
