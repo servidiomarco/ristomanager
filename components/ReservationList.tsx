@@ -838,18 +838,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
 
                             {/* Date & Shift */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data e Ora</label>
                                     <div className="relative">
                                         <input
                                             type="datetime-local"
                                             required
-                                            className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 pl-11 sm:pl-12 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
+                                            className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
                                             value={formData.reservation_time}
                                             onChange={e => setFormData({...formData, reservation_time: e.target.value})}
                                         />
-                                        <Calendar className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
                                     </div>
                                 </div>
                                 <div>
@@ -858,16 +858,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.LUNCH})}
-                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Sun className="h-4 w-4" /> Pranzo
+                                            <Sun className="h-5 w-5" /> Pranzo
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.DINNER})}
-                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Moon className="h-4 w-4" /> Cena
+                                            <Moon className="h-5 w-5" /> Cena
                                         </button>
                                     </div>
                                 </div>
@@ -876,26 +876,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Guests */}
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Numero Ospiti</label>
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
-                                        className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 font-bold text-xl hover:bg-slate-200 transition-all flex items-center justify-center"
+                                        className="w-14 h-14 sm:w-16 sm:h-14 rounded-xl bg-slate-200 text-slate-700 font-bold text-2xl hover:bg-slate-300 transition-all flex items-center justify-center flex-shrink-0"
                                     >
-                                        -
+                                        −
                                     </button>
                                     <input
                                         type="number"
                                         min="1"
                                         required
-                                        className="flex-1 rounded-xl border-2 border-slate-200 p-3 text-center text-xl font-bold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
+                                        className="flex-1 min-w-0 rounded-xl border-2 border-slate-200 p-3 text-center text-2xl font-bold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                         value={formData.guests || ''}
                                         onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
-                                        className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 font-bold text-xl hover:bg-indigo-200 transition-all flex items-center justify-center"
+                                        className="w-14 h-14 sm:w-16 sm:h-14 rounded-xl bg-indigo-500 text-white font-bold text-2xl hover:bg-indigo-600 transition-all flex items-center justify-center flex-shrink-0"
                                     >
                                         +
                                     </button>
