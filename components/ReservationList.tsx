@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
 
@@ -57,6 +57,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
 
@@ -174,6 +175,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         reservation_time: new Date(res.reservation_time).toISOString().substring(0, 16)
       };
       setFormData(formattedReservation);
+
+      // Extract allergens from notes
+      const existingAllergens = COMMON_ALLERGENS.filter(allergen =>
+        res.notes?.toLowerCase().includes(allergen.toLowerCase())
+      );
+      setSelectedAllergens(existingAllergens);
+
       const table = tables.find(t => t.id === res.table_id);
       setModalRoomFilter(table ? table.room_id : 'ALL');
       setIsEditing(true);
@@ -196,8 +204,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         table_id: undefined,
         enable_reminder: true,
         reminder_sent: false,
-        arrival_status: ArrivalStatus.WAITING
+        arrival_status: ArrivalStatus.WAITING,
+        notes: ''
       });
+      setSelectedAllergens([]);
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
@@ -341,10 +351,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
 
+      // Combine allergens with notes
+      const allergensText = selectedAllergens.length > 0
+          ? `Intolleranze: ${selectedAllergens.join(', ')}`
+          : '';
+      const additionalNotes = formData.notes || '';
+      const combinedNotes = [allergensText, additionalNotes].filter(Boolean).join('\n');
+
+      const dataToSave = {
+          ...formData,
+          notes: combinedNotes || undefined
+      };
+
       if (isEditing) {
-          onUpdateReservation(formData as Reservation);
+          onUpdateReservation(dataToSave as Reservation);
       } else {
-          onAddReservation(formData as Omit<Reservation, 'id'>);
+          onAddReservation(dataToSave as Omit<Reservation, 'id'>);
       }
 
       setIsFormOpen(false);
@@ -734,96 +756,124 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                    <form id="reservation-form" onSubmit={handleSubmit} className="p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8">
-                        {/* Left Column: Details (4 cols) */}
-                        <div className="lg:col-span-5 space-y-3 sm:space-y-4">
-                            <h3 className="font-semibold text-sm sm:text-base text-slate-900 mb-2 flex items-center gap-2 border-b pb-2">
-                                <Users className="h-4 w-4 text-indigo-500" /> Dettagli Cliente & Orario
-                            </h3>
+                    <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
+                        {/* Left Column: Details (5 cols) */}
+                        <div className="lg:col-span-5 space-y-5 sm:space-y-6">
+                            <div className="flex items-center gap-3 pb-3 border-b-2 border-slate-100">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                                    <Users className="h-5 w-5 text-indigo-600" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Dettagli Prenotazione</h3>
+                                    <p className="text-xs text-slate-500">Compila i dati del cliente</p>
+                                </div>
+                            </div>
+                            {/* Customer Name */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome Cliente</label>
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Nome Cliente</label>
                                 <input
                                     required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                     value={formData.customer_name}
                                     onChange={e => setFormData({...formData, customer_name: e.target.value})}
                                     placeholder="Mario Rossi"
                                 />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Telefono</label>
+                            {/* Phone & Email */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Telefono</label>
                                     <input
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        type="tel"
+                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                         value={formData.phone || ''}
                                         onChange={e => setFormData({...formData, phone: e.target.value})}
-                                        placeholder="333..."
+                                        placeholder="+39 333..."
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Email</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Email</label>
                                     <input
                                         type="email"
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
-                                        placeholder="cliente@mail.com"
+                                        placeholder="cliente@email.com"
                                     />
                                 </div>
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+
+                            {/* Date & Shift */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data e Ora</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data e Ora</label>
                                     <div className="relative">
                                         <input
                                             type="datetime-local"
                                             required
-                                            className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 pl-8 sm:pl-10 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white cursor-pointer"
+                                            className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 pl-11 sm:pl-12 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
                                             value={formData.reservation_time}
                                             onChange={e => setFormData({...formData, reservation_time: e.target.value})}
                                         />
-                                        <Calendar className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400 pointer-events-none" />
+                                        <Calendar className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Turno</label>
-                                    <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1 border border-slate-300">
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Turno</label>
+                                    <div className="bg-slate-100 p-1.5 rounded-xl flex items-center gap-1.5">
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.LUNCH})}
-                                            className={`flex w-full items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Sun className="h-3 w-3 sm:h-4 sm:w-4" /> <span className="hidden xs:inline">Pranzo</span><span className="xs:hidden">P</span>
+                                            <Sun className="h-4 w-4" /> Pranzo
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.DINNER})}
-                                            className={`flex w-full items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Moon className="h-3 w-3 sm:h-4 sm:w-4" /> <span className="hidden xs:inline">Cena</span><span className="xs:hidden">C</span>
+                                            <Moon className="h-4 w-4" /> Cena
                                         </button>
                                     </div>
                                 </div>
                             </div>
-                            
+
+                            {/* Guests */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Ospiti</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                    value={formData.guests || ''}
-                                    onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
-                                />
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Numero Ospiti</label>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
+                                        className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 font-bold text-xl hover:bg-slate-200 transition-all flex items-center justify-center"
+                                    >
+                                        -
+                                    </button>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        required
+                                        className="flex-1 rounded-xl border-2 border-slate-200 p-3 text-center text-xl font-bold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
+                                        value={formData.guests || ''}
+                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
+                                        className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 font-bold text-xl hover:bg-indigo-200 transition-all flex items-center justify-center"
+                                    >
+                                        +
+                                    </button>
+                                </div>
                             </div>
 
+                            {/* Banquet Menu */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Menu Banchetto</label>
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Menu Banchetto</label>
                                 <select
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all appearance-none cursor-pointer"
                                     value={formData.banquet_menu_id || ''}
                                     onChange={e => setFormData({...formData, banquet_menu_id: e.target.value ? parseInt(e.target.value) : undefined})}
                                 >
@@ -834,18 +884,70 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </select>
                             </div>
 
-                            <div className="flex items-center gap-2 p-2 sm:p-3 bg-indigo-50 rounded-lg border border-indigo-100 cursor-pointer" onClick={() => setFormData({...formData, enable_reminder: !formData.enable_reminder})}>
-                                <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border flex items-center justify-center flex-shrink-0 ${formData.enable_reminder ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                    {formData.enable_reminder && <CheckSquare className="text-white w-2.5 h-2.5 sm:w-3 sm:h-3" />}
+                            <div className="flex items-center gap-3 p-3 sm:p-4 bg-indigo-50 rounded-xl border border-indigo-100 cursor-pointer" onClick={() => setFormData({...formData, enable_reminder: !formData.enable_reminder})}>
+                                <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all ${formData.enable_reminder ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                    {formData.enable_reminder && <Check className="text-white w-3 h-3 sm:w-4 sm:h-4" />}
                                 </div>
-                                <label className="text-xs sm:text-sm text-slate-700 font-medium cursor-pointer select-none">Invia promemoria automatico 24h prima</label>
+                                <label className="text-sm sm:text-base text-slate-700 font-medium cursor-pointer select-none">Invia promemoria automatico 24h prima</label>
                             </div>
 
-                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                            {/* Allergens/Intolerances Section */}
+                            <div className="space-y-3">
+                                <label className="block text-xs font-medium text-slate-500 uppercase">Intolleranze / Allergie</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
+                                        const isSelected = selectedAllergens.includes(allergen);
+                                        return (
+                                            <button
+                                                key={allergen}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedAllergens(prev =>
+                                                        isSelected
+                                                            ? prev.filter(a => a !== allergen)
+                                                            : [...prev, allergen]
+                                                    );
+                                                }}
+                                                className={`flex items-center gap-2 p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left ${
+                                                    isSelected
+                                                        ? 'border-red-400 bg-red-50 text-red-700'
+                                                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                                    isSelected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'
+                                                }`}>
+                                                    {isSelected && <Check className="text-white w-2.5 h-2.5 sm:w-3 sm:h-3" />}
+                                                </div>
+                                                <span className="text-xs sm:text-sm font-medium truncate">{allergen}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {selectedAllergens.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                        {selectedAllergens.map(allergen => (
+                                            <span key={allergen} className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                                                {allergen}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
+                                                    className="hover:text-red-900"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Additional Notes */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase">Note Aggiuntive</label>
                                 <textarea
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-16 sm:h-20 text-base bg-white"
-                                    placeholder="Intolleranze, seggiolone..."
+                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none h-20 sm:h-24 text-base bg-white resize-none transition-all"
+                                    placeholder="Seggiolone, compleanno, richieste speciali..."
                                     value={formData.notes || ''}
                                     onChange={e => setFormData({...formData, notes: e.target.value})}
                                 />
