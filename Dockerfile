@@ -14,6 +14,7 @@ RUN npm ci
 COPY server.ts db.ts types.ts ./
 COPY auth ./auth
 COPY services ./services
+COPY activityLogs ./activityLogs
 
 # Verify auth directory exists
 RUN ls -la auth/
