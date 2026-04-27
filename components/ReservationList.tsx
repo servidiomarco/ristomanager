@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, Mic } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
+import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 
 interface ReservationListProps {
   reservations: Reservation[];
@@ -57,6 +58,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
 
@@ -201,6 +203,42 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
+  };
+
+  const handleVoiceInput = async () => {
+    if (!isVoiceSupported()) {
+      showToast('Riconoscimento vocale non supportato', 'error');
+      return;
+    }
+
+    setIsListening(true);
+    showToast('Parla ora...', 'info');
+
+    try {
+      const transcript = await startListening();
+      const parsed = parseReservationText(transcript);
+
+      console.log('Setting form data with:', parsed);
+
+      setFormData(prev => {
+        const newData = {
+          ...prev,
+          customer_name: parsed.customer_name || prev.customer_name,
+          guests: parsed.guests || prev.guests,
+          reservation_time: parsed.reservation_time || prev.reservation_time,
+          shift: parsed.shift || prev.shift,
+          phone: parsed.phone || prev.phone,
+        };
+        console.log('New form data:', newData);
+        return newData;
+      });
+
+      showToast(`Compilato: "${transcript}"`, 'success');
+    } catch (error) {
+      showToast('Errore riconoscimento vocale', 'error');
+    } finally {
+      setIsListening(false);
+    }
   };
 
   // --- Helper Logic ---
@@ -742,13 +780,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </h3>
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome Cliente</label>
-                                <input
-                                    required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                    value={formData.customer_name}
-                                    onChange={e => setFormData({...formData, customer_name: e.target.value})}
-                                    placeholder="Mario Rossi"
-                                />
+                                <div className="flex gap-2">
+                                    <input
+                                        required
+                                        className="flex-1 rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        value={formData.customer_name}
+                                        onChange={e => setFormData({...formData, customer_name: e.target.value})}
+                                        placeholder="Mario Rossi"
+                                    />
+                                    {isVoiceSupported() && (
+                                        <button
+                                            type="button"
+                                            onClick={handleVoiceInput}
+                                            disabled={isListening}
+                                            className={`p-2.5 rounded-lg transition-colors ${
+                                                isListening
+                                                    ? 'bg-red-100 text-red-600 animate-pulse'
+                                                    : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'
+                                            }`}
+                                            title="Dettatura vocale"
+                                        >
+                                            <Mic className="h-5 w-5" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3 sm:gap-4">
