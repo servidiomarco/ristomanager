@@ -55,7 +55,15 @@ export const parseReservationText = (text: string): ParsedReservation => {
   console.log('Lowercase:', lowerText);
 
   // Extract name using multiple strategies
-  const stopWords = ['oggi', 'domani', 'dopodomani', 'sera', 'stasera', 'pranzo', 'cena', 'alle', 'ore', 'per', 'in', 'persone', 'persona', 'coperti', 'coperto', 'ospiti', 'tavolo', 'prenotazione', '\\d'];
+  const stopWords = [
+    'oggi', 'domani', 'dopodomani', 'questa', 'questo', 'stasera', 'stanotte',
+    'sera', 'pranzo', 'cena', 'mattina', 'pomeriggio',
+    'alle', 'ore', 'per', 'in', 'da',
+    'persone', 'persona', 'coperti', 'coperto', 'ospiti', 'ospite', 'pax',
+    'tavolo', 'prenotazione', 'prenota',
+    'uno', 'due', 'tre', 'quattro', 'cinque', 'sei', 'sette', 'otto', 'nove', 'dieci',
+    '\\d'
+  ];
 
   // Strategy 1: "per [nome]", "a nome [nome]", "nome [nome]"
   let nameMatch = lowerText.match(/(?:per|a nome|nome)\s+([a-zA-ZàèéìòùÀÈÉÌÒÙ]+(?:\s+[a-zA-ZàèéìòùÀÈÉÌÒÙ]+)?)/i);
