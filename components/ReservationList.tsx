@@ -585,16 +585,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </p>
                                 </div> */}
 
+                                {/* Actions - Only shown in edit mode */}
+                                {canEdit && (
                                 <div className="flex items-center gap-2">
                                     {/* Confirmation Actions */}
-                                    <button 
+                                    <button
                                         onClick={() => handleSendWhatsapp(res)}
                                         className="p-2 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
                                         title="Invia conferma WhatsApp"
                                     >
                                         <MessageCircle className="h-5 w-5" />
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => handleSendEmail(res)}
                                         className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                                         title="Invia conferma Email"
@@ -603,26 +605,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </button>
 
                                     {res.enable_reminder && (
-                                        <button 
+                                        <button
                                             onClick={() => handleSendReminder(res)}
-                                                                                         className={`p-2 rounded-lg transition-colors ${res.reminder_sent ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-600'}`}
-                                                                                        title={res.reminder_sent ? "Promemoria già inviato" : "Invia Promemoria"}                                        >
+                                            className={`p-2 rounded-lg transition-colors ${res.reminder_sent ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-600'}`}
+                                            title={res.reminder_sent ? "Promemoria già inviato" : "Invia Promemoria"}
+                                        >
                                             <BellRing className="h-5 w-5" />
                                         </button>
                                     )}
 
                                     <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
-                                    {/* Payment button - Hidden for now */}
-                                    {/* {res.payment_status !== PaymentStatus.PAID_FULL && (
-                                        <button
-                                            onClick={() => handlePaymentAction(res)}
-                                            className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
-                                            title="Registra Pagamento"
-                                        >
-                                            <CreditCard className="h-5 w-5" />
-                                        </button>
-                                    )} */}
 
                                     <button
                                         onClick={() => handleToggleArrivalStatus(res)}
@@ -636,8 +628,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <UserCheck className="h-5 w-5" />
                                     </button>
 
-                                    {canEdit && (
-                                    <>
                                     <button
                                         onClick={() => handleEditClick(res)}
                                         className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -652,9 +642,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     >
                                         <Trash2 className="h-5 w-5" />
                                     </button>
-                                    </>
-                                    )}
                                 </div>
+                                )}
                             </div>
                         </div>
                     );
