@@ -66,6 +66,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initAuth();
   }, []);
 
+  // Listen for session expired events
+  useEffect(() => {
+    const unsubscribe = authApiService.onSessionExpired(() => {
+      console.log('Session expired, logging out...');
+      setUser(null);
+      setPermissions([]);
+      socketClient.disconnect();
+      // Show alert to user
+      alert('La tua sessione è scaduta. Effettua nuovamente il login.');
+    });
+
+    return unsubscribe;
+  }, []);
+
   const login = useCallback(async (credentials: LoginCredentials) => {
     const response = await authApiService.login(credentials);
     setUser(response.user);
