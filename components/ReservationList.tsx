@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, AlertTriangle, StickyNote } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
 
 // Helper to format datetime without timezone conversion
@@ -69,6 +69,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
+  const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
+  const [showAllergensSection, setShowAllergensSection] = useState(false);
+  const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
 
@@ -186,6 +190,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         reservation_time: new Date(res.reservation_time).toISOString().substring(0, 16)
       };
       setFormData(formattedReservation);
+
+      // Extract allergens from notes
+      const existingAllergens = COMMON_ALLERGENS.filter(allergen =>
+        res.notes?.toLowerCase().includes(allergen.toLowerCase())
+      );
+      setSelectedAllergens(existingAllergens);
+
+      // Extract quick notes
+      const existingQuickNotes = QUICK_NOTES.filter(note =>
+        res.notes?.toLowerCase().includes(note.toLowerCase())
+      );
+      setSelectedQuickNotes(existingQuickNotes);
+
+      // Show sections if they have content
+      setShowAllergensSection(existingAllergens.length > 0);
+      setShowNotesSection(existingQuickNotes.length > 0 || (res.notes && res.notes.length > 0));
+
       const table = tables.find(t => t.id === res.table_id);
       setModalRoomFilter(table ? table.room_id : 'ALL');
       setIsEditing(true);
@@ -198,6 +219,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   }
 
+  const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
+
   const handleOpenNew = () => {
       setFormData({
         customer_name: '',
@@ -208,8 +231,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         table_id: undefined,
         enable_reminder: true,
         reminder_sent: false,
-        arrival_status: ArrivalStatus.WAITING
+        arrival_status: ArrivalStatus.WAITING,
+        notes: ''
       });
+      setSelectedAllergens([]);
+      setSelectedQuickNotes([]);
+      setShowAllergensSection(false);
+      setShowNotesSection(false);
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
@@ -353,10 +381,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
 
+      // Combine allergens, quick notes, and additional notes
+      const allergensText = selectedAllergens.length > 0
+          ? `Intolleranze: ${selectedAllergens.join(', ')}`
+          : '';
+      const quickNotesText = selectedQuickNotes.length > 0
+          ? selectedQuickNotes.join(', ')
+          : '';
+      const additionalNotes = formData.notes || '';
+      const combinedNotes = [allergensText, quickNotesText, additionalNotes].filter(Boolean).join(' | ');
+
+      const dataToSave = {
+          ...formData,
+          notes: combinedNotes || undefined
+      };
+
       if (isEditing) {
-          onUpdateReservation(formData as Reservation);
+          onUpdateReservation(dataToSave as Reservation);
       } else {
-          onAddReservation(formData as Omit<Reservation, 'id'>);
+          onAddReservation(dataToSave as Omit<Reservation, 'id'>);
       }
 
       setIsFormOpen(false);
@@ -746,213 +789,365 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                    <form id="reservation-form" onSubmit={handleSubmit} className="p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8">
-                        {/* Left Column: Details (4 cols) */}
-                        <div className="lg:col-span-5 space-y-3 sm:space-y-4">
-                            <h3 className="font-semibold text-sm sm:text-base text-slate-900 mb-2 flex items-center gap-2 border-b pb-2">
-                                <Users className="h-4 w-4 text-indigo-500" /> Dettagli Cliente & Orario
-                            </h3>
+                    <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
+                        {/* Left Column: Details (5 cols) */}
+                        <div className="lg:col-span-5 space-y-5 sm:space-y-6">
+                            <div className="flex items-center gap-3 pb-3 border-b-2 border-slate-100">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                                    <Users className="h-5 w-5 text-indigo-600" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Dettagli Prenotazione</h3>
+                                    <p className="text-xs text-slate-500">Compila i dati del cliente</p>
+                                </div>
+                            </div>
+                            {/* Customer Name */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome Cliente</label>
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Nome Cliente</label>
                                 <input
                                     required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                     value={formData.customer_name}
                                     onChange={e => setFormData({...formData, customer_name: e.target.value})}
                                     placeholder="Mario Rossi"
                                 />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Telefono</label>
+                            {/* Phone & Email */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Telefono</label>
                                     <input
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        type="tel"
+                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                         value={formData.phone || ''}
                                         onChange={e => setFormData({...formData, phone: e.target.value})}
-                                        placeholder="333..."
+                                        placeholder="+39 333..."
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Email</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Email</label>
                                     <input
                                         type="email"
-                                        className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
-                                        placeholder="cliente@mail.com"
+                                        placeholder="cliente@email.com"
                                     />
                                 </div>
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+
+                            {/* Date & Shift */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data e Ora</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data e Ora</label>
                                     <div className="relative">
                                         <input
                                             type="datetime-local"
                                             required
-                                            className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 pl-8 sm:pl-10 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white cursor-pointer"
+                                            className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 pl-11 sm:pl-12 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
                                             value={formData.reservation_time}
                                             onChange={e => setFormData({...formData, reservation_time: e.target.value})}
                                         />
-                                        <Calendar className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 text-slate-400 pointer-events-none" />
+                                        <Calendar className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Turno</label>
-                                    <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1 border border-slate-300">
+                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Turno</label>
+                                    <div className="bg-slate-100 p-1.5 rounded-xl flex items-center gap-1.5">
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.LUNCH})}
-                                            className={`flex w-full items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Sun className="h-3 w-3 sm:h-4 sm:w-4" /> <span className="hidden xs:inline">Pranzo</span><span className="xs:hidden">P</span>
+                                            <Sun className="h-4 w-4" /> Pranzo
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setFormData({...formData, shift: Shift.DINNER})}
-                                            className={`flex w-full items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            className={`flex w-full items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
-                                            <Moon className="h-3 w-3 sm:h-4 sm:w-4" /> <span className="hidden xs:inline">Cena</span><span className="xs:hidden">C</span>
+                                            <Moon className="h-4 w-4" /> Cena
                                         </button>
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Ospiti</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    required
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                    value={formData.guests || ''}
-                                    onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
-                                />
-                            </div>
 
+                            {/* Guests */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Menu Banchetto</label>
-                                <select
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 text-base focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                                    value={formData.banquet_menu_id || ''}
-                                    onChange={e => setFormData({...formData, banquet_menu_id: e.target.value ? parseInt(e.target.value) : undefined})}
-                                >
-                                    <option value="">Alla Carta</option>
-                                    {banquetMenus.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name} (€{m.price_per_person} pp)</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="flex items-center gap-2 p-2 sm:p-3 bg-indigo-50 rounded-lg border border-indigo-100 cursor-pointer" onClick={() => setFormData({...formData, enable_reminder: !formData.enable_reminder})}>
-                                <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border flex items-center justify-center flex-shrink-0 ${formData.enable_reminder ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                    {formData.enable_reminder && <CheckSquare className="text-white w-2.5 h-2.5 sm:w-3 sm:h-3" />}
+                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Numero Ospiti</label>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
+                                        className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 font-bold text-xl hover:bg-slate-200 transition-all flex items-center justify-center"
+                                    >
+                                        -
+                                    </button>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        required
+                                        className="flex-1 rounded-xl border-2 border-slate-200 p-3 text-center text-xl font-bold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
+                                        value={formData.guests || ''}
+                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
+                                        className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 font-bold text-xl hover:bg-indigo-200 transition-all flex items-center justify-center"
+                                    >
+                                        +
+                                    </button>
                                 </div>
-                                <label className="text-xs sm:text-sm text-slate-700 font-medium cursor-pointer select-none">Invia promemoria automatico 24h prima</label>
                             </div>
 
-                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
-                                <textarea
-                                    className="w-full rounded-lg border border-slate-300 p-2 sm:p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-16 sm:h-20 text-base bg-white"
-                                    placeholder="Intolleranze, seggiolone..."
-                                    value={formData.notes || ''}
-                                    onChange={e => setFormData({...formData, notes: e.target.value})}
-                                />
+                            {/* Expandable Sections */}
+                            <div className="space-y-3">
+                                {/* Allergens Button */}
+                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAllergensSection(!showAllergensSection)}
+                                        className={`w-full flex items-center justify-between p-4 transition-all ${
+                                            showAllergensSection ? 'bg-red-50' : 'bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                                selectedAllergens.length > 0 ? 'bg-red-100' : 'bg-slate-100'
+                                            }`}>
+                                                <AlertTriangle className={`w-5 h-5 ${selectedAllergens.length > 0 ? 'text-red-600' : 'text-slate-500'}`} />
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="font-semibold text-slate-800">Intolleranze</span>
+                                                {selectedAllergens.length > 0 && (
+                                                    <p className="text-xs text-red-600 font-medium">{selectedAllergens.length} selezionate</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {showAllergensSection && (
+                                        <div className="p-4 pt-0 space-y-3 border-t border-slate-100 bg-white">
+                                            <div className="grid grid-cols-2 gap-2 pt-3">
+                                                {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
+                                                    const isSelected = selectedAllergens.includes(allergen);
+                                                    return (
+                                                        <button
+                                                            key={allergen}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedAllergens(prev =>
+                                                                    isSelected
+                                                                        ? prev.filter(a => a !== allergen)
+                                                                        : [...prev, allergen]
+                                                                );
+                                                            }}
+                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                                isSelected
+                                                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                            }`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                                                isSelected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                            </div>
+                                                            <span className="text-sm font-medium truncate">{allergen}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {selectedAllergens.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5 pt-2">
+                                                    {selectedAllergens.map(allergen => (
+                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                                                            {allergen}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
+                                                                className="hover:text-red-900"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Notes Button */}
+                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowNotesSection(!showNotesSection)}
+                                        className={`w-full flex items-center justify-between p-4 transition-all ${
+                                            showNotesSection ? 'bg-amber-50' : 'bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                                (selectedQuickNotes.length > 0 || formData.notes) ? 'bg-amber-100' : 'bg-slate-100'
+                                            }`}>
+                                                <StickyNote className={`w-5 h-5 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-amber-600' : 'text-slate-500'}`} />
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="font-semibold text-slate-800">Note</span>
+                                                {selectedQuickNotes.length > 0 && (
+                                                    <p className="text-xs text-amber-600 font-medium">{selectedQuickNotes.join(', ')}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {showNotesSection && (
+                                        <div className="p-4 pt-0 space-y-4 border-t border-slate-100 bg-white">
+                                            {/* Quick Notes */}
+                                            <div className="grid grid-cols-2 gap-2 pt-3">
+                                                {QUICK_NOTES.map(note => {
+                                                    const isSelected = selectedQuickNotes.includes(note);
+                                                    return (
+                                                        <button
+                                                            key={note}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedQuickNotes(prev =>
+                                                                    isSelected
+                                                                        ? prev.filter(n => n !== note)
+                                                                        : [...prev, note]
+                                                                );
+                                                            }}
+                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                                isSelected
+                                                                    ? 'border-amber-400 bg-amber-50 text-amber-700'
+                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                            }`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                                                isSelected ? 'bg-amber-500 border-amber-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                            </div>
+                                                            <span className="text-sm font-medium truncate">{note}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Free text notes */}
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase">Altre note</label>
+                                                <textarea
+                                                    className="w-full rounded-xl border-2 border-slate-200 p-3 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none h-20 text-base bg-white resize-none transition-all"
+                                                    placeholder="Richieste speciali..."
+                                                    value={formData.notes || ''}
+                                                    onChange={e => setFormData({...formData, notes: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
                         {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-8">
-                             <div className="flex flex-col gap-2 mb-3 sm:mb-4">
-                                <div className="flex justify-between items-start gap-2">
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className="font-semibold text-sm sm:text-base text-slate-900 flex items-center gap-2">
-                                            <MapPin className="h-3 w-3 sm:h-4 sm:w-4 text-indigo-500 flex-shrink-0" />
-                                            <span className="truncate">Seleziona Tavolo</span>
-                                        </h3>
-                                        {selectedTableObj && (
-                                            <span className="inline-block mt-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-xs border border-indigo-100 truncate max-w-full">
-                                                {selectedTableObj.name} - {rooms.find(r => r.id === selectedTableObj.room_id)?.name}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-1 sm:gap-2 flex-shrink-0">
+                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
+                             {/* Section Header */}
+                             <div className="flex items-center gap-3 pb-4 mb-4 border-b-2 border-slate-100">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                                    <MapPin className="h-5 w-5 text-emerald-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Seleziona Tavolo</h3>
+                                    <p className="text-xs text-slate-500">
+                                        {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} - {' '}
+                                        <span className="font-semibold text-emerald-600">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
+                                    </p>
+                                </div>
+                                {selectedTableObj && (
+                                    <span className="px-3 py-1.5 text-emerald-700 bg-emerald-50 rounded-xl text-sm font-semibold border-2 border-emerald-200">
+                                        {selectedTableObj.name}
+                                    </span>
+                                )}
+                             </div>
+
+                             {/* Auto-assign & Actions */}
+                             <div className="flex items-center justify-between gap-3 mb-4">
+                                <button
+                                    type="button"
+                                    onClick={handleAutoAssign}
+                                    className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-200 transition-colors font-semibold text-sm"
+                                >
+                                    <Wand2 className="h-4 w-4" /> Assegna Automatico
+                                </button>
+
+                                <div className="flex gap-2">
+                                    {selectedTablesForMerge.length >= 2 && (
                                         <button
                                             type="button"
-                                            onClick={handleAutoAssign}
-                                            className="text-[10px] sm:text-xs flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-medium border border-indigo-100"
+                                            onClick={async () => {
+                                                try {
+                                                    await onMergeTables(selectedTablesForMerge);
+                                                    showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
+                                                    setSelectedTablesForMerge([]);
+                                                } catch (error) {
+                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="flex items-center gap-1.5 bg-purple-100 text-purple-700 px-3 py-2 rounded-xl hover:bg-purple-200 transition-colors font-medium text-sm"
                                         >
-                                            <Wand2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> <span className="hidden sm:inline">Auto</span>
+                                            <Combine className="h-4 w-4" /> Unisci ({selectedTablesForMerge.length})
                                         </button>
+                                    )}
 
-                                        {selectedTablesForMerge.length >= 2 && (
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    try {
-                                                        await onMergeTables(selectedTablesForMerge);
-                                                        showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
-                                                        setSelectedTablesForMerge([]);
-                                                    } catch (error) {
-                                                        showToast('Errore durante l\'unione dei tavoli', 'error');
-                                                    }
-                                                }}
-                                                className="text-[10px] sm:text-xs flex items-center gap-1 bg-purple-50 text-purple-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-100"
-                                            >
-                                                <Combine className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> ({selectedTablesForMerge.length})
-                                            </button>
-                                        )}
-
-                                        {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    try {
-                                                        await onSplitTable(selectedTableObj.id);
-                                                        showToast('Tavoli divisi con successo', 'success');
-                                                        setFormData({...formData, table_id: undefined});
-                                                    } catch (error) {
-                                                        showToast('Errore durante la divisione dei tavoli', 'error');
-                                                    }
-                                                }}
-                                                className="text-[10px] sm:text-xs flex items-center gap-1 bg-amber-50 text-amber-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-amber-100 transition-colors font-medium border border-amber-100"
-                                            >
-                                                <Scissors className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                                            </button>
-                                        )}
-                                    </div>
+                                    {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await onSplitTable(selectedTableObj.id);
+                                                    showToast('Tavoli divisi con successo', 'success');
+                                                    setFormData({...formData, table_id: undefined});
+                                                } catch (error) {
+                                                    showToast('Errore durante la divisione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="flex items-center gap-1.5 bg-amber-100 text-amber-700 px-3 py-2 rounded-xl hover:bg-amber-200 transition-colors font-medium text-sm"
+                                        >
+                                            <Scissors className="h-4 w-4" /> Dividi
+                                        </button>
+                                    )}
                                 </div>
-                                <p className="text-[10px] sm:text-xs text-slate-500 flex flex-wrap items-center gap-1">
-                                    <span className="whitespace-nowrap">Disp. {formData.reservation_time?.split('T')[0]}</span>
-                                    <span className="whitespace-nowrap">({formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}):</span>
-                                    <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                                        {freeTablesCount}/{totalTablesInFilter}
-                                    </span>
-                                </p>
-                            </div>
+                             </div>
 
-                             {/* Room Tabs for Modal */}
-                             <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 mb-2 sm:mb-3 scrollbar-hide">
-                                 <button
-                                    type="button"
-                                    onClick={() => setModalRoomFilter('ALL')}
-                                    className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${modalRoomFilter === 'ALL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                 >
-                                     Tutte
-                                 </button>
-                                 {rooms.map(room => (
+                             {/* Room Tabs */}
+                             <div className="mb-4">
+                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">Sale</p>
+                                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                                      <button
-                                        key={room.id}
                                         type="button"
-                                        onClick={() => setModalRoomFilter(room.id)}
-                                        className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${modalRoomFilter === room.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                        onClick={() => setModalRoomFilter('ALL')}
+                                        className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === 'ALL' ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                                      >
-                                         {room.name}
+                                         Tutte le sale
                                      </button>
-                                 ))}
+                                     {rooms.map(room => (
+                                         <button
+                                            key={room.id}
+                                            type="button"
+                                            onClick={() => setModalRoomFilter(room.id)}
+                                            className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === room.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                         >
+                                             {room.name}
+                                         </button>
+                                     ))}
+                                 </div>
                              </div>
 
                              <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
@@ -1034,10 +1229,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         {isOccupied && occupiedReservation && (
                                                             <>
                                                                 <div className="absolute inset-0 flex items-center justify-center bg-red-100/50 rounded-xl">
-                                                                    <span className="text-[10px] font-bold text-red-700 bg-white/80 px-2 py-0.5 rounded shadow-sm border border-red-200 -mt-16">OCCUPATO</span>
+                                                                    <span className="text-[11px] sm:text-xs font-bold text-red-700 bg-white/90 px-2.5 py-1 rounded-lg shadow-sm border border-red-200 -mt-14 sm:-mt-16">OCCUPATO</span>
                                                                 </div>
-                                                                <div className="absolute -bottom-2.5 w-full flex justify-center">
-                                                                    <div className="bg-red-600 text-white text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-sm max-w-[100%] truncate border border-white -ml-6">
+                                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex justify-center">
+                                                                    <div className="bg-red-600 text-white text-[11px] sm:text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap shadow-md max-w-[120px] truncate border-2 border-white">
                                                                         {occupiedReservation.customer_name}
                                                                     </div>
                                                                 </div>
