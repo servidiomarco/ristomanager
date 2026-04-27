@@ -890,28 +890,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                             </div>
 
-                            {/* Banquet Menu */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Menu Banchetto</label>
-                                <select
-                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all appearance-none cursor-pointer"
-                                    value={formData.banquet_menu_id || ''}
-                                    onChange={e => setFormData({...formData, banquet_menu_id: e.target.value ? parseInt(e.target.value) : undefined})}
-                                >
-                                    <option value="">Alla Carta</option>
-                                    {banquetMenus.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name} (€{m.price_per_person} pp)</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="flex items-center gap-3 p-3 sm:p-4 bg-indigo-50 rounded-xl border border-indigo-100 cursor-pointer" onClick={() => setFormData({...formData, enable_reminder: !formData.enable_reminder})}>
-                                <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all ${formData.enable_reminder ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                    {formData.enable_reminder && <Check className="text-white w-3 h-3 sm:w-4 sm:h-4" />}
-                                </div>
-                                <label className="text-sm sm:text-base text-slate-700 font-medium cursor-pointer select-none">Invia promemoria automatico 24h prima</label>
-                            </div>
-
                             {/* Expandable Sections */}
                             <div className="space-y-3">
                                 {/* Allergens Button */}
@@ -1067,94 +1045,97 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         </div>
 
                         {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-8">
-                             <div className="flex flex-col gap-2 mb-3 sm:mb-4">
-                                <div className="flex justify-between items-start gap-2">
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className="font-semibold text-sm sm:text-base text-slate-900 flex items-center gap-2">
-                                            <MapPin className="h-3 w-3 sm:h-4 sm:w-4 text-indigo-500 flex-shrink-0" />
-                                            <span className="truncate">Seleziona Tavolo</span>
-                                        </h3>
-                                        {selectedTableObj && (
-                                            <span className="inline-block mt-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-xs border border-indigo-100 truncate max-w-full">
-                                                {selectedTableObj.name} - {rooms.find(r => r.id === selectedTableObj.room_id)?.name}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-1 sm:gap-2 flex-shrink-0">
+                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
+                             {/* Section Header */}
+                             <div className="flex items-center gap-3 pb-4 mb-4 border-b-2 border-slate-100">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                                    <MapPin className="h-5 w-5 text-emerald-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Seleziona Tavolo</h3>
+                                    <p className="text-xs text-slate-500">
+                                        {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} - {' '}
+                                        <span className="font-semibold text-emerald-600">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
+                                    </p>
+                                </div>
+                                {selectedTableObj && (
+                                    <span className="px-3 py-1.5 text-emerald-700 bg-emerald-50 rounded-xl text-sm font-semibold border-2 border-emerald-200">
+                                        {selectedTableObj.name}
+                                    </span>
+                                )}
+                             </div>
+
+                             {/* Auto-assign & Actions */}
+                             <div className="flex items-center justify-between gap-3 mb-4">
+                                <button
+                                    type="button"
+                                    onClick={handleAutoAssign}
+                                    className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-200 transition-colors font-semibold text-sm"
+                                >
+                                    <Wand2 className="h-4 w-4" /> Assegna Automatico
+                                </button>
+
+                                <div className="flex gap-2">
+                                    {selectedTablesForMerge.length >= 2 && (
                                         <button
                                             type="button"
-                                            onClick={handleAutoAssign}
-                                            className="text-[10px] sm:text-xs flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-medium border border-indigo-100"
+                                            onClick={async () => {
+                                                try {
+                                                    await onMergeTables(selectedTablesForMerge);
+                                                    showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
+                                                    setSelectedTablesForMerge([]);
+                                                } catch (error) {
+                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="flex items-center gap-1.5 bg-purple-100 text-purple-700 px-3 py-2 rounded-xl hover:bg-purple-200 transition-colors font-medium text-sm"
                                         >
-                                            <Wand2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> <span className="hidden sm:inline">Auto</span>
+                                            <Combine className="h-4 w-4" /> Unisci ({selectedTablesForMerge.length})
                                         </button>
+                                    )}
 
-                                        {selectedTablesForMerge.length >= 2 && (
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    try {
-                                                        await onMergeTables(selectedTablesForMerge);
-                                                        showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
-                                                        setSelectedTablesForMerge([]);
-                                                    } catch (error) {
-                                                        showToast('Errore durante l\'unione dei tavoli', 'error');
-                                                    }
-                                                }}
-                                                className="text-[10px] sm:text-xs flex items-center gap-1 bg-purple-50 text-purple-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-100"
-                                            >
-                                                <Combine className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> ({selectedTablesForMerge.length})
-                                            </button>
-                                        )}
-
-                                        {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    try {
-                                                        await onSplitTable(selectedTableObj.id);
-                                                        showToast('Tavoli divisi con successo', 'success');
-                                                        setFormData({...formData, table_id: undefined});
-                                                    } catch (error) {
-                                                        showToast('Errore durante la divisione dei tavoli', 'error');
-                                                    }
-                                                }}
-                                                className="text-[10px] sm:text-xs flex items-center gap-1 bg-amber-50 text-amber-700 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg hover:bg-amber-100 transition-colors font-medium border border-amber-100"
-                                            >
-                                                <Scissors className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                                            </button>
-                                        )}
-                                    </div>
+                                    {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await onSplitTable(selectedTableObj.id);
+                                                    showToast('Tavoli divisi con successo', 'success');
+                                                    setFormData({...formData, table_id: undefined});
+                                                } catch (error) {
+                                                    showToast('Errore durante la divisione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="flex items-center gap-1.5 bg-amber-100 text-amber-700 px-3 py-2 rounded-xl hover:bg-amber-200 transition-colors font-medium text-sm"
+                                        >
+                                            <Scissors className="h-4 w-4" /> Dividi
+                                        </button>
+                                    )}
                                 </div>
-                                <p className="text-[10px] sm:text-xs text-slate-500 flex flex-wrap items-center gap-1">
-                                    <span className="whitespace-nowrap">Disp. {formData.reservation_time?.split('T')[0]}</span>
-                                    <span className="whitespace-nowrap">({formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}):</span>
-                                    <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                                        {freeTablesCount}/{totalTablesInFilter}
-                                    </span>
-                                </p>
-                            </div>
+                             </div>
 
-                             {/* Room Tabs for Modal */}
-                             <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 mb-2 sm:mb-3 scrollbar-hide">
-                                 <button
-                                    type="button"
-                                    onClick={() => setModalRoomFilter('ALL')}
-                                    className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${modalRoomFilter === 'ALL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                 >
-                                     Tutte
-                                 </button>
-                                 {rooms.map(room => (
+                             {/* Room Tabs */}
+                             <div className="mb-4">
+                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">Sale</p>
+                                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                                      <button
-                                        key={room.id}
                                         type="button"
-                                        onClick={() => setModalRoomFilter(room.id)}
-                                        className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${modalRoomFilter === room.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                        onClick={() => setModalRoomFilter('ALL')}
+                                        className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === 'ALL' ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                                      >
-                                         {room.name}
+                                         Tutte le sale
                                      </button>
-                                 ))}
+                                     {rooms.map(room => (
+                                         <button
+                                            key={room.id}
+                                            type="button"
+                                            onClick={() => setModalRoomFilter(room.id)}
+                                            className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === room.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                         >
+                                             {room.name}
+                                         </button>
+                                     ))}
+                                 </div>
                              </div>
 
                              <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
