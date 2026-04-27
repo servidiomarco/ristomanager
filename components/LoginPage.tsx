@@ -31,7 +31,7 @@ export const LoginPage: React.FC = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl shadow-lg mb-4">
             <ChefHat className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-800">RistoManager AI</h1>
+          <h1 className="text-3xl font-bold text-slate-800">RistoCRM</h1>
           <p className="text-slate-500 mt-2">Accedi al tuo account</p>
         </div>
 

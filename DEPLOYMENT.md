@@ -1,6 +1,6 @@
-# RistoManager AI - Deployment Guide
+# RistoCRM - Deployment Guide
 
-This guide explains how to deploy your RistoManager AI backend to Railway.
+This guide explains how to deploy your RistoCRM backend to Railway.
 
 ## Prerequisites
 

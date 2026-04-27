@@ -662,7 +662,7 @@ const App: React.FC = () => {
           <div className="bg-indigo-600 p-2 rounded-lg">
              <ChefHat className="text-white h-6 w-6" />
           </div>
-          <span className="ml-3 font-bold text-xl hidden lg:block text-slate-800">RistoAI</span>
+          <span className="ml-3 font-bold text-xl hidden lg:block text-slate-800">RistoCRM</span>
         </div>
 
         <nav className="flex-1 py-6 space-y-2 px-3">
@@ -744,7 +744,7 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-y-auto relative pb-20 lg:pb-0">
         {/* Header with Notification Center */}
         <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6">
-           <span className="font-bold text-lg lg:hidden">RistoManager AI</span>
+           <span className="font-bold text-lg lg:hidden">RistoCRM</span>
            <div className="ml-auto flex items-center gap-4">
                <div className="relative">
                    <button 

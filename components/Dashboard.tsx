@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Reservation, Table, Dish, Room, TableStatus, Shift } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { useAuth } from '../contexts/AuthContext';
 
 interface DashboardProps {
   reservations: Reservation[];
@@ -13,9 +14,11 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
+  const { user } = useAuth();
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
 
   const handleGenerateReport = async () => {
     setLoading(true);
@@ -75,10 +78,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const occupancyRate = totalTables > 0 ? Math.round((occupiedTables / totalTables) * 100) : 0;
 
   // Selected day stats
-  const selectedDayOccupiedTableIds = new Set(selectedDayReservations.map(r => r.table_id).filter(Boolean));
-  const selectedDayOccupiedTables = selectedDayOccupiedTableIds.size;
-  const selectedDayOccupancyRate = totalTables > 0 ? Math.round((selectedDayOccupiedTables / totalTables) * 100) : 0;
   const selectedDayGuests = selectedDayReservations.reduce((acc, r) => acc + r.guests, 0);
+  const arrivedGuests = selectedDayReservations
+    .filter(r => r.arrival_status === ArrivalStatus.ARRIVED)
+    .reduce((acc, r) => acc + r.guests, 0);
 
   // Reservations by shift for selected day
   const lunchReservations = selectedDayReservations.filter(r => r.shift === Shift.LUNCH);
@@ -90,15 +93,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
-  const chartData = [
-    { name: 'Lun', guests: 24 },
-    { name: 'Mar', guests: 18 },
-    { name: 'Mer', guests: 32 },
-    { name: 'Gio', guests: 45 },
-    { name: 'Ven', guests: 85 },
-    { name: 'Sab', guests: 98 },
-    { name: 'Dom', guests: 65 },
-  ];
+  // Calculate weekly chart data from real reservations (based on selected date's week)
+  const weeklyChartData = useMemo(() => {
+    // Get start of selected date's week (Monday)
+    const dayOfWeek = selectedDate.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(selectedDate);
+    monday.setDate(selectedDate.getDate() + mondayOffset);
+    monday.setHours(0, 0, 0, 0);
+
+    const days = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+    const data = [];
+
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      const dateStr = date.toISOString().split('T')[0];
+
+      let dayReservations = Array.isArray(reservations)
+        ? reservations.filter(r => r.reservation_time.startsWith(dateStr))
+        : [];
+
+      // Filter by shift if not ALL
+      if (chartShiftFilter !== 'ALL') {
+        dayReservations = dayReservations.filter(r => r.shift === chartShiftFilter);
+      }
+
+      const dayGuests = dayReservations.reduce((acc, r) => acc + r.guests, 0);
+
+      data.push({
+        name: days[i],
+        date: date.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }),
+        guests: dayGuests
+      });
+    }
+
+    return data;
+  }, [reservations, chartShiftFilter, selectedDate]);
+
+  // Get week range for display (based on selected date's week)
+  const weekRange = useMemo(() => {
+    const dayOfWeek = selectedDate.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(selectedDate);
+    monday.setDate(selectedDate.getDate() + mondayOffset);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    return `${monday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+  }, [selectedDate]);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -106,7 +149,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-500">Benvenuto su RistoManager AI</p>
+          <p className="text-slate-500">Benvenuto su RistoCRM, {user?.full_name}</p>
         </div>
 
         {/* Date Navigation */}
@@ -144,41 +187,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
-            <TrendingUp className="h-6 w-6" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+            <Users className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm text-slate-500">Occupazione Attuale</p>
-            <p className="text-2xl font-bold text-slate-800">{occupancyRate}%</p>
+            <p className="text-xs text-slate-500">Ospiti Attesi</p>
+            <p className="text-xl font-bold text-slate-800">{selectedDayGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
-            <Users className="h-6 w-6" />
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
+          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+            <Users className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm text-slate-500">Ospiti Attesi</p>
-            <p className="text-2xl font-bold text-slate-800">{selectedDayGuests}</p>
+            <p className="text-xs text-slate-500">Ospiti Arrivati</p>
+            <p className="text-xl font-bold text-slate-800">{arrivedGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
-            <Utensils className="h-6 w-6" />
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
+          <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
+            <TrendingUp className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm text-slate-500">Coperti Totali</p>
-            <p className="text-2xl font-bold text-slate-800">{totalCapacity}</p>
+            <p className="text-xs text-slate-500">Occupazione</p>
+            <p className="text-xl font-bold text-slate-800">{occupancyRate}%</p>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
-            <TrendingUp className="h-6 w-6" />
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
+          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+            <Utensils className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm text-slate-500">Prenotazioni</p>
-            <p className="text-2xl font-bold text-slate-800">{selectedDayReservations.length}</p>
+            <p className="text-xs text-slate-500">Coperti Totali</p>
+            <p className="text-xl font-bold text-slate-800">{totalCapacity}</p>
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+            <Calendar className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Prenotazioni</p>
+            <p className="text-xl font-bold text-slate-800">{selectedDayReservations.length}</p>
           </div>
         </div>
       </div>
@@ -233,66 +285,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {/* Room by Room Status */}
-          <div className="space-y-3 max-h-64 overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {rooms.map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
-              const freeCount = roomTables.filter(t => t.status === TableStatus.FREE).length;
-              const occupiedCount = roomTables.filter(t => t.status === TableStatus.OCCUPIED).length;
-              const reservedCount = roomTables.filter(t => t.status === TableStatus.RESERVED).length;
-              const dirtyCount = roomTables.filter(t => t.status === TableStatus.DIRTY).length;
+              const roomTableIds = new Set(roomTables.map(t => t.id));
 
-              // Calculate room-specific shift occupancy for selected day
-              const roomLunchTables = lunchReservations.filter(r => roomTables.some(t => t.id === r.table_id)).length;
-              const roomDinnerTables = dinnerReservations.filter(r => roomTables.some(t => t.id === r.table_id)).length;
+              // Calculate room-specific availability per shift for selected day
+              const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
+              const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
+              const roomLunchAvailable = roomTables.length - roomLunchReserved;
+              const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
 
               return (
-                <div key={room.id} className="border border-slate-100 rounded-xl p-4 hover:border-slate-200 transition-colors">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-medium text-slate-700">{room.name}</h3>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
-                        P: {roomLunchTables}
-                      </span>
-                      <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                        C: {roomDinnerTables}
-                      </span>
-                      <span className="text-xs text-slate-400">{roomTables.length} tavoli</span>
+                <div key={room.id} className="border border-slate-100 rounded-lg p-3 hover:border-slate-200 transition-colors bg-slate-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium text-slate-700 text-sm">{room.name}</h3>
+                    <span className="text-xs text-slate-400">{roomTables.length} tavoli</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 bg-amber-50 rounded-md px-2 py-1.5 border border-amber-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-amber-700">Pranzo</span>
+                        <span className={`text-xs font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {roomLunchAvailable}/{roomTables.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex-1 bg-indigo-50 rounded-md px-2 py-1.5 border border-indigo-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-indigo-700">Cena</span>
+                        <span className={`text-xs font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {roomDinnerAvailable}/{roomTables.length}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {freeCount > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                        {freeCount} Liberi
-                      </span>
-                    )}
-                    {occupiedCount > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
-                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                        {occupiedCount} Occupati
-                      </span>
-                    )}
-                    {reservedCount > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                        {reservedCount} Prenotati
-                      </span>
-                    )}
-                    {dirtyCount > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                        <span className="w-2 h-2 rounded-full bg-slate-500"></span>
-                        {dirtyCount} Da pulire
-                      </span>
-                    )}
-                    {roomTables.length === 0 && (
-                      <span className="text-xs text-slate-400">Nessun tavolo</span>
-                    )}
-                  </div>
+                  {roomTables.length === 0 && (
+                    <span className="text-xs text-slate-400">Nessun tavolo</span>
+                  )}
                 </div>
               );
             })}
             {rooms.length === 0 && (
-              <div className="text-center text-slate-400 py-8">
+              <div className="col-span-full text-center text-slate-400 py-8">
                 Nessuna sala configurata
               </div>
             )}
@@ -301,38 +336,82 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           {/* Legend */}
           <div className="flex flex-wrap justify-center gap-4 mt-4 pt-4 border-t border-slate-100">
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-              <span className="text-xs text-slate-600">Libero</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-              <span className="text-xs text-slate-600">Occupato</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span className="text-xs text-slate-600">Prenotato</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-              <span className="text-xs text-slate-600">Da pulire</span>
+              <span className="text-xs text-slate-600">Disponibilità tavoli per turno del giorno selezionato</span>
             </div>
           </div>
         </div>
 
         {/* Weekly Chart - Now smaller (1 column) */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h2 className="text-lg font-semibold mb-4 text-slate-800">Affluenza Settimanale</h2>
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
+            <p className="text-sm text-slate-500 mt-1">{weekRange}</p>
+            <div className="flex rounded-lg border border-slate-200 p-1 bg-slate-50 mt-4">
+              <button
+                onClick={() => setChartShiftFilter('ALL')}
+                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'ALL'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Tutti
+              </button>
+              <button
+                onClick={() => setChartShiftFilter('LUNCH')}
+                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'LUNCH'
+                    ? 'bg-amber-100 text-amber-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Pranzo
+              </button>
+              <button
+                onClick={() => setChartShiftFilter('DINNER')}
+                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'DINNER'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Cena
+              </button>
+            </div>
+          </div>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout="vertical">
+              <BarChart data={weeklyChartData}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                <XAxis type="number" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} width={35} />
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{fill: '#64748b', fontSize: 11}}
+                />
+                <YAxis
+                  domain={[0, 600]}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{fill: '#64748b', fontSize: 11}}
+                  width={35}
+                />
                 <Tooltip
                   cursor={{fill: '#f1f5f9'}}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
+                  labelFormatter={(label, payload) => {
+                    if (payload && payload[0]) {
+                      return `${label} (${payload[0].payload.date})`;
+                    }
+                    return label;
+                  }}
                 />
-                <Bar dataKey="guests" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20} />
+                <Bar
+                  dataKey="guests"
+                  fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
+                  radius={[4, 4, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
