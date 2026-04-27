@@ -21,8 +21,12 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Get user's permissions from database
+    const permissions = await RolePermissionService.getPermissionsForRole(result.user.role);
+
     res.json({
       user: result.user,
+      permissions,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken
     });
@@ -70,7 +74,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
   }
 });
 
-// GET /auth/me - Get current user
+// GET /auth/me - Get current user with permissions
 router.get('/me', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -83,7 +87,10 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(user);
+    // Get user's permissions from database
+    const permissions = await RolePermissionService.getPermissionsForRole(user.role);
+
+    res.json({ ...user, permissions });
   } catch (error) {
     console.error('Get current user error:', error);
     res.status(500).json({ error: 'Internal server error' });
