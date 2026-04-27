@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { AuthService } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
 import { UserRole } from '../types.js';
+import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permissionService.js';
 
 const router = Router();
 
@@ -179,6 +180,87 @@ router.delete('/users/:id', authenticate, authorize(UserRole.OWNER), async (req:
     res.status(204).send();
   } catch (error) {
     console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// ROLE PERMISSIONS MANAGEMENT (Owner only)
+// ============================================
+
+// GET /auth/permissions - Get all available permissions
+router.get('/permissions', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
+  try {
+    res.json({
+      features: ALL_PERMISSIONS,
+      roles: Object.values(UserRole)
+    });
+  } catch (error) {
+    console.error('Get permissions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /auth/permissions/roles - Get all role permissions
+router.get('/permissions/roles', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
+  try {
+    const permissions = await RolePermissionService.getAllRolePermissions();
+    res.json(permissions);
+  } catch (error) {
+    console.error('Get role permissions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /auth/permissions/roles/:role - Get permissions for a specific role
+router.get('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
+  try {
+    const role = req.params.role.toUpperCase() as UserRole;
+
+    if (!Object.values(UserRole).includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    const permissions = await RolePermissionService.getPermissionsForRole(role);
+    res.json({ role, permissions });
+  } catch (error) {
+    console.error('Get role permissions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /auth/permissions/roles/:role - Update permissions for a role
+router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
+  try {
+    const role = req.params.role.toUpperCase() as UserRole;
+    const { permissions } = req.body;
+
+    if (!Object.values(UserRole).includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    if (!Array.isArray(permissions)) {
+      return res.status(400).json({ error: 'Permissions must be an array' });
+    }
+
+    // Prevent removing critical permissions from OWNER role
+    if (role === UserRole.OWNER) {
+      const requiredOwnerPermissions = ['users:full', 'settings:full'];
+      for (const required of requiredOwnerPermissions) {
+        if (!permissions.includes(required)) {
+          return res.status(400).json({
+            error: `Cannot remove ${required} permission from OWNER role`
+          });
+        }
+      }
+    }
+
+    await RolePermissionService.setPermissionsForRole(role, permissions as Permission[]);
+
+    const updatedPermissions = await RolePermissionService.getPermissionsForRole(role);
+    res.json({ role, permissions: updatedPermissions });
+  } catch (error) {
+    console.error('Update role permissions error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

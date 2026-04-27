@@ -7,6 +7,7 @@ import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { UserManagement } from './components/UserManagement';
+import { RolePermissions } from './components/RolePermissions';
 import { useSocket } from './hooks/useSocket';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
@@ -54,6 +55,7 @@ const App: React.FC = () => {
 
   // User management modal state
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [showRolePermissions, setShowRolePermissions] = useState(false);
 
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
@@ -617,6 +619,14 @@ const App: React.FC = () => {
         <UserManagement onClose={() => setShowUserManagement(false)} />
       )}
 
+      {/* Role Permissions Modal */}
+      {showRolePermissions && canManageUsers() && (
+        <RolePermissions
+          isOpen={showRolePermissions}
+          onClose={() => setShowRolePermissions(false)}
+        />
+      )}
+
       {/* Connection Status Indicator */}
       <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
         isConnected
@@ -808,14 +818,71 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.SETTINGS && (
-           <div className="p-10 text-center text-slate-400">
-               <Settings className="h-16 w-16 mx-auto mb-4 opacity-20" />
-               <h2 className="text-xl font-semibold">Impostazioni</h2>
-               <p className="mb-4">Integrazione Gateway di Pagamento & Email</p>
-               <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-lg text-sm">
-                   <div className="w-2 h-2 bg-emerald-500 rounded-full"></div> Stripe Connect (Simulato) Attivo
-               </div>
-           </div>
+          <div className="p-6 lg:p-10 max-w-4xl mx-auto">
+            <h2 className="text-2xl font-bold text-slate-800 mb-6">Impostazioni</h2>
+
+            {/* Admin Section - Only for users who can manage */}
+            {canManageUsers() && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-slate-700 mb-4">Amministrazione</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* User Management */}
+                  <button
+                    onClick={() => setShowUserManagement(true)}
+                    className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left"
+                  >
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Users className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800">Gestione Utenti</h4>
+                      <p className="text-sm text-slate-500">Crea, modifica ed elimina utenti</p>
+                    </div>
+                  </button>
+
+                  {/* Role Permissions */}
+                  <button
+                    onClick={() => setShowRolePermissions(true)}
+                    className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all text-left"
+                  >
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800">Permessi Ruoli</h4>
+                      <p className="text-sm text-slate-500">Configura i permessi per ogni ruolo</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Integrations Section */}
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold text-slate-700 mb-4">Integrazioni</h3>
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                      <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800">Stripe Connect</h4>
+                      <p className="text-sm text-slate-500">Gateway di pagamento</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1 bg-emerald-100 rounded-full text-sm text-emerald-700">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                    Attivo (Simulato)
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Bottom Navigation - Visible only on mobile */}

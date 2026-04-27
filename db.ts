@@ -137,6 +137,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // ============================================
+        // ROLE PERMISSIONS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                id SERIAL PRIMARY KEY,
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                permission VARCHAR(100) NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(role, permission)
+            );
+        `);
+
         // Seed default owner account if no users exist
         const userCount = await client.query('SELECT COUNT(*) FROM users');
         if (parseInt(userCount.rows[0].count) === 0) {
@@ -150,6 +163,42 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['admin@ristomanager.com', passwordHash, 'Admin Owner', 'OWNER']
             );
             console.log('Default owner account created: admin@ristomanager.com');
+        }
+
+        // Seed default role permissions if none exist
+        const permCount = await client.query('SELECT COUNT(*) FROM role_permissions');
+        if (parseInt(permCount.rows[0].count) === 0) {
+            const defaultPermissions = [
+                // OWNER - all permissions
+                ['OWNER', 'dashboard:view'], ['OWNER', 'dashboard:full'],
+                ['OWNER', 'floorplan:view'], ['OWNER', 'floorplan:update_status'], ['OWNER', 'floorplan:full'],
+                ['OWNER', 'menu:view'], ['OWNER', 'menu:full'],
+                ['OWNER', 'reservations:view'], ['OWNER', 'reservations:full'],
+                ['OWNER', 'settings:view'], ['OWNER', 'settings:full'],
+                ['OWNER', 'users:view'], ['OWNER', 'users:full'],
+                ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
+                // MANAGER
+                ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
+                ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
+                ['MANAGER', 'menu:view'], ['MANAGER', 'menu:full'],
+                ['MANAGER', 'reservations:view'], ['MANAGER', 'reservations:full'],
+                ['MANAGER', 'reports:view'],
+                // WAITER
+                ['WAITER', 'dashboard:view'],
+                ['WAITER', 'floorplan:view'], ['WAITER', 'floorplan:update_status'],
+                ['WAITER', 'reservations:view'], ['WAITER', 'reservations:full'],
+                // KITCHEN
+                ['KITCHEN', 'menu:view'],
+                ['KITCHEN', 'reservations:view']
+            ];
+
+            for (const [role, permission] of defaultPermissions) {
+                await client.query(
+                    'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [role, permission]
+                );
+            }
+            console.log('Default role permissions created');
         }
 
         await client.query('COMMIT');
