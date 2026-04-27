@@ -15,6 +15,7 @@ interface ReservationListProps {
   onSplitTable: (tableId: number) => Promise<void>;
   onUpdateTable: (table: Table) => Promise<void>;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  canEdit?: boolean;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -28,7 +29,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onMergeTables,
   onSplitTable,
   onUpdateTable,
-  showToast
+  showToast,
+  canEdit = true
 }) => {
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
@@ -424,12 +426,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
-            <button 
+            {canEdit && (
+            <button
                 onClick={handleOpenNew}
                 className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all"
             >
                 <Plus className="h-5 w-5" /> Nuova
             </button>
+            )}
 
             <div className="flex bg-slate-100 p-1 rounded-xl">
                 <button 
@@ -632,6 +636,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <UserCheck className="h-5 w-5" />
                                     </button>
 
+                                    {canEdit && (
+                                    <>
                                     <button
                                         onClick={() => handleEditClick(res)}
                                         className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -639,13 +645,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     >
                                         <Edit2 className="h-5 w-5" />
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => handleDeleteClick(res.id)}
                                         className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
                                         title="Elimina"
                                     >
                                         <Trash2 className="h-5 w-5" />
                                     </button>
+                                    </>
+                                    )}
                                 </div>
                             </div>
                         </div>

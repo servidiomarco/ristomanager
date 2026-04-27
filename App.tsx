@@ -796,11 +796,12 @@ const App: React.FC = () => {
                 onSplitTable={handleSplitTable}
                 onUpdateTable={handleUpdateTable}
                 showToast={addToast}
+                canEdit={hasPermission('reservations:full')}
             />
         )}
 
         {view === ViewState.FLOOR_PLAN && (
-          <FloorPlan 
+          <FloorPlan
             rooms={rooms}
             tables={tables}
             reservations={reservations}
@@ -811,6 +812,7 @@ const App: React.FC = () => {
             onSplitTable={handleSplitTable}
             onAddRoom={handleAddRoom}
             onDeleteRoom={handleDeleteRoom}
+            canEdit={hasPermission('floorplan:full')}
           />
         )}
 
@@ -824,6 +826,7 @@ const App: React.FC = () => {
             onAddBanquetMenu={handleAddBanquet}
             onUpdateBanquetMenu={handleUpdateBanquet}
             onDeleteBanquetMenu={handleDeleteBanquet}
+            canEdit={hasPermission('menu:full')}
           />
         )}
 

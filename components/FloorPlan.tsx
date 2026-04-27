@@ -16,6 +16,7 @@ interface FloorPlanProps {
   onSplitTable: (tableId: number) => void;
   onAddRoom: (roomName: string) => void;
   onDeleteRoom: (room_id: number) => void;
+  canEdit?: boolean;
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
@@ -28,7 +29,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onMergeTables,
   onSplitTable,
   onAddRoom,
-  onDeleteRoom
+  onDeleteRoom,
+  canEdit = true
 }) => {
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
 
@@ -211,9 +213,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const table = tables.find(t => t.id === tableId);
 
-    // Handle multi-select
-    if (e.ctrlKey || e.metaKey || isSelectionMode) {
+    // Handle multi-select (only in edit mode)
+    if ((e.ctrlKey || e.metaKey || isSelectionMode) && canEdit) {
         setSelectedTables(prev => prev.includes(tableId) ? prev.filter(id => id !== tableId) : [...prev, tableId]);
+        return;
+    }
+
+    // If not in edit mode, don't allow selection or dragging
+    if (!canEdit) {
         return;
     }
 
@@ -332,6 +339,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Touch event handlers for mobile
   const handleTouchStart = (e: React.TouchEvent, tableId: number, element: HTMLDivElement) => {
     e.stopPropagation();
+
+    // If not in edit mode, don't allow selection or dragging
+    if (!canEdit) {
+        return;
+    }
+
     const touch = e.touches[0];
     const table = tables.find(t => t.id === tableId);
 
@@ -482,7 +495,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       [TableStatus.DIRTY]: 'bg-gray-200 border-gray-400 text-gray-600'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
+    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -587,10 +600,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </button>
           ))}
           
-          {/* Add Room UI */}
-          {isAddingRoom ? (
+          {/* Add Room UI - Only shown in edit mode */}
+          {canEdit && (isAddingRoom ? (
               <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
-                  <input 
+                  <input
                       autoFocus
                       value={newRoomName}
                       onChange={e => setNewRoomName(e.target.value)}
@@ -598,15 +611,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       className="px-3 py-2 w-32 rounded-lg border border-indigo-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
                       onKeyDown={e => e.key === 'Enter' && handleConfirmAddRoom()}
                   />
-                  <button 
-                    onClick={handleConfirmAddRoom} 
+                  <button
+                    onClick={handleConfirmAddRoom}
                     className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm"
                     title="Conferma"
                   >
                       <Check size={16}/>
                   </button>
-                  <button 
-                    onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }} 
+                  <button
+                    onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }}
                     className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"
                     title="Annulla"
                   >
@@ -614,24 +627,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   </button>
               </div>
           ) : (
-            <button 
+            <button
                 onClick={() => setIsAddingRoom(true)}
                 className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 border border-indigo-200 shrink-0 transition-colors"
                 title="Aggiungi Nuova Sala"
             >
                 <Plus size={16} />
             </button>
-          )}
+          ))}
         </div>
 
+        {/* Tools section - Only shown in edit mode */}
+        {canEdit && (
         <div className="flex items-center gap-3 border-l pl-4 border-slate-200 overflow-x-auto shrink-0">
           <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Strumenti</span>
-          
-          <button 
+
+          <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
             className={`p-2 rounded-lg border transition-all ${
-                isSelectionMode 
-                ? 'bg-indigo-100 border-indigo-300 text-indigo-700' 
+                isSelectionMode
+                ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
                 : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
             title="Modalità Selezione Multipla"
@@ -640,7 +655,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </button>
 
           {selectedTables.length > 0 && (
-              <button 
+              <button
                 onClick={() => setSelectedTables([])}
                 className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-rose-500 transition-colors"
                 title="Deseleziona Tutto"
@@ -664,7 +679,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <div className="h-8 w-px bg-slate-200 mx-1"></div>
 
           {/* Delete Room Button (Safe location) */}
-          <button 
+          <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
             className="p-2 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition-colors"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
@@ -673,8 +688,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
              <Trash2 className="h-4 w-4 inline" />
           </button>
         </div>
+        )}
 
-        {selectedTables.length > 0 && (
+        {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
+        {canEdit && selectedTables.length > 0 && (
             <div className="flex items-center gap-2 border-l pl-4 border-slate-200 animate-in slide-in-from-right duration-200 shrink-0">
             <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Modifica</span>
             
