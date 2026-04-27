@@ -120,6 +120,37 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // ACTIVITY LOGS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                user_email VARCHAR(255),
+                user_name VARCHAR(255),
+                action VARCHAR(50) NOT NULL,
+                resource_type VARCHAR(50) NOT NULL,
+                resource_id INTEGER,
+                resource_name VARCHAR(255),
+                details JSONB,
+                status VARCHAR(20) DEFAULT 'SUCCESS',
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Create indexes for activity_logs (if not exists)
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_activity_logs_resource_type ON activity_logs(resource_type);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at DESC);
+        `);
+
+        // ============================================
         // USERS TABLE FOR AUTHENTICATION
         // ============================================
         await client.query(`
@@ -177,12 +208,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'settings:view'], ['OWNER', 'settings:full'],
                 ['OWNER', 'users:view'], ['OWNER', 'users:full'],
                 ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
+                ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
                 ['MANAGER', 'menu:view'], ['MANAGER', 'menu:full'],
                 ['MANAGER', 'reservations:view'], ['MANAGER', 'reservations:full'],
                 ['MANAGER', 'reports:view'],
+                ['MANAGER', 'logs:view'],
                 // WAITER
                 ['WAITER', 'dashboard:view'],
                 ['WAITER', 'floorplan:view'], ['WAITER', 'floorplan:update_status'],

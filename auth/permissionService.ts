@@ -16,7 +16,9 @@ export type Permission =
   | 'users:view'
   | 'users:full'
   | 'reports:view'
-  | 'reports:full';
+  | 'reports:full'
+  | 'logs:view'
+  | 'logs:full';
 
 // All available permissions grouped by feature
 export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] = [
@@ -26,7 +28,8 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },
-  { feature: 'Report', permissions: ['reports:view', 'reports:full'] }
+  { feature: 'Report', permissions: ['reports:view', 'reports:full'] },
+  { feature: 'Log Attività', permissions: ['logs:view', 'logs:full'] }
 ];
 
 // Cache for permissions (refreshed periodically)
