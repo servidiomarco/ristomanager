@@ -786,10 +786,11 @@ const App: React.FC = () => {
         </header>
 
         {view === ViewState.DASHBOARD && (
-          <Dashboard 
+          <Dashboard
             reservations={reservations}
             tables={tables}
             dishes={dishes}
+            rooms={rooms}
           />
         )}
 

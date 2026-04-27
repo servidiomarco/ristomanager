@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Reservation, Table, Dish } from '../types';
+import { Reservation, Table, Dish, Room, TableStatus } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Sparkles, Loader2, TrendingUp, Users, DollarSign, Utensils } from 'lucide-react';
@@ -9,11 +9,12 @@ interface DashboardProps {
   reservations: Reservation[];
   tables: Table[];
   dishes: Dish[];
+  rooms: Room[];
 }
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'];
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -131,36 +132,79 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         </div>
 
-        {/* Pie Chart */}
+        {/* Table Status by Room */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h2 className="text-lg font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="space-y-4 max-h-80 overflow-y-auto">
+            {rooms.map(room => {
+              const roomTables = tables.filter(t => t.room_id === room.id);
+              const freeCount = roomTables.filter(t => t.status === TableStatus.FREE).length;
+              const occupiedCount = roomTables.filter(t => t.status === TableStatus.OCCUPIED).length;
+              const reservedCount = roomTables.filter(t => t.status === TableStatus.RESERVED).length;
+              const dirtyCount = roomTables.filter(t => t.status === TableStatus.DIRTY).length;
+
+              return (
+                <div key={room.id} className="border border-slate-100 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium text-slate-700">{room.name}</h3>
+                    <span className="text-xs text-slate-400">{roomTables.length} tavoli</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {freeCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        {freeCount} Liberi
+                      </span>
+                    )}
+                    {occupiedCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
+                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                        {occupiedCount} Occupati
+                      </span>
+                    )}
+                    {reservedCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        {reservedCount} Prenotati
+                      </span>
+                    )}
+                    {dirtyCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+                        <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+                        {dirtyCount} Da pulire
+                      </span>
+                    )}
+                    {roomTables.length === 0 && (
+                      <span className="text-xs text-slate-400">Nessun tavolo</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {rooms.length === 0 && (
+              <div className="text-center text-slate-400 py-8">
+                Nessuna sala configurata
+              </div>
+            )}
           </div>
-          <div className="flex justify-center gap-4 mt-4">
-             {pieData.map((entry, index) => (
-               <div key={entry.name} className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
-                  <span className="text-sm text-slate-600">{entry.name}</span>
-               </div>
-             ))}
+          {/* Legend */}
+          <div className="flex flex-wrap justify-center gap-4 mt-4 pt-4 border-t border-slate-100">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              <span className="text-xs text-slate-600">Libero</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+              <span className="text-xs text-slate-600">Occupato</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              <span className="text-xs text-slate-600">Prenotato</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+              <span className="text-xs text-slate-600">Da pulire</span>
+            </div>
           </div>
         </div>
       </div>
