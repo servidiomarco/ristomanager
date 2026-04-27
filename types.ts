@@ -153,3 +153,57 @@ export interface TokenPayload {
   iat: number;
   exp: number;
 }
+
+// ============================================
+// ACTIVITY LOG TYPES
+// ============================================
+
+export enum ActivityAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+  LOGIN = 'LOGIN',
+  LOGOUT = 'LOGOUT'
+}
+
+export enum ResourceType {
+  RESERVATION = 'RESERVATION',
+  TABLE = 'TABLE',
+  ROOM = 'ROOM',
+  DISH = 'DISH',
+  BANQUET_MENU = 'BANQUET_MENU',
+  USER = 'USER',
+  AUTH = 'AUTH'
+}
+
+export interface ActivityLog {
+  id: number;
+  user_id: number | null;
+  user_email: string;
+  user_name: string;
+  action: ActivityAction;
+  resource_type: ResourceType;
+  resource_id?: number;
+  resource_name?: string;
+  details?: Record<string, any>;
+  status: 'SUCCESS' | 'ERROR';
+  error_message?: string;
+  created_at: string;
+}
+
+export interface LogFilters {
+  user_id?: number;
+  resource_type?: ResourceType;
+  action?: ActivityAction;
+  from_date?: string;
+  to_date?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ActivityStats {
+  total_logs: number;
+  logs_by_action: Record<string, number>;
+  logs_by_resource: Record<string, number>;
+  recent_users: { user_id: number; user_name: string; count: number }[];
+}

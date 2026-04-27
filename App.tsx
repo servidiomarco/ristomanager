@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users } from 'lucide-react';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -8,6 +8,7 @@ import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
+import { ActivityLogs } from './components/ActivityLogs';
 import { useSocket } from './hooks/useSocket';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
@@ -36,7 +37,7 @@ import {
 } from './services/apiService';
 
 const App: React.FC = () => {
-  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
 
@@ -66,6 +67,7 @@ const App: React.FC = () => {
   // User management modal state
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showRolePermissions, setShowRolePermissions] = useState(false);
+  const [showActivityLogs, setShowActivityLogs] = useState(false);
 
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
@@ -637,6 +639,14 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* Activity Logs Modal */}
+      {showActivityLogs && canViewLogs() && (
+        <ActivityLogs
+          isOpen={showActivityLogs}
+          onClose={() => setShowActivityLogs(false)}
+        />
+      )}
+
       {/* Connection Status Indicator */}
       <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
         isConnected
@@ -866,6 +876,28 @@ const App: React.FC = () => {
                     <div>
                       <h4 className="font-semibold text-slate-800">Permessi Ruoli</h4>
                       <p className="text-sm text-slate-500">Configura i permessi per ogni ruolo</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Monitoring Section - Only for users who can view logs */}
+            {canViewLogs() && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-slate-700 mb-4">Monitoraggio</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Activity Logs */}
+                  <button
+                    onClick={() => setShowActivityLogs(true)}
+                    className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200 hover:border-amber-300 hover:shadow-md transition-all text-left"
+                  >
+                    <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+                      <FileText className="w-6 h-6 text-amber-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800">Log Attività</h4>
+                      <p className="text-sm text-slate-500">Visualizza le operazioni degli utenti</p>
                     </div>
                   </button>
                 </div>

@@ -3,6 +3,7 @@ import { AuthService } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
 import { UserRole } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permissionService.js';
+import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 
 const router = Router();
 
@@ -24,6 +25,17 @@ router.post('/login', async (req: Request, res: Response) => {
     // Get user's permissions from database
     const permissions = await RolePermissionService.getPermissionsForRole(result.user.role);
 
+    // Log login activity
+    LogService.logActivity(
+      result.user.id,
+      result.user.email,
+      result.user.full_name,
+      ActivityAction.LOGIN,
+      ResourceType.AUTH,
+      result.user.id,
+      result.user.email
+    );
+
     res.json({
       user: result.user,
       permissions,
@@ -40,6 +52,17 @@ router.post('/login', async (req: Request, res: Response) => {
 router.post('/logout', authenticate, async (req: Request, res: Response) => {
   try {
     if (req.user) {
+      // Log logout activity
+      LogService.logActivity(
+        req.user.userId,
+        req.user.email,
+        req.user.email,
+        ActivityAction.LOGOUT,
+        ResourceType.AUTH,
+        req.user.userId,
+        req.user.email
+      );
+
       await AuthService.logout(req.user.userId);
     }
     res.json({ success: true });
@@ -128,6 +151,21 @@ router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Reque
     }
 
     const user = await AuthService.createUser(email, password, full_name, role);
+
+    // Log activity
+    if (req.user) {
+      LogService.logActivity(
+        req.user.userId,
+        req.user.email,
+        req.user.email,
+        ActivityAction.CREATE,
+        ResourceType.USER,
+        user.id,
+        user.email,
+        { role, full_name }
+      );
+    }
+
     res.status(201).json(user);
   } catch (error: any) {
     console.error('Create user error:', error);
@@ -160,6 +198,20 @@ router.put('/users/:id', authenticate, authorize(UserRole.OWNER), async (req: Re
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Log activity
+    if (req.user) {
+      LogService.logActivity(
+        req.user.userId,
+        req.user.email,
+        req.user.email,
+        ActivityAction.UPDATE,
+        ResourceType.USER,
+        userId,
+        user.email,
+        { role, full_name, is_active }
+      );
+    }
+
     res.json(user);
   } catch (error: any) {
     console.error('Update user error:', error);
@@ -180,10 +232,27 @@ router.delete('/users/:id', authenticate, authorize(UserRole.OWNER), async (req:
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
+    // Get user email before deleting
+    const userToDelete = await AuthService.getUserById(userId);
+    const userEmail = userToDelete?.email;
+
     const deleted = await AuthService.deleteUser(userId);
 
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Log activity
+    if (req.user) {
+      LogService.logActivity(
+        req.user.userId,
+        req.user.email,
+        req.user.email,
+        ActivityAction.DELETE,
+        ResourceType.USER,
+        userId,
+        userEmail
+      );
     }
 
     res.status(204).send();

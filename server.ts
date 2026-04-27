@@ -8,7 +8,9 @@ import pool, { createSchema } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
+import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -52,6 +54,11 @@ app.get('/health', (req, res) => {
 // AUTHENTICATION ROUTES
 // ============================================
 app.use('/auth', authRoutes);
+
+// ============================================
+// ACTIVITY LOGS ROUTES
+// ============================================
+app.use('/activity-logs', logRoutes);
 
 // ============================================
 // WHATSAPP WEBHOOK ENDPOINTS (Vonage)
@@ -124,6 +131,20 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         );
         const newReservation = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.RESERVATION,
+                newReservation.id,
+                customer_name,
+                { guests, reservation_time, shift }
+            );
+        }
+
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
@@ -145,6 +166,20 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         );
         const updatedReservation = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.RESERVATION,
+                parseInt(id, 10),
+                customer_name,
+                { guests, reservation_time, shift, payment_status, arrival_status }
+            );
+        }
+
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationUpdated(updatedReservation, socketId);
@@ -159,7 +194,25 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
 app.delete('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get reservation name before deleting
+        const existing = await pool.query('SELECT customer_name FROM reservations WHERE id = $1', [id]);
+        const resourceName = existing.rows[0]?.customer_name;
+
         await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
+
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.RESERVATION,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
 
         // Broadcast to all connected clients except the one who deleted it
         const socketId = req.headers['x-socket-id'] as string;
@@ -240,6 +293,20 @@ app.post('/tables', authenticate, requirePermission('floorplan:full'), async (re
         );
         const newTable = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.TABLE,
+                newTable.id,
+                name,
+                { shape, seats, room_id }
+            );
+        }
+
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastTableCreated(newTable, socketId);
@@ -296,6 +363,20 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
 
         console.log('Updated table merged_with:', updatedTable.merged_with);
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.TABLE,
+                parseInt(id, 10),
+                updatedTable.name,
+                req.body
+            );
+        }
+
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastTableUpdated(updatedTable, socketId);
@@ -310,7 +391,25 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
 app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get table name before deleting
+        const existing = await pool.query('SELECT name FROM tables WHERE id = $1', [id]);
+        const resourceName = existing.rows[0]?.name;
+
         await pool.query('DELETE FROM tables WHERE id = $1', [id]);
+
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.TABLE,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
 
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastTableDeleted(Number(id));
@@ -343,6 +442,20 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
         );
         const newRoom = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.ROOM,
+                newRoom.id,
+                name,
+                { width, height }
+            );
+        }
+
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastRoomCreated(newRoom);
 
@@ -356,7 +469,25 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
 app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get room name before deleting
+        const existing = await pool.query('SELECT name FROM rooms WHERE id = $1', [id]);
+        const resourceName = existing.rows[0]?.name;
+
         await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.ROOM,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
 
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastRoomDeleted(Number(id));
@@ -389,6 +520,20 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         );
         const newDish = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.DISH,
+                newDish.id,
+                name,
+                { price, category }
+            );
+        }
+
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastDishCreated(newDish);
 
@@ -409,6 +554,20 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         );
         const updatedDish = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.DISH,
+                parseInt(id, 10),
+                name,
+                { price, category }
+            );
+        }
+
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastDishUpdated(updatedDish);
 
@@ -422,7 +581,25 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
 app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get dish name before deleting
+        const existing = await pool.query('SELECT name FROM dishes WHERE id = $1', [id]);
+        const resourceName = existing.rows[0]?.name;
+
         await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
+
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.DISH,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
 
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastDishDeleted(Number(id));
@@ -455,6 +632,20 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         );
         const newMenu = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.BANQUET_MENU,
+                newMenu.id,
+                name,
+                { price_per_person, dish_count: dish_ids?.length || 0 }
+            );
+        }
+
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetCreated(newMenu);
 
@@ -475,6 +666,20 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         );
         const updatedMenu = result.rows[0];
 
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                name,
+                { price_per_person, dish_count: dish_ids?.length || 0 }
+            );
+        }
+
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetUpdated(updatedMenu);
 
@@ -488,7 +693,25 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
 app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get menu name before deleting
+        const existing = await pool.query('SELECT name FROM banquet_menus WHERE id = $1', [id]);
+        const resourceName = existing.rows[0]?.name;
+
         await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);
+
+        // Log activity
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
 
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetDeleted(Number(id));

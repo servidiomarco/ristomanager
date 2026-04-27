@@ -26,6 +26,7 @@ interface AuthContextType {
   canAccessView: (view: ViewState) => boolean;
   getAccessibleViews: () => ViewState[];
   canManageUsers: () => boolean;
+  canViewLogs: () => boolean;
   getAccessToken: () => string | null;
 }
 
@@ -114,6 +115,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return permissions.includes('users:full');
   }, [permissions]);
 
+  const canViewLogs = useCallback((): boolean => {
+    return permissions.includes('logs:view');
+  }, [permissions]);
+
   const getAccessToken = useCallback((): string | null => {
     return authApiService.getAccessToken();
   }, []);
@@ -129,6 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     canAccessView,
     getAccessibleViews,
     canManageUsers,
+    canViewLogs,
     getAccessToken
   };
 
