@@ -4,6 +4,18 @@ import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2
 import { sendWhatsAppConfirmation } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 
+// Helper to format datetime without timezone conversion
+const formatDateTime = (isoString: string): string => {
+  // Parse the ISO string directly without timezone conversion
+  const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (match) {
+    const [, year, month, day, hour, minute] = match;
+    return `${day}/${month}/${year}, ${hour}:${minute}`;
+  }
+  // Fallback to original behavior
+  return new Date(isoString).toLocaleString();
+};
+
 interface ReservationListProps {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
@@ -591,7 +603,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                                 <div className="flex flex-wrap gap-4 text-sm text-slate-500">
                                     <div className="flex items-center gap-1">
-                                        <Clock className="h-4 w-4" /> {new Date(res.reservation_time).toLocaleString()}
+                                        <Clock className="h-4 w-4" /> {formatDateTime(res.reservation_time)}
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <Users className="h-4 w-4" /> {res.guests} Ospiti
