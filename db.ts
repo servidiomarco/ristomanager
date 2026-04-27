@@ -234,6 +234,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             console.log('Default role permissions created');
         }
 
+        // Add logs permissions if they don't exist (migration for existing databases)
+        const logsPermissions = [
+            ['OWNER', 'logs:view'],
+            ['OWNER', 'logs:full'],
+            ['MANAGER', 'logs:view']
+        ];
+        for (const [role, permission] of logsPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {
