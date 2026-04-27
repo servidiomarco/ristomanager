@@ -28,173 +28,199 @@ const getHeaders = (includeContentType = true): HeadersInit => {
   return headers;
 };
 
+// Fetch with automatic token refresh on 401
+const fetchWithAuth = async (
+  url: string,
+  options: RequestInit = {},
+  retried = false
+): Promise<Response> => {
+  const response = await fetch(url, options);
+
+  // If unauthorized and not already retried, try to refresh token
+  if (response.status === 401 && !retried) {
+    console.log('Token expired, attempting refresh...');
+    const refreshed = await authApiService.refreshToken();
+
+    if (refreshed) {
+      console.log('Token refreshed successfully, retrying request...');
+      // Update the authorization header with new token
+      const newHeaders = { ...options.headers } as Record<string, string>;
+      newHeaders['Authorization'] = `Bearer ${refreshed.accessToken}`;
+
+      // Retry the request with new token
+      return fetchWithAuth(url, { ...options, headers: newHeaders }, true);
+    }
+    // If refresh failed, the authApiService will trigger session expired
+  }
+
+  return response;
+};
+
+// Helper to make authenticated requests with error handling
+const apiRequest = async <T>(
+  url: string,
+  options: RequestInit = {},
+  expectJson = true
+): Promise<T> => {
+  const response = await fetchWithAuth(url, options);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+  }
+
+  if (expectJson) {
+    return response.json();
+  }
+
+  return undefined as T;
+};
+
 export const getReservations = async (): Promise<Reservation[]> => {
-  const response = await fetch(`${API_URL}/reservations`, {
+  return apiRequest<Reservation[]>(`${API_URL}/reservations`, {
     headers: getHeaders(false)
   });
-  return response.json();
 };
 
 export const createReservation = async (reservation: Omit<Reservation, 'id'>): Promise<Reservation> => {
-  const response = await fetch(`${API_URL}/reservations`, {
+  return apiRequest<Reservation>(`${API_URL}/reservations`, {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
   });
-  return response.json();
 };
 
 export const updateReservation = async (id: number, reservation: Partial<Reservation>): Promise<Reservation> => {
-  const response = await fetch(`${API_URL}/reservations/${id}`, {
+  return apiRequest<Reservation>(`${API_URL}/reservations/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
   });
-  return response.json();
 };
 
 export const deleteReservation = async (id: number): Promise<void> => {
-  await fetch(`${API_URL}/reservations/${id}`, {
+  return apiRequest<void>(`${API_URL}/reservations/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
-  });
+  }, false);
 };
 
 export const getTables = async (): Promise<Table[]> => {
-  const response = await fetch(`${API_URL}/tables`, {
+  return apiRequest<Table[]>(`${API_URL}/tables`, {
     headers: getHeaders(false)
   });
-  return response.json();
 };
 
 export const createTable = async (table: Omit<Table, 'id'>): Promise<Table> => {
-    const response = await fetch(`${API_URL}/tables`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(table),
-    });
-    return response.json();
+  return apiRequest<Table>(`${API_URL}/tables`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(table),
+  });
 };
 
 export const updateTable = async (id: number, table: Partial<Table>): Promise<Table> => {
   console.log('apiService.updateTable - Sending to backend:', id, 'Data:', JSON.stringify(table, null, 2));
 
-  const response = await fetch(`${API_URL}/tables/${id}`, {
+  const result = await apiRequest<Table>(`${API_URL}/tables/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(table),
   });
 
-  const result = await response.json();
   console.log('apiService.updateTable - Backend returned:', JSON.stringify(result, null, 2));
-
   return result;
 };
 
 export const deleteTable = async (id: number): Promise<void> => {
-  await fetch(`${API_URL}/tables/${id}`, {
+  return apiRequest<void>(`${API_URL}/tables/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
-  });
+  }, false);
 };
 
 export const getRooms = async (): Promise<Room[]> => {
-  const response = await fetch(`${API_URL}/rooms`, {
+  return apiRequest<Room[]>(`${API_URL}/rooms`, {
     headers: getHeaders(false)
   });
-  return response.json();
 };
 
 export const createRoom = async (room: Omit<Room, 'id'>): Promise<Room> => {
-    const response = await fetch(`${API_URL}/rooms`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(room),
-    });
-    return response.json();
+  return apiRequest<Room>(`${API_URL}/rooms`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(room),
+  });
 };
 
 export const deleteRoom = async (id: number): Promise<void> => {
-    await fetch(`${API_URL}/rooms/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(false),
-    });
+  return apiRequest<void>(`${API_URL}/rooms/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
 };
 
 export const getDishes = async (): Promise<Dish[]> => {
-    const response = await fetch(`${API_URL}/dishes`, {
-        headers: getHeaders(false)
-    });
-    return response.json();
+  return apiRequest<Dish[]>(`${API_URL}/dishes`, {
+    headers: getHeaders(false)
+  });
 };
 
 export const createDish = async (dish: Omit<Dish, 'id'>): Promise<Dish> => {
-    const response = await fetch(`${API_URL}/dishes`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(dish),
-    });
-    return response.json();
+  return apiRequest<Dish>(`${API_URL}/dishes`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(dish),
+  });
 };
 
 export const updateDish = async (id: number, dish: Partial<Dish>): Promise<Dish> => {
-    const response = await fetch(`${API_URL}/dishes/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(dish),
-    });
-    return response.json();
+  return apiRequest<Dish>(`${API_URL}/dishes/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(dish),
+  });
 };
 
 export const deleteDish = async (id: number): Promise<void> => {
-    await fetch(`${API_URL}/dishes/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(false),
-    });
+  return apiRequest<void>(`${API_URL}/dishes/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
 };
 
 export const getBanquetMenus = async (): Promise<BanquetMenu[]> => {
-    const response = await fetch(`${API_URL}/banquet-menus`, {
-        headers: getHeaders(false)
-    });
-    return response.json();
+  return apiRequest<BanquetMenu[]>(`${API_URL}/banquet-menus`, {
+    headers: getHeaders(false)
+  });
 };
 
 export const createBanquetMenu = async (menu: Omit<BanquetMenu, 'id'>): Promise<BanquetMenu> => {
-    const response = await fetch(`${API_URL}/banquet-menus`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(menu),
-    });
-    return response.json();
+  return apiRequest<BanquetMenu>(`${API_URL}/banquet-menus`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(menu),
+  });
 };
 
 export const updateBanquetMenu = async (id: number, menu: Partial<BanquetMenu>): Promise<BanquetMenu> => {
-    const response = await fetch(`${API_URL}/banquet-menus/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(menu),
-    });
-    return response.json();
+  return apiRequest<BanquetMenu>(`${API_URL}/banquet-menus/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(menu),
+  });
 };
 
 export const deleteBanquetMenu = async (id: number): Promise<void> => {
-    await fetch(`${API_URL}/banquet-menus/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(false),
-    });
+  return apiRequest<void>(`${API_URL}/banquet-menus/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
 };
 
 export const sendWhatsAppConfirmation = async (reservationId: number): Promise<{ success: boolean; message: string }> => {
-    const response = await fetch(`${API_URL}/reservations/${reservationId}/confirm-whatsapp`, {
-        method: 'POST',
-        headers: getHeaders(),
-    });
-
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to send WhatsApp confirmation' }));
-        throw new Error(errorData.error || 'Failed to send WhatsApp confirmation');
-    }
-
-    return response.json();
+  return apiRequest<{ success: boolean; message: string }>(`${API_URL}/reservations/${reservationId}/confirm-whatsapp`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
 };

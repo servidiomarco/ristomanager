@@ -8,6 +8,9 @@ const REFRESH_TOKEN_KEY = 'ristomanager_refresh_token';
 const USER_KEY = 'ristomanager_user';
 const PERMISSIONS_KEY = 'ristomanager_permissions';
 
+// Session expired callback type
+type SessionExpiredCallback = () => void;
+
 export interface AuthResponse {
   user: User;
   permissions: string[];
@@ -21,6 +24,21 @@ export interface RefreshResponse {
 }
 
 class AuthApiService {
+  private sessionExpiredCallbacks: Set<SessionExpiredCallback> = new Set();
+  private isRefreshing: boolean = false;
+  private refreshPromise: Promise<boolean> | null = null;
+
+  // Register a callback for session expired events
+  onSessionExpired(callback: SessionExpiredCallback): () => void {
+    this.sessionExpiredCallbacks.add(callback);
+    return () => this.sessionExpiredCallbacks.delete(callback);
+  }
+
+  // Trigger session expired callbacks
+  private triggerSessionExpired(): void {
+    this.sessionExpiredCallbacks.forEach(callback => callback());
+  }
+
   // Get stored access token
   getAccessToken(): string | null {
     return localStorage.getItem(ACCESS_TOKEN_KEY);
@@ -110,7 +128,7 @@ class AuthApiService {
     this.clearAuth();
   }
 
-  // Refresh access token
+  // Refresh access token (with deduplication for concurrent calls)
   async refreshToken(): Promise<RefreshResponse | null> {
     const refreshToken = this.getRefreshToken();
 
@@ -118,31 +136,60 @@ class AuthApiService {
       return null;
     }
 
-    try {
-      const response = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ refreshToken })
-      });
-
-      if (!response.ok) {
-        this.clearAuth();
-        return null;
+    // If already refreshing, wait for the existing promise
+    if (this.isRefreshing && this.refreshPromise) {
+      const success = await this.refreshPromise;
+      if (success) {
+        return {
+          accessToken: this.getAccessToken()!,
+          refreshToken: this.getRefreshToken()!
+        };
       }
-
-      const data: RefreshResponse = await response.json();
-
-      // Update stored tokens
-      localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
-      localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
-
-      return data;
-    } catch {
-      this.clearAuth();
       return null;
     }
+
+    this.isRefreshing = true;
+    this.refreshPromise = (async (): Promise<boolean> => {
+      try {
+        const response = await fetch(`${API_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ refreshToken })
+        });
+
+        if (!response.ok) {
+          this.clearAuth();
+          this.triggerSessionExpired();
+          return false;
+        }
+
+        const data: RefreshResponse = await response.json();
+
+        // Update stored tokens
+        localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
+        localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+
+        return true;
+      } catch {
+        this.clearAuth();
+        this.triggerSessionExpired();
+        return false;
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+
+    const success = await this.refreshPromise;
+    if (success) {
+      return {
+        accessToken: this.getAccessToken()!,
+        refreshToken: this.getRefreshToken()!
+      };
+    }
+    return null;
   }
 
   // Get current user from API
