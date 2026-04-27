@@ -40,7 +40,7 @@ const App: React.FC = () => {
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
 
-  // Set initial view based on user's accessible views
+  // Redirect to first accessible view when user changes or doesn't have access to current view
   useEffect(() => {
     if (isAuthenticated && user) {
       const accessibleViews = getAccessibleViews();
@@ -48,7 +48,7 @@ const App: React.FC = () => {
         setView(accessibleViews[0]);
       }
     }
-  }, [isAuthenticated, user, getAccessibleViews]);
+  }, [isAuthenticated, user]);
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
