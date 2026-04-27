@@ -97,11 +97,13 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 // GET /auth/users - List all users
 router.get('/users', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
   try {
+    console.log('Fetching all users...');
     const users = await AuthService.getAllUsers();
+    console.log(`Found ${users.length} users`);
     res.json(users);
-  } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (error: any) {
+    console.error('Get users error:', error.message, error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
