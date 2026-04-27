@@ -6,9 +6,11 @@ const API_URL = "https://ristomanager-production.up.railway.app";
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
 const REFRESH_TOKEN_KEY = 'ristomanager_refresh_token';
 const USER_KEY = 'ristomanager_user';
+const PERMISSIONS_KEY = 'ristomanager_permissions';
 
 export interface AuthResponse {
   user: User;
+  permissions: string[];
   accessToken: string;
   refreshToken: string;
 }
@@ -40,11 +42,12 @@ class AuthApiService {
     }
   }
 
-  // Store tokens and user
-  private storeAuth(accessToken: string, refreshToken: string, user: User): void {
+  // Store tokens, user and permissions
+  private storeAuth(accessToken: string, refreshToken: string, user: User, permissions: string[]): void {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
   }
 
   // Clear stored auth data
@@ -52,6 +55,18 @@ class AuthApiService {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(PERMISSIONS_KEY);
+  }
+
+  // Get stored permissions
+  getPermissions(): string[] {
+    const permissionsJson = localStorage.getItem(PERMISSIONS_KEY);
+    if (!permissionsJson) return [];
+    try {
+      return JSON.parse(permissionsJson);
+    } catch {
+      return [];
+    }
   }
 
   // Login
@@ -70,7 +85,7 @@ class AuthApiService {
     }
 
     const data: AuthResponse = await response.json();
-    this.storeAuth(data.accessToken, data.refreshToken, data.user);
+    this.storeAuth(data.accessToken, data.refreshToken, data.user, data.permissions || []);
     return data;
   }
 
@@ -156,8 +171,13 @@ class AuthApiService {
         return null;
       }
 
-      const user: User = await response.json();
+      const data = await response.json();
+      const user: User = { ...data };
+      delete (user as any).permissions;
       localStorage.setItem(USER_KEY, JSON.stringify(user));
+      if (data.permissions) {
+        localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(data.permissions));
+      }
       return user;
     } catch {
       return null;

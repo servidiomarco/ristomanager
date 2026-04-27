@@ -1,16 +1,28 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
-import { PermissionService, Permission } from '../auth/permissions';
 import { socketClient } from '../services/socketClient';
+
+// Permission type (must match backend)
+type Permission = string;
+
+// View to permission mapping
+const VIEW_PERMISSIONS: Record<ViewState, string> = {
+  [ViewState.DASHBOARD]: 'dashboard:view',
+  [ViewState.FLOOR_PLAN]: 'floorplan:view',
+  [ViewState.MENU]: 'menu:view',
+  [ViewState.RESERVATIONS]: 'reservations:view',
+  [ViewState.SETTINGS]: 'settings:view'
+};
 
 interface AuthContextType {
   user: User | null;
+  permissions: string[];
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
-  hasPermission: (permission: Permission) => boolean;
+  hasPermission: (permission: string) => boolean;
   canAccessView: (view: ViewState) => boolean;
   getAccessibleViews: () => ViewState[];
   canManageUsers: () => boolean;
@@ -21,6 +33,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Check for existing auth on mount
@@ -28,11 +41,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initAuth = async () => {
       try {
         const storedUser = authApiService.getUser();
+        const storedPermissions = authApiService.getPermissions();
+
         if (storedUser && authApiService.isAuthenticated()) {
-          // Verify token is still valid
+          // Verify token is still valid and get fresh permissions
           const currentUser = await authApiService.getCurrentUser();
           if (currentUser) {
             setUser(currentUser);
+            // Get fresh permissions from storage (updated by getCurrentUser)
+            setPermissions(authApiService.getPermissions());
             // Connect socket for already authenticated user
             socketClient.connect();
           } else {
@@ -52,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (credentials: LoginCredentials) => {
     const response = await authApiService.login(credentials);
     setUser(response.user);
+    setPermissions(response.permissions || []);
     // Reconnect socket with the new auth token
     socketClient.reconnectWithToken();
   }, []);
@@ -59,29 +77,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(async () => {
     await authApiService.logout();
     setUser(null);
+    setPermissions([]);
     // Disconnect socket on logout
     socketClient.disconnect();
   }, []);
 
-  const hasPermission = useCallback((permission: Permission): boolean => {
-    if (!user) return false;
-    return PermissionService.hasPermission(user.role, permission);
-  }, [user]);
+  const hasPermission = useCallback((permission: string): boolean => {
+    return permissions.includes(permission);
+  }, [permissions]);
 
   const canAccessView = useCallback((view: ViewState): boolean => {
-    if (!user) return false;
-    return PermissionService.canAccessView(user.role, view);
-  }, [user]);
+    const requiredPermission = VIEW_PERMISSIONS[view];
+    if (!requiredPermission) return false;
+    return permissions.includes(requiredPermission);
+  }, [permissions]);
 
   const getAccessibleViews = useCallback((): ViewState[] => {
-    if (!user) return [];
-    return PermissionService.getAccessibleViews(user.role);
-  }, [user]);
+    return Object.values(ViewState).filter(view => canAccessView(view));
+  }, [canAccessView]);
 
   const canManageUsers = useCallback((): boolean => {
-    if (!user) return false;
-    return PermissionService.canManageUsers(user.role);
-  }, [user]);
+    return permissions.includes('users:full');
+  }, [permissions]);
 
   const getAccessToken = useCallback((): string | null => {
     return authApiService.getAccessToken();
@@ -89,6 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value: AuthContextType = {
     user,
+    permissions,
     isAuthenticated: !!user,
     isLoading,
     login,
