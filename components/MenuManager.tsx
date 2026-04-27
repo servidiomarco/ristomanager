@@ -13,6 +13,7 @@ interface MenuManagerProps {
   onAddBanquetMenu: (menu: Omit<BanquetMenu, 'id'>) => void;
   onUpdateBanquetMenu: (id: number, menu: Partial<BanquetMenu>) => void;
   onDeleteBanquetMenu: (id: number) => void;
+  canEdit?: boolean;
 }
 
 export const MenuManager: React.FC<MenuManagerProps> = ({
@@ -23,7 +24,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onDeleteDish,
     onAddBanquetMenu,
     onUpdateBanquetMenu,
-    onDeleteBanquetMenu
+    onDeleteBanquetMenu,
+    canEdit = true
 }) => {
   console.log("MenuManager: banquetMenus prop received:", banquetMenus);
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
@@ -165,16 +167,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <h1 className="text-3xl font-bold text-slate-800">Gestione Menu & Banchetti</h1>
           <p className="text-slate-500">Configura i piatti e crea proposte per eventi.</p>
         </div>
+        {canEdit && (
         <div className="flex gap-2">
             {activeTab === 'DISHES' ? (
-                 <button 
+                 <button
                  onClick={() => setIsDishFormOpen(true)}
                  className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-lg shadow-indigo-200"
                >
                  <Plus className="h-5 w-5" /> Nuovo Piatto
                </button>
             ) : (
-                <button 
+                <button
                 onClick={() => setIsBanquetFormOpen(true)}
                 className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-lg shadow-indigo-200"
               >
@@ -182,6 +185,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </button>
             )}
         </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -231,7 +235,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Categoria</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Prezzo</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Allergeni</th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Azioni</th>
+                    {canEdit && <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Azioni</th>}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -258,6 +262,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             )) : <span className="text-xs text-slate-400">-</span>}
                         </div>
                         </td>
+                        {canEdit && (
                         <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                             <button
@@ -274,6 +279,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </button>
                         </div>
                         </td>
+                        )}
                     </tr>
                     ))}
                 </tbody>
@@ -286,6 +292,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
+                      {canEdit && (
                       <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                               onClick={() => handleEditBanquet(menu)}
@@ -300,6 +307,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               <Trash2 className="h-5 w-5" />
                           </button>
                       </div>
+                      )}
                       <div className="flex justify-between items-start mb-4">
                           <div>
                               <h3 className="font-bold text-lg text-slate-800">{menu.name}</h3>
