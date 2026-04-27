@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, AlertTriangle, StickyNote } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
 
 interface ReservationListProps {
@@ -58,6 +58,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
+  const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
+  const [showAllergensSection, setShowAllergensSection] = useState(false);
+  const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
 
@@ -182,6 +185,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
       setSelectedAllergens(existingAllergens);
 
+      // Extract quick notes
+      const existingQuickNotes = QUICK_NOTES.filter(note =>
+        res.notes?.toLowerCase().includes(note.toLowerCase())
+      );
+      setSelectedQuickNotes(existingQuickNotes);
+
+      // Show sections if they have content
+      setShowAllergensSection(existingAllergens.length > 0);
+      setShowNotesSection(existingQuickNotes.length > 0 || (res.notes && res.notes.length > 0));
+
       const table = tables.find(t => t.id === res.table_id);
       setModalRoomFilter(table ? table.room_id : 'ALL');
       setIsEditing(true);
@@ -193,6 +206,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           onDeleteReservation(id);
       }
   }
+
+  const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
 
   const handleOpenNew = () => {
       setFormData({
@@ -208,6 +223,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         notes: ''
       });
       setSelectedAllergens([]);
+      setSelectedQuickNotes([]);
+      setShowAllergensSection(false);
+      setShowNotesSection(false);
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
@@ -351,12 +369,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
 
-      // Combine allergens with notes
+      // Combine allergens, quick notes, and additional notes
       const allergensText = selectedAllergens.length > 0
           ? `Intolleranze: ${selectedAllergens.join(', ')}`
           : '';
+      const quickNotesText = selectedQuickNotes.length > 0
+          ? selectedQuickNotes.join(', ')
+          : '';
       const additionalNotes = formData.notes || '';
-      const combinedNotes = [allergensText, additionalNotes].filter(Boolean).join('\n');
+      const combinedNotes = [allergensText, quickNotesText, additionalNotes].filter(Boolean).join(' | ');
 
       const dataToSave = {
           ...formData,
@@ -891,66 +912,157 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <label className="text-sm sm:text-base text-slate-700 font-medium cursor-pointer select-none">Invia promemoria automatico 24h prima</label>
                             </div>
 
-                            {/* Allergens/Intolerances Section */}
+                            {/* Expandable Sections */}
                             <div className="space-y-3">
-                                <label className="block text-xs font-medium text-slate-500 uppercase">Intolleranze / Allergie</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
-                                        const isSelected = selectedAllergens.includes(allergen);
-                                        return (
-                                            <button
-                                                key={allergen}
-                                                type="button"
-                                                onClick={() => {
-                                                    setSelectedAllergens(prev =>
-                                                        isSelected
-                                                            ? prev.filter(a => a !== allergen)
-                                                            : [...prev, allergen]
-                                                    );
-                                                }}
-                                                className={`flex items-center gap-2 p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left ${
-                                                    isSelected
-                                                        ? 'border-red-400 bg-red-50 text-red-700'
-                                                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                                                }`}
-                                            >
-                                                <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                                                    isSelected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'
-                                                }`}>
-                                                    {isSelected && <Check className="text-white w-2.5 h-2.5 sm:w-3 sm:h-3" />}
-                                                </div>
-                                                <span className="text-xs sm:text-sm font-medium truncate">{allergen}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                {selectedAllergens.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 pt-1">
-                                        {selectedAllergens.map(allergen => (
-                                            <span key={allergen} className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
-                                                {allergen}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
-                                                    className="hover:text-red-900"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                                {/* Allergens Button */}
+                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAllergensSection(!showAllergensSection)}
+                                        className={`w-full flex items-center justify-between p-4 transition-all ${
+                                            showAllergensSection ? 'bg-red-50' : 'bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                                selectedAllergens.length > 0 ? 'bg-red-100' : 'bg-slate-100'
+                                            }`}>
+                                                <AlertTriangle className={`w-5 h-5 ${selectedAllergens.length > 0 ? 'text-red-600' : 'text-slate-500'}`} />
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="font-semibold text-slate-800">Intolleranze</span>
+                                                {selectedAllergens.length > 0 && (
+                                                    <p className="text-xs text-red-600 font-medium">{selectedAllergens.length} selezionate</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
+                                    </button>
 
-                            {/* Additional Notes */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase">Note Aggiuntive</label>
-                                <textarea
-                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none h-20 sm:h-24 text-base bg-white resize-none transition-all"
-                                    placeholder="Seggiolone, compleanno, richieste speciali..."
-                                    value={formData.notes || ''}
-                                    onChange={e => setFormData({...formData, notes: e.target.value})}
-                                />
+                                    {showAllergensSection && (
+                                        <div className="p-4 pt-0 space-y-3 border-t border-slate-100 bg-white">
+                                            <div className="grid grid-cols-2 gap-2 pt-3">
+                                                {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
+                                                    const isSelected = selectedAllergens.includes(allergen);
+                                                    return (
+                                                        <button
+                                                            key={allergen}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedAllergens(prev =>
+                                                                    isSelected
+                                                                        ? prev.filter(a => a !== allergen)
+                                                                        : [...prev, allergen]
+                                                                );
+                                                            }}
+                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                                isSelected
+                                                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                            }`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                                                isSelected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                            </div>
+                                                            <span className="text-sm font-medium truncate">{allergen}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {selectedAllergens.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5 pt-2">
+                                                    {selectedAllergens.map(allergen => (
+                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                                                            {allergen}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
+                                                                className="hover:text-red-900"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Notes Button */}
+                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowNotesSection(!showNotesSection)}
+                                        className={`w-full flex items-center justify-between p-4 transition-all ${
+                                            showNotesSection ? 'bg-amber-50' : 'bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                                (selectedQuickNotes.length > 0 || formData.notes) ? 'bg-amber-100' : 'bg-slate-100'
+                                            }`}>
+                                                <StickyNote className={`w-5 h-5 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-amber-600' : 'text-slate-500'}`} />
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="font-semibold text-slate-800">Note</span>
+                                                {selectedQuickNotes.length > 0 && (
+                                                    <p className="text-xs text-amber-600 font-medium">{selectedQuickNotes.join(', ')}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {showNotesSection && (
+                                        <div className="p-4 pt-0 space-y-4 border-t border-slate-100 bg-white">
+                                            {/* Quick Notes */}
+                                            <div className="grid grid-cols-2 gap-2 pt-3">
+                                                {QUICK_NOTES.map(note => {
+                                                    const isSelected = selectedQuickNotes.includes(note);
+                                                    return (
+                                                        <button
+                                                            key={note}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedQuickNotes(prev =>
+                                                                    isSelected
+                                                                        ? prev.filter(n => n !== note)
+                                                                        : [...prev, note]
+                                                                );
+                                                            }}
+                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                                isSelected
+                                                                    ? 'border-amber-400 bg-amber-50 text-amber-700'
+                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                            }`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                                                isSelected ? 'bg-amber-500 border-amber-500' : 'border-slate-300 bg-white'
+                                                            }`}>
+                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                            </div>
+                                                            <span className="text-sm font-medium truncate">{note}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Free text notes */}
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase">Altre note</label>
+                                                <textarea
+                                                    className="w-full rounded-xl border-2 border-slate-200 p-3 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none h-20 text-base bg-white resize-none transition-all"
+                                                    placeholder="Richieste speciali..."
+                                                    value={formData.notes || ''}
+                                                    onChange={e => setFormData({...formData, notes: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
