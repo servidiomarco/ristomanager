@@ -839,13 +839,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             {/* Date & Shift */}
                             <div className="space-y-4">
-                                <div>
+                                <div className="overflow-hidden">
                                     <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data e Ora</label>
                                     <div className="relative">
                                         <input
                                             type="datetime-local"
                                             required
-                                            className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
+                                            className="w-full max-w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all box-border"
                                             value={formData.reservation_time}
                                             onChange={e => setFormData({...formData, reservation_time: e.target.value})}
                                         />
