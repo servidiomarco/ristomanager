@@ -1217,10 +1217,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         {isOccupied && occupiedReservation && (
                                                             <>
                                                                 <div className="absolute inset-0 flex items-center justify-center bg-red-100/50 rounded-xl">
-                                                                    <span className="text-[10px] font-bold text-red-700 bg-white/80 px-2 py-0.5 rounded shadow-sm border border-red-200 -mt-16">OCCUPATO</span>
+                                                                    <span className="text-[11px] sm:text-xs font-bold text-red-700 bg-white/90 px-2.5 py-1 rounded-lg shadow-sm border border-red-200 -mt-14 sm:-mt-16">OCCUPATO</span>
                                                                 </div>
-                                                                <div className="absolute -bottom-2.5 w-full flex justify-center">
-                                                                    <div className="bg-red-600 text-white text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-sm max-w-[100%] truncate border border-white -ml-6">
+                                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex justify-center">
+                                                                    <div className="bg-red-600 text-white text-[11px] sm:text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap shadow-md max-w-[120px] truncate border-2 border-white">
                                                                         {occupiedReservation.customer_name}
                                                                     </div>
                                                                 </div>
