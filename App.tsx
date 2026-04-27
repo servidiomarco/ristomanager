@@ -36,9 +36,19 @@ import {
 } from './services/apiService';
 
 const App: React.FC = () => {
-  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+
+  // Redirect to first accessible view when user changes or doesn't have access to current view
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      const accessibleViews = getAccessibleViews();
+      if (accessibleViews.length > 0 && !accessibleViews.includes(view)) {
+        setView(accessibleViews[0]);
+      }
+    }
+  }, [isAuthenticated, user]);
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
