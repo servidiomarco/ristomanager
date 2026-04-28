@@ -861,7 +861,12 @@ app.post('/todos', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('todo:created', newTodo, socketId);
+        console.log('📝 Broadcasting todo:created', { todoId: newTodo.id, socketService: !!socketService });
+        if (socketService) {
+            socketService.broadcastToAll('todo:created', newTodo, socketId);
+        } else {
+            console.error('📝 socketService is undefined, cannot broadcast!');
+        }
 
         res.status(201).json(newTodo);
     } catch (err) {
