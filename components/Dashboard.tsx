@@ -278,9 +278,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Socket.IO real-time updates for shopping
   useEffect(() => {
     const socket = socketClient.getSocket();
+    console.log('Shopping socket setup - socket:', socket?.id, 'connected:', socket?.connected, 'socketConnected state:', socketConnected);
     if (!socket) return;
 
     const handleShoppingCreated = (item: ShoppingItem) => {
+      console.log('Socket: shopping:created received', item, 'selectedDate:', selectedDateStr);
       // Only add if it's for the currently selected date
       if (item.date === selectedDateStr) {
         setShoppingItems(prev => {
@@ -291,14 +293,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     };
 
     const handleShoppingUpdated = (item: ShoppingItem) => {
+      console.log('Socket: shopping:updated received', item);
       setShoppingItems(prev => prev.map(i => i.id === item.id ? item : i));
     };
 
     const handleShoppingDeleted = (data: { id: string }) => {
+      console.log('Socket: shopping:deleted received', data);
       setShoppingItems(prev => prev.filter(i => i.id !== data.id));
     };
 
     const handleShoppingCleared = (data: { date: string }) => {
+      console.log('Socket: shopping:cleared received', data);
       if (data.date === selectedDateStr) {
         setShoppingItems(prev => prev.filter(i => !i.checked));
       }
