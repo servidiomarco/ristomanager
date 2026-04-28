@@ -563,6 +563,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">Attività</h2>
                 <p className="text-xs text-slate-500">{pendingCount} da completare</p>
+                {/* Debug info - remove after testing */}
+                <p className="text-[9px] text-slate-400">User: {user?.id} - {user?.full_name} | Todos: {todos.length}</p>
               </div>
             </div>
             <button onClick={handleOpenAddTodo} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
@@ -587,6 +589,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="py-6 text-center">
                 <CheckCircle2 className="h-8 w-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-400 text-xs">Nessuna attività</p>
+                {/* Debug: show first todo assignment info */}
+                {todos.length > 0 && (
+                  <p className="text-[8px] text-slate-300 mt-2">
+                    1st todo: ID={todos[0].assignedToUserId} Name={todos[0].assignedToUserName}
+                  </p>
+                )}
               </div>
             ) : (
               filteredTodos.slice(0, 5).map(todo => {
