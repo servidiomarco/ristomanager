@@ -173,8 +173,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Helper to check if task is assigned to current user
   const isAssignedToMe = (todo: TodoItem) => {
+    // Check by ID first
     if (todo.assignedToUserId && user?.id) {
-      return Number(todo.assignedToUserId) === Number(user.id);
+      if (Number(todo.assignedToUserId) === Number(user.id)) {
+        return true;
+      }
+    }
+    // Fallback: check by name if ID comparison fails
+    if (todo.assignedToUserName && user?.full_name) {
+      if (todo.assignedToUserName.toLowerCase() === user.full_name.toLowerCase()) {
+        return true;
+      }
     }
     return false;
   };
