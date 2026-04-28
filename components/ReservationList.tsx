@@ -235,7 +235,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     try {
       const transcript = await startListening();
+      console.log('Voice transcript:', transcript);
       const parsed = parseReservationText(transcript);
+      console.log('Parsed reservation:', parsed);
 
       // Update form with parsed values, keeping existing values if not parsed
       setFormData(prev => ({

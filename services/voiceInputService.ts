@@ -89,19 +89,47 @@ export const parseReservationText = (text: string): ParsedReservation => {
   const result: ParsedReservation = {};
   const lowerText = text.toLowerCase();
 
-  // Extract name: "per [nome]", "a nome [nome]", "nome [nome]", "prenotazione [nome]"
-  // Match capitalized words (names typically start with uppercase)
+  // Words that signal end of name
+  const stopWords = [
+    'domani', 'oggi', 'dopodomani', 'sera', 'pranzo', 'cena',
+    'alle', 'ore', 'per', 'persone', 'persona', 'coperti', 'coperto',
+    'tavolo', 'in', 'il', 'la', 'lo', 'gli', 'le', 'un', 'una',
+    'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato', 'domenica',
+    'lunedi', 'martedi', 'mercoledi', 'giovedi', 'venerdi',
+    '\\d' // numbers
+  ];
+  const stopWordsPattern = new RegExp(`\\s+(${stopWords.join('|')})`, 'i');
+
+  // Extract name: multiple patterns to catch different phrasings
+  // Pattern 1: "prenotazione per [nome]" or "per [nome]"
+  // Pattern 2: "a nome [nome]" or "nome [nome]"
+  // Pattern 3: "prenotazione [nome]" (without "per")
   const namePatterns = [
-    /(?:per|a nome|nome|prenotazione)\s+([A-Z][a-zàèéìòù]+(?:\s+[A-Z][a-zàèéìòù]+)*)/i,
-    /(?:per|a nome|nome)\s+(\w+(?:\s+\w+)?)/i
+    /(?:prenotazione\s+)?per\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /a\s+nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    // Fallback: simpler patterns
+    /(?:prenotazione\s+)?per\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
+    /a\s+nome\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
+    /nome\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
   ];
 
   for (const pattern of namePatterns) {
-    const match = text.match(pattern);
+    const match = lowerText.match(pattern);
     if (match && match[1]) {
+      // Clean up and capitalize
+      let name = match[1].trim();
+      // Remove any trailing stop words that might have been captured
+      name = name.replace(stopWordsPattern, '').trim();
+      // Skip if name is a stop word itself
+      if (stopWords.some(sw => name.toLowerCase() === sw)) continue;
+      // Skip if name is too short (likely not a real name)
+      if (name.length < 2) continue;
+
       // Capitalize first letter of each word
-      result.customer_name = match[1]
+      result.customer_name = name
         .split(' ')
+        .filter(w => w.length > 0)
         .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
         .join(' ');
       break;
