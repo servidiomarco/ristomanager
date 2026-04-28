@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, AlertTriangle, StickyNote } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
 
 // Helper to format datetime without timezone conversion
@@ -119,6 +119,42 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
     return matchesDate && matchesStatus && matchesShift && matchesSearch;
   });
+
+  // Date Navigation Helpers
+  const selectedDateObj = new Date(selectedDate);
+  const todayStr = new Date().toISOString().split('T')[0];
+  const selectedDateStr = selectedDate.split('T')[0];
+  const isToday = selectedDateStr === todayStr;
+
+  const goToPreviousDay = () => {
+    const current = new Date(selectedDate);
+    current.setDate(current.getDate() - 1);
+    // Keep the same time
+    const time = selectedDate.split('T')[1] || '12:00';
+    setSelectedDate(current.toISOString().split('T')[0] + 'T' + time);
+  };
+
+  const goToNextDay = () => {
+    const current = new Date(selectedDate);
+    current.setDate(current.getDate() + 1);
+    // Keep the same time
+    const time = selectedDate.split('T')[1] || '12:00';
+    setSelectedDate(current.toISOString().split('T')[0] + 'T' + time);
+  };
+
+  const goToToday = () => {
+    const time = selectedDate.split('T')[1] || '12:00';
+    setSelectedDate(new Date().toISOString().split('T')[0] + 'T' + time);
+  };
+
+  const formatSelectedDate = (date: Date) => {
+    return date.toLocaleDateString('it-IT', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  };
 
   // --- Actions ---
 
@@ -557,27 +593,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 />
             </div>
             <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
-            <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 px-3 relative group">
-                    <Calendar className="text-indigo-500 h-5 w-5 absolute left-3 pointer-events-none" />
-                    <input
-                    type="datetime-local"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="outline-none text-slate-700 font-medium bg-transparent pl-8 cursor-pointer py-2"
-                    />
-                </div>
-                {/* Status filter hidden for now */}
-                {/* <select
-                    className="outline-none text-slate-600 text-sm bg-transparent pr-2 py-2"
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
+
+            {/* Date Navigation */}
+            <div className="flex items-center gap-1 bg-slate-50 rounded-xl p-1">
+                <button
+                    onClick={goToPreviousDay}
+                    className="p-2 hover:bg-white rounded-lg transition-colors"
+                    title="Giorno precedente"
                 >
-                    <option value="ALL">Tutti gli stati</option>
-                    <option value={PaymentStatus.PENDING}>In Attesa</option>
-                    <option value={PaymentStatus.PAID_DEPOSIT}>Acconto Versato</option>
-                    <option value={PaymentStatus.PAID_FULL}>Saldato</option>
-                </select> */}
+                    <ChevronLeft className="h-5 w-5 text-slate-600" />
+                </button>
+
+                <div className="flex items-center gap-2 px-3 py-1.5 min-w-[180px]">
+                    <Calendar className="h-4 w-4 text-indigo-600" />
+                    <span className="font-medium text-slate-700 capitalize text-sm">
+                        {formatSelectedDate(selectedDateObj)}
+                    </span>
+                </div>
+
+                <button
+                    onClick={goToNextDay}
+                    className="p-2 hover:bg-white rounded-lg transition-colors"
+                    title="Giorno successivo"
+                >
+                    <ChevronRight className="h-5 w-5 text-slate-600" />
+                </button>
+
+                {!isToday && (
+                    <button
+                        onClick={goToToday}
+                        className="px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    >
+                        Oggi
+                    </button>
+                )}
             </div>
       </div>
 
