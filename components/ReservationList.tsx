@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic } from 'lucide-react';
 import { sendWhatsAppConfirmation } from '../services/apiService';
+import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 
 // Helper to format datetime without timezone conversion
 const formatDateTime = (isoString: string): string => {
@@ -76,6 +77,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
+  const [isListening, setIsListening] = useState(false);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -219,6 +221,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               : `${res.customer_name} è in attesa`,
           'success'
       );
+  };
+
+  // Voice input handler
+  const handleVoiceInput = async () => {
+    if (!isVoiceSupported()) {
+      showToast('Riconoscimento vocale non supportato dal browser', 'error');
+      return;
+    }
+
+    setIsListening(true);
+    showToast('Parla ora...', 'info');
+
+    try {
+      const transcript = await startListening();
+      const parsed = parseReservationText(transcript);
+
+      // Update form with parsed values, keeping existing values if not parsed
+      setFormData(prev => ({
+        ...prev,
+        customer_name: parsed.customer_name || prev.customer_name,
+        guests: parsed.guests || prev.guests,
+        reservation_time: parsed.reservation_time || prev.reservation_time,
+        shift: parsed.shift || prev.shift,
+        phone: parsed.phone || prev.phone,
+        notes: parsed.notes ? (prev.notes ? `${prev.notes}, ${parsed.notes}` : parsed.notes) : prev.notes,
+      }));
+
+      // Build summary of what was parsed
+      const parsedFields: string[] = [];
+      if (parsed.customer_name) parsedFields.push(`Nome: ${parsed.customer_name}`);
+      if (parsed.guests) parsedFields.push(`${parsed.guests} persone`);
+      if (parsed.reservation_time) {
+        const dt = new Date(parsed.reservation_time);
+        parsedFields.push(`${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`);
+      }
+      if (parsed.shift) parsedFields.push(parsed.shift === Shift.LUNCH ? 'Pranzo' : 'Cena');
+
+      if (parsedFields.length > 0) {
+        showToast(`Compilato: ${parsedFields.join(' · ')}`, 'success');
+      } else {
+        showToast(`Riconosciuto: "${transcript}"`, 'info');
+      }
+    } catch (error: any) {
+      if (error.message === 'no-speech') {
+        showToast('Nessun audio rilevato, riprova', 'error');
+      } else if (error.message === 'audio-capture') {
+        showToast('Microfono non disponibile', 'error');
+      } else if (error.message === 'not-allowed') {
+        showToast('Permesso microfono negato', 'error');
+      } else {
+        showToast('Errore riconoscimento vocale', 'error');
+      }
+    } finally {
+      setIsListening(false);
+    }
   };
 
   const handleEditClick = (res: Reservation) => {
@@ -861,16 +918,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <p className="text-xs text-slate-500">Compila i dati del cliente</p>
                                 </div>
                             </div>
-                            {/* Customer Name */}
+                            {/* Customer Name with Voice Input */}
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Nome Cliente</label>
-                                <input
-                                    required
-                                    className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
-                                    value={formData.customer_name}
-                                    onChange={e => setFormData({...formData, customer_name: e.target.value})}
-                                    placeholder="Mario Rossi"
-                                />
+                                <div className="flex gap-2">
+                                    <input
+                                        required
+                                        className="flex-1 rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
+                                        value={formData.customer_name}
+                                        onChange={e => setFormData({...formData, customer_name: e.target.value})}
+                                        placeholder="Mario Rossi"
+                                    />
+                                    {isVoiceSupported() && (
+                                        <button
+                                            type="button"
+                                            onClick={handleVoiceInput}
+                                            disabled={isListening}
+                                            className={`p-3 sm:p-4 rounded-xl transition-all flex items-center justify-center ${
+                                                isListening
+                                                    ? 'bg-red-100 text-red-600 animate-pulse'
+                                                    : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'
+                                            }`}
+                                            title="Dettatura vocale - Es: 'Prenotazione per Mario Rossi domani sera alle 20 per 4 persone'"
+                                        >
+                                            <Mic className="h-5 w-5" />
+                                        </button>
+                                    )}
+                                </div>
+                                {isVoiceSupported() && (
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
+                                    </p>
+                                )}
                             </div>
 
                             {/* Phone & Email */}
