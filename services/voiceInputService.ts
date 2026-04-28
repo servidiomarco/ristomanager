@@ -91,7 +91,7 @@ export const parseReservationText = (text: string): ParsedReservation => {
 
   // Words that signal end of name
   const stopWords = [
-    'domani', 'oggi', 'dopodomani', 'sera', 'pranzo', 'cena',
+    'domani', 'oggi', 'dopodomani', 'stasera', 'stanotte', 'sera', 'pranzo', 'cena',
     'alle', 'ore', 'per', 'persone', 'persona', 'coperti', 'coperto',
     'tavolo', 'in', 'il', 'la', 'lo', 'gli', 'le', 'un', 'una',
     'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato', 'domenica',
@@ -106,13 +106,13 @@ export const parseReservationText = (text: string): ParsedReservation => {
   // Pattern 3: "a nome [nome]" or "nome [nome]"
   const namePatterns = [
     // "prenotazione per mario rossi alle..."
-    /prenotazione\s+per\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /prenotazione\s+per\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|stasera|stanotte|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
     // "prenotazione mario rossi alle..." (without "per")
-    /prenotazione\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /prenotazione\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|stasera|stanotte|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
     // "per mario rossi alle..."
-    /\bper\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /\bper\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|stasera|stanotte|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
     // "a nome mario rossi"
-    /a\s+nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    /a\s+nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|stasera|stanotte|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
     // Fallback: simpler patterns
     /prenotazione\s+per\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
     /prenotazione\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
@@ -162,7 +162,7 @@ export const parseReservationText = (text: string): ParsedReservation => {
   const today = new Date();
   let targetDate: Date | null = null;
 
-  if (lowerText.includes('oggi')) {
+  if (lowerText.includes('oggi') || lowerText.includes('stasera') || lowerText.includes('stanotte')) {
     targetDate = new Date(today);
   } else if (lowerText.includes('domani')) {
     targetDate = new Date(today);
@@ -240,7 +240,7 @@ export const parseReservationText = (text: string): ParsedReservation => {
   // Determine shift from time or keywords
   if (lowerText.includes('pranzo') || lowerText.includes('mezzogiorno')) {
     result.shift = Shift.LUNCH;
-  } else if (lowerText.includes('cena') || lowerText.includes('sera')) {
+  } else if (lowerText.includes('cena') || lowerText.includes('sera') || lowerText.includes('stasera') || lowerText.includes('stanotte')) {
     result.shift = Shift.DINNER;
   } else if (hours !== undefined) {
     // Infer shift from time
