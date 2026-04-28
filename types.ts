@@ -207,3 +207,35 @@ export interface ActivityStats {
   logs_by_resource: Record<string, number>;
   recent_users: { user_id: number; user_name: string; count: number }[];
 }
+
+// ============================================
+// TODO TYPES
+// ============================================
+
+export enum TodoPriority {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH'
+}
+
+export enum TodoCategory {
+  GENERAL = 'GENERAL',
+  RESERVATION = 'RESERVATION',
+  INVENTORY = 'INVENTORY',
+  STAFF = 'STAFF',
+  MAINTENANCE = 'MAINTENANCE',
+  EVENT = 'EVENT'
+}
+
+export interface TodoItem {
+  id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  priority: TodoPriority;
+  category: TodoCategory;
+  dueDate?: string;
+  createdAt: string;
+  completedAt?: string;
+  linkedReservationId?: number;
+}
