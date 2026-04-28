@@ -113,3 +113,31 @@ export enum ViewState {
   RESERVATIONS = 'RESERVATIONS',
   SETTINGS = 'SETTINGS'
 }
+
+export enum TodoPriority {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH'
+}
+
+export enum TodoCategory {
+  GENERAL = 'GENERAL',
+  RESERVATION = 'RESERVATION',
+  INVENTORY = 'INVENTORY',
+  STAFF = 'STAFF',
+  MAINTENANCE = 'MAINTENANCE',
+  EVENT = 'EVENT'
+}
+
+export interface TodoItem {
+  id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  priority: TodoPriority;
+  category: TodoCategory;
+  dueDate?: string;
+  createdAt: string;
+  completedAt?: string;
+  linkedReservationId?: number;
+}
