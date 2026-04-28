@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils } from 'lucide-react';
+import { X, Plus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, AlertTriangle } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -26,6 +26,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Modal states
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<User | null>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     fetchUsers();
@@ -110,14 +114,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     }
   };
 
-  const handleDelete = async (userId: number) => {
-    if (!confirm('Sei sicuro di voler eliminare questo utente?')) return;
+  const handleDeleteClick = (user: User) => {
+    setDeleteConfirmUser(user);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmUser) return;
 
     try {
-      await authApiService.deleteUser(userId);
+      await authApiService.deleteUser(deleteConfirmUser.id);
       await fetchUsers();
+      setDeleteConfirmUser(null);
     } catch (err: any) {
-      alert(err.message || 'Errore nell\'eliminazione');
+      setDeleteConfirmUser(null);
+      setDeleteError(err.message || 'Errore nell\'eliminazione');
     }
   };
 
@@ -339,7 +349,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                         <Edit2 className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(user.id)}
+                        onClick={() => handleDeleteClick(user)}
                         className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Elimina"
                       >
@@ -369,6 +379,58 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="h-8 w-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">Elimina Utente</h3>
+              <p className="text-slate-600 mb-6">
+                Sei sicuro di voler eliminare <strong>{deleteConfirmUser.full_name}</strong>? Questa azione non può essere annullata.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirmUser(null)}
+                  className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors font-medium"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium"
+                >
+                  Elimina
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {deleteError && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="h-8 w-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">Errore</h3>
+              <p className="text-slate-600 mb-6">{deleteError}</p>
+              <button
+                onClick={() => setDeleteError('')}
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

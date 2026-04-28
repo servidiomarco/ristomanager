@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
@@ -56,6 +56,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
   const { user } = useAuth();
+  const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -441,7 +442,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
             </div>
             <button
-              onClick={() => setTodoFilter('mine')}
+              onClick={() => {
+                setTodoFilter('mine');
+                todoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
               className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
             >
               Visualizza
@@ -606,7 +610,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Todo List - Compact version in sidebar */}
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div ref={todoSectionRef} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle } from 'lucide-react';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -66,9 +66,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Room Management State
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
-  
+
   // Tick state for updating timers every second
   const [tick, setTick] = useState(0);
+
+  // Modal state for alerts
+  const [alertModal, setAlertModal] = useState<{ message: string; type: 'error' | 'warning' } | null>(null);
+  const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -454,16 +458,24 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const handleDeleteRoomClick = (room_id: number) => {
       if (rooms.length <= 1) {
-          alert("Devi mantenere almeno una sala attiva.");
+          setAlertModal({ message: "Devi mantenere almeno una sala attiva.", type: 'warning' });
           return;
       }
       const roomTables = tables.filter(t => t.room_id === room_id);
       if (roomTables.length > 0) {
-          alert("Non puoi eliminare una sala che contiene dei tavoli. Rimuovi prima i tavoli.");
+          setAlertModal({ message: "Non puoi eliminare una sala che contiene dei tavoli. Rimuovi prima i tavoli.", type: 'warning' });
           return;
       }
-      if (confirm(`Sei sicuro di voler eliminare la sala "${rooms.find(r => r.id === room_id)?.name}"?`)) {
-          onDeleteRoom(room_id);
+      const room = rooms.find(r => r.id === room_id);
+      if (room) {
+          setDeleteRoomConfirm(room);
+      }
+  };
+
+  const handleDeleteRoomConfirm = () => {
+      if (deleteRoomConfirm) {
+          onDeleteRoom(deleteRoomConfirm.id);
+          setDeleteRoomConfirm(null);
       }
   };
 
@@ -832,6 +844,62 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                </div>
            </div>
       </div>
+
+      {/* Alert Modal */}
+      {alertModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
+                alertModal.type === 'error' ? 'bg-red-100' : 'bg-amber-100'
+              }`}>
+                <AlertTriangle className={`h-8 w-8 ${
+                  alertModal.type === 'error' ? 'text-red-600' : 'text-amber-600'
+                }`} />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">Attenzione</h3>
+              <p className="text-slate-600 mb-6">{alertModal.message}</p>
+              <button
+                onClick={() => setAlertModal(null)}
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Room Confirmation Modal */}
+      {deleteRoomConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="h-8 w-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">Elimina Sala</h3>
+              <p className="text-slate-600 mb-6">
+                Sei sicuro di voler eliminare la sala <strong>"{deleteRoomConfirm.name}"</strong>?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteRoomConfirm(null)}
+                  className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors font-medium"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleDeleteRoomConfirm}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium"
+                >
+                  Elimina
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
