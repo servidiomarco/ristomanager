@@ -1,4 +1,4 @@
-import { TodoItem, TodoPriority, TodoCategory } from '../types';
+import { TodoItem, TodoPriority, TodoCategory, UserRole } from '../types';
 
 const STORAGE_KEY = 'ristocrm_todos';
 
@@ -82,4 +82,19 @@ export const getTodosByCategory = (category: TodoCategory): TodoItem[] => {
 
 export const getTodosLinkedToReservation = (reservationId: number): TodoItem[] => {
   return getTodos().filter(t => t.linkedReservationId === reservationId);
+};
+
+export const getTodosAssignedToUser = (userId: number): TodoItem[] => {
+  return getTodos().filter(t => t.assignedToUserId === userId);
+};
+
+export const getTodosAssignedToTeam = (team: UserRole): TodoItem[] => {
+  return getTodos().filter(t => t.assignedToTeam === team);
+};
+
+export const getMyTodos = (userId: number, userRole: UserRole): TodoItem[] => {
+  return getTodos().filter(t =>
+    t.assignedToUserId === userId ||
+    t.assignedToTeam === userRole
+  );
 };

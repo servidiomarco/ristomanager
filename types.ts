@@ -238,4 +238,10 @@ export interface TodoItem {
   createdAt: string;
   completedAt?: string;
   linkedReservationId?: number;
+  // Assignment fields
+  assignedToUserId?: number;
+  assignedToUserName?: string;
+  assignedToTeam?: UserRole;
+  createdByUserId?: number;
+  createdByUserName?: string;
 }

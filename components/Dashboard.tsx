@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { getTodos, createTodo, deleteTodo, toggleTodoComplete } from '../services/todoService';
+import { authApiService } from '../services/authApiService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo } from 'lucide-react';
+import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -31,6 +32,20 @@ const PRIORITY_COLORS: Record<TodoPriority, string> = {
   [TodoPriority.HIGH]: 'text-rose-500',
 };
 
+const TEAM_LABELS: Record<UserRole, string> = {
+  [UserRole.OWNER]: 'Proprietario',
+  [UserRole.MANAGER]: 'Manager',
+  [UserRole.WAITER]: 'Camerieri',
+  [UserRole.KITCHEN]: 'Cucina',
+};
+
+const TEAM_COLORS: Record<UserRole, string> = {
+  [UserRole.OWNER]: 'bg-purple-100 text-purple-700',
+  [UserRole.MANAGER]: 'bg-blue-100 text-blue-700',
+  [UserRole.WAITER]: 'bg-emerald-100 text-emerald-700',
+  [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',
+};
+
 interface DashboardProps {
   reservations: Reservation[];
   tables: Table[];
@@ -47,18 +62,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Todo State
   const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('pending');
+  const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showAddTodo, setShowAddTodo] = useState(false);
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [newTodo, setNewTodo] = useState({
     title: '',
     description: '',
     priority: TodoPriority.MEDIUM,
     category: TodoCategory.GENERAL,
     dueDate: '',
+    assignedToUserId: undefined as number | undefined,
+    assignedToTeam: undefined as UserRole | undefined,
   });
 
   useEffect(() => {
     setTodos(getTodos());
+    // Load staff users for assignment
+    authApiService.getUsers().then(users => {
+      setStaffUsers(users.filter(u => u.is_active));
+    }).catch(() => {
+      // Ignore error if not authorized to view users
+    });
   }, []);
 
   const handleGenerateReport = async () => {
@@ -70,15 +94,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const handleAddTodo = () => {
     if (!newTodo.title.trim()) return;
+    const assignedUser = staffUsers.find(u => u.id === newTodo.assignedToUserId);
     const todo = createTodo({
       title: newTodo.title,
       description: newTodo.description || undefined,
       priority: newTodo.priority,
       category: newTodo.category,
       dueDate: newTodo.dueDate || undefined,
+      assignedToUserId: newTodo.assignedToUserId,
+      assignedToUserName: assignedUser?.full_name,
+      assignedToTeam: newTodo.assignedToTeam,
+      createdByUserId: user?.id,
+      createdByUserName: user?.full_name,
     });
     setTodos([todo, ...todos]);
-    setNewTodo({ title: '', description: '', priority: TodoPriority.MEDIUM, category: TodoCategory.GENERAL, dueDate: '' });
+    setNewTodo({ title: '', description: '', priority: TodoPriority.MEDIUM, category: TodoCategory.GENERAL, dueDate: '', assignedToUserId: undefined, assignedToTeam: undefined });
     setShowAddTodo(false);
   };
 
@@ -93,7 +123,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
+
+  // My assigned todos (assigned to me or my team)
+  const myTodos = todos.filter(t =>
+    !t.completed && (
+      t.assignedToUserId === user?.id ||
+      t.assignedToTeam === user?.role
+    )
+  );
+
   const filteredTodos = todos.filter(todo => {
+    if (todoFilter === 'mine') return !todo.completed && (todo.assignedToUserId === user?.id || todo.assignedToTeam === user?.role);
     if (todoFilter === 'pending') return !todo.completed;
     if (todoFilter === 'completed') return todo.completed;
     if (todoFilter === 'overdue') return !todo.completed && todo.dueDate && todo.dueDate < todayStr;
@@ -261,6 +301,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           )}
         </div>
       </div>
+
+      {/* My Tasks Alert Banner */}
+      {myTodos.length > 0 && (
+        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-white/20 rounded-lg">
+                <UserCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
+                <p className="text-sm text-white/80">
+                  {myTodos.filter(t => t.assignedToUserId === user?.id).length > 0 && (
+                    <span>{myTodos.filter(t => t.assignedToUserId === user?.id).length} personali</span>
+                  )}
+                  {myTodos.filter(t => t.assignedToUserId === user?.id).length > 0 && myTodos.filter(t => t.assignedToTeam === user?.role).length > 0 && ' · '}
+                  {myTodos.filter(t => t.assignedToTeam === user?.role).length > 0 && (
+                    <span>{myTodos.filter(t => t.assignedToTeam === user?.role).length} del team {user?.role && TEAM_LABELS[user.role]}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setTodoFilter('mine')}
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
+            >
+              Visualizza
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -435,14 +506,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
           <div className="flex gap-1 mb-3 overflow-x-auto">
             {[
-              { key: 'pending', label: 'Da fare', icon: Circle },
-              { key: 'completed', label: 'Fatte', icon: CheckCircle2 },
+              { key: 'mine', label: 'Le mie', icon: UserCircle, count: myTodos.length },
+              { key: 'pending', label: 'Tutte', icon: Circle },
               { key: 'overdue', label: 'Scadute', icon: AlertTriangle, count: overdueTodos.length },
             ].map(tab => (
               <button key={tab.key} onClick={() => setTodoFilter(tab.key as typeof todoFilter)} className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${todoFilter === tab.key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
                 <tab.icon className="h-3 w-3" />
                 {tab.label}
-                {tab.count !== undefined && tab.count > 0 && <span className="bg-rose-500 text-white text-[10px] px-1 rounded-full">{tab.count}</span>}
+                {tab.count !== undefined && tab.count > 0 && <span className={`text-[10px] px-1 rounded-full ${tab.key === 'mine' ? 'bg-indigo-500 text-white' : 'bg-rose-500 text-white'}`}>{tab.count}</span>}
               </button>
             ))}
           </div>
@@ -469,8 +540,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             <button onClick={() => handleDeleteTodo(todo.id)} className="p-0.5 text-slate-400 hover:text-rose-500 rounded"><Trash2 className="h-3 w-3" /></button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 mt-0.5">
+                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[todo.category]}`}>{CATEGORY_LABELS[todo.category]}</span>
+                          {todo.assignedToUserName && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 flex items-center gap-0.5">
+                              <UserCircle className="h-2.5 w-2.5" />{todo.assignedToUserName}
+                            </span>
+                          )}
+                          {todo.assignedToTeam && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${TEAM_COLORS[todo.assignedToTeam]}`}>
+                              <UsersRound className="h-2.5 w-2.5" />{TEAM_LABELS[todo.assignedToTeam]}
+                            </span>
+                          )}
                           {todo.dueDate && <span className={`text-[10px] ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}>{new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>}
                         </div>
                       </div>
@@ -602,6 +683,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Scadenza (opzionale)</label>
                 <input type="date" value={newTodo.dueDate} onChange={e => setNewTodo({ ...newTodo, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Persona</label>
+                  <select
+                    value={newTodo.assignedToUserId || ''}
+                    onChange={e => setNewTodo({ ...newTodo, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
+                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">Nessuno</option>
+                    {staffUsers.map(u => (
+                      <option key={u.id} value={u.id}>{u.full_name} ({TEAM_LABELS[u.role]})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Team</label>
+                  <select
+                    value={newTodo.assignedToTeam || ''}
+                    onChange={e => setNewTodo({ ...newTodo, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
+                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">Nessun team</option>
+                    {Object.entries(TEAM_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
