@@ -75,6 +75,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -85,7 +86,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onConfirm: () => void;
     onCancel: () => void;
     onSelectSuggestion?: (table: Table) => void;
-  } | null>(null); 
+  } | null>(null);
 
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
@@ -213,10 +214,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setIsFormOpen(true);
   };
 
-  const handleDeleteClick = (id: number) => {
-      if(window.confirm("Sei sicuro di voler cancellare questa prenotazione?")) {
-          onDeleteReservation(id);
+  const handleDeleteClick = (id: number, customerName: string) => {
+      setDeleteConfirmModal({show: true, reservationId: id, customerName});
+  }
+
+  const handleConfirmDelete = () => {
+      if (deleteConfirmModal.reservationId !== null) {
+          onDeleteReservation(deleteConfirmModal.reservationId);
+          showToast('Prenotazione eliminata', 'success');
       }
+      setDeleteConfirmModal({show: false, reservationId: null, customerName: ''});
+  }
+
+  const handleCancelDelete = () => {
+      setDeleteConfirmModal({show: false, reservationId: null, customerName: ''});
   }
 
   const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
@@ -691,7 +702,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <Edit2 className="h-5 w-5" />
                                     </button>
                                     <button
-                                        onClick={() => handleDeleteClick(res.id)}
+                                        onClick={() => handleDeleteClick(res.id, res.customer_name)}
                                         className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
                                         title="Elimina"
                                     >
@@ -1357,6 +1368,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </button>
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mb-4">
+                <Trash2 className="h-8 w-8 text-rose-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">Conferma Eliminazione</h3>
+              <p className="text-slate-600 mb-1">
+                Stai per eliminare la prenotazione di:
+              </p>
+              <p className="text-lg font-semibold text-slate-800 mb-4">
+                {deleteConfirmModal.customerName}
+              </p>
+              <p className="text-sm text-slate-500">
+                Questa azione non può essere annullata.
+              </p>
+            </div>
+            <div className="flex border-t border-slate-100">
+              <button
+                onClick={handleCancelDelete}
+                className="flex-1 px-6 py-4 text-slate-700 font-medium hover:bg-slate-50 transition-colors border-r border-slate-100"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="flex-1 px-6 py-4 text-rose-600 font-medium hover:bg-rose-50 transition-colors"
+              >
+                Elimina
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
