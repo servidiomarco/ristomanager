@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
-import { getTodos, createTodo, deleteTodo, toggleTodoComplete } from '../services/todoService';
+import { getTodos, createTodo, deleteTodo, toggleTodoComplete, saveTodos } from '../services/todoService';
 import { authApiService } from '../services/authApiService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound } from 'lucide-react';
+import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -63,9 +63,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Todo State
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
-  const [showAddTodo, setShowAddTodo] = useState(false);
+  const [showTodoModal, setShowTodoModal] = useState(false);
+  const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
-  const [newTodo, setNewTodo] = useState({
+  const [todoForm, setTodoForm] = useState({
     title: '',
     description: '',
     priority: TodoPriority.MEDIUM,
@@ -92,24 +93,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     setLoading(false);
   };
 
-  const handleAddTodo = () => {
-    if (!newTodo.title.trim()) return;
-    const assignedUser = staffUsers.find(u => u.id === newTodo.assignedToUserId);
-    const todo = createTodo({
-      title: newTodo.title,
-      description: newTodo.description || undefined,
-      priority: newTodo.priority,
-      category: newTodo.category,
-      dueDate: newTodo.dueDate || undefined,
-      assignedToUserId: newTodo.assignedToUserId,
-      assignedToUserName: assignedUser?.full_name,
-      assignedToTeam: newTodo.assignedToTeam,
-      createdByUserId: user?.id,
-      createdByUserName: user?.full_name,
+  const resetTodoForm = () => {
+    setTodoForm({ title: '', description: '', priority: TodoPriority.MEDIUM, category: TodoCategory.GENERAL, dueDate: '', assignedToUserId: undefined, assignedToTeam: undefined });
+    setEditingTodo(null);
+  };
+
+  const handleOpenAddTodo = () => {
+    resetTodoForm();
+    setShowTodoModal(true);
+  };
+
+  const handleOpenEditTodo = (todo: TodoItem) => {
+    setEditingTodo(todo);
+    setTodoForm({
+      title: todo.title,
+      description: todo.description || '',
+      priority: todo.priority,
+      category: todo.category,
+      dueDate: todo.dueDate || '',
+      assignedToUserId: todo.assignedToUserId,
+      assignedToTeam: todo.assignedToTeam,
     });
-    setTodos([todo, ...todos]);
-    setNewTodo({ title: '', description: '', priority: TodoPriority.MEDIUM, category: TodoCategory.GENERAL, dueDate: '', assignedToUserId: undefined, assignedToTeam: undefined });
-    setShowAddTodo(false);
+    setShowTodoModal(true);
+  };
+
+  const handleSaveTodo = () => {
+    if (!todoForm.title.trim()) return;
+    const assignedUser = staffUsers.find(u => u.id === todoForm.assignedToUserId);
+
+    if (editingTodo) {
+      // Update existing todo
+      const updatedTodo: TodoItem = {
+        ...editingTodo,
+        title: todoForm.title,
+        description: todoForm.description || undefined,
+        priority: todoForm.priority,
+        category: todoForm.category,
+        dueDate: todoForm.dueDate || undefined,
+        assignedToUserId: todoForm.assignedToUserId,
+        assignedToUserName: assignedUser?.full_name,
+        assignedToTeam: todoForm.assignedToTeam,
+      };
+      const allTodos = getTodos();
+      const updatedTodos = allTodos.map(t => t.id === editingTodo.id ? updatedTodo : t);
+      saveTodos(updatedTodos);
+      setTodos(updatedTodos);
+    } else {
+      // Create new todo
+      const todo = createTodo({
+        title: todoForm.title,
+        description: todoForm.description || undefined,
+        priority: todoForm.priority,
+        category: todoForm.category,
+        dueDate: todoForm.dueDate || undefined,
+        assignedToUserId: todoForm.assignedToUserId,
+        assignedToUserName: assignedUser?.full_name,
+        assignedToTeam: todoForm.assignedToTeam,
+        createdByUserId: user?.id,
+        createdByUserName: user?.full_name,
+      });
+      setTodos([todo, ...todos]);
+    }
+
+    resetTodoForm();
+    setShowTodoModal(false);
   };
 
   const handleToggleTodo = (id: string) => {
@@ -500,7 +547,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <p className="text-xs text-slate-500">{pendingCount} da completare</p>
               </div>
             </div>
-            <button onClick={() => setShowAddTodo(true)} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+            <button onClick={handleOpenAddTodo} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
               <Plus className="h-4 w-4" />
             </button>
           </div>
@@ -537,6 +584,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <p className={`text-xs font-medium truncate ${todo.completed ? 'line-through text-slate-400' : 'text-slate-700'}`}>{todo.title}</p>
                           <div className="flex items-center gap-0.5 flex-shrink-0">
                             <Flag className={`h-3 w-3 ${PRIORITY_COLORS[todo.priority]}`} />
+                            <button onClick={() => handleOpenEditTodo(todo)} className="p-0.5 text-slate-400 hover:text-indigo-500 rounded"><Edit2 className="h-3 w-3" /></button>
                             <button onClick={() => handleDeleteTodo(todo.id)} className="p-0.5 text-slate-400 hover:text-rose-500 rounded"><Trash2 className="h-3 w-3" /></button>
                           </div>
                         </div>
@@ -647,27 +695,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Add Todo Modal */}
-      {showAddTodo && (
+      {/* Add/Edit Todo Modal */}
+      {showTodoModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Nuova Attività</h3>
-              <button onClick={() => setShowAddTodo(false)} className="p-1 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-500" /></button>
+              <h3 className="text-lg font-semibold text-slate-800">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-500" /></button>
             </div>
             <div className="p-4 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Titolo</label>
-                <input type="text" value={newTodo.title} onChange={e => setNewTodo({ ...newTodo, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus />
+                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Descrizione (opzionale)</label>
-                <textarea value={newTodo.description} onChange={e => setNewTodo({ ...newTodo, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" />
+                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Priorità</label>
-                  <select value={newTodo.priority} onChange={e => setNewTodo({ ...newTodo, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
                     <option value={TodoPriority.LOW}>Bassa</option>
                     <option value={TodoPriority.MEDIUM}>Media</option>
                     <option value={TodoPriority.HIGH}>Alta</option>
@@ -675,21 +723,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria</label>
-                  <select value={newTodo.category} onChange={e => setNewTodo({ ...newTodo, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
                     {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
                   </select>
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Scadenza (opzionale)</label>
-                <input type="date" value={newTodo.dueDate} onChange={e => setNewTodo({ ...newTodo, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Persona</label>
                   <select
-                    value={newTodo.assignedToUserId || ''}
-                    onChange={e => setNewTodo({ ...newTodo, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
+                    value={todoForm.assignedToUserId || ''}
+                    onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
                     className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Nessuno</option>
@@ -701,8 +749,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Team</label>
                   <select
-                    value={newTodo.assignedToTeam || ''}
-                    onChange={e => setNewTodo({ ...newTodo, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
+                    value={todoForm.assignedToTeam || ''}
+                    onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
                     className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Nessun team</option>
@@ -714,8 +762,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
-              <button onClick={() => setShowAddTodo(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium">Annulla</button>
-              <button onClick={handleAddTodo} disabled={!newTodo.title.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">Aggiungi</button>
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium">Annulla</button>
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                {editingTodo ? 'Salva' : 'Aggiungi'}
+              </button>
             </div>
           </div>
         </div>
