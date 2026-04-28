@@ -102,16 +102,22 @@ export const parseReservationText = (text: string): ParsedReservation => {
 
   // Extract name: multiple patterns to catch different phrasings
   // Pattern 1: "prenotazione per [nome]" or "per [nome]"
-  // Pattern 2: "a nome [nome]" or "nome [nome]"
-  // Pattern 3: "prenotazione [nome]" (without "per")
+  // Pattern 2: "prenotazione [nome]" (without "per")
+  // Pattern 3: "a nome [nome]" or "nome [nome]"
   const namePatterns = [
-    /(?:prenotazione\s+)?per\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    // "prenotazione per mario rossi alle..."
+    /prenotazione\s+per\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    // "prenotazione mario rossi alle..." (without "per")
+    /prenotazione\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    // "per mario rossi alle..."
+    /\bper\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
+    // "a nome mario rossi"
     /a\s+nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
-    /nome\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\s]+?)(?=\s+(?:domani|oggi|dopodomani|sera|pranzo|cena|alle|ore|per\s+\d|in\s+\d|\d+\s*person|\d+\s*copert|tavolo|$))/i,
     // Fallback: simpler patterns
-    /(?:prenotazione\s+)?per\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
+    /prenotazione\s+per\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
+    /prenotazione\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
+    /\bper\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
     /a\s+nome\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
-    /nome\s+([a-zàèéìòùA-Z]+(?:\s+[a-zàèéìòùA-Z]+)?)/i,
   ];
 
   for (const pattern of namePatterns) {
