@@ -5,7 +5,7 @@ import { todoApiService } from '../services/todoApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2 } from 'lucide-react';
+import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -54,6 +54,36 @@ interface DashboardProps {
   rooms: Room[];
 }
 
+// Shopping List Types
+type ShoppingCategory = 'CUCINA' | 'BAR' | 'ALTRO';
+
+interface ShoppingItem {
+  id: string;
+  name: string;
+  category: ShoppingCategory;
+  checked: boolean;
+}
+
+const SHOPPING_CATEGORY_LABELS: Record<ShoppingCategory, string> = {
+  'CUCINA': 'Cucina',
+  'BAR': 'Bar',
+  'ALTRO': 'Altro'
+};
+
+const SHOPPING_CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
+  'CUCINA': <ChefHat className="h-4 w-4" />,
+  'BAR': <Coffee className="h-4 w-4" />,
+  'ALTRO': <Package className="h-4 w-4" />
+};
+
+const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
+  'CUCINA': 'bg-orange-100 text-orange-700 border-orange-200',
+  'BAR': 'bg-amber-100 text-amber-700 border-amber-200',
+  'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
+};
+
+const SHOPPING_STORAGE_KEY = 'ristocrm_shopping_list';
+
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
@@ -79,6 +109,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     assignedToUserId: undefined as number | undefined,
     assignedToTeam: undefined as UserRole | undefined,
   });
+
+  // Shopping List State
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>(() => {
+    try {
+      const stored = localStorage.getItem(SHOPPING_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
+
+  // Save shopping list to localStorage
+  useEffect(() => {
+    localStorage.setItem(SHOPPING_STORAGE_KEY, JSON.stringify(shoppingItems));
+  }, [shoppingItems]);
+
+  const addShoppingItem = () => {
+    if (!newItemName.trim()) return;
+    const newItem: ShoppingItem = {
+      id: crypto.randomUUID(),
+      name: newItemName.trim(),
+      category: newItemCategory,
+      checked: false
+    };
+    setShoppingItems(prev => [...prev, newItem]);
+    setNewItemName('');
+  };
+
+  const toggleShoppingItem = (id: string) => {
+    setShoppingItems(prev => prev.map(item =>
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+  };
+
+  const deleteShoppingItem = (id: string) => {
+    setShoppingItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const clearCheckedItems = () => {
+    setShoppingItems(prev => prev.filter(item => !item.checked));
+  };
+
+  // Group shopping items by category
+  const shoppingByCategory = useMemo(() => {
+    const grouped: Record<ShoppingCategory, ShoppingItem[]> = {
+      'CUCINA': [],
+      'BAR': [],
+      'ALTRO': []
+    };
+    shoppingItems.forEach(item => {
+      grouped[item.category].push(item);
+    });
+    return grouped;
+  }, [shoppingItems]);
+
+  const totalItems = shoppingItems.length;
+  const checkedItems = shoppingItems.filter(i => i.checked).length;
 
   // Fetch todos from API
   const fetchTodos = useCallback(async () => {
@@ -694,81 +783,184 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Weekly Chart - Full width section */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
-            <p className="text-sm text-slate-500 mt-1">{weekRange}</p>
+      {/* Weekly Chart + Shopping List */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Weekly Chart */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
+              <p className="text-sm text-slate-500">{weekRange}</p>
+            </div>
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+              <button
+                onClick={() => setChartShiftFilter('ALL')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'ALL'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Tutti
+              </button>
+              <button
+                onClick={() => setChartShiftFilter('LUNCH')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'LUNCH'
+                    ? 'bg-amber-100 text-amber-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Pranzo
+              </button>
+              <button
+                onClick={() => setChartShiftFilter('DINNER')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  chartShiftFilter === 'DINNER'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Cena
+              </button>
+            </div>
           </div>
-          <div className="flex rounded-lg border border-slate-200 p-1 bg-slate-50">
-            <button
-              onClick={() => setChartShiftFilter('ALL')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                chartShiftFilter === 'ALL'
-                  ? 'bg-white text-slate-800 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Tutti
-            </button>
-            <button
-              onClick={() => setChartShiftFilter('LUNCH')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                chartShiftFilter === 'LUNCH'
-                  ? 'bg-amber-100 text-amber-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Pranzo
-            </button>
-            <button
-              onClick={() => setChartShiftFilter('DINNER')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                chartShiftFilter === 'DINNER'
-                  ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Cena
-            </button>
+          <div className="h-52 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weeklyChartData}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{fill: '#64748b', fontSize: 11}}
+                />
+                <YAxis
+                  domain={[0, 'auto']}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{fill: '#64748b', fontSize: 11}}
+                  width={30}
+                />
+                <Tooltip
+                  cursor={{fill: '#f1f5f9'}}
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
+                  labelFormatter={(label, payload) => {
+                    if (payload && payload[0]) {
+                      return `${label} (${payload[0].payload.date})`;
+                    }
+                    return label;
+                  }}
+                />
+                <Bar
+                  dataKey="guests"
+                  fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={weeklyChartData}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-              <XAxis
-                dataKey="name"
-                axisLine={false}
-                tickLine={false}
-                tick={{fill: '#64748b', fontSize: 12}}
-              />
-              <YAxis
-                domain={[0, 'auto']}
-                axisLine={false}
-                tickLine={false}
-                tick={{fill: '#64748b', fontSize: 12}}
-                width={40}
-              />
-              <Tooltip
-                cursor={{fill: '#f1f5f9'}}
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
-                labelFormatter={(label, payload) => {
-                  if (payload && payload[0]) {
-                    return `${label} (${payload[0].payload.date})`;
-                  }
-                  return label;
-                }}
-              />
-              <Bar
-                dataKey="guests"
-                fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+
+        {/* Shopping List */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                <ShoppingCart className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">Spesa del Giorno</h2>
+                <p className="text-sm text-slate-500">{checkedItems}/{totalItems} completati</p>
+              </div>
+            </div>
+            {checkedItems > 0 && (
+              <button
+                onClick={clearCheckedItems}
+                className="text-xs text-slate-500 hover:text-rose-600 transition-colors"
+              >
+                Rimuovi completati
+              </button>
+            )}
+          </div>
+
+          {/* Add Item Form */}
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={newItemName}
+              onChange={(e) => setNewItemName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addShoppingItem()}
+              placeholder="Aggiungi prodotto..."
+              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+            />
+            <select
+              value={newItemCategory}
+              onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
+              className="px-2 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+            >
+              <option value="CUCINA">Cucina</option>
+              <option value="BAR">Bar</option>
+              <option value="ALTRO">Altro</option>
+            </select>
+            <button
+              onClick={addShoppingItem}
+              disabled={!newItemName.trim()}
+              className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Shopping List by Category */}
+          <div className="flex-1 overflow-y-auto max-h-[200px] space-y-4">
+            {totalItems === 0 ? (
+              <div className="py-8 text-center">
+                <ShoppingCart className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">Nessun prodotto nella lista</p>
+              </div>
+            ) : (
+              (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(category => {
+                const items = shoppingByCategory[category];
+                if (items.length === 0) return null;
+                return (
+                  <div key={category}>
+                    <div className={`flex items-center gap-2 px-2 py-1 rounded-lg ${SHOPPING_CATEGORY_COLORS[category]} mb-2`}>
+                      {SHOPPING_CATEGORY_ICONS[category]}
+                      <span className="text-xs font-medium">{SHOPPING_CATEGORY_LABELS[category]}</span>
+                      <span className="text-xs opacity-70">({items.length})</span>
+                    </div>
+                    <div className="space-y-1 pl-2">
+                      {items.map(item => (
+                        <div key={item.id} className="flex items-center gap-2 group">
+                          <button
+                            onClick={() => toggleShoppingItem(item.id)}
+                            className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                              item.checked
+                                ? 'bg-emerald-500 border-emerald-500 text-white'
+                                : 'border-slate-300 hover:border-emerald-400'
+                            }`}
+                          >
+                            {item.checked && <Check className="h-2.5 w-2.5" />}
+                          </button>
+                          <span className={`flex-1 text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                            {item.name}
+                          </span>
+                          <button
+                            onClick={() => deleteShoppingItem(item.id)}
+                            className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
