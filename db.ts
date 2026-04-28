@@ -247,6 +247,43 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
+        // ============================================
+        // TODOS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS todos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                completed BOOLEAN DEFAULT false,
+                priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH')),
+                category VARCHAR(50) NOT NULL DEFAULT 'GENERAL' CHECK (category IN ('GENERAL', 'RESERVATION', 'INVENTORY', 'STAFF', 'MAINTENANCE', 'EVENT')),
+                due_date DATE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMPTZ,
+                linked_reservation_id INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                assigned_to_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                assigned_to_user_name VARCHAR(255),
+                assigned_to_team VARCHAR(50) CHECK (assigned_to_team IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_user_name VARCHAR(255)
+            );
+        `);
+
+        // Create indexes for todos
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_user ON todos(assigned_to_user_id);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_team ON todos(assigned_to_team);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

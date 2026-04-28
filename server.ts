@@ -724,6 +724,317 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
 });
 
 // ============================================
+// TODOS - require authentication
+// ============================================
+app.get('/todos', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        let query = `
+            SELECT
+                id,
+                title,
+                description,
+                completed,
+                priority,
+                category,
+                due_date as "dueDate",
+                created_at as "createdAt",
+                completed_at as "completedAt",
+                linked_reservation_id as "linkedReservationId",
+                assigned_to_user_id as "assignedToUserId",
+                assigned_to_user_name as "assignedToUserName",
+                assigned_to_team as "assignedToTeam",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+            FROM todos
+        `;
+        const params: string[] = [];
+
+        if (date) {
+            query += ' WHERE due_date = $1';
+            params.push(date as string);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/todos/my', authenticate, async (req, res) => {
+    try {
+        const userId = req.user?.userId;
+        const userRole = req.user?.role;
+
+        const result = await pool.query(`
+            SELECT
+                id,
+                title,
+                description,
+                completed,
+                priority,
+                category,
+                due_date as "dueDate",
+                created_at as "createdAt",
+                completed_at as "completedAt",
+                linked_reservation_id as "linkedReservationId",
+                assigned_to_user_id as "assignedToUserId",
+                assigned_to_user_name as "assignedToUserName",
+                assigned_to_team as "assignedToTeam",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+            FROM todos
+            WHERE (assigned_to_user_id = $1 OR assigned_to_team = $2)
+              AND completed = false
+            ORDER BY
+                CASE priority
+                    WHEN 'HIGH' THEN 1
+                    WHEN 'MEDIUM' THEN 2
+                    WHEN 'LOW' THEN 3
+                END,
+                due_date ASC NULLS LAST,
+                created_at DESC
+        `, [userId, userRole]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/todos', authenticate, async (req, res) => {
+    try {
+        const {
+            title,
+            description,
+            priority,
+            category,
+            dueDate,
+            assignedToUserId,
+            assignedToUserName,
+            assignedToTeam,
+            linkedReservationId
+        } = req.body;
+
+        const result = await pool.query(`
+            INSERT INTO todos (
+                title, description, priority, category, due_date,
+                assigned_to_user_id, assigned_to_user_name, assigned_to_team,
+                linked_reservation_id, created_by_user_id, created_by_user_name
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING
+                id,
+                title,
+                description,
+                completed,
+                priority,
+                category,
+                due_date as "dueDate",
+                created_at as "createdAt",
+                completed_at as "completedAt",
+                linked_reservation_id as "linkedReservationId",
+                assigned_to_user_id as "assignedToUserId",
+                assigned_to_user_name as "assignedToUserName",
+                assigned_to_team as "assignedToTeam",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `, [
+            title,
+            description || null,
+            priority || 'MEDIUM',
+            category || 'GENERAL',
+            dueDate || null,
+            assignedToUserId || null,
+            assignedToUserName || null,
+            assignedToTeam || null,
+            linkedReservationId || null,
+            req.user?.userId || null,
+            req.user?.email || null
+        ]);
+
+        const newTodo = result.rows[0];
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('todo:created', newTodo, socketId);
+
+        res.status(201).json(newTodo);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/todos/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            title,
+            description,
+            priority,
+            category,
+            dueDate,
+            completed,
+            assignedToUserId,
+            assignedToUserName,
+            assignedToTeam
+        } = req.body;
+
+        // Build dynamic update query
+        const fields: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        const fieldMappings: Record<string, { dbField: string; value: any }> = {
+            title: { dbField: 'title', value: title },
+            description: { dbField: 'description', value: description },
+            priority: { dbField: 'priority', value: priority },
+            category: { dbField: 'category', value: category },
+            dueDate: { dbField: 'due_date', value: dueDate },
+            completed: { dbField: 'completed', value: completed },
+            assignedToUserId: { dbField: 'assigned_to_user_id', value: assignedToUserId },
+            assignedToUserName: { dbField: 'assigned_to_user_name', value: assignedToUserName },
+            assignedToTeam: { dbField: 'assigned_to_team', value: assignedToTeam },
+        };
+
+        for (const [key, mapping] of Object.entries(fieldMappings)) {
+            if (req.body.hasOwnProperty(key)) {
+                fields.push(`${mapping.dbField} = $${paramIndex}`);
+                values.push(mapping.value ?? null);
+                paramIndex++;
+            }
+        }
+
+        // Handle completed_at based on completed status
+        if (req.body.hasOwnProperty('completed')) {
+            if (completed) {
+                fields.push(`completed_at = CURRENT_TIMESTAMP`);
+            } else {
+                fields.push(`completed_at = NULL`);
+            }
+        }
+
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        values.push(id);
+        const query = `
+            UPDATE todos
+            SET ${fields.join(', ')}
+            WHERE id = $${paramIndex}
+            RETURNING
+                id,
+                title,
+                description,
+                completed,
+                priority,
+                category,
+                due_date as "dueDate",
+                created_at as "createdAt",
+                completed_at as "completedAt",
+                linked_reservation_id as "linkedReservationId",
+                assigned_to_user_id as "assignedToUserId",
+                assigned_to_user_name as "assignedToUserName",
+                assigned_to_team as "assignedToTeam",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `;
+
+        const result = await pool.query(query, values);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        const updatedTodo = result.rows[0];
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+
+        res.json(updatedTodo);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/todos/:id/toggle', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(`
+            UPDATE todos
+            SET
+                completed = NOT completed,
+                completed_at = CASE
+                    WHEN NOT completed THEN CURRENT_TIMESTAMP
+                    ELSE NULL
+                END
+            WHERE id = $1
+            RETURNING
+                id,
+                title,
+                description,
+                completed,
+                priority,
+                category,
+                due_date as "dueDate",
+                created_at as "createdAt",
+                completed_at as "completedAt",
+                linked_reservation_id as "linkedReservationId",
+                assigned_to_user_id as "assignedToUserId",
+                assigned_to_user_name as "assignedToUserName",
+                assigned_to_team as "assignedToTeam",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `, [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        const updatedTodo = result.rows[0];
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+
+        res.json(updatedTodo);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/todos/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query('DELETE FROM todos WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Todo not found' });
+        }
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('todo:deleted', { id }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // WHATSAPP HELPER FUNCTIONS
 // ============================================
 

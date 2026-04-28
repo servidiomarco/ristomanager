@@ -172,6 +172,16 @@ export class SocketService {
     console.log(`Broadcasting banquet:deleted for ID ${id}`);
   }
 
+  // Generic broadcast method for any event type
+  broadcastToAll(event: string, data: any, excludeSocketId?: string) {
+    if (excludeSocketId) {
+      this.io.except(excludeSocketId).emit(event, data);
+    } else {
+      this.io.emit(event, data);
+    }
+    console.log(`Broadcasting ${event}`);
+  }
+
   // Get Socket.IO instance (for advanced usage if needed)
   getIO() {
     return this.io;

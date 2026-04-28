@@ -1,8 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
-import { getTodos, createTodo, deleteTodo, toggleTodoComplete, saveTodos } from '../services/todoService';
+import { todoApiService } from '../services/todoApiService';
 import { authApiService } from '../services/authApiService';
+import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -62,6 +63,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Todo State
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todosLoading, setTodosLoading] = useState(true);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showTodoModal, setShowTodoModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
@@ -76,14 +78,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     assignedToTeam: undefined as UserRole | undefined,
   });
 
+  // Fetch todos from API
+  const fetchTodos = useCallback(async () => {
+    try {
+      setTodosLoading(true);
+      const fetchedTodos = await todoApiService.getTodos();
+      setTodos(fetchedTodos);
+    } catch (error) {
+      console.error('Error fetching todos:', error);
+    } finally {
+      setTodosLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    setTodos(getTodos());
+    fetchTodos();
     // Load staff users for assignment
     authApiService.getUsers().then(users => {
       setStaffUsers(users.filter(u => u.is_active));
     }).catch(() => {
       // Ignore error if not authorized to view users
     });
+  }, [fetchTodos]);
+
+  // Socket.IO real-time updates for todos
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+
+    const handleTodoCreated = (todo: TodoItem) => {
+      setTodos(prev => {
+        if (prev.some(t => t.id === todo.id)) return prev;
+        return [todo, ...prev];
+      });
+    };
+
+    const handleTodoUpdated = (todo: TodoItem) => {
+      setTodos(prev => prev.map(t => t.id === todo.id ? todo : t));
+    };
+
+    const handleTodoDeleted = (data: { id: string }) => {
+      setTodos(prev => prev.filter(t => t.id !== data.id));
+    };
+
+    socket.on('todo:created', handleTodoCreated);
+    socket.on('todo:updated', handleTodoUpdated);
+    socket.on('todo:deleted', handleTodoDeleted);
+
+    return () => {
+      socket.off('todo:created', handleTodoCreated);
+      socket.off('todo:updated', handleTodoUpdated);
+      socket.off('todo:deleted', handleTodoDeleted);
+    };
   }, []);
 
   const handleGenerateReport = async () => {
@@ -117,56 +163,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     setShowTodoModal(true);
   };
 
-  const handleSaveTodo = () => {
+  const handleSaveTodo = async () => {
     if (!todoForm.title.trim()) return;
     const assignedUser = staffUsers.find(u => u.id === todoForm.assignedToUserId);
 
-    if (editingTodo) {
-      // Update existing todo
-      const updatedTodo: TodoItem = {
-        ...editingTodo,
-        title: todoForm.title,
-        description: todoForm.description || undefined,
-        priority: todoForm.priority,
-        category: todoForm.category,
-        dueDate: todoForm.dueDate || undefined,
-        assignedToUserId: todoForm.assignedToUserId,
-        assignedToUserName: assignedUser?.full_name,
-        assignedToTeam: todoForm.assignedToTeam,
-      };
-      const allTodos = getTodos();
-      const updatedTodos = allTodos.map(t => t.id === editingTodo.id ? updatedTodo : t);
-      saveTodos(updatedTodos);
-      setTodos(updatedTodos);
-    } else {
-      // Create new todo
-      const todo = createTodo({
-        title: todoForm.title,
-        description: todoForm.description || undefined,
-        priority: todoForm.priority,
-        category: todoForm.category,
-        dueDate: todoForm.dueDate || undefined,
-        assignedToUserId: todoForm.assignedToUserId,
-        assignedToUserName: assignedUser?.full_name,
-        assignedToTeam: todoForm.assignedToTeam,
-        createdByUserId: user?.id,
-        createdByUserName: user?.full_name,
-      });
-      setTodos([todo, ...todos]);
+    try {
+      if (editingTodo) {
+        // Update existing todo
+        const updated = await todoApiService.updateTodo(editingTodo.id, {
+          title: todoForm.title,
+          description: todoForm.description || undefined,
+          priority: todoForm.priority,
+          category: todoForm.category,
+          dueDate: todoForm.dueDate || undefined,
+          assignedToUserId: todoForm.assignedToUserId,
+          assignedToUserName: assignedUser?.full_name,
+          assignedToTeam: todoForm.assignedToTeam,
+        });
+        setTodos(todos.map(t => t.id === editingTodo.id ? updated : t));
+      } else {
+        // Create new todo
+        const todo = await todoApiService.createTodo({
+          title: todoForm.title,
+          description: todoForm.description || undefined,
+          priority: todoForm.priority,
+          category: todoForm.category,
+          dueDate: todoForm.dueDate || undefined,
+          assignedToUserId: todoForm.assignedToUserId,
+          assignedToUserName: assignedUser?.full_name,
+          assignedToTeam: todoForm.assignedToTeam,
+        });
+        setTodos([todo, ...todos]);
+      }
+
+      resetTodoForm();
+      setShowTodoModal(false);
+    } catch (error) {
+      console.error('Error saving todo:', error);
     }
-
-    resetTodoForm();
-    setShowTodoModal(false);
   };
 
-  const handleToggleTodo = (id: string) => {
-    const updated = toggleTodoComplete(id);
-    if (updated) setTodos(todos.map(t => t.id === id ? updated : t));
+  const handleToggleTodo = async (id: string) => {
+    try {
+      const updated = await todoApiService.toggleTodoComplete(id);
+      setTodos(todos.map(t => t.id === id ? updated : t));
+    } catch (error) {
+      console.error('Error toggling todo:', error);
+    }
   };
 
-  const handleDeleteTodo = (id: string) => {
-    deleteTodo(id);
-    setTodos(todos.filter(t => t.id !== id));
+  const handleDeleteTodo = async (id: string) => {
+    try {
+      await todoApiService.deleteTodo(id);
+      setTodos(todos.filter(t => t.id !== id));
+    } catch (error) {
+      console.error('Error deleting todo:', error);
+    }
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -563,8 +615,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">Attività</h2>
                 <p className="text-xs text-slate-500">{pendingCount} da completare</p>
-                {/* Debug info - remove after testing */}
-                <p className="text-[9px] text-slate-400">User: {user?.id} - {user?.full_name} | Todos: {todos.length}</p>
               </div>
             </div>
             <button onClick={handleOpenAddTodo} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
@@ -585,16 +635,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             ))}
           </div>
           <div className="flex-1 divide-y divide-slate-100 overflow-y-auto max-h-[280px]">
-            {filteredTodos.length === 0 ? (
+            {todosLoading ? (
+              <div className="py-6 text-center">
+                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
+                <p className="text-slate-400 text-xs">Caricamento...</p>
+              </div>
+            ) : filteredTodos.length === 0 ? (
               <div className="py-6 text-center">
                 <CheckCircle2 className="h-8 w-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-400 text-xs">Nessuna attività</p>
-                {/* Debug: show first todo assignment info */}
-                {todos.length > 0 && (
-                  <p className="text-[8px] text-slate-300 mt-2">
-                    1st todo: ID={todos[0].assignedToUserId} Name={todos[0].assignedToUserName}
-                  </p>
-                )}
               </div>
             ) : (
               filteredTodos.slice(0, 5).map(todo => {
