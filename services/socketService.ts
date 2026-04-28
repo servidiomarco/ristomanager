@@ -174,12 +174,15 @@ export class SocketService {
 
   // Generic broadcast method for any event type
   broadcastToAll(event: string, data: any, excludeSocketId?: string) {
+    const connectedSockets = this.io.sockets.sockets.size;
+    console.log(`📡 broadcastToAll: ${event} to ${connectedSockets} connected clients (excluding: ${excludeSocketId || 'none'})`);
+
     if (excludeSocketId) {
       this.io.except(excludeSocketId).emit(event, data);
     } else {
       this.io.emit(event, data);
     }
-    console.log(`Broadcasting ${event}`);
+    console.log(`📡 Broadcast ${event} sent`);
   }
 
   // Get Socket.IO instance (for advanced usage if needed)

@@ -1097,7 +1097,13 @@ app.post('/shopping', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:created', newItem, socketId);
+        console.log('🛒 Broadcasting shopping:created', { itemId: newItem.id, socketService: !!socketService, excludeSocketId: socketId });
+        if (socketService) {
+            socketService.broadcastToAll('shopping:created', newItem, socketId);
+            console.log('🛒 Broadcast sent successfully');
+        } else {
+            console.error('🛒 socketService is undefined, cannot broadcast!');
+        }
 
         res.status(201).json(newItem);
     } catch (err) {
