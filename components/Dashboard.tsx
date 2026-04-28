@@ -417,149 +417,152 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         </div>
 
-        {/* Weekly Chart - Now smaller (1 column) */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
-            <p className="text-sm text-slate-500 mt-1">{weekRange}</p>
-            <div className="flex rounded-lg border border-slate-200 p-1 bg-slate-50 mt-4">
-              <button
-                onClick={() => setChartShiftFilter('ALL')}
-                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'ALL'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Tutti
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('LUNCH')}
-                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'LUNCH'
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Pranzo
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('DINNER')}
-                className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'DINNER'
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Cena
-              </button>
+        {/* Todo List - Compact version in sidebar */}
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                <ListTodo className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-800">Attività</h2>
+                <p className="text-xs text-slate-500">{pendingCount} da completare</p>
+              </div>
             </div>
+            <button onClick={() => setShowAddTodo(true)} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyChartData}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 11}}
-                />
-                <YAxis
-                  domain={[0, 600]}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 11}}
-                  width={35}
-                />
-                <Tooltip
-                  cursor={{fill: '#f1f5f9'}}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
-                  labelFormatter={(label, payload) => {
-                    if (payload && payload[0]) {
-                      return `${label} (${payload[0].payload.date})`;
-                    }
-                    return label;
-                  }}
-                />
-                <Bar
-                  dataKey="guests"
-                  fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="flex gap-1 mb-3 overflow-x-auto">
+            {[
+              { key: 'pending', label: 'Da fare', icon: Circle },
+              { key: 'completed', label: 'Fatte', icon: CheckCircle2 },
+              { key: 'overdue', label: 'Scadute', icon: AlertTriangle, count: overdueTodos.length },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setTodoFilter(tab.key as typeof todoFilter)} className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${todoFilter === tab.key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+                <tab.icon className="h-3 w-3" />
+                {tab.label}
+                {tab.count !== undefined && tab.count > 0 && <span className="bg-rose-500 text-white text-[10px] px-1 rounded-full">{tab.count}</span>}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 divide-y divide-slate-100 overflow-y-auto max-h-[280px]">
+            {filteredTodos.length === 0 ? (
+              <div className="py-6 text-center">
+                <CheckCircle2 className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-400 text-xs">Nessuna attività</p>
+              </div>
+            ) : (
+              filteredTodos.slice(0, 5).map(todo => {
+                const isOverdue = !todo.completed && todo.dueDate && todo.dueDate < todayStr;
+                return (
+                  <div key={todo.id} className={`py-2 ${todo.completed ? 'opacity-50' : ''}`}>
+                    <div className="flex items-start gap-2">
+                      <button onClick={() => handleToggleTodo(todo.id)} className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${todo.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-indigo-400'}`}>
+                        {todo.completed && <Check className="h-2 w-2" />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <p className={`text-xs font-medium truncate ${todo.completed ? 'line-through text-slate-400' : 'text-slate-700'}`}>{todo.title}</p>
+                          <div className="flex items-center gap-0.5 flex-shrink-0">
+                            <Flag className={`h-3 w-3 ${PRIORITY_COLORS[todo.priority]}`} />
+                            <button onClick={() => handleDeleteTodo(todo.id)} className="p-0.5 text-slate-400 hover:text-rose-500 rounded"><Trash2 className="h-3 w-3" /></button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[todo.category]}`}>{CATEGORY_LABELS[todo.category]}</span>
+                          {todo.dueDate && <span className={`text-[10px] ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}>{new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {filteredTodos.length > 5 && (
+              <div className="py-2 text-center">
+                <span className="text-xs text-indigo-600">+{filteredTodos.length - 5} altre attività</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Todo List Section */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-4 sm:p-6 border-b border-slate-100">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                <ListTodo className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800">Attività</h2>
-                <p className="text-sm text-slate-500">{pendingCount} da completare</p>
-              </div>
-            </div>
-            <button onClick={() => setShowAddTodo(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium">
-              <Plus className="h-4 w-4" /> Nuova
+      {/* Weekly Chart - Full width section */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
+            <p className="text-sm text-slate-500 mt-1">{weekRange}</p>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 p-1 bg-slate-50">
+            <button
+              onClick={() => setChartShiftFilter('ALL')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                chartShiftFilter === 'ALL'
+                  ? 'bg-white text-slate-800 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Tutti
+            </button>
+            <button
+              onClick={() => setChartShiftFilter('LUNCH')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                chartShiftFilter === 'LUNCH'
+                  ? 'bg-amber-100 text-amber-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Pranzo
+            </button>
+            <button
+              onClick={() => setChartShiftFilter('DINNER')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                chartShiftFilter === 'DINNER'
+                  ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Cena
             </button>
           </div>
-          <div className="flex gap-2 mt-4 overflow-x-auto pb-1">
-            {[
-              { key: 'pending', label: 'Da fare', icon: Circle },
-              { key: 'completed', label: 'Completate', icon: CheckCircle2 },
-              { key: 'overdue', label: 'Scadute', icon: AlertTriangle, count: overdueTodos.length },
-              { key: 'all', label: 'Tutte', icon: ListTodo },
-            ].map(tab => (
-              <button key={tab.key} onClick={() => setTodoFilter(tab.key as typeof todoFilter)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${todoFilter === tab.key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-                {tab.count !== undefined && tab.count > 0 && <span className="bg-rose-500 text-white text-xs px-1.5 py-0.5 rounded-full">{tab.count}</span>}
-              </button>
-            ))}
-          </div>
         </div>
-        <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
-          {filteredTodos.length === 0 ? (
-            <div className="p-8 text-center">
-              <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3"><CheckCircle2 className="h-6 w-6 text-slate-400" /></div>
-              <p className="text-slate-500 text-sm">{todoFilter === 'pending' ? 'Nessuna attività da completare' : todoFilter === 'completed' ? 'Nessuna attività completata' : todoFilter === 'overdue' ? 'Nessuna attività scaduta' : 'Nessuna attività'}</p>
-            </div>
-          ) : (
-            filteredTodos.map(todo => {
-              const isOverdue = !todo.completed && todo.dueDate && todo.dueDate < todayStr;
-              return (
-                <div key={todo.id} className={`p-4 hover:bg-slate-50 transition-colors ${todo.completed ? 'opacity-60' : ''}`}>
-                  <div className="flex items-start gap-3">
-                    <button onClick={() => handleToggleTodo(todo.id)} className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${todo.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-indigo-400'}`}>
-                      {todo.completed && <Check className="h-3 w-3" />}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className={`font-medium ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{todo.title}</p>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <Flag className={`h-4 w-4 ${PRIORITY_COLORS[todo.priority]}`} />
-                          <button onClick={() => handleDeleteTodo(todo.id)} className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"><Trash2 className="h-4 w-4" /></button>
-                        </div>
-                      </div>
-                      {todo.description && <p className="text-sm text-slate-500 mt-1">{todo.description}</p>}
-                      <div className="flex flex-wrap items-center gap-2 mt-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[todo.category]}`}>{CATEGORY_LABELS[todo.category]}</span>
-                        {todo.dueDate && <span className={`flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-500'}`}><Calendar className="h-3 w-3" />{new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}{isOverdue && ' (scaduta)'}</span>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weeklyChartData}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+              <XAxis
+                dataKey="name"
+                axisLine={false}
+                tickLine={false}
+                tick={{fill: '#64748b', fontSize: 12}}
+              />
+              <YAxis
+                domain={[0, 'auto']}
+                axisLine={false}
+                tickLine={false}
+                tick={{fill: '#64748b', fontSize: 12}}
+                width={40}
+              />
+              <Tooltip
+                cursor={{fill: '#f1f5f9'}}
+                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
+                labelFormatter={(label, payload) => {
+                  if (payload && payload[0]) {
+                    return `${label} (${payload[0].payload.date})`;
+                  }
+                  return label;
+                }}
+              />
+              <Bar
+                dataKey="guests"
+                fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
+                radius={[4, 4, 0, 0]}
+              />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
