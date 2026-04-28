@@ -560,12 +560,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [selectedDate]);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header with Calendar Navigation */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-500">Benvenuto su RistoCRM, {user?.full_name}</p>
+          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Dashboard</h1>
+          <p className="text-slate-500 text-base lg:text-lg">Benvenuto su RistoCRM, {user?.full_name}</p>
         </div>
 
         {/* Date Navigation */}
@@ -634,98 +634,98 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-            <Users className="h-5 w-5" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 lg:gap-6">
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+            <Users className="h-6 w-6 lg:h-7 lg:w-7" />
           </div>
           <div>
-            <p className="text-xs text-slate-500">Ospiti Attesi</p>
-            <p className="text-xl font-bold text-slate-800">{selectedDayGuests}</p>
+            <p className="text-sm lg:text-base text-slate-500">Ospiti Attesi</p>
+            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-            <Users className="h-5 w-5" />
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <Users className="h-6 w-6 lg:h-7 lg:w-7" />
           </div>
           <div>
-            <p className="text-xs text-slate-500">Ospiti Arrivati</p>
-            <p className="text-xl font-bold text-slate-800">{arrivedGuests}</p>
+            <p className="text-sm lg:text-base text-slate-500">Ospiti Arrivati</p>
+            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{arrivedGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-rose-50 text-rose-600 rounded-lg">
-            <TrendingUp className="h-5 w-5" />
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+            <TrendingUp className="h-6 w-6 lg:h-7 lg:w-7" />
           </div>
           <div>
-            <p className="text-xs text-slate-500">Occupazione</p>
-            <p className="text-xl font-bold text-slate-800">{occupancyRate}%</p>
+            <p className="text-sm lg:text-base text-slate-500">Occupazione</p>
+            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{occupancyRate}%</p>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
-            <Utensils className="h-5 w-5" />
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+            <Utensils className="h-6 w-6 lg:h-7 lg:w-7" />
           </div>
           <div>
-            <p className="text-xs text-slate-500">Coperti Totali</p>
-            <p className="text-xl font-bold text-slate-800">{totalCapacity}</p>
+            <p className="text-sm lg:text-base text-slate-500">Coperti Totali</p>
+            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{totalCapacity}</p>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-            <Calendar className="h-5 w-5" />
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <Calendar className="h-6 w-6 lg:h-7 lg:w-7" />
           </div>
           <div>
-            <p className="text-xs text-slate-500">Prenotazioni</p>
-            <p className="text-xl font-bold text-slate-800">{selectedDayReservations.length}</p>
+            <p className="text-sm lg:text-base text-slate-500">Prenotazioni</p>
+            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayReservations.length}</p>
           </div>
         </div>
       </div>
 
       {/* Charts Section - Swapped: Table Status is now larger */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Table Status by Room - Now expanded (2 columns) */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h2 className="text-lg font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
+        <div className="lg:col-span-2 bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-xl lg:text-2xl font-semibold mb-6 text-slate-800">Stato Tavoli</h2>
 
           {/* Shift Occupancy Summary */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-amber-800">Pranzo</span>
-                <span className="text-xs text-amber-600">{lunchTableIds.size}/{totalTables} tavoli</span>
+          <div className="grid grid-cols-2 gap-4 lg:gap-6 mb-6">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 lg:p-6 border border-amber-100">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-base lg:text-lg font-medium text-amber-800">Pranzo</span>
+                <span className="text-sm text-amber-600">{lunchTableIds.size}/{totalTables} tavoli</span>
               </div>
               <div className="flex items-end gap-2">
-                <span className="text-3xl font-bold text-amber-700">{lunchOccupancy}%</span>
-                <span className="text-sm text-amber-600 mb-1">occupazione</span>
+                <span className="text-4xl lg:text-5xl font-bold text-amber-700">{lunchOccupancy}%</span>
+                <span className="text-base text-amber-600 mb-1">occupazione</span>
               </div>
-              <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
+              <div className="mt-3 h-3 bg-amber-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-amber-500 rounded-full transition-all duration-500"
                   style={{ width: `${lunchOccupancy}%` }}
                 />
               </div>
-              <p className="text-xs text-amber-600 mt-2">
+              <p className="text-sm text-amber-600 mt-3">
                 {lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti
               </p>
             </div>
 
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-indigo-800">Cena</span>
-                <span className="text-xs text-indigo-600">{dinnerTableIds.size}/{totalTables} tavoli</span>
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 lg:p-6 border border-indigo-100">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-base lg:text-lg font-medium text-indigo-800">Cena</span>
+                <span className="text-sm text-indigo-600">{dinnerTableIds.size}/{totalTables} tavoli</span>
               </div>
               <div className="flex items-end gap-2">
-                <span className="text-3xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
-                <span className="text-sm text-indigo-600 mb-1">occupazione</span>
+                <span className="text-4xl lg:text-5xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
+                <span className="text-base text-indigo-600 mb-1">occupazione</span>
               </div>
-              <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
+              <div className="mt-3 h-3 bg-indigo-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-indigo-500 rounded-full transition-all duration-500"
                   style={{ width: `${dinnerOccupancy}%` }}
                 />
               </div>
-              <p className="text-xs text-indigo-600 mt-2">
+              <p className="text-sm text-indigo-600 mt-3">
                 {dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti
               </p>
             </div>
@@ -789,19 +789,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Todo List - Compact version in sidebar */}
-        <div ref={todoSectionRef} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                <ListTodo className="h-4 w-4" />
+        <div ref={todoSectionRef} className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                <ListTodo className="h-5 w-5 lg:h-6 lg:w-6" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-slate-800">Attività</h2>
-                <p className="text-xs text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {pendingCount} da completare</p>
+                <h2 className="text-base lg:text-lg font-semibold text-slate-800">Attività</h2>
+                <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {pendingCount} da completare</p>
               </div>
             </div>
-            <button onClick={handleOpenAddTodo} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-              <Plus className="h-4 w-4" />
+            <button onClick={handleOpenAddTodo} className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors">
+              <Plus className="h-5 w-5" />
             </button>
           </div>
           <div className="flex gap-1 mb-3 overflow-x-auto">
@@ -876,13 +876,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Weekly Chart + Shopping List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Weekly Chart */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800">Affluenza Settimanale</h2>
-              <p className="text-sm text-slate-500">{weekRange}</p>
+              <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Affluenza Settimanale</h2>
+              <p className="text-base text-slate-500">{weekRange}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
               <button
@@ -956,21 +956,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Shopping List */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-                <ShoppingCart className="h-5 w-5" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                <ShoppingCart className="h-6 w-6" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-slate-800">Spesa del Giorno</h2>
-                <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
+                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Spesa del Giorno</h2>
+                <p className="text-base text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
               </div>
             </div>
             {checkedItems > 0 && (
               <button
                 onClick={clearCheckedItems}
-                className="text-xs text-slate-500 hover:text-rose-600 transition-colors"
+                className="text-sm text-slate-500 hover:text-rose-600 transition-colors"
               >
                 Rimuovi completati
               </button>

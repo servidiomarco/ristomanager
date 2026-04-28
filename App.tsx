@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText } from 'lucide-react';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -40,6 +40,7 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Redirect to first accessible view when user changes or doesn't have access to current view
   useEffect(() => {
@@ -657,21 +658,44 @@ const App: React.FC = () => {
       </div>
 
       {/* Sidebar - Hidden on mobile, visible on lg+ */}
-      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 flex-col transition-all duration-300 z-20 relative">
-        <div className="h-16 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-100">
-          <div className="bg-indigo-600 p-2 rounded-lg">
-             <ChefHat className="text-white h-6 w-6" />
+      <aside className={`hidden lg:flex ${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-slate-200 flex-col transition-all duration-300 z-20 relative`}>
+        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-6'} border-b border-slate-100`}>
+          <div className="flex items-center">
+            <div className="bg-indigo-600 p-2 rounded-lg">
+               <ChefHat className="text-white h-6 w-6" />
+            </div>
+            {!sidebarCollapsed && <span className="ml-3 font-bold text-xl text-slate-800">RistoCRM</span>}
           </div>
-          <span className="ml-3 font-bold text-xl hidden lg:block text-slate-800">RistoCRM</span>
+          {!sidebarCollapsed && (
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Comprimi sidebar"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          )}
         </div>
 
-        <nav className="flex-1 py-6 space-y-2 px-3">
+        {/* Expand button when collapsed */}
+        {sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            className="mx-auto mt-4 p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            title="Espandi sidebar"
+          >
+            <PanelLeft size={20} />
+          </button>
+        )}
+
+        <nav className={`flex-1 py-6 space-y-2 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
           {canAccessView(ViewState.DASHBOARD) && (
             <SidebarItem
               icon={<LayoutDashboard size={20} />}
               label="Dashboard"
               active={view === ViewState.DASHBOARD}
               onClick={() => setView(ViewState.DASHBOARD)}
+              collapsed={sidebarCollapsed}
             />
           )}
           {canAccessView(ViewState.RESERVATIONS) && (
@@ -680,6 +704,7 @@ const App: React.FC = () => {
               label="Prenotazioni"
               active={view === ViewState.RESERVATIONS}
               onClick={() => setView(ViewState.RESERVATIONS)}
+              collapsed={sidebarCollapsed}
             />
           )}
           {canAccessView(ViewState.FLOOR_PLAN) && (
@@ -688,6 +713,7 @@ const App: React.FC = () => {
               label="Sala & Tavoli"
               active={view === ViewState.FLOOR_PLAN}
               onClick={() => setView(ViewState.FLOOR_PLAN)}
+              collapsed={sidebarCollapsed}
             />
           )}
           {canAccessView(ViewState.MENU) && (
@@ -696,6 +722,7 @@ const App: React.FC = () => {
               label="Menu & Banchetti"
               active={view === ViewState.MENU}
               onClick={() => setView(ViewState.MENU)}
+              collapsed={sidebarCollapsed}
             />
           )}
           {canAccessView(ViewState.SETTINGS) && (
@@ -704,39 +731,56 @@ const App: React.FC = () => {
               label="Impostazioni"
               active={view === ViewState.SETTINGS}
               onClick={() => setView(ViewState.SETTINGS)}
+              collapsed={sidebarCollapsed}
             />
           )}
         </nav>
 
-        <div className="p-4 border-t border-slate-100 space-y-2">
+        <div className={`p-4 border-t border-slate-100 space-y-2 ${sidebarCollapsed ? 'px-2' : ''}`}>
           {/* User Management Button (Owner only) */}
           {canManageUsers() && (
             <button
               onClick={() => setShowUserManagement(true)}
-              className="w-full flex items-center gap-3 px-3 py-2 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl transition-all"
+              className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl transition-all`}
+              title={sidebarCollapsed ? 'Gestione Utenti' : undefined}
             >
               <Users size={20} />
-              <span className="text-sm font-medium">Gestione Utenti</span>
+              {!sidebarCollapsed && <span className="text-sm font-medium">Gestione Utenti</span>}
             </button>
           )}
 
           {/* User Info */}
-          <div className="hidden lg:flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
-              {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">
+                {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+              </div>
+              <button
+                onClick={logout}
+                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                title="Esci"
+              >
+                <LogOut size={18} />
+              </button>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-700 truncate">{user?.full_name || 'Utente'}</p>
-              <p className="text-xs text-slate-400">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+          ) : (
+            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+                {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-700 truncate">{user?.full_name || 'Utente'}</p>
+                <p className="text-xs text-slate-400">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+              </div>
+              <button
+                onClick={logout}
+                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                title="Esci"
+              >
+                <LogOut size={16} />
+              </button>
             </div>
-            <button
-              onClick={logout}
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-              title="Esci"
-            >
-              <LogOut size={16} />
-            </button>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -1009,10 +1053,11 @@ const App: React.FC = () => {
 };
 
 // Helper Component for Sidebar
-const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
+const SidebarItem = ({ icon, label, active, onClick, collapsed = false }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed?: boolean }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${
+    title={collapsed ? label : undefined}
+    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-3 rounded-xl transition-all duration-200 group ${
       active
         ? 'bg-indigo-50 text-indigo-600'
         : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -1021,8 +1066,8 @@ const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, 
     <span className={`${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
       {icon}
     </span>
-    <span className="font-medium text-sm">{label}</span>
-    {active && <ChevronRight className="ml-auto h-4 w-4" />}
+    {!collapsed && <span className="font-medium text-sm">{label}</span>}
+    {active && !collapsed && <ChevronRight className="ml-auto h-4 w-4" />}
   </button>
 );
 
