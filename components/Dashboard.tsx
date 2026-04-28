@@ -215,10 +215,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Track socket connection state to re-subscribe when socket reconnects
   useEffect(() => {
+    console.log('🔌 Setting up socket connection tracker...');
     const unsubscribe = socketClient.onSocketChange((socket, connected) => {
-      console.log('Socket connection changed:', connected);
+      console.log('🔌 Socket connection changed - id:', socket?.id, 'connected:', connected);
       setSocketConnected(connected);
     });
+
+    // Also check current state
+    const currentSocket = socketClient.getSocket();
+    console.log('🔌 Current socket state - id:', currentSocket?.id, 'connected:', currentSocket?.connected);
+    if (currentSocket?.connected && !socketConnected) {
+      console.log('🔌 Socket already connected, updating state');
+      setSocketConnected(true);
+    }
+
     return unsubscribe;
   }, []);
 
@@ -278,11 +288,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Socket.IO real-time updates for shopping
   useEffect(() => {
     const socket = socketClient.getSocket();
-    console.log('Shopping socket setup - socket:', socket?.id, 'connected:', socket?.connected, 'socketConnected state:', socketConnected);
-    if (!socket) return;
+    console.log('🛒 Shopping socket setup - socket id:', socket?.id, 'connected:', socket?.connected, 'socketConnected state:', socketConnected);
+
+    if (!socket) {
+      console.log('🛒 No socket available, skipping listener setup');
+      return;
+    }
+
+    if (!socket.connected) {
+      console.log('🛒 Socket not connected, skipping listener setup');
+      return;
+    }
+
+    console.log('🛒 Setting up shopping socket listeners...');
 
     const handleShoppingCreated = (item: ShoppingItem) => {
-      console.log('Socket: shopping:created received', item, 'selectedDate:', selectedDateStr);
+      console.log('🛒 Socket: shopping:created received', item, 'selectedDate:', selectedDateStr);
       // Only add if it's for the currently selected date
       if (item.date === selectedDateStr) {
         setShoppingItems(prev => {
@@ -313,12 +334,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     socket.on('shopping:updated', handleShoppingUpdated);
     socket.on('shopping:deleted', handleShoppingDeleted);
     socket.on('shopping:cleared', handleShoppingCleared);
+    console.log('🛒 Shopping socket listeners registered successfully');
+
+    // Debug: Listen for any event
+    const debugHandler = (...args: any[]) => {
+      console.log('🛒 Socket received event:', args);
+    };
+    socket.onAny(debugHandler);
 
     return () => {
+      console.log('🛒 Cleaning up shopping socket listeners');
       socket.off('shopping:created', handleShoppingCreated);
       socket.off('shopping:updated', handleShoppingUpdated);
       socket.off('shopping:deleted', handleShoppingDeleted);
       socket.off('shopping:cleared', handleShoppingCleared);
+      socket.offAny(debugHandler);
     };
   }, [selectedDateStr, socketConnected]);
 
