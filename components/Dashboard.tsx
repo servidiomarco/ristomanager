@@ -110,6 +110,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
 
+  // Socket connection state - used to re-subscribe when socket reconnects
+  const [socketConnected, setSocketConnected] = useState(socketClient.isConnected());
+
   // Fetch shopping items from API
   const fetchShopping = useCallback(async (dateStr: string) => {
     try {
@@ -210,6 +213,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     });
   }, []);
 
+  // Track socket connection state to re-subscribe when socket reconnects
+  useEffect(() => {
+    const unsubscribe = socketClient.onSocketChange((socket, connected) => {
+      console.log('Socket connection changed:', connected);
+      setSocketConnected(connected);
+    });
+    return unsubscribe;
+  }, []);
+
   // Socket.IO real-time updates for todos
   useEffect(() => {
     const socket = socketClient.getSocket();
@@ -256,7 +268,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('todo:updated', handleTodoUpdated);
       socket.off('todo:deleted', handleTodoDeleted);
     };
-  }, [selectedDateStr]);
+  }, [selectedDateStr, socketConnected]);
 
   // Fetch shopping items when selectedDate changes
   useEffect(() => {
@@ -303,7 +315,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('shopping:deleted', handleShoppingDeleted);
       socket.off('shopping:cleared', handleShoppingCleared);
     };
-  }, [selectedDateStr]);
+  }, [selectedDateStr, socketConnected]);
 
   const handleGenerateReport = async () => {
     setLoading(true);
