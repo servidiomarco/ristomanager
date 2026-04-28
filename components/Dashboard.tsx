@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
+import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -54,16 +55,7 @@ interface DashboardProps {
   rooms: Room[];
 }
 
-// Shopping List Types
-type ShoppingCategory = 'CUCINA' | 'BAR' | 'ALTRO';
-
-interface ShoppingItem {
-  id: string;
-  name: string;
-  category: ShoppingCategory;
-  checked: boolean;
-}
-
+// Shopping List Labels and Colors
 const SHOPPING_CATEGORY_LABELS: Record<ShoppingCategory, string> = {
   'CUCINA': 'Cucina',
   'BAR': 'Bar',
@@ -82,8 +74,6 @@ const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
   'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
 };
 
-const SHOPPING_STORAGE_KEY = 'ristocrm_shopping_list';
-
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
@@ -91,6 +81,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+
+  // Get selected date string for filtering (defined early for use in shopping/todo functions)
+  const selectedDateStr = selectedDate.toISOString().split('T')[0];
+  const isToday = selectedDateStr === new Date().toISOString().split('T')[0];
 
   // Todo State
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -111,46 +105,66 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   });
 
   // Shopping List State
-  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>(() => {
-    try {
-      const stored = localStorage.getItem(SHOPPING_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
+  const [shoppingLoading, setShoppingLoading] = useState(true);
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
 
-  // Save shopping list to localStorage
-  useEffect(() => {
-    localStorage.setItem(SHOPPING_STORAGE_KEY, JSON.stringify(shoppingItems));
-  }, [shoppingItems]);
+  // Fetch shopping items from API
+  const fetchShopping = useCallback(async (dateStr: string) => {
+    try {
+      setShoppingLoading(true);
+      const items = await shoppingApiService.getItemsByDate(dateStr);
+      setShoppingItems(items);
+    } catch (error) {
+      console.error('Error fetching shopping items:', error);
+    } finally {
+      setShoppingLoading(false);
+    }
+  }, []);
 
-  const addShoppingItem = () => {
+  const addShoppingItem = async () => {
     if (!newItemName.trim()) return;
-    const newItem: ShoppingItem = {
-      id: crypto.randomUUID(),
-      name: newItemName.trim(),
-      category: newItemCategory,
-      checked: false
-    };
-    setShoppingItems(prev => [...prev, newItem]);
-    setNewItemName('');
+    try {
+      const newItem = await shoppingApiService.createItem({
+        name: newItemName.trim(),
+        category: newItemCategory,
+        date: selectedDateStr
+      });
+      setShoppingItems(prev => [...prev, newItem]);
+      setNewItemName('');
+    } catch (error) {
+      console.error('Error adding shopping item:', error);
+    }
   };
 
-  const toggleShoppingItem = (id: string) => {
-    setShoppingItems(prev => prev.map(item =>
-      item.id === id ? { ...item, checked: !item.checked } : item
-    ));
+  const toggleShoppingItem = async (id: string) => {
+    try {
+      const updated = await shoppingApiService.toggleItem(id);
+      setShoppingItems(prev => prev.map(item =>
+        item.id === id ? updated : item
+      ));
+    } catch (error) {
+      console.error('Error toggling shopping item:', error);
+    }
   };
 
-  const deleteShoppingItem = (id: string) => {
-    setShoppingItems(prev => prev.filter(item => item.id !== id));
+  const deleteShoppingItem = async (id: string) => {
+    try {
+      await shoppingApiService.deleteItem(id);
+      setShoppingItems(prev => prev.filter(item => item.id !== id));
+    } catch (error) {
+      console.error('Error deleting shopping item:', error);
+    }
   };
 
-  const clearCheckedItems = () => {
-    setShoppingItems(prev => prev.filter(item => !item.checked));
+  const clearCheckedItems = async () => {
+    try {
+      await shoppingApiService.clearChecked(selectedDateStr);
+      setShoppingItems(prev => prev.filter(item => !item.checked));
+    } catch (error) {
+      console.error('Error clearing checked items:', error);
+    }
   };
 
   // Group shopping items by category
@@ -169,11 +183,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const totalItems = shoppingItems.length;
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
-  // Fetch todos from API
-  const fetchTodos = useCallback(async () => {
+  // Fetch todos from API (filtered by selected date)
+  const fetchTodos = useCallback(async (dateStr: string) => {
     try {
       setTodosLoading(true);
-      const fetchedTodos = await todoApiService.getTodos();
+      const fetchedTodos = await todoApiService.getTodosByDate(dateStr);
       setTodos(fetchedTodos);
     } catch (error) {
       console.error('Error fetching todos:', error);
@@ -182,15 +196,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
+  // Fetch todos when selectedDate changes
   useEffect(() => {
-    fetchTodos();
-    // Load staff users for assignment
+    fetchTodos(selectedDateStr);
+  }, [selectedDateStr, fetchTodos]);
+
+  // Load staff users for assignment (once on mount)
+  useEffect(() => {
     authApiService.getUsers().then(users => {
       setStaffUsers(users.filter(u => u.is_active));
     }).catch(() => {
       // Ignore error if not authorized to view users
     });
-  }, [fetchTodos]);
+  }, []);
 
   // Socket.IO real-time updates for todos
   useEffect(() => {
@@ -198,14 +216,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     if (!socket) return;
 
     const handleTodoCreated = (todo: TodoItem) => {
-      setTodos(prev => {
-        if (prev.some(t => t.id === todo.id)) return prev;
-        return [todo, ...prev];
-      });
+      // Only add if it's for the currently selected date
+      if (todo.dueDate === selectedDateStr) {
+        setTodos(prev => {
+          if (prev.some(t => t.id === todo.id)) return prev;
+          return [todo, ...prev];
+        });
+      }
     };
 
     const handleTodoUpdated = (todo: TodoItem) => {
-      setTodos(prev => prev.map(t => t.id === todo.id ? todo : t));
+      // Update if it exists in current list, or add if it's for today's date
+      setTodos(prev => {
+        const exists = prev.some(t => t.id === todo.id);
+        if (exists) {
+          // If the date changed and it's no longer for selected date, remove it
+          if (todo.dueDate !== selectedDateStr) {
+            return prev.filter(t => t.id !== todo.id);
+          }
+          return prev.map(t => t.id === todo.id ? todo : t);
+        } else if (todo.dueDate === selectedDateStr) {
+          // New todo for selected date
+          return [todo, ...prev];
+        }
+        return prev;
+      });
     };
 
     const handleTodoDeleted = (data: { id: string }) => {
@@ -221,7 +256,54 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('todo:updated', handleTodoUpdated);
       socket.off('todo:deleted', handleTodoDeleted);
     };
-  }, []);
+  }, [selectedDateStr]);
+
+  // Fetch shopping items when selectedDate changes
+  useEffect(() => {
+    fetchShopping(selectedDateStr);
+  }, [selectedDateStr, fetchShopping]);
+
+  // Socket.IO real-time updates for shopping
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+
+    const handleShoppingCreated = (item: ShoppingItem) => {
+      // Only add if it's for the currently selected date
+      if (item.date === selectedDateStr) {
+        setShoppingItems(prev => {
+          if (prev.some(i => i.id === item.id)) return prev;
+          return [...prev, item];
+        });
+      }
+    };
+
+    const handleShoppingUpdated = (item: ShoppingItem) => {
+      setShoppingItems(prev => prev.map(i => i.id === item.id ? item : i));
+    };
+
+    const handleShoppingDeleted = (data: { id: string }) => {
+      setShoppingItems(prev => prev.filter(i => i.id !== data.id));
+    };
+
+    const handleShoppingCleared = (data: { date: string }) => {
+      if (data.date === selectedDateStr) {
+        setShoppingItems(prev => prev.filter(i => !i.checked));
+      }
+    };
+
+    socket.on('shopping:created', handleShoppingCreated);
+    socket.on('shopping:updated', handleShoppingUpdated);
+    socket.on('shopping:deleted', handleShoppingDeleted);
+    socket.on('shopping:cleared', handleShoppingCleared);
+
+    return () => {
+      socket.off('shopping:created', handleShoppingCreated);
+      socket.off('shopping:updated', handleShoppingUpdated);
+      socket.off('shopping:deleted', handleShoppingDeleted);
+      socket.off('shopping:cleared', handleShoppingCleared);
+    };
+  }, [selectedDateStr]);
 
   const handleGenerateReport = async () => {
     setLoading(true);
@@ -237,6 +319,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const handleOpenAddTodo = () => {
     resetTodoForm();
+    // Default to selected date for new todos
+    setTodoForm(prev => ({ ...prev, dueDate: selectedDateStr }));
     setShowTodoModal(true);
   };
 
@@ -381,10 +465,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const goToToday = () => {
     setSelectedDate(new Date());
   };
-
-  // Get selected date string for filtering
-  const selectedDateStr = selectedDate.toISOString().split('T')[0];
-  const isToday = selectedDateStr === new Date().toISOString().split('T')[0];
 
   // Filter reservations for selected date
   const selectedDayReservations = useMemo(() => {
@@ -705,7 +785,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">Attività</h2>
-                <p className="text-xs text-slate-500">{pendingCount} da completare</p>
+                <p className="text-xs text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {pendingCount} da completare</p>
               </div>
             </div>
             <button onClick={handleOpenAddTodo} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
@@ -872,7 +952,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-slate-800">Spesa del Giorno</h2>
-                <p className="text-sm text-slate-500">{checkedItems}/{totalItems} completati</p>
+                <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
               </div>
             </div>
             {checkedItems > 0 && (
@@ -915,7 +995,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           {/* Shopping List by Category */}
           <div className="flex-1 overflow-y-auto max-h-[200px] space-y-4">
-            {totalItems === 0 ? (
+            {shoppingLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="h-8 w-8 text-emerald-400 mx-auto mb-2 animate-spin" />
+                <p className="text-slate-400 text-sm">Caricamento...</p>
+              </div>
+            ) : totalItems === 0 ? (
               <div className="py-8 text-center">
                 <ShoppingCart className="h-10 w-10 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-400 text-sm">Nessun prodotto nella lista</p>

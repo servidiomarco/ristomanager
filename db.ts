@@ -284,6 +284,29 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
         `);
 
+        // ============================================
+        // SHOPPING LIST TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS shopping_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                category VARCHAR(20) NOT NULL DEFAULT 'ALTRO' CHECK (category IN ('CUCINA', 'BAR', 'ALTRO')),
+                checked BOOLEAN DEFAULT false,
+                date DATE NOT NULL DEFAULT CURRENT_DATE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            );
+        `);
+
+        // Create indexes for shopping_items
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_shopping_items_date ON shopping_items(date);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_shopping_items_category ON shopping_items(category);
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

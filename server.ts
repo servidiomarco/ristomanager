@@ -1035,6 +1035,155 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
+// SHOPPING LIST - require authentication
+// ============================================
+app.get('/shopping', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        if (!date) {
+            return res.status(400).json({ error: 'Date parameter is required' });
+        }
+
+        const result = await pool.query(`
+            SELECT
+                id,
+                name,
+                category,
+                checked,
+                date,
+                created_at as "createdAt",
+                created_by_user_id as "createdByUserId"
+            FROM shopping_items
+            WHERE date = $1
+            ORDER BY
+                CASE category
+                    WHEN 'CUCINA' THEN 1
+                    WHEN 'BAR' THEN 2
+                    WHEN 'ALTRO' THEN 3
+                END,
+                created_at ASC
+        `, [date]);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/shopping', authenticate, async (req, res) => {
+    try {
+        const { name, category, date } = req.body;
+
+        if (!name || !date) {
+            return res.status(400).json({ error: 'Name and date are required' });
+        }
+
+        const result = await pool.query(`
+            INSERT INTO shopping_items (name, category, date, created_by_user_id)
+            VALUES ($1, $2, $3, $4)
+            RETURNING
+                id,
+                name,
+                category,
+                checked,
+                date,
+                created_at as "createdAt",
+                created_by_user_id as "createdByUserId"
+        `, [name, category || 'ALTRO', date, req.user?.userId || null]);
+
+        const newItem = result.rows[0];
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:created', newItem, socketId);
+
+        res.status(201).json(newItem);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(`
+            UPDATE shopping_items
+            SET checked = NOT checked
+            WHERE id = $1
+            RETURNING
+                id,
+                name,
+                category,
+                checked,
+                date,
+                created_at as "createdAt",
+                created_by_user_id as "createdByUserId"
+        `, [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        const updatedItem = result.rows[0];
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:updated', updatedItem, socketId);
+
+        res.json(updatedItem);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/shopping/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query('DELETE FROM shopping_items WHERE id = $1 RETURNING id, date', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:deleted', { id, date: result.rows[0].date }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        if (!date) {
+            return res.status(400).json({ error: 'Date parameter is required' });
+        }
+
+        await pool.query('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:cleared', { date }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // WHATSAPP HELPER FUNCTIONS
 // ============================================
 
