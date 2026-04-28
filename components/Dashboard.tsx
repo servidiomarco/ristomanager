@@ -171,16 +171,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // Helper to check if task is assigned to current user
+  const isAssignedToMe = (todo: TodoItem) => {
+    if (todo.assignedToUserId && user?.id) {
+      return Number(todo.assignedToUserId) === Number(user.id);
+    }
+    return false;
+  };
+
+  const isAssignedToMyTeam = (todo: TodoItem) => {
+    return todo.assignedToTeam === user?.role;
+  };
+
   // My assigned todos (assigned to me or my team)
   const myTodos = todos.filter(t =>
-    !t.completed && (
-      t.assignedToUserId === user?.id ||
-      t.assignedToTeam === user?.role
-    )
+    !t.completed && (isAssignedToMe(t) || isAssignedToMyTeam(t))
   );
 
   const filteredTodos = todos.filter(todo => {
-    if (todoFilter === 'mine') return !todo.completed && (todo.assignedToUserId === user?.id || todo.assignedToTeam === user?.role);
+    if (todoFilter === 'mine') return !todo.completed && (isAssignedToMe(todo) || isAssignedToMyTeam(todo));
     if (todoFilter === 'pending') return !todo.completed;
     if (todoFilter === 'completed') return todo.completed;
     if (todoFilter === 'overdue') return !todo.completed && todo.dueDate && todo.dueDate < todayStr;
@@ -360,12 +369,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div>
                 <h3 className="font-semibold">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
                 <p className="text-sm text-white/80">
-                  {myTodos.filter(t => t.assignedToUserId === user?.id).length > 0 && (
-                    <span>{myTodos.filter(t => t.assignedToUserId === user?.id).length} personali</span>
+                  {myTodos.filter(isAssignedToMe).length > 0 && (
+                    <span>{myTodos.filter(isAssignedToMe).length} personali</span>
                   )}
-                  {myTodos.filter(t => t.assignedToUserId === user?.id).length > 0 && myTodos.filter(t => t.assignedToTeam === user?.role).length > 0 && ' · '}
-                  {myTodos.filter(t => t.assignedToTeam === user?.role).length > 0 && (
-                    <span>{myTodos.filter(t => t.assignedToTeam === user?.role).length} del team {user?.role && TEAM_LABELS[user.role]}</span>
+                  {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
+                  {myTodos.filter(isAssignedToMyTeam).length > 0 && (
+                    <span>{myTodos.filter(isAssignedToMyTeam).length} del team {user?.role && TEAM_LABELS[user.role]}</span>
                   )}
                 </p>
               </div>
