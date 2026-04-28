@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
+import { AlertTriangle } from 'lucide-react';
 
 // Permission type (must match backend)
 type Permission = string;
@@ -36,6 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showSessionExpiredModal, setShowSessionExpiredModal] = useState(false);
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -74,8 +76,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setPermissions([]);
       socketClient.disconnect();
-      // Show alert to user
-      alert('La tua sessione è scaduta. Effettua nuovamente il login.');
+      // Show session expired modal
+      setShowSessionExpiredModal(true);
     });
 
     return unsubscribe;
@@ -141,6 +143,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider value={value}>
       {children}
+
+      {/* Session Expired Modal */}
+      {showSessionExpiredModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="h-8 w-8 text-amber-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-slate-800 mb-2">Sessione Scaduta</h3>
+              <p className="text-slate-600 mb-6">
+                La tua sessione è scaduta. Effettua nuovamente il login per continuare.
+              </p>
+              <button
+                onClick={() => setShowSessionExpiredModal(false)}
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+              >
+                Accedi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };
