@@ -67,6 +67,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [todosLoading, setTodosLoading] = useState(true);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showTodoModal, setShowTodoModal] = useState(false);
+  const [showMyTasksModal, setShowMyTasksModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
   const [todoForm, setTodoForm] = useState({
@@ -442,10 +443,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
             </div>
             <button
-              onClick={() => {
-                setTodoFilter('mine');
-                todoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }}
+              onClick={() => setShowMyTasksModal(true)}
               className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
             >
               Visualizza
@@ -773,6 +771,93 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* My Tasks Modal */}
+      {showMyTasksModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600">
+              <div className="flex items-center gap-3 text-white">
+                <div className="p-2 bg-white/20 rounded-lg">
+                  <UserCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold">Le Mie Attività</h3>
+                  <p className="text-sm text-white/80">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
+                </div>
+              </div>
+              <button onClick={() => setShowMyTasksModal(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X className="h-5 w-5 text-white" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {myTodos.length === 0 ? (
+                <div className="py-12 text-center">
+                  <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
+                  <p className="text-slate-600 font-medium">Tutto fatto!</p>
+                  <p className="text-slate-400 text-sm">Non hai attività assegnate</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {myTodos.map(todo => {
+                    const isOverdue = todo.dueDate && todo.dueDate < todayStr;
+                    return (
+                      <div key={todo.id} className={`p-4 rounded-xl border ${isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'} hover:shadow-md transition-shadow`}>
+                        <div className="flex items-start gap-3">
+                          <button
+                            onClick={() => handleToggleTodo(todo.id)}
+                            className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-indigo-400 flex items-center justify-center transition-colors"
+                          >
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium text-slate-800">{todo.title}</p>
+                              <Flag className={`h-4 w-4 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
+                            </div>
+                            {todo.description && (
+                              <p className="text-sm text-slate-500 mt-1">{todo.description}</p>
+                            )}
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              <span className={`text-xs px-2 py-1 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
+                                {CATEGORY_LABELS[todo.category]}
+                              </span>
+                              {isAssignedToMe(todo) && (
+                                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
+                                  <UserCircle className="h-3 w-3" /> Personale
+                                </span>
+                              )}
+                              {isAssignedToMyTeam(todo) && !isAssignedToMe(todo) && (
+                                <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${TEAM_COLORS[todo.assignedToTeam!]}`}>
+                                  <UsersRound className="h-3 w-3" /> {TEAM_LABELS[todo.assignedToTeam!]}
+                                </span>
+                              )}
+                              {todo.dueDate && (
+                                <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-500'}`}>
+                                  <Clock className="h-3 w-3" />
+                                  {isOverdue ? 'Scaduto: ' : ''}
+                                  {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50">
+              <button
+                onClick={() => setShowMyTasksModal(false)}
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+              >
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
