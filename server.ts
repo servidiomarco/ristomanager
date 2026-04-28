@@ -1051,7 +1051,7 @@ app.get('/shopping', authenticate, async (req, res) => {
                 name,
                 category,
                 checked,
-                date,
+                TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
                 created_by_user_id as "createdByUserId"
             FROM shopping_items
@@ -1088,7 +1088,7 @@ app.post('/shopping', authenticate, async (req, res) => {
                 name,
                 category,
                 checked,
-                date,
+                TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
                 created_by_user_id as "createdByUserId"
         `, [name, category || 'ALTRO', date, req.user?.userId || null]);
@@ -1119,7 +1119,7 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
                 name,
                 category,
                 checked,
-                date,
+                TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
                 created_by_user_id as "createdByUserId"
         `, [id]);
@@ -1145,7 +1145,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query('DELETE FROM shopping_items WHERE id = $1 RETURNING id, date', [id]);
+        const result = await pool.query('DELETE FROM shopping_items WHERE id = $1 RETURNING id, TO_CHAR(date, \'YYYY-MM-DD\') as date', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
