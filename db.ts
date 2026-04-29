@@ -336,6 +336,81 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_shopping_items_category ON shopping_items(category);
         `);
 
+        // ============================================
+        // STAFF MEMBERS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS staff_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) NOT NULL,
+                surname VARCHAR(100) NOT NULL,
+                category VARCHAR(20) NOT NULL CHECK (category IN ('SALA', 'CUCINA')),
+                staff_type VARCHAR(20) NOT NULL CHECK (staff_type IN ('FISSO', 'STAGIONALE', 'EXTRA')),
+                phone VARCHAR(50),
+                email VARCHAR(255),
+                role VARCHAR(100),
+                hire_date DATE,
+                contract_end_date DATE,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_members_category ON staff_members(category);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_members_is_active ON staff_members(is_active);
+        `);
+
+        // ============================================
+        // STAFF SHIFTS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS staff_shifts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                staff_id UUID NOT NULL REFERENCES staff_members(id) ON DELETE CASCADE,
+                date DATE NOT NULL,
+                shift VARCHAR(20) NOT NULL CHECK (shift IN ('LUNCH', 'DINNER')),
+                present BOOLEAN DEFAULT true,
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(staff_id, date, shift)
+            );
+        `);
+
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_shifts_date ON staff_shifts(date);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_shifts_staff_id ON staff_shifts(staff_id);
+        `);
+
+        // ============================================
+        // STAFF TIME OFF TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS staff_time_off (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                staff_id UUID NOT NULL REFERENCES staff_members(id) ON DELETE CASCADE,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                type VARCHAR(20) NOT NULL CHECK (type IN ('RIPOSO', 'VACANZA', 'MALATTIA', 'PERMESSO')),
+                notes TEXT,
+                approved BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_time_off_staff_id ON staff_time_off(staff_id);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_staff_time_off_dates ON staff_time_off(start_date, end_date);
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

@@ -1209,6 +1209,603 @@ app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
 });
 
 // ============================================
+// STAFF MANAGEMENT ROUTES
+// ============================================
+
+// Get all staff members
+app.get('/staff', authenticate, async (req, res) => {
+    try {
+        const { category } = req.query;
+        let query = 'SELECT * FROM staff_members';
+        const params: any[] = [];
+
+        if (category) {
+            query += ' WHERE category = $1';
+            params.push(category);
+        }
+
+        query += ' ORDER BY surname, name';
+
+        const result = await pool.query(query, params);
+
+        const staff = result.rows.map(row => ({
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        }));
+
+        res.json(staff);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get single staff member
+app.get('/staff/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('SELECT * FROM staff_members WHERE id = $1', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const row = result.rows[0];
+        res.json({
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Create staff member
+app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes } = req.body;
+
+        if (!name || !surname || !category || !staffType) {
+            return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO staff_members (name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING *`,
+            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, notes || null]
+        );
+
+        const row = result.rows[0];
+        const staffMember = {
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        };
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('staff:created', staffMember, socketId);
+
+        res.status(201).json(staffMember);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update staff member
+app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive } = req.body;
+
+        const result = await pool.query(
+            `UPDATE staff_members SET
+                name = COALESCE($1, name),
+                surname = COALESCE($2, surname),
+                category = COALESCE($3, category),
+                staff_type = COALESCE($4, staff_type),
+                phone = COALESCE($5, phone),
+                email = COALESCE($6, email),
+                role = COALESCE($7, role),
+                hire_date = COALESCE($8, hire_date),
+                contract_end_date = COALESCE($9, contract_end_date),
+                notes = COALESCE($10, notes),
+                is_active = COALESCE($11, is_active),
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = $12
+             RETURNING *`,
+            [name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const row = result.rows[0];
+        const staffMember = {
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        };
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('staff:updated', staffMember, socketId);
+
+        res.json(staffMember);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete staff member
+app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('staff:deleted', { id }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// STAFF SHIFTS ROUTES
+// ============================================
+
+// Get shifts (optionally filtered by date and/or staffId)
+app.get('/staff/shifts', authenticate, async (req, res) => {
+    try {
+        const { date, staffId, startDate, endDate } = req.query;
+        let query = 'SELECT * FROM staff_shifts WHERE 1=1';
+        const params: any[] = [];
+        let paramCount = 0;
+
+        if (date) {
+            paramCount++;
+            query += ` AND date = $${paramCount}`;
+            params.push(date);
+        }
+
+        if (startDate && endDate) {
+            paramCount++;
+            query += ` AND date >= $${paramCount}`;
+            params.push(startDate);
+            paramCount++;
+            query += ` AND date <= $${paramCount}`;
+            params.push(endDate);
+        }
+
+        if (staffId) {
+            paramCount++;
+            query += ` AND staff_id = $${paramCount}`;
+            params.push(staffId);
+        }
+
+        query += ' ORDER BY date, shift';
+
+        const result = await pool.query(query, params);
+
+        const shifts = result.rows.map(row => ({
+            id: row.id,
+            staffId: row.staff_id,
+            date: row.date,
+            shift: row.shift,
+            present: row.present,
+            notes: row.notes,
+            createdAt: row.created_at
+        }));
+
+        res.json(shifts);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Create shift
+app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { staffId, date, shift, present, notes } = req.body;
+
+        if (!staffId || !date || !shift) {
+            return res.status(400).json({ error: 'staffId, date, and shift are required' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
+             RETURNING *`,
+            [staffId, date, shift, present !== false, notes || null]
+        );
+
+        const row = result.rows[0];
+        const shiftData = {
+            id: row.id,
+            staffId: row.staff_id,
+            date: row.date,
+            shift: row.shift,
+            present: row.present,
+            notes: row.notes,
+            createdAt: row.created_at
+        };
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shift:created', shiftData, socketId);
+
+        res.status(201).json(shiftData);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Bulk create shifts
+app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { shifts } = req.body;
+
+        if (!Array.isArray(shifts) || shifts.length === 0) {
+            return res.status(400).json({ error: 'shifts array is required' });
+        }
+
+        const createdShifts = [];
+        for (const shift of shifts) {
+            const result = await pool.query(
+                `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
+                 RETURNING *`,
+                [shift.staffId, shift.date, shift.shift, shift.present !== false, shift.notes || null]
+            );
+            const row = result.rows[0];
+            createdShifts.push({
+                id: row.id,
+                staffId: row.staff_id,
+                date: row.date,
+                shift: row.shift,
+                present: row.present,
+                notes: row.notes,
+                createdAt: row.created_at
+            });
+        }
+
+        res.status(201).json(createdShifts);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update shift
+app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { present, notes } = req.body;
+
+        const result = await pool.query(
+            `UPDATE staff_shifts SET
+                present = COALESCE($1, present),
+                notes = COALESCE($2, notes)
+             WHERE id = $3
+             RETURNING *`,
+            [present, notes, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Shift not found' });
+        }
+
+        const row = result.rows[0];
+        const shiftData = {
+            id: row.id,
+            staffId: row.staff_id,
+            date: row.date,
+            shift: row.shift,
+            present: row.present,
+            notes: row.notes,
+            createdAt: row.created_at
+        };
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shift:updated', shiftData, socketId);
+
+        res.json(shiftData);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete shift
+app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('DELETE FROM staff_shifts WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Shift not found' });
+        }
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shift:deleted', { id }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// STAFF TIME OFF ROUTES
+// ============================================
+
+// Get time off (optionally filtered by staffId and date range)
+app.get('/staff/time-off', authenticate, async (req, res) => {
+    try {
+        const { staffId, startDate, endDate } = req.query;
+        let query = 'SELECT * FROM staff_time_off WHERE 1=1';
+        const params: any[] = [];
+        let paramCount = 0;
+
+        if (staffId) {
+            paramCount++;
+            query += ` AND staff_id = $${paramCount}`;
+            params.push(staffId);
+        }
+
+        if (startDate && endDate) {
+            paramCount++;
+            query += ` AND start_date <= $${paramCount}`;
+            params.push(endDate);
+            paramCount++;
+            query += ` AND end_date >= $${paramCount}`;
+            params.push(startDate);
+        }
+
+        query += ' ORDER BY start_date DESC';
+
+        const result = await pool.query(query, params);
+
+        const timeOffs = result.rows.map(row => ({
+            id: row.id,
+            staffId: row.staff_id,
+            startDate: row.start_date,
+            endDate: row.end_date,
+            type: row.type,
+            notes: row.notes,
+            approved: row.approved,
+            createdAt: row.created_at
+        }));
+
+        res.json(timeOffs);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Create time off
+app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { staffId, startDate, endDate, type, notes, approved } = req.body;
+
+        if (!staffId || !startDate || !endDate || !type) {
+            return res.status(400).json({ error: 'staffId, startDate, endDate, and type are required' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, notes, approved)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING *`,
+            [staffId, startDate, endDate, type, notes || null, approved !== false]
+        );
+
+        const row = result.rows[0];
+        const timeOff = {
+            id: row.id,
+            staffId: row.staff_id,
+            startDate: row.start_date,
+            endDate: row.end_date,
+            type: row.type,
+            notes: row.notes,
+            approved: row.approved,
+            createdAt: row.created_at
+        };
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('timeoff:created', timeOff, socketId);
+
+        res.status(201).json(timeOff);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update time off
+app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { startDate, endDate, type, notes, approved } = req.body;
+
+        const result = await pool.query(
+            `UPDATE staff_time_off SET
+                start_date = COALESCE($1, start_date),
+                end_date = COALESCE($2, end_date),
+                type = COALESCE($3, type),
+                notes = COALESCE($4, notes),
+                approved = COALESCE($5, approved)
+             WHERE id = $6
+             RETURNING *`,
+            [startDate, endDate, type, notes, approved, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Time off record not found' });
+        }
+
+        const row = result.rows[0];
+        const timeOff = {
+            id: row.id,
+            staffId: row.staff_id,
+            startDate: row.start_date,
+            endDate: row.end_date,
+            type: row.type,
+            notes: row.notes,
+            approved: row.approved,
+            createdAt: row.created_at
+        };
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('timeoff:updated', timeOff, socketId);
+
+        res.json(timeOff);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete time off
+app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('DELETE FROM staff_time_off WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Time off record not found' });
+        }
+
+        // Broadcast
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('timeoff:deleted', { id }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get staff presence for a specific date
+app.get('/staff/presence', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        if (!date) {
+            return res.status(400).json({ error: 'date is required' });
+        }
+
+        // Get all active staff with their shifts for the date
+        const result = await pool.query(`
+            SELECT
+                sm.*,
+                ss.shift,
+                ss.present
+            FROM staff_members sm
+            LEFT JOIN staff_shifts ss ON sm.id = ss.staff_id AND ss.date = $1
+            WHERE sm.is_active = true
+            ORDER BY sm.category, sm.surname, sm.name
+        `, [date]);
+
+        const staffByShift = {
+            sala: { lunch: [] as any[], dinner: [] as any[] },
+            cucina: { lunch: [] as any[], dinner: [] as any[] }
+        };
+
+        result.rows.forEach(row => {
+            if (row.shift && row.present !== false) {
+                const staff = {
+                    id: row.id,
+                    name: row.name,
+                    surname: row.surname,
+                    category: row.category,
+                    staffType: row.staff_type,
+                    role: row.role
+                };
+
+                const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
+                const shiftKey = row.shift === 'LUNCH' ? 'lunch' : 'dinner';
+                staffByShift[categoryKey][shiftKey].push(staff);
+            }
+        });
+
+        res.json(staffByShift);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // WHATSAPP HELPER FUNCTIONS
 // ============================================
 
