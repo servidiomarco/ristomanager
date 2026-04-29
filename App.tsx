@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -9,6 +9,7 @@ import { LoginPage } from './components/LoginPage';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
+import { StaffManagement } from './components/StaffManagement';
 import { useSocket } from './hooks/useSocket';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
@@ -725,6 +726,15 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.STAFF) && (
+            <SidebarItem
+              icon={<UsersRound size={20} />}
+              label="Personale"
+              active={view === ViewState.STAFF}
+              onClick={() => setView(ViewState.STAFF)}
+              collapsed={sidebarCollapsed}
+            />
+          )}
           {canAccessView(ViewState.SETTINGS) && (
             <SidebarItem
               icon={<Settings size={20} />}
@@ -885,6 +895,10 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.STAFF && (
+          <StaffManagement showToast={addToast} />
+        )}
+
         {view === ViewState.SETTINGS && (
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold text-slate-800 mb-6">Impostazioni</h2>
@@ -1008,6 +1022,14 @@ const App: React.FC = () => {
                 label="Menu"
                 active={view === ViewState.MENU}
                 onClick={() => setView(ViewState.MENU)}
+              />
+            )}
+            {canAccessView(ViewState.STAFF) && (
+              <BottomNavItem
+                icon={<UsersRound size={24} />}
+                label="Personale"
+                active={view === ViewState.STAFF}
+                onClick={() => setView(ViewState.STAFF)}
               />
             )}
             {canAccessView(ViewState.SETTINGS) && (

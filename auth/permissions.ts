@@ -11,6 +11,8 @@ export type Permission =
   | 'menu:full'
   | 'reservations:view'
   | 'reservations:full'
+  | 'staff:view'
+  | 'staff:full'
   | 'settings:view'
   | 'settings:full'
   | 'users:view'
@@ -32,6 +34,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'menu:full',
     'reservations:view',
     'reservations:full',
+    'staff:view',
+    'staff:full',
     'settings:view',
     'settings:full',
     'users:view',
@@ -51,6 +55,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'menu:full',
     'reservations:view',
     'reservations:full',
+    'staff:view',
+    'staff:full',
     'reports:view',
     'logs:view'
   ],
@@ -73,6 +79,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.FLOOR_PLAN]: ['floorplan:view'],
   [ViewState.MENU]: ['menu:view'],
   [ViewState.RESERVATIONS]: ['reservations:view'],
+  [ViewState.STAFF]: ['staff:view'],
   [ViewState.SETTINGS]: ['settings:view']
 };
 
