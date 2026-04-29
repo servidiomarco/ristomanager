@@ -81,6 +81,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+  const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
 
   // Get selected date string for filtering (defined early for use in shopping/todo functions)
   const selectedDateStr = selectedDate.toISOString().split('T')[0];
@@ -860,9 +861,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="lg:col-span-3 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
-            <div className="flex gap-3 text-xs">
-              <span className="text-amber-600 font-medium">P = Pranzo</span>
-              <span className="text-indigo-600 font-medium">C = Cena</span>
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+              <button
+                onClick={() => setAffluenceShiftFilter('ALL')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  affluenceShiftFilter === 'ALL'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Tutti
+              </button>
+              <button
+                onClick={() => setAffluenceShiftFilter('LUNCH')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  affluenceShiftFilter === 'LUNCH'
+                    ? 'bg-amber-100 text-amber-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Pranzo
+              </button>
+              <button
+                onClick={() => setAffluenceShiftFilter('DINNER')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  affluenceShiftFilter === 'DINNER'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Cena
+              </button>
             </div>
           </div>
 
@@ -875,74 +904,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
 
                 {/* Lunch Time Slots */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-amber-700 w-16">Pranzo</span>
-                    <span className="text-[10px] text-slate-400">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {room.lunchSlots.map(slot => (
-                      <div key={slot.time} className="flex-1 text-center">
-                        <div className="text-[9px] text-slate-400 mb-0.5">{slot.time}</div>
-                        <div className="relative overflow-hidden rounded bg-slate-100">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-amber-300 transition-all duration-300"
-                            style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                          />
-                          <div className={`relative text-xs font-bold py-0.5 z-10 ${slot.guests > 0 ? 'text-amber-800' : 'text-slate-400'}`}>
-                            {slot.guests}
+                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
+                  <div className={affluenceShiftFilter === 'ALL' ? 'mb-2' : ''}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-amber-700 w-16">Pranzo</span>
+                      <span className="text-[10px] text-slate-400">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
+                    </div>
+                    <div className={`flex ${affluenceShiftFilter === 'LUNCH' ? 'gap-2' : 'gap-1'}`}>
+                      {room.lunchSlots.map(slot => (
+                        <div key={slot.time} className="flex-1 text-center">
+                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'LUNCH' ? 'text-xs' : 'text-[9px]'}`}>{slot.time}</div>
+                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'LUNCH' ? 'h-12' : ''}`}>
+                            <div
+                              className="absolute inset-y-0 left-0 bg-amber-300 transition-all duration-300"
+                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
+                            />
+                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'LUNCH' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-amber-800' : 'text-slate-400'}`}>
+                              {slot.guests}
+                            </div>
                           </div>
+                          {affluenceShiftFilter === 'LUNCH' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Dinner Time Slots */}
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-indigo-700 w-16">Cena</span>
-                    <span className="text-[10px] text-slate-400">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
-                  </div>
-                  <div className="flex gap-0.5 overflow-x-auto">
-                    {room.dinnerSlots.map(slot => (
-                      <div key={slot.time} className="flex-1 min-w-[32px] text-center">
-                        <div className="text-[8px] text-slate-400 mb-0.5">{slot.time.substring(0, 5)}</div>
-                        <div className="relative overflow-hidden rounded bg-slate-100">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-indigo-300 transition-all duration-300"
-                            style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                          />
-                          <div className={`relative text-xs font-bold py-0.5 z-10 ${slot.guests > 0 ? 'text-indigo-800' : 'text-slate-400'}`}>
-                            {slot.guests}
+                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-indigo-700 w-16">Cena</span>
+                      <span className="text-[10px] text-slate-400">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
+                    </div>
+                    <div className={`flex overflow-x-auto ${affluenceShiftFilter === 'DINNER' ? 'gap-1.5' : 'gap-0.5'}`}>
+                      {room.dinnerSlots.map(slot => (
+                        <div key={slot.time} className={`flex-1 text-center ${affluenceShiftFilter === 'DINNER' ? 'min-w-[50px]' : 'min-w-[32px]'}`}>
+                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'DINNER' ? 'text-[10px]' : 'text-[8px]'}`}>{slot.time.substring(0, 5)}</div>
+                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'DINNER' ? 'h-12' : ''}`}>
+                            <div
+                              className="absolute inset-y-0 left-0 bg-indigo-300 transition-all duration-300"
+                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
+                            />
+                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'DINNER' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-indigo-800' : 'text-slate-400'}`}>
+                              {slot.guests}
+                            </div>
                           </div>
+                          {affluenceShiftFilter === 'DINNER' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
 
           {/* Total Summary */}
-          <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-3">
-            <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-amber-800">Totale Pranzo</span>
-                <span className="text-sm font-bold text-amber-700">
-                  {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                </span>
+          <div className={`mt-4 pt-3 border-t border-slate-100 grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
+              <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-amber-800">Totale Pranzo</span>
+                  <span className="text-sm font-bold text-amber-700">
+                    {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="bg-indigo-50 rounded-lg p-2.5 border border-indigo-100">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-indigo-800">Totale Cena</span>
-                <span className="text-sm font-bold text-indigo-700">
-                  {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                </span>
+            )}
+            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
+              <div className="bg-indigo-50 rounded-lg p-2.5 border border-indigo-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-indigo-800">Totale Cena</span>
+                  <span className="text-sm font-bold text-indigo-700">
+                    {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
