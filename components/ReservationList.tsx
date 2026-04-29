@@ -1304,9 +1304,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </p>
                                 </div>
                                 {selectedTableObj && (
-                                    <span className="px-3 py-1.5 text-emerald-700 bg-emerald-50 rounded-xl text-sm font-semibold border-2 border-emerald-200">
-                                        {selectedTableObj.name}
-                                    </span>
+                                    <div className="flex items-center gap-1">
+                                        <span className="px-3 py-1.5 text-emerald-700 bg-emerald-50 rounded-l-xl text-sm font-semibold border-2 border-r-0 border-emerald-200">
+                                            T. {selectedTableObj.name}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setFormData({...formData, table_id: undefined});
+                                                showToast('Tavolo rimosso dalla prenotazione', 'info');
+                                            }}
+                                            className="px-2 py-1.5 text-rose-600 bg-rose-50 rounded-r-xl text-sm font-semibold border-2 border-rose-200 hover:bg-rose-100 transition-colors"
+                                            title="Rimuovi tavolo"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
                                 )}
                              </div>
 
