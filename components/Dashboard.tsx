@@ -884,8 +884,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     {room.lunchSlots.map(slot => (
                       <div key={slot.time} className="flex-1 text-center">
                         <div className="text-[9px] text-slate-400 mb-0.5">{slot.time}</div>
-                        <div className={`text-xs font-bold rounded py-0.5 ${slot.guests > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-300'}`}>
-                          {slot.guests}
+                        <div className="relative overflow-hidden rounded bg-slate-100">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-amber-300 transition-all duration-300"
+                            style={{ width: `${Math.min(slot.percentage, 100)}%` }}
+                          />
+                          <div className={`relative text-xs font-bold py-0.5 z-10 ${slot.guests > 0 ? 'text-amber-800' : 'text-slate-400'}`}>
+                            {slot.guests}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -902,8 +908,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     {room.dinnerSlots.map(slot => (
                       <div key={slot.time} className="flex-1 min-w-[32px] text-center">
                         <div className="text-[8px] text-slate-400 mb-0.5">{slot.time.substring(0, 5)}</div>
-                        <div className={`text-xs font-bold rounded py-0.5 ${slot.guests > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-300'}`}>
-                          {slot.guests}
+                        <div className="relative overflow-hidden rounded bg-slate-100">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-indigo-300 transition-all duration-300"
+                            style={{ width: `${Math.min(slot.percentage, 100)}%` }}
+                          />
+                          <div className={`relative text-xs font-bold py-0.5 z-10 ${slot.guests > 0 ? 'text-indigo-800' : 'text-slate-400'}`}>
+                            {slot.guests}
+                          </div>
                         </div>
                       </div>
                     ))}
