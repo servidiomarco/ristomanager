@@ -54,6 +54,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 name VARCHAR(255) NOT NULL,
                 shape VARCHAR(50) NOT NULL,
                 seats INTEGER NOT NULL,
+                min_seats INTEGER,
+                max_seats INTEGER,
                 x INTEGER NOT NULL,
                 y INTEGER NOT NULL,
                 room_id INTEGER REFERENCES rooms(id) ON DELETE CASCADE,
@@ -63,6 +65,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 temp_lock_expires_at TIMESTAMPTZ
             );
         `);
+
+        // Add min_seats and max_seats columns if they don't exist (migration)
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS min_seats INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS max_seats INTEGER;`);
         
         await client.query(`
             CREATE TABLE IF NOT EXISTS dishes (

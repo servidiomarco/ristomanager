@@ -16,6 +16,25 @@ const formatDateTime = (isoString: string): string => {
   return new Date(isoString).toLocaleString();
 };
 
+// Helper to format only time
+const formatTime = (isoString: string): string => {
+  const match = isoString.match(/T(\d{2}):(\d{2})/);
+  if (match) {
+    return `${match[1]}:${match[2]}`;
+  }
+  return '';
+};
+
+// Helper to calculate lateness in minutes (returns negative if reservation is in the future)
+const getMinutesLate = (reservationTime: string): number => {
+  const now = new Date();
+  const match = reservationTime.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return 0;
+  const [, year, month, day, hour, minute] = match;
+  const resDate = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  return Math.floor((now.getTime() - resDate.getTime()) / 60000);
+};
+
 interface ReservationListProps {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
@@ -76,6 +95,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
+  const [mergeMode, setMergeMode] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
   const [isListening, setIsListening] = useState(false);
 
@@ -102,8 +122,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       arrival_status: ArrivalStatus.WAITING
   });
 
+  // Auto-set shift based on time only for NEW reservations, not when editing
   useEffect(() => {
-    if (formData.reservation_time) {
+    if (formData.reservation_time && !isEditing) {
       const hour = new Date(formData.reservation_time).getHours();
       if (hour >= 11 && hour < 17) {
         setFormData(d => ({...d, shift: Shift.LUNCH}));
@@ -111,7 +132,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         setFormData(d => ({...d, shift: Shift.DINNER}));
       }
     }
-  }, [formData.reservation_time]);
+  }, [formData.reservation_time, isEditing]);
 
   // Filter Logic for Main List
   const filteredReservations = reservations.filter(r => {
@@ -299,9 +320,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
       setSelectedQuickNotes(existingQuickNotes);
 
+      // Clean notes: remove allergens and quick notes parts to avoid duplication
+      let cleanedNotes = res.notes || '';
+      // Remove "Intolleranze: ..." part
+      cleanedNotes = cleanedNotes.replace(/Intolleranze:\s*[^|]*(\s*\|\s*)?/gi, '');
+      // Remove quick notes
+      existingQuickNotes.forEach(note => {
+        cleanedNotes = cleanedNotes.replace(new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\|?\\s*', 'gi'), '');
+      });
+      // Clean up remaining separators and whitespace
+      cleanedNotes = cleanedNotes.replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '').replace(/\s*\|\s*\|\s*/g, ' | ').trim();
+
+      // Update formData with cleaned notes
+      setFormData(prev => ({ ...prev, notes: cleanedNotes || '' }));
+
       // Show sections if they have content
       setShowAllergensSection(existingAllergens.length > 0);
-      setShowNotesSection(existingQuickNotes.length > 0 || (res.notes && res.notes.length > 0));
+      setShowNotesSection(existingQuickNotes.length > 0 || cleanedNotes.length > 0);
 
       const table = tables.find(t => t.id === res.table_id);
       setModalRoomFilter(table ? table.room_id : 'ALL');
@@ -525,8 +560,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const selectedTableObj = tables.find(t => t.id === formData.table_id);
 
   // Calculate Free Tables for the form header
-  const totalTablesInFilter = tables.filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter).length;
-  const occupiedTablesInFilter = tables.filter(t => (modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter) && isTableOccupied(t.id, formData.reservation_time!.split('T')[0], formData.shift!)).length;
+  // Helper to check if a table is merged into another table (and thus should be hidden)
+  const isTableMergedIntoAnother = (tableId: number) => {
+    return tables.some(other =>
+      other.merged_with &&
+      other.merged_with.length > 0 &&
+      other.merged_with.map(id => Number(id)).includes(Number(tableId))
+    );
+  };
+
+  // Get visible tables (not merged into another table)
+  const visibleTables = tables.filter(t =>
+    (modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter) &&
+    !isTableMergedIntoAnother(t.id)
+  );
+
+  const totalTablesInFilter = visibleTables.length;
+
+  // Count occupied tables only if we have valid form data
+  const occupiedTablesInFilter = (formData.reservation_time && formData.shift)
+    ? visibleTables.filter(t =>
+        isTableOccupied(t.id, formData.reservation_time!.split('T')[0], formData.shift!)
+      ).length
+    : 0;
+
   const freeTablesCount = totalTablesInFilter - occupiedTablesInFilter;
 
   // Render logic for Map Table
@@ -718,26 +775,45 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     return (
                         <div key={res.id} className={`bg-white p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
                             <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-1">
+                                <div className="flex items-center gap-3 mb-2">
                                     <h3 className="font-bold text-lg text-slate-800">{res.customer_name}</h3>
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>
-                                        {res.payment_status === PaymentStatus.PAID_FULL ? 'SALDATO' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'ACCONTO' : 'DA PAGARE'}
-                                    </span>
-                                    
+                                    {/* Payment status - only show if paid */}
+                                    {res.payment_status !== PaymentStatus.PENDING && (
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>
+                                            {res.payment_status === PaymentStatus.PAID_FULL ? 'SALDATO' : 'ACCONTO'}
+                                        </span>
+                                    )}
                                 </div>
-                                <div className="flex flex-wrap gap-4 text-sm text-slate-500">
-                                    <div className="flex items-center gap-1">
-                                        <Clock className="h-4 w-4" /> {formatDateTime(res.reservation_time)}
-                                    </div>
+                                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                                    {/* Time with lateness indicator */}
+                                    {(() => {
+                                        const minutesLate = getMinutesLate(res.reservation_time);
+                                        const isToday = res.reservation_time.split('T')[0] === new Date().toISOString().split('T')[0];
+                                        const clockColor = isToday && minutesLate >= 30 ? 'text-red-500'
+                                            : isToday && minutesLate >= 15 ? 'text-orange-500'
+                                            : 'text-slate-400';
+                                        return (
+                                            <div className={`flex items-center gap-1 ${clockColor}`}>
+                                                <Clock className="h-4 w-4" />
+                                                <span className="font-medium">{formatTime(res.reservation_time)}</span>
+                                                {isToday && minutesLate >= 15 && (
+                                                    <span className="text-xs ml-1">({minutesLate} min)</span>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                     <div className="flex items-center gap-1">
                                         <Users className="h-4 w-4" /> {res.guests} Ospiti
                                     </div>
+                                    {/* Table & Room - Better highlighted */}
                                     {table ? (
-                                        <div className="flex items-center gap-1 text-indigo-600 font-medium">
-                                            <div className="w-2 h-2 bg-indigo-500 rounded-full" /> Tavolo {table.name} ({rooms.find(r => r.id === table.room_id)?.name}) - {res.customer_name}
+                                        <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-semibold">
+                                            <span className="text-indigo-900 font-bold">T. {table.name}</span>
+                                            <span className="text-indigo-500">•</span>
+                                            <span>{rooms.find(r => r.id === table.room_id)?.name}</span>
                                         </div>
                                     ) : (
-                                        <div className="flex items-center gap-1 text-rose-500 font-medium">
+                                        <div className="flex items-center gap-1 text-rose-500 font-medium bg-rose-50 px-3 py-1 rounded-lg">
                                             <AlertCircle className="h-3 w-3" /> Nessun Tavolo
                                         </div>
                                     )}
@@ -762,34 +838,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {/* Actions - Only shown in edit mode */}
                                 {canEdit && (
                                 <div className="flex items-center gap-2">
-                                    {/* Confirmation Actions */}
-                                    <button
-                                        onClick={() => handleSendWhatsapp(res)}
-                                        className="p-2 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-                                        title="Invia conferma WhatsApp"
-                                    >
-                                        <MessageCircle className="h-5 w-5" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleSendEmail(res)}
-                                        className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                                        title="Invia conferma Email"
-                                    >
-                                        <Mail className="h-5 w-5" />
-                                    </button>
-
-                                    {res.enable_reminder && (
-                                        <button
-                                            onClick={() => handleSendReminder(res)}
-                                            className={`p-2 rounded-lg transition-colors ${res.reminder_sent ? 'bg-amber-100 text-amber-600' : 'bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-600'}`}
-                                            title={res.reminder_sent ? "Promemoria già inviato" : "Invia Promemoria"}
-                                        >
-                                            <BellRing className="h-5 w-5" />
-                                        </button>
-                                    )}
-
-                                    <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
                                     <button
                                         onClick={() => handleToggleArrivalStatus(res)}
                                         className={`p-2 rounded-lg transition-colors ${
@@ -902,7 +950,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="bg-white rounded-none sm:rounded-2xl shadow-2xl w-full sm:max-w-5xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full sm:max-h-[90vh]">
                 <div className="p-3 sm:p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                     <h2 className="text-lg sm:text-xl font-bold text-slate-800">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h2>
-                    <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-slate-600">
+                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="text-slate-400 hover:text-slate-600">
                         <X className="h-5 w-5 sm:h-6 sm:w-6" />
                     </button>
                 </div>
@@ -1220,30 +1268,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                              {/* Auto-assign & Actions */}
                              <div className="flex items-center justify-between gap-3 mb-4">
-                                <button
-                                    type="button"
-                                    onClick={handleAutoAssign}
-                                    className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-200 transition-colors font-semibold text-sm"
-                                >
-                                    <Wand2 className="h-4 w-4" /> Assegna Automatico
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleAutoAssign}
+                                        className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-200 transition-colors font-semibold text-sm"
+                                    >
+                                        <Wand2 className="h-4 w-4" /> Assegna Automatico
+                                    </button>
 
-                                <div className="flex gap-2">
+                                    {/* Merge Mode Toggle */}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setMergeMode(!mergeMode);
+                                            if (mergeMode) {
+                                                setSelectedTablesForMerge([]);
+                                            }
+                                        }}
+                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-colors font-semibold text-sm ${
+                                            mergeMode
+                                                ? 'bg-purple-600 text-white shadow-lg shadow-purple-200'
+                                                : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                        }`}
+                                    >
+                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
+                                    </button>
+                                </div>
+
+                                <div className="flex gap-2 items-center">
+                                    {/* Show selected tables count and total capacity */}
+                                    {selectedTablesForMerge.length >= 1 && (
+                                        <div className="text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">
+                                            {selectedTablesForMerge.length} tavoli = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
+                                        </div>
+                                    )}
+
                                     {selectedTablesForMerge.length >= 2 && (
                                         <button
                                             type="button"
                                             onClick={async () => {
                                                 try {
+                                                    const primaryTableId = selectedTablesForMerge[0];
                                                     await onMergeTables(selectedTablesForMerge);
-                                                    showToast(`${selectedTablesForMerge.length} tavoli uniti con successo`, 'success');
+                                                    // Auto-select the merged table for the reservation
+                                                    setFormData(prev => ({ ...prev, table_id: primaryTableId }));
+                                                    showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
                                                     setSelectedTablesForMerge([]);
+                                                    setMergeMode(false);
                                                 } catch (error) {
                                                     showToast('Errore durante l\'unione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="flex items-center gap-1.5 bg-purple-100 text-purple-700 px-3 py-2 rounded-xl hover:bg-purple-200 transition-colors font-medium text-sm"
+                                            className="flex items-center gap-1.5 bg-purple-600 text-white px-3 py-2 rounded-xl hover:bg-purple-700 transition-colors font-medium text-sm shadow-lg"
                                         >
-                                            <Combine className="h-4 w-4" /> Unisci ({selectedTablesForMerge.length})
+                                            <Combine className="h-4 w-4" /> Conferma Unione
                                         </button>
                                     )}
 
@@ -1324,7 +1403,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         type="button"
                                                         disabled={isOccupied}
                                                         onClick={(e) => {
-                                                            if (e.ctrlKey || e.metaKey) {
+                                                            if (mergeMode || e.ctrlKey || e.metaKey) {
                                                                 // Multi-select mode for merging
                                                                 e.preventDefault();
                                                                 setSelectedTablesForMerge(prev =>
@@ -1415,9 +1494,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                          Tavolo Unito
                                      </div>
                                  </div>
-                                 <div className="text-[10px] text-slate-400 italic">
-                                     💡 Tieni premuto Ctrl (o Cmd su Mac) mentre clicchi per selezionare più tavoli da unire
-                                 </div>
+                                 {mergeMode ? (
+                                     <div className="text-[10px] text-purple-600 font-medium bg-purple-50 px-2 py-1 rounded-lg">
+                                         🔗 Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
+                                     </div>
+                                 ) : (
+                                     <div className="text-[10px] text-slate-400 italic">
+                                         💡 Usa il pulsante "Unisci Tavoli" per combinare più tavoli per grandi gruppi
+                                     </div>
+                                 )}
                              </div>
                         </div>
                     </form>
@@ -1426,14 +1511,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="p-3 sm:p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 sm:gap-3">
                     <button
                         type="button"
-                        onClick={() => setIsFormOpen(false)}
+                        onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}
                         className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl border border-slate-300 text-slate-700 text-sm sm:text-base font-medium hover:bg-white transition-colors"
                     >
                         Annulla
                     </button>
+                    {mergeMode && selectedTablesForMerge.length > 0 && (
+                        <span className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
+                            ⚠️ Conferma l'unione tavoli prima di salvare
+                        </span>
+                    )}
                     <button
                         onClick={handleSubmit}
-                        className="px-3 sm:px-5 py-2 sm:py-2.5 bg-indigo-600 text-white rounded-lg sm:rounded-xl text-sm sm:text-base font-medium hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all"
+                        disabled={mergeMode && selectedTablesForMerge.length > 0}
+                        className={`px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-sm sm:text-base font-medium transition-all ${
+                            mergeMode && selectedTablesForMerge.length > 0
+                                ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
+                        }`}
                     >
                         {isEditing ? 'Salva' : 'Conferma'}
                     </button>

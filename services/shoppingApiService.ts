@@ -1,7 +1,7 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 
-const API_URL = "https://ristomanager-production.up.railway.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
 export type ShoppingCategory = 'CUCINA' | 'BAR' | 'ALTRO';
 

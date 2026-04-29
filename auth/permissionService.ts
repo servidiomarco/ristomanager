@@ -23,7 +23,7 @@ export type Permission =
 // All available permissions grouped by feature
 export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] = [
   { feature: 'Dashboard', permissions: ['dashboard:view', 'dashboard:full'] },
-  { feature: 'Sala e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
+  { feature: 'Sale e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
   { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },

@@ -1,7 +1,7 @@
 import { ActivityLog, LogFilters, ActivityStats } from '../types';
 import { authApiService } from './authApiService';
 
-const API_URL = "https://ristomanager-production.up.railway.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
 // Helper function to get headers with auth token
 const getHeaders = (): HeadersInit => {

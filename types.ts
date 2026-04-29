@@ -16,6 +16,8 @@ export interface Table {
   name: string;
   shape: TableShape;
   seats: number;
+  min_seats?: number;
+  max_seats?: number;
   x: number;
   y: number;
   room_id: number;

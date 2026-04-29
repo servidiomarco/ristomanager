@@ -1,6 +1,6 @@
 import { User, UserRole, LoginCredentials } from '../types';
 
-const API_URL = "https://ristomanager-production.up.railway.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';

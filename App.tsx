@@ -710,7 +710,7 @@ const App: React.FC = () => {
           {canAccessView(ViewState.FLOOR_PLAN) && (
             <SidebarItem
               icon={<Grid size={20} />}
-              label="Sala & Tavoli"
+              label="Sale & Tavoli"
               active={view === ViewState.FLOOR_PLAN}
               onClick={() => setView(ViewState.FLOOR_PLAN)}
               collapsed={sidebarCollapsed}

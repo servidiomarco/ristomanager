@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
 // Use environment variable or default to production URL
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://ristomanager-production.up.railway.app';
+const SOCKET_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 // Token storage key (must match authApiService)
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
