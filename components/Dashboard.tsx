@@ -555,13 +555,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return match ? match[1] : '';
     };
 
-    // Calculate room capacities
-    const roomCapacities = rooms.map(room => {
-      const roomTables = tables.filter(t => t.room_id === room.id);
-      const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
-      return { roomId: room.id, roomName: room.name, maxCapacity };
-    });
-
     // Get room for a reservation based on table_id
     const getRoomForReservation = (r: Reservation) => {
       if (!r.table_id) return null;
@@ -569,53 +562,52 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return table ? table.room_id : null;
     };
 
-    // Room-based affluence by shift
-    const roomAffluence = rooms.map(room => {
+    // Room-based affluence with time slots
+    const roomTimeSlots = rooms.map(room => {
       const roomTables = tables.filter(t => t.room_id === room.id);
       const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
 
-      const lunchGuests = lunchReservations
-        .filter(r => getRoomForReservation(r) === room.id)
-        .reduce((acc, r) => acc + r.guests, 0);
+      // Lunch slots for this room
+      const lunchSlots = LUNCH_SLOTS.map(slot => {
+        const reservationsAtSlot = lunchReservations.filter(r =>
+          getRoomForReservation(r) === room.id && getTimeFromReservation(r) === slot
+        );
+        const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
+        return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
+      });
 
-      const dinnerGuests = dinnerReservations
-        .filter(r => getRoomForReservation(r) === room.id)
-        .reduce((acc, r) => acc + r.guests, 0);
+      // Dinner slots for this room
+      const dinnerSlots = DINNER_SLOTS.map(slot => {
+        const reservationsAtSlot = dinnerReservations.filter(r =>
+          getRoomForReservation(r) === room.id && getTimeFromReservation(r) === slot
+        );
+        const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
+        return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
+      });
+
+      const totalLunchGuests = lunchSlots.reduce((acc, s) => acc + s.guests, 0);
+      const totalDinnerGuests = dinnerSlots.reduce((acc, s) => acc + s.guests, 0);
 
       return {
         roomId: room.id,
         roomName: room.name,
         maxCapacity,
-        lunchGuests,
-        dinnerGuests,
-        lunchPercentage: maxCapacity > 0 ? Math.round((lunchGuests / maxCapacity) * 100) : 0,
-        dinnerPercentage: maxCapacity > 0 ? Math.round((dinnerGuests / maxCapacity) * 100) : 0
-      };
-    });
-
-    // Time slot data (for reference)
-    const lunchData = LUNCH_SLOTS.map(slot => {
-      const reservationsAtSlot = lunchReservations.filter(r => getTimeFromReservation(r) === slot);
-      return {
-        time: slot,
-        guests: reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0),
-        reservations: reservationsAtSlot.length
-      };
-    });
-
-    const dinnerData = DINNER_SLOTS.map(slot => {
-      const reservationsAtSlot = dinnerReservations.filter(r => getTimeFromReservation(r) === slot);
-      return {
-        time: slot,
-        guests: reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0),
-        reservations: reservationsAtSlot.length
+        lunchSlots,
+        dinnerSlots,
+        totalLunchGuests,
+        totalDinnerGuests,
+        lunchPercentage: maxCapacity > 0 ? Math.round((totalLunchGuests / maxCapacity) * 100) : 0,
+        dinnerPercentage: maxCapacity > 0 ? Math.round((totalDinnerGuests / maxCapacity) * 100) : 0
       };
     });
 
     // Total capacity for percentage calculation
-    const totalCapacity = roomCapacities.reduce((acc, r) => acc + r.maxCapacity, 0);
+    const totalCapacity = rooms.reduce((acc, room) => {
+      const roomTables = tables.filter(t => t.room_id === room.id);
+      return acc + roomTables.reduce((sum, t) => sum + t.seats, 0);
+    }, 0);
 
-    return { lunchData, dinnerData, roomAffluence, totalCapacity };
+    return { roomTimeSlots, totalCapacity, LUNCH_SLOTS, DINNER_SLOTS };
   }, [lunchReservations, dinnerReservations, rooms, tables]);
 
   // Calculate weekly chart data from real reservations (based on selected date's week)
@@ -791,130 +783,130 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Combined: Table Status + Room Affluence */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
-        {/* Table Status by Room */}
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
+      {/* Row 1: Stato Tavoli (full width) */}
+      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
 
-          {/* Shift Occupancy Summary */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-amber-800">Pranzo</span>
-                <span className="text-xs text-amber-600">{lunchTableIds.size}/{totalTables}</span>
-              </div>
-              <div className="flex items-end gap-1">
-                <span className="text-2xl font-bold text-amber-700">{lunchOccupancy}%</span>
-              </div>
-              <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
-              </div>
-              <p className="text-xs text-amber-600 mt-2">{lunchReservations.length} pren. · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+        {/* Shift Occupancy Summary */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-amber-800">Pranzo</span>
+              <span className="text-xs text-amber-600">{lunchTableIds.size}/{totalTables} tavoli</span>
             </div>
-
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-indigo-800">Cena</span>
-                <span className="text-xs text-indigo-600">{dinnerTableIds.size}/{totalTables}</span>
-              </div>
-              <div className="flex items-end gap-1">
-                <span className="text-2xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
-              </div>
-              <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
-                <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
-              </div>
-              <p className="text-xs text-indigo-600 mt-2">{dinnerReservations.length} pren. · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+            <div className="flex items-end gap-2">
+              <span className="text-3xl font-bold text-amber-700">{lunchOccupancy}%</span>
+              <span className="text-sm text-amber-600 mb-1">occupazione</span>
             </div>
+            <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
+            </div>
+            <p className="text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
 
-          {/* Room by Room Status */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {rooms.map(room => {
-              const roomTables = tables.filter(t => t.room_id === room.id);
-              const roomTableIds = new Set(roomTables.map(t => t.id));
-              const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
-              const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
-              const roomLunchAvailable = roomTables.length - roomLunchReserved;
-              const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
-
-              return (
-                <div key={room.id} className="border border-slate-100 rounded-lg p-2.5 hover:border-slate-200 transition-colors bg-slate-50/50">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <h3 className="font-medium text-slate-700 text-xs">{room.name}</h3>
-                    <span className="text-[10px] text-slate-400">{roomTables.length} tav.</span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <div className="flex-1 bg-amber-50 rounded px-1.5 py-1 border border-amber-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-amber-700">P</span>
-                        <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {roomLunchAvailable}/{roomTables.length}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex-1 bg-indigo-50 rounded px-1.5 py-1 border border-indigo-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-indigo-700">C</span>
-                        <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {roomDinnerAvailable}/{roomTables.length}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-indigo-800">Cena</span>
+              <span className="text-xs text-indigo-600">{dinnerTableIds.size}/{totalTables} tavoli</span>
+            </div>
+            <div className="flex items-end gap-2">
+              <span className="text-3xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
+              <span className="text-sm text-indigo-600 mb-1">occupazione</span>
+            </div>
+            <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
+            </div>
+            <p className="text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
         </div>
 
-        {/* Room Affluence */}
+        {/* Room by Room Status */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {rooms.map(room => {
+            const roomTables = tables.filter(t => t.room_id === room.id);
+            const roomTableIds = new Set(roomTables.map(t => t.id));
+            const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
+            const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
+            const roomLunchAvailable = roomTables.length - roomLunchReserved;
+            const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
+
+            return (
+              <div key={room.id} className="border border-slate-100 rounded-lg p-2 hover:border-slate-200 transition-colors bg-slate-50/50">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-medium text-slate-700 text-xs truncate">{room.name}</h3>
+                  <span className="text-[10px] text-slate-400">{roomTables.length}</span>
+                </div>
+                <div className="flex gap-1">
+                  <div className="flex-1 bg-amber-50 rounded px-1 py-0.5 border border-amber-100 text-center">
+                    <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {roomLunchAvailable}
+                    </span>
+                  </div>
+                  <div className="flex-1 bg-indigo-50 rounded px-1 py-0.5 border border-indigo-100 text-center">
+                    <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {roomDinnerAvailable}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+        {/* Affluenza per Sala con orari */}
         <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Sala</h2>
+            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
             <div className="flex gap-3 text-xs">
-              <div className="flex items-center gap-1">
-                <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
-                <span className="text-slate-500">Pranzo</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
-                <span className="text-slate-500">Cena</span>
-              </div>
+              <span className="text-amber-600 font-medium">P = Pranzo</span>
+              <span className="text-indigo-600 font-medium">C = Cena</span>
             </div>
           </div>
 
-          <div className="space-y-3">
-            {timeSlotAffluence.roomAffluence.map(room => (
-              <div key={room.roomId} className="border border-slate-100 rounded-lg p-3 hover:border-slate-200 transition-colors">
+          <div className="space-y-4 max-h-[400px] overflow-y-auto">
+            {timeSlotAffluence.roomTimeSlots.map(room => (
+              <div key={room.roomId} className="border border-slate-100 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-medium text-slate-700 text-sm">{room.roomName}</h3>
-                  <span className="text-xs text-slate-400">Max {room.maxCapacity}</span>
+                  <h3 className="font-semibold text-slate-700">{room.roomName}</h3>
+                  <span className="text-xs text-slate-400">Max {room.maxCapacity} coperti</span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-amber-700">{room.lunchGuests}/{room.maxCapacity}</span>
-                      <span className="text-[10px] font-bold text-amber-600">{room.lunchPercentage}%</span>
-                    </div>
-                    <div className="h-4 bg-amber-50 rounded-full overflow-hidden border border-amber-100">
-                      <div
-                        className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(room.lunchPercentage, 100)}%` }}
-                      />
-                    </div>
+
+                {/* Lunch Time Slots */}
+                <div className="mb-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-amber-700 w-16">Pranzo</span>
+                    <span className="text-[10px] text-slate-400">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
                   </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-indigo-700">{room.dinnerGuests}/{room.maxCapacity}</span>
-                      <span className="text-[10px] font-bold text-indigo-600">{room.dinnerPercentage}%</span>
-                    </div>
-                    <div className="h-4 bg-indigo-50 rounded-full overflow-hidden border border-indigo-100">
-                      <div
-                        className="h-full bg-gradient-to-r from-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(room.dinnerPercentage, 100)}%` }}
-                      />
-                    </div>
+                  <div className="flex gap-1">
+                    {room.lunchSlots.map(slot => (
+                      <div key={slot.time} className="flex-1 text-center">
+                        <div className="text-[9px] text-slate-400 mb-0.5">{slot.time}</div>
+                        <div className={`text-xs font-bold rounded py-0.5 ${slot.guests > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-300'}`}>
+                          {slot.guests}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Dinner Time Slots */}
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-indigo-700 w-16">Cena</span>
+                    <span className="text-[10px] text-slate-400">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
+                  </div>
+                  <div className="flex gap-0.5 overflow-x-auto">
+                    {room.dinnerSlots.map(slot => (
+                      <div key={slot.time} className="flex-1 min-w-[32px] text-center">
+                        <div className="text-[8px] text-slate-400 mb-0.5">{slot.time.substring(0, 5)}</div>
+                        <div className={`text-xs font-bold rounded py-0.5 ${slot.guests > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-300'}`}>
+                          {slot.guests}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -941,101 +933,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Todo Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        {/* Todo List - Compact version in sidebar */}
-        <div ref={todoSectionRef} className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-                <ListTodo className="h-5 w-5 lg:h-6 lg:w-6" />
-              </div>
-              <div>
-                <h2 className="text-base lg:text-lg font-semibold text-slate-800">Attività</h2>
-                <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {pendingCount} da completare</p>
-              </div>
-            </div>
-            <button onClick={handleOpenAddTodo} className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors">
-              <Plus className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="flex gap-1 mb-3 overflow-x-auto">
-            {[
-              { key: 'mine', label: 'Le mie', icon: UserCircle, count: myTodos.length },
-              { key: 'pending', label: 'Tutte', icon: Circle },
-              { key: 'overdue', label: 'Scadute', icon: AlertTriangle, count: overdueTodos.length },
-            ].map(tab => (
-              <button key={tab.key} onClick={() => setTodoFilter(tab.key as typeof todoFilter)} className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${todoFilter === tab.key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
-                <tab.icon className="h-3 w-3" />
-                {tab.label}
-                {tab.count !== undefined && tab.count > 0 && <span className={`text-[10px] px-1 rounded-full ${tab.key === 'mine' ? 'bg-indigo-500 text-white' : 'bg-rose-500 text-white'}`}>{tab.count}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="flex-1 divide-y divide-slate-100 overflow-y-auto max-h-[280px]">
-            {todosLoading ? (
-              <div className="py-6 text-center">
-                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
-                <p className="text-slate-400 text-xs">Caricamento...</p>
-              </div>
-            ) : filteredTodos.length === 0 ? (
-              <div className="py-6 text-center">
-                <CheckCircle2 className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-400 text-xs">Nessuna attività</p>
-              </div>
-            ) : (
-              filteredTodos.slice(0, 5).map(todo => {
-                const isOverdue = !todo.completed && todo.dueDate && todo.dueDate < todayStr;
-                return (
-                  <div key={todo.id} className={`py-2 ${todo.completed ? 'opacity-50' : ''}`}>
-                    <div className="flex items-start gap-2">
-                      <button onClick={() => handleToggleTodo(todo.id)} className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${todo.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-indigo-400'}`}>
-                        {todo.completed && <Check className="h-2 w-2" />}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <p className={`text-xs font-medium truncate ${todo.completed ? 'line-through text-slate-400' : 'text-slate-700'}`}>{todo.title}</p>
-                          <div className="flex items-center gap-0.5 flex-shrink-0">
-                            <Flag className={`h-3 w-3 ${PRIORITY_COLORS[todo.priority]}`} />
-                            <button onClick={() => handleOpenEditTodo(todo)} className="p-0.5 text-slate-400 hover:text-indigo-500 rounded"><Edit2 className="h-3 w-3" /></button>
-                            <button onClick={() => handleDeleteTodo(todo.id)} className="p-0.5 text-slate-400 hover:text-rose-500 rounded"><Trash2 className="h-3 w-3" /></button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${CATEGORY_COLORS[todo.category]}`}>{CATEGORY_LABELS[todo.category]}</span>
-                          {todo.assignedToUserName && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 flex items-center gap-0.5">
-                              <UserCircle className="h-2.5 w-2.5" />{todo.assignedToUserName}
-                            </span>
-                          )}
-                          {todo.assignedToTeam && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${TEAM_COLORS[todo.assignedToTeam]}`}>
-                              <UsersRound className="h-2.5 w-2.5" />{TEAM_LABELS[todo.assignedToTeam]}
-                            </span>
-                          )}
-                          {todo.dueDate && <span className={`text-[10px] ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}>{new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-            {filteredTodos.length > 5 && (
-              <div className="py-2 text-center">
-                <span className="text-xs text-indigo-600">+{filteredTodos.length - 5} altre attività</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Weekly Chart + Shopping List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
-        {/* Weekly Chart */}
-        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100">
+        {/* Affluenza Settimanale */}
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>
               <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Affluenza Settimanale</h2>
@@ -1111,8 +1011,156 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
-        {/* Shopping List */}
+      {/* Row 3: Attività + Spesa del giorno */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+        {/* Attività (Todo List) */}
+        <div ref={todoSectionRef} className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                <ListTodo className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Attività</h2>
+                <p className="text-base text-slate-500">{pendingCount} da completare</p>
+              </div>
+            </div>
+            <button
+              onClick={handleOpenAddTodo}
+              className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex gap-1 mb-4 p-1 bg-slate-100 rounded-lg">
+            {[
+              { key: 'mine', label: 'Mie', icon: UserCircle },
+              { key: 'all', label: 'Tutte', icon: ListTodo },
+              { key: 'pending', label: 'Da fare', icon: Circle },
+              { key: 'completed', label: 'Fatte', icon: CheckCircle2 },
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => setTodoFilter(key as typeof todoFilter)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  todoFilter === key
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Overdue Alert */}
+          {overdueTodos.length > 0 && (
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-rose-500 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
+                <p className="text-xs text-rose-600">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Todo List */}
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
+            {todosLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
+                <p className="text-slate-400 text-sm">Caricamento attività...</p>
+              </div>
+            ) : filteredTodos.length === 0 ? (
+              <div className="py-8 text-center">
+                <CheckCircle2 className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">
+                  {todoFilter === 'mine' ? 'Nessuna attività assegnata a te' : 'Nessuna attività'}
+                </p>
+              </div>
+            ) : (
+              filteredTodos.map(todo => {
+                const isOverdue = todo.dueDate && todo.dueDate < todayStr && !todo.completed;
+                return (
+                  <div
+                    key={todo.id}
+                    className={`group p-3 rounded-xl border transition-all hover:shadow-sm ${
+                      todo.completed
+                        ? 'bg-slate-50 border-slate-100'
+                        : isOverdue
+                        ? 'bg-rose-50 border-rose-100'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <button
+                        onClick={() => handleToggleTodo(todo.id)}
+                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                          todo.completed
+                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                            : 'border-slate-300 hover:border-indigo-400'
+                        }`}
+                      >
+                        {todo.completed && <Check className="h-3 w-3" />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                            {todo.title}
+                          </p>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => handleOpenEditTodo(todo)}
+                              className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTodo(todo.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
+                            {CATEGORY_LABELS[todo.category]}
+                          </span>
+                          <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
+                          {todo.assignedToUserName && (
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <UserCircle className="h-3 w-3" />
+                              {todo.assignedToUserName}
+                            </span>
+                          )}
+                          {todo.assignedToTeam && !todo.assignedToUserId && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${TEAM_COLORS[todo.assignedToTeam]}`}>
+                              {TEAM_LABELS[todo.assignedToTeam]}
+                            </span>
+                          )}
+                          {todo.dueDate && (
+                            <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-400'}`}>
+                              <Clock className="h-3 w-3" />
+                              {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Spesa del Giorno (Shopping List) */}
         <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -1163,7 +1211,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {/* Shopping List by Category */}
-          <div className="flex-1 overflow-y-auto max-h-[200px] space-y-4">
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-4">
             {shoppingLoading ? (
               <div className="py-8 text-center">
                 <Loader2 className="h-8 w-8 text-emerald-400 mx-auto mb-2 animate-spin" />
