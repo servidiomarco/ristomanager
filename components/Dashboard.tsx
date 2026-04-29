@@ -855,9 +855,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
-        {/* Affluenza per Sala con orari */}
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
+        {/* Affluenza per Sala con orari - 75% */}
+        <div className="lg:col-span-3 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
             <div className="flex gap-3 text-xs">
@@ -946,17 +946,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         </div>
 
-        {/* Affluenza Settimanale */}
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        {/* Affluenza Settimanale - 25% */}
+        <div className="lg:col-span-1 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex flex-col gap-3 mb-4">
             <div>
-              <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Affluenza Settimanale</h2>
-              <p className="text-base text-slate-500">{weekRange}</p>
+              <h2 className="text-base font-semibold text-slate-800">Affluenza Settimanale</h2>
+              <p className="text-xs text-slate-500">{weekRange}</p>
             </div>
             <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
               <button
                 onClick={() => setChartShiftFilter('ALL')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
                   chartShiftFilter === 'ALL'
                     ? 'bg-white text-slate-800 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
@@ -966,7 +966,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </button>
               <button
                 onClick={() => setChartShiftFilter('LUNCH')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
                   chartShiftFilter === 'LUNCH'
                     ? 'bg-amber-100 text-amber-700 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
@@ -976,7 +976,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </button>
               <button
                 onClick={() => setChartShiftFilter('DINNER')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
                   chartShiftFilter === 'DINNER'
                     ? 'bg-indigo-100 text-indigo-700 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
@@ -986,22 +986,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </button>
             </div>
           </div>
-          <div className="h-52 w-full">
+          <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyChartData}>
+              <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                 <XAxis
                   dataKey="name"
                   axisLine={false}
                   tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 11}}
+                  tick={{fill: '#64748b', fontSize: 9}}
                 />
                 <YAxis
                   domain={[0, 'auto']}
                   axisLine={false}
                   tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 11}}
-                  width={30}
+                  tick={{fill: '#64748b', fontSize: 9}}
+                  width={25}
                 />
                 <Tooltip
                   cursor={{fill: '#f1f5f9'}}
