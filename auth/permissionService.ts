@@ -11,6 +11,8 @@ export type Permission =
   | 'menu:full'
   | 'reservations:view'
   | 'reservations:full'
+  | 'staff:view'
+  | 'staff:full'
   | 'settings:view'
   | 'settings:full'
   | 'users:view'
@@ -26,6 +28,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Sale e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
   { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
+  { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },
   { feature: 'Report', permissions: ['reports:view', 'reports:full'] },

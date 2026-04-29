@@ -215,6 +215,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'users:view'], ['OWNER', 'users:full'],
                 ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
                 ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
+                ['OWNER', 'staff:view'], ['OWNER', 'staff:full'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
@@ -222,6 +223,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['MANAGER', 'reservations:view'], ['MANAGER', 'reservations:full'],
                 ['MANAGER', 'reports:view'],
                 ['MANAGER', 'logs:view'],
+                ['MANAGER', 'staff:view'], ['MANAGER', 'staff:full'],
                 // WAITER
                 ['WAITER', 'dashboard:view'],
                 ['WAITER', 'floorplan:view'], ['WAITER', 'floorplan:update_status'],
@@ -252,6 +254,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 [role, permission]
             );
         }
+
+        // Add staff permissions if they don't exist (migration for existing databases)
+        const staffPermissions = [
+            ['OWNER', 'staff:view'],
+            ['OWNER', 'staff:full'],
+            ['MANAGER', 'staff:view'],
+            ['MANAGER', 'staff:full']
+        ];
+        for (const [role, permission] of staffPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('Staff permissions migration completed');
 
         // ============================================
         // TODOS TABLE
