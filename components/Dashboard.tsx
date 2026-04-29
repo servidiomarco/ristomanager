@@ -129,12 +129,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const addShoppingItem = async () => {
     if (!newItemName.trim()) return;
     try {
-      const newItem = await shoppingApiService.createItem({
+      // Don't add to state here - let the socket event handle it
+      // This prevents duplicates on the creating device
+      await shoppingApiService.createItem({
         name: newItemName.trim(),
         category: newItemCategory,
         date: selectedDateStr
       });
-      setShoppingItems(prev => [...prev, newItem]);
       setNewItemName('');
     } catch (error) {
       console.error('Error adding shopping item:', error);
