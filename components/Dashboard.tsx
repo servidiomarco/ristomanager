@@ -1064,28 +1064,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <span className="text-xs font-medium">{SHOPPING_CATEGORY_LABELS[category]}</span>
                       <span className="text-xs opacity-70">({items.length})</span>
                     </div>
-                    <div className="space-y-1 pl-2">
+                    <div className="space-y-2 pl-2">
                       {items.map(item => (
-                        <div key={item.id} className="flex items-center gap-2 group">
-                          <button
-                            onClick={() => toggleShoppingItem(item.id)}
-                            className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-                              item.checked
-                                ? 'bg-emerald-500 border-emerald-500 text-white'
-                                : 'border-slate-300 hover:border-emerald-400'
-                            }`}
-                          >
-                            {item.checked && <Check className="h-2.5 w-2.5" />}
-                          </button>
-                          <span className={`flex-1 text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                            {item.name}
-                          </span>
-                          <button
-                            onClick={() => deleteShoppingItem(item.id)}
-                            className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                        <div key={item.id} className="group">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleShoppingItem(item.id)}
+                              className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                                item.checked
+                                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                                  : 'border-slate-300 hover:border-emerald-400'
+                              }`}
+                            >
+                              {item.checked && <Check className="h-2.5 w-2.5" />}
+                            </button>
+                            <span className={`flex-1 text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                              {item.name}
+                            </span>
+                            <button
+                              onClick={() => deleteShoppingItem(item.id)}
+                              className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          {item.createdByUserName && (
+                            <div className="ml-6 text-xs text-slate-400">
+                              {item.createdByUserName.split('@')[0]} • {item.createdAt ? new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

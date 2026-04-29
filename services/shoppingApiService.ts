@@ -13,6 +13,7 @@ export interface ShoppingItem {
   date: string;
   createdAt?: string;
   createdByUserId?: number;
+  createdByUserName?: string;
 }
 
 // Helper function to get headers with socket ID and auth token

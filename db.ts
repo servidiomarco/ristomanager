@@ -295,8 +295,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 checked BOOLEAN DEFAULT false,
                 date DATE NOT NULL DEFAULT CURRENT_DATE,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_user_name VARCHAR(255)
             );
+        `);
+
+        // Add created_by_user_name column if it doesn't exist (migration)
+        await client.query(`
+            ALTER TABLE shopping_items ADD COLUMN IF NOT EXISTS created_by_user_name VARCHAR(255);
         `);
 
         // Create indexes for shopping_items

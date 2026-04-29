@@ -1062,7 +1062,8 @@ app.get('/shopping', authenticate, async (req, res) => {
                 checked,
                 TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
-                created_by_user_id as "createdByUserId"
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
             FROM shopping_items
             WHERE date = $1
             ORDER BY
@@ -1090,8 +1091,8 @@ app.post('/shopping', authenticate, async (req, res) => {
         }
 
         const result = await pool.query(`
-            INSERT INTO shopping_items (name, category, date, created_by_user_id)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING
                 id,
                 name,
@@ -1099,8 +1100,9 @@ app.post('/shopping', authenticate, async (req, res) => {
                 checked,
                 TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
-                created_by_user_id as "createdByUserId"
-        `, [name, category || 'ALTRO', date, req.user?.userId || null]);
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `, [name, category || 'ALTRO', date, req.user?.userId || null, req.user?.email || null]);
 
         const newItem = result.rows[0];
 
@@ -1136,7 +1138,8 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
                 checked,
                 TO_CHAR(date, 'YYYY-MM-DD') as date,
                 created_at as "createdAt",
-                created_by_user_id as "createdByUserId"
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
         `, [id]);
 
         if (result.rows.length === 0) {
