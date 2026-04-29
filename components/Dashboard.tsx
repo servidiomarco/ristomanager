@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffCategory, StaffType } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -111,6 +112,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
 
+  // Staff Presence State
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [staffShifts, setStaffShifts] = useState<StaffShift[]>([]);
+  const [staffLoading, setStaffLoading] = useState(true);
+
   // Socket connection state - used to re-subscribe when socket reconnects
   const [socketConnected, setSocketConnected] = useState(socketClient.isConnected());
 
@@ -124,6 +130,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       console.error('Error fetching shopping items:', error);
     } finally {
       setShoppingLoading(false);
+    }
+  }, []);
+
+  // Fetch staff members and shifts for selected date
+  const fetchStaff = useCallback(async (dateStr: string) => {
+    try {
+      setStaffLoading(true);
+      const [members, shifts] = await Promise.all([
+        staffApiService.getStaffMembers(),
+        staffApiService.getShifts(dateStr)
+      ]);
+      setStaffMembers(members.filter(m => m.isActive));
+      setStaffShifts(shifts);
+    } catch (error) {
+      console.error('Error fetching staff data:', error);
+    } finally {
+      setStaffLoading(false);
     }
   }, []);
 
@@ -186,6 +209,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [shoppingItems]);
 
   const totalItems = shoppingItems.length;
+
+  // Staff presence calculation
+  const staffPresence = useMemo(() => {
+    const getStaffForShift = (shift: Shift, category: StaffCategory) => {
+      const shiftStaffIds = staffShifts
+        .filter(s => s.shift === shift && s.present !== false)
+        .map(s => s.staffId);
+      return staffMembers.filter(m =>
+        m.category === category && shiftStaffIds.includes(m.id)
+      );
+    };
+
+    return {
+      lunch: {
+        sala: getStaffForShift(Shift.LUNCH, StaffCategory.SALA),
+        cucina: getStaffForShift(Shift.LUNCH, StaffCategory.CUCINA)
+      },
+      dinner: {
+        sala: getStaffForShift(Shift.DINNER, StaffCategory.SALA),
+        cucina: getStaffForShift(Shift.DINNER, StaffCategory.CUCINA)
+      }
+    };
+  }, [staffMembers, staffShifts]);
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
   // Fetch todos from API (filtered by selected date)
@@ -286,6 +332,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   useEffect(() => {
     fetchShopping(selectedDateStr);
   }, [selectedDateStr, fetchShopping]);
+
+  // Fetch staff when selectedDate changes
+  useEffect(() => {
+    fetchStaff(selectedDateStr);
+  }, [selectedDateStr, fetchStaff]);
 
   // Socket.IO real-time updates for shopping
   useEffect(() => {
@@ -1327,6 +1378,157 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             )}
           </div>
         </div>
+      </div>
+
+      {/* Row 4: Staff Presence */}
+      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2.5 bg-violet-50 text-violet-600 rounded-xl">
+            <UsersRound className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Personale in Servizio</h2>
+            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
+          </div>
+        </div>
+
+        {staffLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Pranzo */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-amber-200 flex items-center justify-center">
+                  <span className="text-amber-700 text-sm font-bold">P</span>
+                </div>
+                <span className="font-semibold text-amber-800">Pranzo</span>
+                <span className="ml-auto text-sm text-amber-600">
+                  {staffPresence.lunch.sala.length + staffPresence.lunch.cucina.length} persone
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Sala */}
+                <div className="bg-white/60 rounded-lg p-2.5">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Users className="h-4 w-4 text-emerald-600" />
+                    <span className="text-xs font-medium text-emerald-700">Sala</span>
+                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.sala.length}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {staffPresence.lunch.sala.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                    ) : (
+                      staffPresence.lunch.sala.slice(0, 4).map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
+                            {s.name[0]}{s.surname[0]}
+                          </div>
+                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                        </div>
+                      ))
+                    )}
+                    {staffPresence.lunch.sala.length > 4 && (
+                      <p className="text-[10px] text-slate-400">+{staffPresence.lunch.sala.length - 4} altri</p>
+                    )}
+                  </div>
+                </div>
+                {/* Cucina */}
+                <div className="bg-white/60 rounded-lg p-2.5">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <ChefHat className="h-4 w-4 text-orange-600" />
+                    <span className="text-xs font-medium text-orange-700">Cucina</span>
+                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.cucina.length}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {staffPresence.lunch.cucina.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                    ) : (
+                      staffPresence.lunch.cucina.slice(0, 4).map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
+                            {s.name[0]}{s.surname[0]}
+                          </div>
+                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                        </div>
+                      ))
+                    )}
+                    {staffPresence.lunch.cucina.length > 4 && (
+                      <p className="text-[10px] text-slate-400">+{staffPresence.lunch.cucina.length - 4} altri</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Cena */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-200 flex items-center justify-center">
+                  <span className="text-indigo-700 text-sm font-bold">C</span>
+                </div>
+                <span className="font-semibold text-indigo-800">Cena</span>
+                <span className="ml-auto text-sm text-indigo-600">
+                  {staffPresence.dinner.sala.length + staffPresence.dinner.cucina.length} persone
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Sala */}
+                <div className="bg-white/60 rounded-lg p-2.5">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Users className="h-4 w-4 text-emerald-600" />
+                    <span className="text-xs font-medium text-emerald-700">Sala</span>
+                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.sala.length}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {staffPresence.dinner.sala.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                    ) : (
+                      staffPresence.dinner.sala.slice(0, 4).map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
+                            {s.name[0]}{s.surname[0]}
+                          </div>
+                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                        </div>
+                      ))
+                    )}
+                    {staffPresence.dinner.sala.length > 4 && (
+                      <p className="text-[10px] text-slate-400">+{staffPresence.dinner.sala.length - 4} altri</p>
+                    )}
+                  </div>
+                </div>
+                {/* Cucina */}
+                <div className="bg-white/60 rounded-lg p-2.5">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <ChefHat className="h-4 w-4 text-orange-600" />
+                    <span className="text-xs font-medium text-orange-700">Cucina</span>
+                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.cucina.length}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {staffPresence.dinner.cucina.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                    ) : (
+                      staffPresence.dinner.cucina.slice(0, 4).map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
+                            {s.name[0]}{s.surname[0]}
+                          </div>
+                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                        </div>
+                      ))
+                    )}
+                    {staffPresence.dinner.cucina.length > 4 && (
+                      <p className="text-[10px] text-slate-400">+{staffPresence.dinner.cucina.length - 4} altri</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* My Tasks Modal */}

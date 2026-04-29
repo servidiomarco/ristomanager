@@ -113,6 +113,7 @@ export enum ViewState {
   FLOOR_PLAN = 'FLOOR_PLAN',
   MENU = 'MENU',
   RESERVATIONS = 'RESERVATIONS',
+  STAFF = 'STAFF',
   SETTINGS = 'SETTINGS'
 }
 
@@ -175,7 +176,10 @@ export enum ResourceType {
   DISH = 'DISH',
   BANQUET_MENU = 'BANQUET_MENU',
   USER = 'USER',
-  AUTH = 'AUTH'
+  AUTH = 'AUTH',
+  STAFF = 'STAFF',
+  STAFF_SHIFT = 'STAFF_SHIFT',
+  STAFF_TIME_OFF = 'STAFF_TIME_OFF'
 }
 
 export interface ActivityLog {
@@ -246,4 +250,64 @@ export interface TodoItem {
   assignedToTeam?: UserRole;
   createdByUserId?: number;
   createdByUserName?: string;
+}
+
+// ============================================
+// STAFF MANAGEMENT TYPES
+// ============================================
+
+export enum StaffCategory {
+  SALA = 'SALA',
+  CUCINA = 'CUCINA'
+}
+
+export enum StaffType {
+  FISSO = 'FISSO',
+  STAGIONALE = 'STAGIONALE',
+  EXTRA = 'EXTRA'
+}
+
+export enum TimeOffType {
+  RIPOSO = 'RIPOSO',
+  VACANZA = 'VACANZA',
+  MALATTIA = 'MALATTIA',
+  PERMESSO = 'PERMESSO'
+}
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  surname: string;
+  category: StaffCategory;
+  staffType: StaffType;
+  phone?: string;
+  email?: string;
+  role?: string; // e.g., "Chef", "Cameriere", "Lavapiatti"
+  hireDate?: string;
+  contractEndDate?: string; // For seasonal staff
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface StaffShift {
+  id: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD
+  shift: Shift; // LUNCH or DINNER
+  present: boolean;
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface StaffTimeOff {
+  id: string;
+  staffId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  type: TimeOffType;
+  notes?: string;
+  approved: boolean;
+  createdAt?: string;
 }

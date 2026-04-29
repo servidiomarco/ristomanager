@@ -13,6 +13,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.FLOOR_PLAN]: 'floorplan:view',
   [ViewState.MENU]: 'menu:view',
   [ViewState.RESERVATIONS]: 'reservations:view',
+  [ViewState.STAFF]: 'staff:view',
   [ViewState.SETTINGS]: 'settings:view'
 };
 
