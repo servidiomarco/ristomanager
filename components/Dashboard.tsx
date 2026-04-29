@@ -791,218 +791,160 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Room Affluence Card */}
-      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl">
-            <Users className="h-6 w-6" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Sala</h2>
-            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - Coperti rispetto alla capienza massima</p>
-          </div>
-          <div className="flex gap-4 text-xs">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-              <span className="text-slate-500">Pranzo</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
-              <span className="text-slate-500">Cena</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {timeSlotAffluence.roomAffluence.map(room => (
-            <div key={room.roomId} className="border border-slate-100 rounded-xl p-4 hover:border-slate-200 transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-slate-700">{room.roomName}</h3>
-                <span className="text-xs text-slate-400">Max {room.maxCapacity} coperti</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                {/* Lunch */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-medium text-amber-700">Pranzo</span>
-                    <span className="text-xs text-slate-500">{room.lunchGuests}/{room.maxCapacity}</span>
-                  </div>
-                  <div className="h-5 bg-amber-50 rounded-full overflow-hidden border border-amber-100">
-                    <div
-                      className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
-                      style={{ width: `${Math.min(room.lunchPercentage, 100)}%`, minWidth: room.lunchGuests > 0 ? '1.5rem' : '0' }}
-                    >
-                      {room.lunchPercentage >= 20 && <span className="text-[10px] font-bold text-white">{room.lunchPercentage}%</span>}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Dinner */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-medium text-indigo-700">Cena</span>
-                    <span className="text-xs text-slate-500">{room.dinnerGuests}/{room.maxCapacity}</span>
-                  </div>
-                  <div className="h-5 bg-indigo-50 rounded-full overflow-hidden border border-indigo-100">
-                    <div
-                      className="h-full bg-gradient-to-r from-indigo-400 to-indigo-500 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
-                      style={{ width: `${Math.min(room.dinnerPercentage, 100)}%`, minWidth: room.dinnerGuests > 0 ? '1.5rem' : '0' }}
-                    >
-                      {room.dinnerPercentage >= 20 && <span className="text-[10px] font-bold text-white">{room.dinnerPercentage}%</span>}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {rooms.length === 0 && (
-            <div className="text-center py-8 text-slate-400">
-              Nessuna sala configurata
-            </div>
-          )}
-        </div>
-
-        {/* Total Summary */}
-        <div className="mt-5 pt-4 border-t border-slate-100">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-amber-800">Totale Pranzo</span>
-                <span className="text-lg font-bold text-amber-700">
-                  {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                </span>
-              </div>
-              <div className="text-xs text-amber-600 mt-1">
-                {timeSlotAffluence.totalCapacity > 0
-                  ? Math.round((lunchReservations.reduce((acc, r) => acc + r.guests, 0) / timeSlotAffluence.totalCapacity) * 100)
-                  : 0}% della capienza totale
-              </div>
-            </div>
-            <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-indigo-800">Totale Cena</span>
-                <span className="text-lg font-bold text-indigo-700">
-                  {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                </span>
-              </div>
-              <div className="text-xs text-indigo-600 mt-1">
-                {timeSlotAffluence.totalCapacity > 0
-                  ? Math.round((dinnerReservations.reduce((acc, r) => acc + r.guests, 0) / timeSlotAffluence.totalCapacity) * 100)
-                  : 0}% della capienza totale
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Charts Section - Swapped: Table Status is now larger */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        {/* Table Status by Room - Now expanded (2 columns) */}
-        <div className="lg:col-span-2 bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100">
-          <h2 className="text-xl lg:text-2xl font-semibold mb-6 text-slate-800">Stato Tavoli</h2>
+      {/* Combined: Table Status + Room Affluence */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+        {/* Table Status by Room */}
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
 
           {/* Shift Occupancy Summary */}
-          <div className="grid grid-cols-2 gap-4 lg:gap-6 mb-6">
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 lg:p-6 border border-amber-100">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-base lg:text-lg font-medium text-amber-800">Pranzo</span>
-                <span className="text-sm text-amber-600">{lunchTableIds.size}/{totalTables} tavoli</span>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-amber-800">Pranzo</span>
+                <span className="text-xs text-amber-600">{lunchTableIds.size}/{totalTables}</span>
               </div>
-              <div className="flex items-end gap-2">
-                <span className="text-4xl lg:text-5xl font-bold text-amber-700">{lunchOccupancy}%</span>
-                <span className="text-base text-amber-600 mb-1">occupazione</span>
+              <div className="flex items-end gap-1">
+                <span className="text-2xl font-bold text-amber-700">{lunchOccupancy}%</span>
               </div>
-              <div className="mt-3 h-3 bg-amber-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                  style={{ width: `${lunchOccupancy}%` }}
-                />
+              <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
               </div>
-              <p className="text-sm text-amber-600 mt-3">
-                {lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti
-              </p>
+              <p className="text-xs text-amber-600 mt-2">{lunchReservations.length} pren. · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
 
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 lg:p-6 border border-indigo-100">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-base lg:text-lg font-medium text-indigo-800">Cena</span>
-                <span className="text-sm text-indigo-600">{dinnerTableIds.size}/{totalTables} tavoli</span>
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-indigo-800">Cena</span>
+                <span className="text-xs text-indigo-600">{dinnerTableIds.size}/{totalTables}</span>
               </div>
-              <div className="flex items-end gap-2">
-                <span className="text-4xl lg:text-5xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
-                <span className="text-base text-indigo-600 mb-1">occupazione</span>
+              <div className="flex items-end gap-1">
+                <span className="text-2xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
               </div>
-              <div className="mt-3 h-3 bg-indigo-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                  style={{ width: `${dinnerOccupancy}%` }}
-                />
+              <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
               </div>
-              <p className="text-sm text-indigo-600 mt-3">
-                {dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti
-              </p>
+              <p className="text-xs text-indigo-600 mt-2">{dinnerReservations.length} pren. · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
           </div>
 
           {/* Room by Room Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {rooms.map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
               const roomTableIds = new Set(roomTables.map(t => t.id));
-
-              // Calculate room-specific availability per shift for selected day
               const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
               const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
               const roomLunchAvailable = roomTables.length - roomLunchReserved;
               const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
 
               return (
-                <div key={room.id} className="border border-slate-100 rounded-lg p-3 hover:border-slate-200 transition-colors bg-slate-50/50">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium text-slate-700 text-sm">{room.name}</h3>
-                    <span className="text-xs text-slate-400">{roomTables.length} tavoli</span>
+                <div key={room.id} className="border border-slate-100 rounded-lg p-2.5 hover:border-slate-200 transition-colors bg-slate-50/50">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h3 className="font-medium text-slate-700 text-xs">{room.name}</h3>
+                    <span className="text-[10px] text-slate-400">{roomTables.length} tav.</span>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1 bg-amber-50 rounded-md px-2 py-1.5 border border-amber-100">
+                  <div className="flex gap-1.5">
+                    <div className="flex-1 bg-amber-50 rounded px-1.5 py-1 border border-amber-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-amber-700">Pranzo</span>
-                        <span className={`text-xs font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        <span className="text-[10px] text-amber-700">P</span>
+                        <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                           {roomLunchAvailable}/{roomTables.length}
                         </span>
                       </div>
                     </div>
-                    <div className="flex-1 bg-indigo-50 rounded-md px-2 py-1.5 border border-indigo-100">
+                    <div className="flex-1 bg-indigo-50 rounded px-1.5 py-1 border border-indigo-100">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-indigo-700">Cena</span>
-                        <span className={`text-xs font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        <span className="text-[10px] text-indigo-700">C</span>
+                        <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                           {roomDinnerAvailable}/{roomTables.length}
                         </span>
                       </div>
                     </div>
                   </div>
-                  {roomTables.length === 0 && (
-                    <span className="text-xs text-slate-400">Nessun tavolo</span>
-                  )}
                 </div>
               );
             })}
-            {rooms.length === 0 && (
-              <div className="col-span-full text-center text-slate-400 py-8">
-                Nessuna sala configurata
-              </div>
-            )}
-          </div>
-
-          {/* Legend */}
-          <div className="flex flex-wrap justify-center gap-4 mt-4 pt-4 border-t border-slate-100">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-600">Disponibilità tavoli per turno del giorno selezionato</span>
-            </div>
           </div>
         </div>
 
+        {/* Room Affluence */}
+        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Sala</h2>
+            <div className="flex gap-3 text-xs">
+              <div className="flex items-center gap-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
+                <span className="text-slate-500">Pranzo</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
+                <span className="text-slate-500">Cena</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {timeSlotAffluence.roomAffluence.map(room => (
+              <div key={room.roomId} className="border border-slate-100 rounded-lg p-3 hover:border-slate-200 transition-colors">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-medium text-slate-700 text-sm">{room.roomName}</h3>
+                  <span className="text-xs text-slate-400">Max {room.maxCapacity}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-amber-700">{room.lunchGuests}/{room.maxCapacity}</span>
+                      <span className="text-[10px] font-bold text-amber-600">{room.lunchPercentage}%</span>
+                    </div>
+                    <div className="h-4 bg-amber-50 rounded-full overflow-hidden border border-amber-100">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(room.lunchPercentage, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-indigo-700">{room.dinnerGuests}/{room.maxCapacity}</span>
+                      <span className="text-[10px] font-bold text-indigo-600">{room.dinnerPercentage}%</span>
+                    </div>
+                    <div className="h-4 bg-indigo-50 rounded-full overflow-hidden border border-indigo-100">
+                      <div
+                        className="h-full bg-gradient-to-r from-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(room.dinnerPercentage, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Total Summary */}
+          <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-3">
+            <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-800">Totale Pranzo</span>
+                <span className="text-sm font-bold text-amber-700">
+                  {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                </span>
+              </div>
+            </div>
+            <div className="bg-indigo-50 rounded-lg p-2.5 border border-indigo-100">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-indigo-800">Totale Cena</span>
+                <span className="text-sm font-bold text-indigo-700">
+                  {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Todo Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Todo List - Compact version in sidebar */}
         <div ref={todoSectionRef} className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-4">
