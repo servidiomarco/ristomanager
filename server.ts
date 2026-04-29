@@ -1086,9 +1086,14 @@ app.post('/shopping', authenticate, async (req, res) => {
     try {
         const { name, category, date } = req.body;
 
+        console.log('🛒 POST /shopping - req.user:', req.user);
+
         if (!name || !date) {
             return res.status(400).json({ error: 'Name and date are required' });
         }
+
+        const creatorEmail = req.user?.email || null;
+        console.log('🛒 Creator email:', creatorEmail);
 
         const result = await pool.query(`
             INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name)
@@ -1102,7 +1107,9 @@ app.post('/shopping', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
-        `, [name, category || 'ALTRO', date, req.user?.userId || null, req.user?.email || null]);
+        `, [name, category || 'ALTRO', date, req.user?.userId || null, creatorEmail]);
+
+        console.log('🛒 Created item:', result.rows[0]);
 
         const newItem = result.rows[0];
 
