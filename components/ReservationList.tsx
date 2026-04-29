@@ -575,10 +575,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const totalTablesInFilter = visibleTables.length;
 
   // Count occupied tables only if we have valid form data
+  // Include tables occupied by OTHER reservations + the table currently selected in formData
   const occupiedTablesInFilter = (formData.reservation_time && formData.shift)
-    ? visibleTables.filter(t =>
-        isTableOccupied(t.id, formData.reservation_time!.split('T')[0], formData.shift!)
-      ).length
+    ? visibleTables.filter(t => {
+        // Check if occupied by another reservation
+        const occupiedByOther = isTableOccupied(t.id, formData.reservation_time!.split('T')[0], formData.shift!);
+        // Check if this is the table selected in the current form
+        const selectedInForm = formData.table_id === t.id;
+        return occupiedByOther || selectedInForm;
+      }).length
     : 0;
 
   const freeTablesCount = totalTablesInFilter - occupiedTablesInFilter;
