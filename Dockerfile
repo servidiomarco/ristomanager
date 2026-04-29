@@ -10,6 +10,9 @@ COPY tsconfig*.json ./
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
 
+# Cache buster - change this value to force rebuild of source files
+ARG CACHE_BUST=1
+
 # Copy ALL TypeScript source files
 COPY server.ts db.ts types.ts ./
 COPY auth ./auth

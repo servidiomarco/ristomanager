@@ -1,6 +1,10 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Build version identifier - change this to verify deployments
+const BUILD_VERSION = '2026-04-29-v2';
+console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
+
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
