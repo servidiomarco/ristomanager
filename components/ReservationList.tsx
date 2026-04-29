@@ -110,10 +110,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onSelectSuggestion?: (table: Table) => void;
   } | null>(null);
 
+  // Time slot options
+  const LUNCH_TIMES = ['13:00', '13:30', '14:00'];
+  const DINNER_TIMES = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
+
+  const getDefaultTime = (shift: Shift) => shift === Shift.LUNCH ? '13:00' : '20:00';
+
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
       guests: 2,
-      reservation_time: new Date().toISOString().substring(0, 16),
+      reservation_time: `${new Date().toISOString().split('T')[0]}T20:00`,
       shift: Shift.DINNER,
       payment_status: PaymentStatus.PENDING,
       table_id: undefined,
@@ -121,18 +127,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       reminder_sent: false,
       arrival_status: ArrivalStatus.WAITING
   });
-
-  // Auto-set shift based on time only for NEW reservations, not when editing
-  useEffect(() => {
-    if (formData.reservation_time && !isEditing) {
-      const hour = new Date(formData.reservation_time).getHours();
-      if (hour >= 11 && hour < 17) {
-        setFormData(d => ({...d, shift: Shift.LUNCH}));
-      } else {
-        setFormData(d => ({...d, shift: Shift.DINNER}));
-      }
-    }
-  }, [formData.reservation_time, isEditing]);
 
   // Filter Logic for Main List
   const filteredReservations = reservations.filter(r => {
@@ -363,11 +357,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
 
   const handleOpenNew = () => {
+      const newShift = selectedShift === 'ALL' ? Shift.DINNER : selectedShift;
+      const defaultTime = getDefaultTime(newShift);
+      const dateOnly = selectedDate.split('T')[0];
       setFormData({
         customer_name: '',
         guests: 2,
-        reservation_time: selectedDate,
-        shift: selectedShift === 'ALL' ? Shift.DINNER : selectedShift,
+        reservation_time: `${dateOnly}T${defaultTime}`,
+        shift: newShift,
         payment_status: PaymentStatus.PENDING,
         table_id: undefined,
         enable_reminder: true,
@@ -1028,36 +1025,83 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             {/* Date & Shift */}
                             <div className="space-y-4">
-                                <div className="overflow-hidden">
-                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data e Ora</label>
-                                    <div className="relative">
-                                        <input
-                                            type="datetime-local"
-                                            required
-                                            className="w-full max-w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all box-border"
-                                            value={formData.reservation_time}
-                                            onChange={e => setFormData({...formData, reservation_time: e.target.value})}
-                                        />
-                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
-                                    </div>
-                                </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Turno</label>
                                     <div className="bg-slate-100 p-1.5 rounded-xl flex items-center gap-1.5">
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({...formData, shift: Shift.LUNCH})}
+                                            onClick={() => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`});
+                                            }}
                                             className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
                                             <Sun className="h-5 w-5" /> Pranzo
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({...formData, shift: Shift.DINNER})}
+                                            onClick={() => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`});
+                                            }}
                                             className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
                                         >
                                             <Moon className="h-5 w-5" /> Cena
                                         </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="overflow-hidden">
+                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data</label>
+                                        <div className="relative">
+                                            <input
+                                                type="date"
+                                                required
+                                                className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
+                                                value={formData.reservation_time?.split('T')[0] || ''}
+                                                onChange={e => {
+                                                    const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
+                                                    setFormData({...formData, reservation_time: `${e.target.value}T${currentTime}`});
+                                                }}
+                                            />
+                                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Ora</label>
+                                        <div className="relative">
+                                            <select
+                                                required
+                                                className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all appearance-none"
+                                                value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
+                                                onChange={e => {
+                                                    const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                    setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
+                                                }}
+                                            >
+                                                {formData.shift === Shift.LUNCH ? (
+                                                    <>
+                                                        <option value="13:00">13:00</option>
+                                                        <option value="13:30">13:30</option>
+                                                        <option value="14:00">14:00</option>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <option value="19:30">19:30</option>
+                                                        <option value="20:00">20:00</option>
+                                                        <option value="20:30">20:30</option>
+                                                        <option value="21:00">21:00</option>
+                                                        <option value="21:30">21:30</option>
+                                                        <option value="22:00">22:00</option>
+                                                        <option value="22:30">22:30</option>
+                                                        <option value="23:00">23:00</option>
+                                                        <option value="23:30">23:30</option>
+                                                    </>
+                                                )}
+                                            </select>
+                                            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
