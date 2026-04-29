@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Build version identifier - change this to verify deployments
-const BUILD_VERSION = '2026-04-29-v2';
+const BUILD_VERSION = '2026-04-29-v3';
 console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 
 import express from 'express';
@@ -741,7 +741,7 @@ app.get('/todos', authenticate, async (req, res) => {
                 completed,
                 priority,
                 category,
-                due_date as "dueDate",
+                TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
@@ -782,7 +782,7 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 completed,
                 priority,
                 category,
-                due_date as "dueDate",
+                TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
@@ -838,7 +838,7 @@ app.post('/todos', authenticate, async (req, res) => {
                 completed,
                 priority,
                 category,
-                due_date as "dueDate",
+                TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
@@ -944,7 +944,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 completed,
                 priority,
                 category,
-                due_date as "dueDate",
+                TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
@@ -994,7 +994,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                 completed,
                 priority,
                 category,
-                due_date as "dueDate",
+                TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
