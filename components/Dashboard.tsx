@@ -545,7 +545,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
-  // Time slot affluence data
+  // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
     const LUNCH_SLOTS = ['13:00', '13:30', '14:00'];
     const DINNER_SLOTS = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
@@ -555,6 +555,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return match ? match[1] : '';
     };
 
+    // Calculate room capacities
+    const roomCapacities = rooms.map(room => {
+      const roomTables = tables.filter(t => t.room_id === room.id);
+      const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
+      return { roomId: room.id, roomName: room.name, maxCapacity };
+    });
+
+    // Get room for a reservation based on table_id
+    const getRoomForReservation = (r: Reservation) => {
+      if (!r.table_id) return null;
+      const table = tables.find(t => t.id === r.table_id);
+      return table ? table.room_id : null;
+    };
+
+    // Room-based affluence by shift
+    const roomAffluence = rooms.map(room => {
+      const roomTables = tables.filter(t => t.room_id === room.id);
+      const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
+
+      const lunchGuests = lunchReservations
+        .filter(r => getRoomForReservation(r) === room.id)
+        .reduce((acc, r) => acc + r.guests, 0);
+
+      const dinnerGuests = dinnerReservations
+        .filter(r => getRoomForReservation(r) === room.id)
+        .reduce((acc, r) => acc + r.guests, 0);
+
+      return {
+        roomId: room.id,
+        roomName: room.name,
+        maxCapacity,
+        lunchGuests,
+        dinnerGuests,
+        lunchPercentage: maxCapacity > 0 ? Math.round((lunchGuests / maxCapacity) * 100) : 0,
+        dinnerPercentage: maxCapacity > 0 ? Math.round((dinnerGuests / maxCapacity) * 100) : 0
+      };
+    });
+
+    // Time slot data (for reference)
     const lunchData = LUNCH_SLOTS.map(slot => {
       const reservationsAtSlot = lunchReservations.filter(r => getTimeFromReservation(r) === slot);
       return {
@@ -573,11 +612,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       };
     });
 
-    const maxLunchGuests = Math.max(...lunchData.map(d => d.guests), 1);
-    const maxDinnerGuests = Math.max(...dinnerData.map(d => d.guests), 1);
+    // Total capacity for percentage calculation
+    const totalCapacity = roomCapacities.reduce((acc, r) => acc + r.maxCapacity, 0);
 
-    return { lunchData, dinnerData, maxLunchGuests, maxDinnerGuests };
-  }, [lunchReservations, dinnerReservations]);
+    return { lunchData, dinnerData, roomAffluence, totalCapacity };
+  }, [lunchReservations, dinnerReservations, rooms, tables]);
 
   // Calculate weekly chart data from real reservations (based on selected date's week)
   const weeklyChartData = useMemo(() => {
@@ -752,66 +791,107 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Time Slot Affluence Card */}
+      {/* Room Affluence Card */}
       <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-5">
           <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl">
-            <Clock className="h-6 w-6" />
+            <Users className="h-6 w-6" />
           </div>
-          <div>
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Orario Affluenza</h2>
-            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - Ospiti per fascia oraria</p>
+          <div className="flex-1">
+            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Sala</h2>
+            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - Coperti rispetto alla capienza massima</p>
+          </div>
+          <div className="flex gap-4 text-xs">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+              <span className="text-slate-500">Pranzo</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
+              <span className="text-slate-500">Cena</span>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Lunch Slots */}
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-              <span className="text-sm font-medium text-amber-700">Pranzo</span>
-              <span className="text-xs text-slate-400 ml-auto">{lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti totali</span>
-            </div>
-            <div className="space-y-2">
-              {timeSlotAffluence.lunchData.map(slot => (
-                <div key={slot.time} className="flex items-center gap-3">
-                  <span className="text-sm font-mono text-slate-600 w-12">{slot.time}</span>
-                  <div className="flex-1 h-6 bg-slate-100 rounded-full overflow-hidden">
+        <div className="space-y-4">
+          {timeSlotAffluence.roomAffluence.map(room => (
+            <div key={room.roomId} className="border border-slate-100 rounded-xl p-4 hover:border-slate-200 transition-colors">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-slate-700">{room.roomName}</h3>
+                <span className="text-xs text-slate-400">Max {room.maxCapacity} coperti</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Lunch */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-medium text-amber-700">Pranzo</span>
+                    <span className="text-xs text-slate-500">{room.lunchGuests}/{room.maxCapacity}</span>
+                  </div>
+                  <div className="h-5 bg-amber-50 rounded-full overflow-hidden border border-amber-100">
                     <div
                       className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
-                      style={{ width: `${(slot.guests / timeSlotAffluence.maxLunchGuests) * 100}%`, minWidth: slot.guests > 0 ? '2rem' : '0' }}
+                      style={{ width: `${Math.min(room.lunchPercentage, 100)}%`, minWidth: room.lunchGuests > 0 ? '1.5rem' : '0' }}
                     >
-                      {slot.guests > 0 && <span className="text-xs font-bold text-white">{slot.guests}</span>}
+                      {room.lunchPercentage >= 20 && <span className="text-[10px] font-bold text-white">{room.lunchPercentage}%</span>}
                     </div>
                   </div>
-                  <span className="text-xs text-slate-400 w-16 text-right">{slot.reservations} pren.</span>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Dinner Slots */}
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
-              <span className="text-sm font-medium text-indigo-700">Cena</span>
-              <span className="text-xs text-slate-400 ml-auto">{dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti totali</span>
-            </div>
-            <div className="space-y-2">
-              {timeSlotAffluence.dinnerData.map(slot => (
-                <div key={slot.time} className="flex items-center gap-3">
-                  <span className="text-sm font-mono text-slate-600 w-12">{slot.time}</span>
-                  <div className="flex-1 h-6 bg-slate-100 rounded-full overflow-hidden">
+                {/* Dinner */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-medium text-indigo-700">Cena</span>
+                    <span className="text-xs text-slate-500">{room.dinnerGuests}/{room.maxCapacity}</span>
+                  </div>
+                  <div className="h-5 bg-indigo-50 rounded-full overflow-hidden border border-indigo-100">
                     <div
                       className="h-full bg-gradient-to-r from-indigo-400 to-indigo-500 rounded-full transition-all duration-500 flex items-center justify-end pr-2"
-                      style={{ width: `${(slot.guests / timeSlotAffluence.maxDinnerGuests) * 100}%`, minWidth: slot.guests > 0 ? '2rem' : '0' }}
+                      style={{ width: `${Math.min(room.dinnerPercentage, 100)}%`, minWidth: room.dinnerGuests > 0 ? '1.5rem' : '0' }}
                     >
-                      {slot.guests > 0 && <span className="text-xs font-bold text-white">{slot.guests}</span>}
+                      {room.dinnerPercentage >= 20 && <span className="text-[10px] font-bold text-white">{room.dinnerPercentage}%</span>}
                     </div>
                   </div>
-                  <span className="text-xs text-slate-400 w-16 text-right">{slot.reservations} pren.</span>
                 </div>
-              ))}
+              </div>
+            </div>
+          ))}
+
+          {rooms.length === 0 && (
+            <div className="text-center py-8 text-slate-400">
+              Nessuna sala configurata
+            </div>
+          )}
+        </div>
+
+        {/* Total Summary */}
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-amber-800">Totale Pranzo</span>
+                <span className="text-lg font-bold text-amber-700">
+                  {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                </span>
+              </div>
+              <div className="text-xs text-amber-600 mt-1">
+                {timeSlotAffluence.totalCapacity > 0
+                  ? Math.round((lunchReservations.reduce((acc, r) => acc + r.guests, 0) / timeSlotAffluence.totalCapacity) * 100)
+                  : 0}% della capienza totale
+              </div>
+            </div>
+            <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-indigo-800">Totale Cena</span>
+                <span className="text-lg font-bold text-indigo-700">
+                  {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                </span>
+              </div>
+              <div className="text-xs text-indigo-600 mt-1">
+                {timeSlotAffluence.totalCapacity > 0
+                  ? Math.round((dinnerReservations.reduce((acc, r) => acc + r.guests, 0) / timeSlotAffluence.totalCapacity) * 100)
+                  : 0}% della capienza totale
+              </div>
             </div>
           </div>
         </div>
