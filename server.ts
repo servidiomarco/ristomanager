@@ -1252,39 +1252,6 @@ app.get('/staff', authenticate, async (req, res) => {
     }
 });
 
-// Get single staff member
-app.get('/staff/:id', authenticate, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await pool.query('SELECT * FROM staff_members WHERE id = $1', [id]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Staff member not found' });
-        }
-
-        const row = result.rows[0];
-        res.json({
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
 // Create staff member
 app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
@@ -1330,87 +1297,10 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
     }
 });
 
-// Update staff member
-app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive } = req.body;
-
-        const result = await pool.query(
-            `UPDATE staff_members SET
-                name = COALESCE($1, name),
-                surname = COALESCE($2, surname),
-                category = COALESCE($3, category),
-                staff_type = COALESCE($4, staff_type),
-                phone = COALESCE($5, phone),
-                email = COALESCE($6, email),
-                role = COALESCE($7, role),
-                hire_date = COALESCE($8, hire_date),
-                contract_end_date = COALESCE($9, contract_end_date),
-                notes = COALESCE($10, notes),
-                is_active = COALESCE($11, is_active),
-                updated_at = CURRENT_TIMESTAMP
-             WHERE id = $12
-             RETURNING *`,
-            [name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive, id]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Staff member not found' });
-        }
-
-        const row = result.rows[0];
-        const staffMember = {
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        };
-
-        // Broadcast to all connected clients
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('staff:updated', staffMember, socketId);
-
-        res.json(staffMember);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-// Delete staff member
-app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const result = await pool.query('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Staff member not found' });
-        }
-
-        // Broadcast to all connected clients
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('staff:deleted', { id }, socketId);
-
-        res.status(204).send();
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
 // ============================================
 // STAFF SHIFTS ROUTES
+// IMPORTANT: These specific paths must be defined BEFORE /staff/:id routes
+// otherwise Express will match /staff/shifts as /staff/:id with id="shifts"
 // ============================================
 
 // Get shifts (optionally filtered by date and/or staffId)
@@ -1799,6 +1689,124 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         });
 
         res.json(staffByShift);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// STAFF MEMBER BY-ID ROUTES
+// IMPORTANT: These parameterized routes must be defined AFTER all specific
+// /staff/* paths (shifts, time-off, presence) to avoid route shadowing
+// ============================================
+
+// Get single staff member
+app.get('/staff/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('SELECT * FROM staff_members WHERE id = $1', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const row = result.rows[0];
+        res.json({
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update staff member
+app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive } = req.body;
+
+        const result = await pool.query(
+            `UPDATE staff_members SET
+                name = COALESCE($1, name),
+                surname = COALESCE($2, surname),
+                category = COALESCE($3, category),
+                staff_type = COALESCE($4, staff_type),
+                phone = COALESCE($5, phone),
+                email = COALESCE($6, email),
+                role = COALESCE($7, role),
+                hire_date = COALESCE($8, hire_date),
+                contract_end_date = COALESCE($9, contract_end_date),
+                notes = COALESCE($10, notes),
+                is_active = COALESCE($11, is_active),
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = $12
+             RETURNING *`,
+            [name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const row = result.rows[0];
+        const staffMember = {
+            id: row.id,
+            name: row.name,
+            surname: row.surname,
+            category: row.category,
+            staffType: row.staff_type,
+            phone: row.phone,
+            email: row.email,
+            role: row.role,
+            hireDate: row.hire_date,
+            contractEndDate: row.contract_end_date,
+            notes: row.notes,
+            isActive: row.is_active,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        };
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('staff:updated', staffMember, socketId);
+
+        res.json(staffMember);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete staff member
+app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        // Broadcast to all connected clients
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('staff:deleted', { id }, socketId);
+
+        res.status(204).send();
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });

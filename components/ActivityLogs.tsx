@@ -23,7 +23,10 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
   [ResourceType.DISH]: 'Piatto',
   [ResourceType.BANQUET_MENU]: 'Menu Banchetto',
   [ResourceType.USER]: 'Utente',
-  [ResourceType.AUTH]: 'Autenticazione'
+  [ResourceType.AUTH]: 'Autenticazione',
+  [ResourceType.STAFF]: 'Personale',
+  [ResourceType.STAFF_SHIFT]: 'Turno Personale',
+  [ResourceType.STAFF_TIME_OFF]: 'Permesso Personale'
 };
 
 const ACTION_COLORS: Record<ActivityAction, string> = {
