@@ -1088,11 +1088,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                          {item.createdByUserName && (
-                            <div className="ml-6 text-xs text-slate-400">
-                              {item.createdByUserName.split('@')[0]} • {item.createdAt ? new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </div>
-                          )}
+                          <div className="ml-6 text-xs text-slate-400">
+                            {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
+                            {item.createdAt && (
+                              <> • {new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} {new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
