@@ -376,6 +376,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <option>Antipasti</option>
                     <option>Primi</option>
                     <option>Secondi</option>
+                    <option>Contorni</option>
                     <option>Dolci</option>
                     <option>Bevande</option>
                   </select>
