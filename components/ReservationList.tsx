@@ -119,6 +119,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
   const [isListening, setIsListening] = useState(false);
 
+  // Map view canvas size tracking for responsive scaling
+  const mapCanvasRef = useRef<HTMLDivElement>(null);
+  const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = mapCanvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setMapCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [viewMode]);
+
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -723,7 +738,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className={`${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-6'} space-y-6`}>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Gestione Prenotazioni</h1>
@@ -1002,8 +1017,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
+          // Compute the natural bounding box of the room and a scale factor
+          // so the room fits the available canvas width/height on tablet+desktop.
+          // On mobile (<768px) we keep scale=1 and rely on overflow scrolling.
+          const PADDING = 40;
+          const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+          const baseSize = isMobile ? 45 : 80;
+          const baseWidth = isMobile ? 60 : 100;
+          const seatMultiplier = isMobile ? 8 : 15;
+          let maxRight = 0;
+          let maxBottom = 0;
+          for (const t of tablesInRoom) {
+              let w: number, h: number;
+              if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) {
+                  w = baseSize; h = baseSize;
+              } else {
+                  w = Math.max(baseWidth, t.seats * seatMultiplier);
+                  h = baseSize;
+              }
+              maxRight = Math.max(maxRight, t.x + w);
+              maxBottom = Math.max(maxBottom, t.y + h);
+          }
+          const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
+          const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
+          const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
+              ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
+              : 1;
+
           return (
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] animate-in fade-in duration-300">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-220px)] animate-in fade-in duration-300">
                   {/* Room Selector for Map */}
                   <div className="flex gap-2 mb-4 border-b border-slate-100 pb-2 overflow-x-auto scrollbar-hide">
                       {rooms.map(room => (
@@ -1023,7 +1065,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                   {/* Map Canvas */}
                   <div
-                    className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto"
+                    ref={mapCanvasRef}
+                    className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto md:overflow-hidden"
                     style={{
                         backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
                         backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
@@ -1037,8 +1080,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                </div>
                            </div>
                        )}
-                       {tablesInRoom.map(renderMapTable)}
-    
+                       <div
+                           style={{
+                               width: extentWidth,
+                               height: extentHeight,
+                               transform: `scale(${scale})`,
+                               transformOrigin: 'top left',
+                               position: 'relative'
+                           }}
+                       >
+                           {tablesInRoom.map(renderMapTable)}
+                       </div>
+
                        {/* Legend Overlay */}
                        <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-sm border border-slate-200 text-xs space-y-2">
                            <div className="font-semibold text-slate-700 mb-1">Legenda</div>
