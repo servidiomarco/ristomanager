@@ -804,9 +804,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </button>
 
             <div className="relative">
-              <div className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                <Calendar className="h-5 w-5 text-indigo-600" />
-                <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
+              <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
+                <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
                   {formatDate(selectedDate)}
                 </span>
               </div>
@@ -874,50 +874,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 lg:gap-6">
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
-            <Users className="h-6 w-6 lg:h-7 lg:w-7" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
+            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div>
-            <p className="text-sm lg:text-base text-slate-500">Ospiti Attesi</p>
-            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayGuests}</p>
-          </div>
-        </div>
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <Users className="h-6 w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div>
-            <p className="text-sm lg:text-base text-slate-500">Ospiti Arrivati</p>
-            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{arrivedGuests}</p>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Attesi</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
-            <TrendingUp className="h-6 w-6 lg:h-7 lg:w-7" />
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
+            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div>
-            <p className="text-sm lg:text-base text-slate-500">Occupazione</p>
-            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{occupancyRate}%</p>
-          </div>
-        </div>
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-            <Utensils className="h-6 w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div>
-            <p className="text-sm lg:text-base text-slate-500">Coperti Totali</p>
-            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{totalCapacity}</p>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Arrivati</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{arrivedGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-            <Calendar className="h-6 w-6 lg:h-7 lg:w-7" />
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
+            <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div>
-            <p className="text-sm lg:text-base text-slate-500">Prenotazioni</p>
-            <p className="text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayReservations.length}</p>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Occupazione</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{occupancyRate}%</p>
+          </div>
+        </div>
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-amber-50 text-amber-600 rounded-xl flex-shrink-0">
+            <Utensils className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Coperti Totali</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{totalCapacity}</p>
+          </div>
+        </div>
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 col-span-2 md:col-span-1">
+          <div className="p-2 sm:p-3 bg-blue-50 text-blue-600 rounded-xl flex-shrink-0">
+            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Prenotazioni</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayReservations.length}</p>
           </div>
         </div>
       </div>

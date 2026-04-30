@@ -824,9 +824,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </button>
 
                     <div className="relative">
-                        <div className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                            <Calendar className="h-5 w-5 text-indigo-600" />
-                            <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
+                        <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
+                            <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                            <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
                                 {formatSelectedDate(selectedDateObj)}
                             </span>
                         </div>

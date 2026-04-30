@@ -927,7 +927,7 @@ const App: React.FC = () => {
 
         {/* Bottom Navigation - Visible only on mobile */}
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 lg:hidden z-30">
-          <div className="flex items-center justify-around py-2">
+          <div className="flex items-center py-2 overflow-x-auto scrollbar-hide px-1">
             {canAccessView(ViewState.DASHBOARD) && (
               <BottomNavItem
                 icon={<LayoutDashboard size={24} />}
@@ -1033,14 +1033,14 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false }: { icon
 const BottomNavItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
   <button
     onClick={onClick}
-    className={`flex flex-col items-center justify-center px-3 py-2 min-w-[60px] transition-colors duration-200 ${
+    className={`flex flex-1 flex-col items-center justify-center px-1 py-2 min-w-[48px] flex-shrink-0 transition-colors duration-200 ${
       active
         ? 'text-indigo-600'
         : 'text-slate-400'
     }`}
   >
     {icon}
-    <span className={`text-[10px] mt-1 font-medium ${active ? 'text-indigo-600' : 'text-slate-500'}`}>
+    <span className={`text-[10px] mt-1 font-medium whitespace-nowrap ${active ? 'text-indigo-600' : 'text-slate-500'}`}>
       {label}
     </span>
   </button>
