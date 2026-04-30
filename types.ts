@@ -55,6 +55,7 @@ export interface BanquetMenu {
   description: string;
   price_per_person: number;
   dish_ids: number[];
+  event_date: string; // YYYY-MM-DD
 }
 
 export enum PaymentStatus {

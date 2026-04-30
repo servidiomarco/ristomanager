@@ -746,7 +746,9 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM banquet_menus ORDER BY name');
+        const result = await pool.query(
+            "SELECT id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+        );
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -756,10 +758,13 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, event_date } = req.body;
+        if (!event_date) {
+            return res.status(400).json({ error: 'event_date is required' });
+        }
         const result = await pool.query(
-            'INSERT INTO banquet_menus (name, description, price_per_person, dish_ids) VALUES ($1, $2, $3, $4) RETURNING *',
-            [name, description, price_per_person, dish_ids]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, event_date) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date",
+            [name, description, price_per_person, dish_ids, event_date]
         );
         const newMenu = result.rows[0];
 
@@ -790,10 +795,13 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, event_date } = req.body;
+        if (!event_date) {
+            return res.status(400).json({ error: 'event_date is required' });
+        }
         const result = await pool.query(
-            'UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4 WHERE id = $5 RETURNING *',
-            [name, description, price_per_person, dish_ids, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, event_date = $5 WHERE id = $6 RETURNING id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date",
+            [name, description, price_per_person, dish_ids, event_date, id]
         );
         const updatedMenu = result.rows[0];
 

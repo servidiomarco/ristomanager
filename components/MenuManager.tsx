@@ -1,8 +1,20 @@
 
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Dish, BanquetMenu, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
+
+const ITALIAN_MONTHS = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+const ITALIAN_WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+
+const formatLocalDate = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+};
 
 interface MenuManagerProps {
   dishes: Dish[];
@@ -29,6 +41,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 }) => {
   console.log("MenuManager: banquetMenus prop received:", banquetMenus);
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
+  const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
@@ -51,7 +64,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       name: '',
       description: '',
       price_per_person: 0,
-      dish_ids: []
+      dish_ids: [],
+      event_date: ''
   });
 
   const handleAddDishSubmit = (e: React.FormEvent) => {
@@ -97,28 +111,26 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const handleAddBanquetSubmit = (e: React.FormEvent) => {
       e.preventDefault();
-      if(!newBanquet.name || !newBanquet.price_per_person) return;
+      if(!newBanquet.name || !newBanquet.price_per_person || !newBanquet.event_date) return;
 
-      if (isEditingBanquet && editingBanquetId !== null) {
-        onUpdateBanquetMenu(editingBanquetId, {
+      const payload = {
           name: newBanquet.name!,
           description: newBanquet.description || '',
           price_per_person: Number(newBanquet.price_per_person),
-          dish_ids: newBanquet.dish_ids || []
-        });
+          dish_ids: newBanquet.dish_ids || [],
+          event_date: newBanquet.event_date!
+      };
+
+      if (isEditingBanquet && editingBanquetId !== null) {
+        onUpdateBanquetMenu(editingBanquetId, payload);
       } else {
-        onAddBanquetMenu({
-            name: newBanquet.name!,
-            description: newBanquet.description || '',
-            price_per_person: Number(newBanquet.price_per_person),
-            dish_ids: newBanquet.dish_ids || []
-        } as BanquetMenu);
+        onAddBanquetMenu(payload as BanquetMenu);
       }
 
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [] });
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], event_date: '' });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -126,7 +138,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       name: menu.name,
       description: menu.description,
       price_per_person: menu.price_per_person,
-      dish_ids: menu.dish_ids
+      dish_ids: menu.dish_ids,
+      event_date: menu.event_date || ''
     });
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
@@ -289,6 +302,26 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       )}
 
       {activeTab === 'BANQUETS' && (
+        <div className="space-y-6">
+          {/* View toggle */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex bg-slate-100 rounded-xl p-1">
+              <button
+                onClick={() => setBanquetView('LIST')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${banquetView === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <ListIcon className="h-4 w-4" /> Lista
+              </button>
+              <button
+                onClick={() => setBanquetView('CALENDAR')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${banquetView === 'CALENDAR' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Calendar className="h-4 w-4" /> Calendario
+              </button>
+            </div>
+          </div>
+
+          {banquetView === 'LIST' && (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
@@ -314,6 +347,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               <p className="text-sm text-slate-500 line-clamp-2">{menu.description}</p>
                           </div>
                       </div>
+                      {menu.event_date && (
+                        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg mb-3">
+                          <Calendar className="h-3.5 w-3.5" />
+                          {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                        </div>
+                      )}
                       <div className="mb-4">
                           <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
                           <span className="text-slate-400 text-sm"> / persona</span>
@@ -335,6 +374,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   </div>
               )}
           </div>
+          )}
+
+          {banquetView === 'CALENDAR' && (
+            <BanquetCalendar
+              banquetMenus={banquetMenus}
+              onSelectBanquet={handleEditBanquet}
+              canEdit={canEdit}
+            />
+          )}
+        </div>
       )}
 
       {/* Add Dish Modal */}
@@ -446,7 +495,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Nome Menu</label>
-                    <input 
+                    <input
                         required
                         placeholder="es. Menu Matrimonio Gold"
                         className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -455,8 +504,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                 </div>
                 <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Data Evento</label>
+                    <input
+                        type="date"
+                        required
+                        className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={newBanquet.event_date || ''}
+                        onChange={e => setNewBanquet({...newBanquet, event_date: e.target.value})}
+                    />
+                </div>
+                <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Prezzo per Persona (€)</label>
-                    <input 
+                    <input
                         type="number"
                         required
                         className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -467,7 +526,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Descrizione Commerciale</label>
-                <textarea 
+                <textarea
                   className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-20"
                   value={newBanquet.description}
                   onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
@@ -476,28 +535,74 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Seleziona Piatti</label>
-                <div className="bg-slate-50 rounded-xl border border-slate-200 p-2 h-60 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {dishes.map(dish => (
-                        <div 
-                            key={dish.id} 
-                            onClick={() => toggleDishInBanquet(dish.id)}
-                            className={`p-3 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
-                                newBanquet.dish_ids?.includes(dish.id) 
-                                ? 'bg-indigo-50 border-indigo-500' 
-                                : 'bg-white border-slate-200 hover:border-slate-300'
-                            }`}
-                        >
-                            <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center ${
-                                newBanquet.dish_ids?.includes(dish.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
-                            }`}>
-                                {newBanquet.dish_ids?.includes(dish.id) && <div className="w-2 h-2 bg-white rounded-full" />}
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 max-h-72 overflow-y-auto space-y-3">
+                    {BANQUET_DISH_CATEGORIES.map(category => {
+                        const categoryDishes = dishes.filter(d => d.category === category);
+                        if (categoryDishes.length === 0) return null;
+                        return (
+                            <div key={category}>
+                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5 sticky top-0 bg-slate-50 py-0.5">
+                                    {category}
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {categoryDishes.map(dish => (
+                                        <div
+                                            key={dish.id}
+                                            onClick={() => toggleDishInBanquet(dish.id)}
+                                            className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
+                                                newBanquet.dish_ids?.includes(dish.id)
+                                                ? 'bg-indigo-50 border-indigo-500'
+                                                : 'bg-white border-slate-200 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                                                newBanquet.dish_ids?.includes(dish.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
+                                            }`}>
+                                                {newBanquet.dish_ids?.includes(dish.id) && <div className="w-2 h-2 bg-white rounded-full" />}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
+                                                <div className="text-xs text-slate-500">€{dish.price}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
+                        );
+                    })}
+                    {/* Uncategorized dishes (if any custom categories exist) */}
+                    {(() => {
+                        const orphan = dishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
+                        if (orphan.length === 0) return null;
+                        return (
                             <div>
-                                <div className="text-sm font-medium text-slate-800">{dish.name}</div>
-                                <div className="text-xs text-slate-500">{dish.category} - €{dish.price}</div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Altro</div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {orphan.map(dish => (
+                                        <div
+                                            key={dish.id}
+                                            onClick={() => toggleDishInBanquet(dish.id)}
+                                            className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
+                                                newBanquet.dish_ids?.includes(dish.id)
+                                                ? 'bg-indigo-50 border-indigo-500'
+                                                : 'bg-white border-slate-200 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                                                newBanquet.dish_ids?.includes(dish.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
+                                            }`}>
+                                                {newBanquet.dish_ids?.includes(dish.id) && <div className="w-2 h-2 bg-white rounded-full" />}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
+                                                <div className="text-xs text-slate-500">{dish.category} · €{dish.price}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })()}
                 </div>
               </div>
 
@@ -518,6 +623,133 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   Crea Menu
                 </button>
               </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface BanquetCalendarProps {
+  banquetMenus: BanquetMenu[];
+  onSelectBanquet: (menu: BanquetMenu) => void;
+  canEdit: boolean;
+}
+
+const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, canEdit }) => {
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  const monthIndex = cursor.getMonth();
+  const year = cursor.getFullYear();
+
+  // Group banquets by date
+  const banquetsByDate = useMemo(() => {
+    const map = new Map<string, BanquetMenu[]>();
+    for (const m of banquetMenus) {
+      if (!m.event_date) continue;
+      const arr = map.get(m.event_date) || [];
+      arr.push(m);
+      map.set(m.event_date, arr);
+    }
+    return map;
+  }, [banquetMenus]);
+
+  // Build the 6×7 grid for the month, week starting on Monday
+  const cells = useMemo(() => {
+    const firstOfMonth = new Date(year, monthIndex, 1);
+    const dayOfWeek = (firstOfMonth.getDay() + 6) % 7; // Mon=0..Sun=6
+    const start = new Date(year, monthIndex, 1 - dayOfWeek);
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  }, [year, monthIndex]);
+
+  const todayKey = formatLocalDate(new Date());
+  const selectedBanquets = selectedDate ? (banquetsByDate.get(selectedDate) || []) : [];
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
+          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          aria-label="Mese precedente"
+        >
+          <ChevronLeft className="h-5 w-5 text-slate-600" />
+        </button>
+        <h3 className="font-semibold text-slate-800 capitalize">
+          {ITALIAN_MONTHS[monthIndex]} {year}
+        </h3>
+        <button
+          onClick={() => setCursor(new Date(year, monthIndex + 1, 1))}
+          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          aria-label="Mese successivo"
+        >
+          <ChevronRight className="h-5 w-5 text-slate-600" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+        {ITALIAN_WEEKDAYS.map(d => <div key={d} className="py-1">{d}</div>)}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5">
+        {cells.map((d, i) => {
+          const key = formatLocalDate(d);
+          const inMonth = d.getMonth() === monthIndex;
+          const events = banquetsByDate.get(key) || [];
+          const isToday = key === todayKey;
+          const isSelected = key === selectedDate;
+          return (
+            <button
+              key={i}
+              onClick={() => setSelectedDate(events.length ? key : null)}
+              className={`aspect-square sm:aspect-auto sm:min-h-[68px] p-1.5 rounded-lg border text-left flex flex-col transition-all ${
+                isSelected
+                  ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
+                  : events.length
+                  ? 'border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50'
+                  : 'border-slate-200 hover:bg-slate-50'
+              } ${inMonth ? '' : 'opacity-40'}`}
+            >
+              <span className={`text-xs font-semibold ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
+                {d.getDate()}
+              </span>
+              {events.length > 0 && (
+                <span className="mt-auto text-[10px] font-medium text-indigo-700 bg-white border border-indigo-200 rounded-full px-1.5 py-0.5 self-start">
+                  {events.length} {events.length === 1 ? 'evento' : 'eventi'}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedDate && (
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <h4 className="font-semibold text-slate-800 mb-3 capitalize">
+            {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+          </h4>
+          <div className="space-y-2">
+            {selectedBanquets.map(menu => (
+              <div
+                key={menu.id}
+                onClick={() => canEdit && onSelectBanquet(menu)}
+                className={`p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-200 transition-colors flex items-center justify-between gap-3 ${canEdit ? 'cursor-pointer' : ''}`}
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-800 truncate">{menu.name}</p>
+                  {menu.description && <p className="text-xs text-slate-500 truncate">{menu.description}</p>}
+                </div>
+                <span className="text-sm font-bold text-indigo-600 whitespace-nowrap">€{menu.price_per_person}/pax</span>
+              </div>
+            ))}
           </div>
         </div>
       )}

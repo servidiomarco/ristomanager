@@ -146,8 +146,22 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
                 price_per_person DECIMAL(10, 2) NOT NULL,
-                dish_ids INTEGER[]
+                dish_ids INTEGER[],
+                event_date DATE
             );
+        `);
+
+        // Add event_date column to existing banquet_menus if missing
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'banquet_menus' AND column_name = 'event_date'
+                ) THEN
+                    ALTER TABLE banquet_menus ADD COLUMN event_date DATE;
+                END IF;
+            END $$;
         `);
 
         await client.query(`
