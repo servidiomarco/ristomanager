@@ -2,7 +2,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { Dish, BanquetMenu, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
+import { printBanquet } from '../utils/printBanquet';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -66,7 +67,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       description: '',
       price_per_person: 0,
       dish_ids: [],
-      event_date: ''
+      event_date: '',
+      deposit_amount: undefined
   });
 
   const handleAddDishSubmit = (e: React.FormEvent) => {
@@ -119,7 +121,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           description: newBanquet.description || '',
           price_per_person: Number(newBanquet.price_per_person),
           dish_ids: newBanquet.dish_ids || [],
-          event_date: newBanquet.event_date!
+          event_date: newBanquet.event_date!,
+          deposit_amount: newBanquet.deposit_amount != null && newBanquet.deposit_amount !== ('' as any)
+              ? Number(newBanquet.deposit_amount)
+              : undefined
       };
 
       if (isEditingBanquet && editingBanquetId !== null) {
@@ -131,7 +136,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], event_date: '' });
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], event_date: '', deposit_amount: undefined });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -140,7 +145,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       description: menu.description,
       price_per_person: menu.price_per_person,
       dish_ids: menu.dish_ids,
-      event_date: menu.event_date || ''
+      event_date: menu.event_date || '',
+      deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined
     });
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
@@ -326,8 +332,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
-                      {canEdit && (
                       <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                              onClick={() => printBanquet(menu, dishes)}
+                              className="text-slate-300 hover:text-emerald-500 transition-colors"
+                              title="Stampa / Salva PDF / Condividi"
+                          >
+                              <Printer className="h-5 w-5" />
+                          </button>
+                          {canEdit && (
+                          <>
                           <button
                               onClick={() => handleEditBanquet(menu)}
                               className="text-slate-300 hover:text-indigo-500 transition-colors"
@@ -340,8 +354,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           >
                               <Trash2 className="h-5 w-5" />
                           </button>
+                          </>
+                          )}
                       </div>
-                      )}
                       <div className="flex justify-between items-start mb-4">
                           <div>
                               <h3 className="font-bold text-lg text-slate-800">{menu.name}</h3>
@@ -354,9 +369,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
                         </div>
                       )}
-                      <div className="mb-4">
-                          <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
-                          <span className="text-slate-400 text-sm"> / persona</span>
+                      <div className="mb-4 flex items-baseline gap-4 flex-wrap">
+                          <div>
+                              <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
+                              <span className="text-slate-400 text-sm"> / persona</span>
+                          </div>
+                          {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
+                              <div className="text-sm">
+                                  <span className="text-slate-400">Acconto: </span>
+                                  <span className="font-semibold text-slate-700">€{Number(menu.deposit_amount).toFixed(2)}</span>
+                              </div>
+                          )}
                       </div>
                       <div className="space-y-2">
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Composizione:</p>
@@ -522,6 +545,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={newBanquet.price_per_person}
                         onChange={e => setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)})}
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Acconto (€) <span className="text-slate-400 font-normal">— opzionale</span></label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={newBanquet.deposit_amount ?? ''}
+                        onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                     />
                 </div>
               </div>

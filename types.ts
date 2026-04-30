@@ -56,6 +56,7 @@ export interface BanquetMenu {
   price_per_person: number;
   dish_ids: number[];
   event_date: string; // YYYY-MM-DD
+  deposit_amount?: number;
 }
 
 export enum PaymentStatus {

@@ -147,7 +147,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 description TEXT,
                 price_per_person DECIMAL(10, 2) NOT NULL,
                 dish_ids INTEGER[],
-                event_date DATE
+                event_date DATE,
+                deposit_amount DECIMAL(10, 2)
             );
         `);
 
@@ -160,6 +161,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     WHERE table_name = 'banquet_menus' AND column_name = 'event_date'
                 ) THEN
                     ALTER TABLE banquet_menus ADD COLUMN event_date DATE;
+                END IF;
+            END $$;
+        `);
+
+        // Add deposit_amount column to existing banquet_menus if missing
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'banquet_menus' AND column_name = 'deposit_amount'
+                ) THEN
+                    ALTER TABLE banquet_menus ADD COLUMN deposit_amount DECIMAL(10, 2);
                 END IF;
             END $$;
         `);
