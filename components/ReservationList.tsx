@@ -1254,6 +1254,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                             </div>
 
+                            {/* Banchetto - shown only if there are banquets on the chosen date */}
+                            {(() => {
+                                const formDate = formData.reservation_time?.split('T')[0];
+                                const banquetsForDate = formDate
+                                    ? banquetMenus.filter(m => m.event_date === formDate)
+                                    : [];
+                                if (banquetsForDate.length === 0) return null;
+                                return (
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Banchetto</label>
+                                        <div className="relative">
+                                            <select
+                                                className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 pr-11 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all appearance-none"
+                                                value={formData.banquet_menu_id ?? ''}
+                                                onChange={e => setFormData({
+                                                    ...formData,
+                                                    banquet_menu_id: e.target.value ? Number(e.target.value) : undefined
+                                                })}
+                                            >
+                                                <option value="">Nessuno</option>
+                                                {banquetsForDate.map(m => (
+                                                    <option key={m.id} value={m.id}>
+                                                        {m.name} — €{Number(m.price_per_person).toFixed(2)}/persona
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
                             {/* Expandable Sections */}
                             <div className="space-y-3">
                                 {/* Allergens Button */}
