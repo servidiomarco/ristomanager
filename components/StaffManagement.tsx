@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType,
   Shift, TimeOffType
@@ -141,6 +141,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   // DATA FETCHING
   // ============================================
 
+  // Keep latest showToast in a ref so fetchData stays stable across renders.
+  // The parent (App) recreates addToast every render, so depending on it
+  // directly would re-fire the fetch effect indefinitely.
+  const showToastRef = useRef(showToast);
+  useEffect(() => { showToastRef.current = showToast; }, [showToast]);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -154,11 +160,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       setTimeOffs(timeOffData);
     } catch (error) {
       console.error('Error fetching staff data:', error);
-      showToast('Errore nel caricamento del personale', 'error');
+      showToastRef.current('Errore nel caricamento del personale', 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     fetchData();
