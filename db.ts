@@ -1,8 +1,13 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import bcrypt from 'bcryptjs';
+
+// Return DATE columns as plain YYYY-MM-DD strings instead of JS Date objects.
+// PostgreSQL DATE has no timezone; the default parser shifts it through the
+// server's local TZ, causing off-by-one-day bugs in clients in other zones.
+types.setTypeParser(1082, (val: string) => val);
 
 // const pool = new Pool({
 //   user: 'postgres',

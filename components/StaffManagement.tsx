@@ -64,6 +64,17 @@ const TIME_OFF_LEGEND_DOT: Record<TimeOffType, string> = {
   [TimeOffType.PERMESSO]: 'bg-violet-300'
 };
 
+// Format Date as YYYY-MM-DD using local components (avoids UTC timezone shift)
+const formatLocalDate = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+// Server may return dates as either YYYY-MM-DD or full ISO strings; take first 10 chars
+const toDateOnly = (date: string): string => date.substring(0, 10);
+
 interface StaffManagementProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
@@ -211,16 +222,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   }, [calendarDate]);
 
   const getShiftsForDay = (date: Date, staffId: string) => {
-    const dateStr = date.toISOString().split('T')[0];
-    return shifts.filter(s => s.staffId === staffId && s.date === dateStr);
+    const dateStr = formatLocalDate(date);
+    return shifts.filter(s => s.staffId === staffId && toDateOnly(s.date) === dateStr);
   };
 
   const getTimeOffForDay = (date: Date, staffId: string) => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatLocalDate(date);
     return timeOffs.find(t =>
       t.staffId === staffId &&
-      dateStr >= t.startDate &&
-      dateStr <= t.endDate
+      dateStr >= toDateOnly(t.startDate) &&
+      dateStr <= toDateOnly(t.endDate)
     );
   };
 
@@ -316,7 +327,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     if (!selectedStaff) return;
     setShiftForm({
       staffId: selectedStaff.id,
-      date: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      date: formatLocalDate(date || new Date()),
       lunch: true,
       dinner: false,
       present: true,
@@ -376,7 +387,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
   const handleOpenAddTimeOff = () => {
     if (!selectedStaff) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate(new Date());
     setTimeOffForm({
       staffId: selectedStaff.id,
       startDate: today,
