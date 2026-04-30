@@ -4,7 +4,7 @@ import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge } 
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar } from 'lucide-react';
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
-import { socketClient } from '../services/socketClient';
+import { useSocket } from '../hooks/useSocket';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -27,8 +27,8 @@ interface FloorPlanProps {
   onUpdateTable: (updatedTable: Table) => void;
   onDeleteTable: (tableId: number) => void;
   onAddTable: (table: Omit<Table, 'id'>) => void;
-  onMergeTables: (tableIds: number[], date: string, shift: Shift) => void;
-  onSplitTable: (tableId: number, date: string, shift: Shift) => void;
+  onMergeTables: (tableIds: number[], date: string, shift: Shift) => Promise<void> | void;
+  onSplitTable: (tableId: number, date: string, shift: Shift) => Promise<void> | void;
   onAddRoom: (roomName: string) => void;
   onDeleteRoom: (room_id: number) => void;
   canEdit?: boolean;
@@ -62,6 +62,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
 
+  // Refresh merges from the server for the current date+shift. Used after
+  // local merge/split actions so the originating client updates immediately
+  // even when the socket is offline.
+  const refreshMerges = async () => {
+    try {
+      const merges = await getTableMerges(selectedDate, selectedShift);
+      setTableMerges(merges);
+    } catch (err) {
+      console.error('Error fetching table merges:', err);
+    }
+  };
+
   // Fetch merges whenever date/shift changes
   useEffect(() => {
     let cancelled = false;
@@ -76,9 +88,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return () => { cancelled = true; };
   }, [selectedDate, selectedShift]);
 
+  const { socket } = useSocket();
+
   // Listen for merge socket events filtered by current date+shift
   useEffect(() => {
-    const socket = socketClient.getSocket();
     if (!socket) return;
 
     const matches = (m: TableMerge) => m.date === selectedDate && m.shift === selectedShift;
@@ -107,7 +120,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       socket.off('tableMerge:created', handleCreated);
       socket.off('tableMerge:deleted', handleDeleted);
     };
-  }, [selectedDate, selectedShift]);
+  }, [socket, selectedDate, selectedShift]);
 
   // Compose display tables: raw tables + per-shift merges
   const displayTables = useMemo(
@@ -813,9 +826,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
             {selectedTables.length > 1 && !selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                 <button
-                    onClick={() => {
-                        onMergeTables(selectedTables, selectedDate, selectedShift);
+                    onClick={async () => {
+                        await onMergeTables(selectedTables, selectedDate, selectedShift);
                         setSelectedTables([]);
+                        refreshMerges();
                     }}
                     className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 font-medium text-sm"
                 >
@@ -825,9 +839,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
             {selectedTables.length === 1 && singleSelectedTable?.merged_with && singleSelectedTable.merged_with.length > 0 && !singleSelectedTable?.is_locked && (
                 <button
-                    onClick={() => {
-                        onSplitTable(selectedTables[0], selectedDate, selectedShift);
+                    onClick={async () => {
+                        await onSplitTable(selectedTables[0], selectedDate, selectedShift);
                         setSelectedTables([]);
+                        refreshMerges();
                     }}
                     className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 font-medium text-sm"
                     title={`Dividi tavoli: ${singleSelectedTable.name}`}

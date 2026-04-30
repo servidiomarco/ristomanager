@@ -4,7 +4,7 @@ import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
-import { socketClient } from '../services/socketClient';
+import { useSocket } from '../hooks/useSocket';
 
 // Helper to format datetime without timezone conversion
 const formatDateTime = (isoString: string): string => {
@@ -141,6 +141,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     ? formData.shift
     : (selectedShift !== 'ALL' ? selectedShift : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER));
 
+  // Refresh merges from the server. Used after local merge/split actions so
+  // the originating client updates immediately even when the socket is offline.
+  const refreshMerges = async (date: string, shift: Shift) => {
+    try {
+      const merges = await getTableMerges(date, shift);
+      setTableMerges(merges);
+    } catch (err) {
+      console.error('Error fetching table merges:', err);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     getTableMerges(focalDate, focalShift)
@@ -152,8 +163,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
+  const { socket } = useSocket();
+
   useEffect(() => {
-    const socket = socketClient.getSocket();
     if (!socket) return;
     const matches = (m: TableMerge) => m.date === focalDate && m.shift === focalShift;
     const onCreated = (m: TableMerge) => {
@@ -178,7 +190,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       socket.off('tableMerge:created', onCreated);
       socket.off('tableMerge:deleted', onDeleted);
     };
-  }, [focalDate, focalShift]);
+  }, [socket, focalDate, focalShift]);
 
   const displayTables = useMemo(
     () => applyMerges(tables, tableMerges),
@@ -1415,6 +1427,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     const primaryTableId = selectedTablesForMerge[0];
                                                     const mergeDate = formData.reservation_time.split('T')[0];
                                                     await onMergeTables(selectedTablesForMerge, mergeDate, formData.shift);
+                                                    await refreshMerges(mergeDate, formData.shift);
                                                     // Auto-select the merged table for the reservation
                                                     setFormData(prev => ({ ...prev, table_id: primaryTableId }));
                                                     showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
@@ -1441,6 +1454,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 try {
                                                     const splitDate = formData.reservation_time.split('T')[0];
                                                     await onSplitTable(selectedTableObj.id, splitDate, formData.shift);
+                                                    await refreshMerges(splitDate, formData.shift);
                                                     showToast('Tavoli divisi con successo', 'success');
                                                     setFormData({...formData, table_id: undefined});
                                                 } catch (error) {

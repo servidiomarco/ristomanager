@@ -485,8 +485,10 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
             );
         }
 
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastTableMergeCreated(merge, socketId);
+        // Broadcast to ALL clients (including originator) so the originating
+        // client's local merge state updates from the socket event without
+        // needing an extra refetch. The client listener upserts idempotently.
+        if (socketService) socketService.broadcastTableMergeCreated(merge);
 
         res.status(201).json(merge);
     } catch (err) {
@@ -526,8 +528,7 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
             );
         }
 
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastTableMergeDeleted(deleted, socketId);
+        if (socketService) socketService.broadcastTableMergeDeleted(deleted);
 
         res.json(deleted);
     } catch (err) {
