@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2 } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
@@ -118,6 +118,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [mergeMode, setMergeMode] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
   const [isListening, setIsListening] = useState(false);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
 
   // Map view canvas size tracking for responsive scaling
   const mapCanvasRef = useRef<HTMLDivElement>(null);
@@ -1092,21 +1093,37 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                            {tablesInRoom.map(renderMapTable)}
                        </div>
 
-                       {/* Legend Overlay */}
-                       <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-sm border border-slate-200 text-xs space-y-2">
-                           <div className="font-semibold text-slate-700 mb-1">Legenda</div>
-                           <div className="flex items-center gap-2 text-emerald-700">
-                               <div className="w-3 h-3 bg-white border border-emerald-400 rounded-sm"></div> Libero
-                           </div>
-                           <div className="flex items-center gap-2 text-red-700">
-                               <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
-                           </div>
-                           <div className="border-t border-slate-200 mt-2 pt-2">
-                                <div className="font-semibold text-slate-700">Occupazione:</div>
-                                <div className="text-sm">
-                                    <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
-                                </div>
-                           </div>
+                       {/* Legend - collapsible */}
+                       <div className="absolute bottom-4 right-4 z-10 select-none">
+                           <button
+                               type="button"
+                               onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                               className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
+                               aria-expanded={isLegendOpen}
+                           >
+                               <Info size={14} className="text-indigo-500" />
+                               Legenda
+                           </button>
+                           {isLegendOpen && (
+                               <div
+                                   className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                                   onClick={(e) => e.stopPropagation()}
+                               >
+                                   <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
+                                   <div className="flex items-center gap-2 text-slate-600">
+                                       <div className="w-3 h-3 bg-white border border-emerald-400 rounded-sm"></div> Libero
+                                   </div>
+                                   <div className="flex items-center gap-2 text-slate-600">
+                                       <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
+                                   </div>
+                                   <div className="border-t border-slate-200 mt-1 pt-2">
+                                       <div className="font-semibold text-slate-700">Occupazione:</div>
+                                       <div className="text-sm">
+                                           <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
+                                       </div>
+                                   </div>
+                               </div>
+                           )}
                        </div>
                   </div>
               </div>
