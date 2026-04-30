@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffCategory, StaffType } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
@@ -85,8 +85,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
 
   // Get selected date string for filtering (defined early for use in shopping/todo functions)
-  const selectedDateStr = selectedDate.toISOString().split('T')[0];
-  const isToday = selectedDateStr === new Date().toISOString().split('T')[0];
+  // Use local date components to avoid UTC timezone shift
+  const formatLocalDate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  const toDateOnly = (date: string): string => date.substring(0, 10);
+  const selectedDateStr = formatLocalDate(selectedDate);
+  const isToday = selectedDateStr === formatLocalDate(new Date());
 
   // Todo State
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -115,6 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [staffShifts, setStaffShifts] = useState<StaffShift[]>([]);
+  const [staffTimeOffs, setStaffTimeOffs] = useState<StaffTimeOff[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
 
   // Socket connection state - used to re-subscribe when socket reconnects
@@ -133,16 +142,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  // Fetch staff members and shifts for selected date
+  // Fetch staff members, shifts, and time-off for selected date
   const fetchStaff = useCallback(async (dateStr: string) => {
     try {
       setStaffLoading(true);
-      const [members, shifts] = await Promise.all([
+      const [members, shifts, timeOffs] = await Promise.all([
         staffApiService.getStaffMembers(),
-        staffApiService.getShifts(dateStr)
+        staffApiService.getShifts(dateStr),
+        staffApiService.getTimeOffByDateRange(dateStr, dateStr)
       ]);
       setStaffMembers(members.filter(m => m.isActive));
       setStaffShifts(shifts);
+      setStaffTimeOffs(timeOffs);
     } catch (error) {
       console.error('Error fetching staff data:', error);
     } finally {
@@ -210,16 +221,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const totalItems = shoppingItems.length;
 
-  // Staff presence calculation
+  // Staff presence calculation:
+  // - Excludes staff with time-off covering the selected date
+  // - FISSO staff are implicitly present on both shifts during their hire period
+  //   unless it's their weekly rest day
+  // - Explicit shift rows (with present=false) override the implicit rule
   const staffPresence = useMemo(() => {
-    const getStaffForShift = (shift: Shift, category: StaffCategory) => {
-      const shiftStaffIds = staffShifts
-        .filter(s => s.shift === shift && s.present !== false)
-        .map(s => s.staffId);
-      return staffMembers.filter(m =>
-        m.category === category && shiftStaffIds.includes(m.id)
+    const dayOfWeek = new Date(`${selectedDateStr}T00:00:00`).getDay();
+    const onTimeOff = new Set(
+      staffTimeOffs
+        .filter(t => toDateOnly(t.startDate) <= selectedDateStr && toDateOnly(t.endDate) >= selectedDateStr)
+        .map(t => t.staffId)
+    );
+
+    const isPresent = (staff: StaffMember, shift: Shift): boolean => {
+      if (onTimeOff.has(staff.id)) return false;
+
+      const explicitShift = staffShifts.find(s =>
+        s.staffId === staff.id && s.shift === shift && toDateOnly(s.date) === selectedDateStr
       );
+      if (explicitShift) return explicitShift.present !== false;
+
+      if (staff.staffType !== StaffType.FISSO) return false;
+      if (staff.weeklyRestDay != null && staff.weeklyRestDay === dayOfWeek) return false;
+      if (staff.hireDate && selectedDateStr < toDateOnly(staff.hireDate)) return false;
+      if (staff.contractEndDate && selectedDateStr > toDateOnly(staff.contractEndDate)) return false;
+      return true;
     };
+
+    const getStaffForShift = (shift: Shift, category: StaffCategory) =>
+      staffMembers.filter(m => m.category === category && isPresent(m, shift));
 
     return {
       lunch: {
@@ -231,7 +262,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         cucina: getStaffForShift(Shift.DINNER, StaffCategory.CUCINA)
       }
     };
-  }, [staffMembers, staffShifts]);
+  }, [staffMembers, staffShifts, staffTimeOffs, selectedDateStr]);
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
   // Fetch todos from API (filtered by selected date)
