@@ -356,11 +356,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 role VARCHAR(100),
                 hire_date DATE,
                 contract_end_date DATE,
+                weekly_rest_day SMALLINT CHECK (weekly_rest_day BETWEEN 0 AND 6),
                 notes TEXT,
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
+        `);
+
+        // Migration for existing databases
+        await client.query(`
+            ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS weekly_rest_day SMALLINT CHECK (weekly_rest_day BETWEEN 0 AND 6);
         `);
 
         await client.query(`

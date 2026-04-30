@@ -79,6 +79,7 @@ export interface CreateStaffInput {
   role?: string;
   hireDate?: string;
   contractEndDate?: string;
+  weeklyRestDay?: number | null;
   notes?: string;
 }
 
@@ -92,6 +93,7 @@ export interface UpdateStaffInput {
   role?: string;
   hireDate?: string;
   contractEndDate?: string;
+  weeklyRestDay?: number | null;
   notes?: string;
   isActive?: boolean;
 }

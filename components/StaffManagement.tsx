@@ -64,6 +64,9 @@ const TIME_OFF_LEGEND_DOT: Record<TimeOffType, string> = {
   [TimeOffType.PERMESSO]: 'bg-violet-300'
 };
 
+// Indices match JS Date.getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
+const WEEKDAY_LABELS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+
 // Format Date as YYYY-MM-DD using local components (avoids UTC timezone shift)
 const formatLocalDate = (date: Date): string => {
   const y = date.getFullYear();
@@ -116,6 +119,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     role: '',
     hireDate: '',
     contractEndDate: '',
+    weeklyRestDay: null,
     notes: ''
   });
 
@@ -266,6 +270,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       role: '',
       hireDate: '',
       contractEndDate: '',
+      weeklyRestDay: null,
       notes: ''
     });
     setEditingStaff(null);
@@ -288,6 +293,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       role: staff.role || '',
       hireDate: staff.hireDate || '',
       contractEndDate: staff.contractEndDate || '',
+      weeklyRestDay: staff.weeklyRestDay ?? null,
       notes: staff.notes || ''
     });
     setShowStaffModal(true);
@@ -663,13 +669,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                       )}
                     </div>
                     <p className="text-slate-600">{selectedStaff.role || (selectedStaff.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco')}</p>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex flex-wrap gap-2 mt-2">
                       <span className={`text-xs px-2 py-1 rounded-full border ${STAFF_CATEGORY_COLORS[selectedStaff.category]}`}>
                         {STAFF_CATEGORY_LABELS[selectedStaff.category]}
                       </span>
                       <span className={`text-xs px-2 py-1 rounded-full ${STAFF_TYPE_COLORS[selectedStaff.staffType]}`}>
                         {STAFF_TYPE_LABELS[selectedStaff.staffType]}
                       </span>
+                      {selectedStaff.weeklyRestDay !== undefined && selectedStaff.weeklyRestDay !== null && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">
+                          Riposo: {WEEKDAY_LABELS[selectedStaff.weeklyRestDay]}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -771,7 +782,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     const lunchShift = dayShifts.find(s => s.shift === Shift.LUNCH);
                     const dinnerShift = dayShifts.find(s => s.shift === Shift.DINNER);
 
+                    const isWeeklyRest = selectedStaff.weeklyRestDay !== undefined
+                      && selectedStaff.weeklyRestDay !== null
+                      && day.getDay() === selectedStaff.weeklyRestDay;
+
                     const inHirePeriod = selectedStaff.staffType === StaffType.FISSO
+                      && !isWeeklyRest
                       && isWithinHirePeriod(selectedStaff, dateStr);
 
                     // Show shift if explicit DB row exists OR FISSO implicit presence applies
@@ -787,9 +803,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                       ? 'border-transparent bg-slate-50/50 opacity-40'
                       : dayTimeOff
                         ? TIME_OFF_DAY_BG[dayTimeOff.type]
-                        : isToday
-                          ? 'border-indigo-300 bg-indigo-50'
-                          : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50';
+                        : isWeeklyRest && !lunchShift && !dinnerShift
+                          ? 'border-slate-300 bg-slate-100'
+                          : isToday
+                            ? 'border-indigo-300 bg-indigo-50'
+                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50';
 
                     return (
                       <div
@@ -804,6 +822,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                         {dayTimeOff ? (
                           <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff.type]}`}>
                             {TIME_OFF_LABELS[dayTimeOff.type]}
+                          </div>
+                        ) : isWeeklyRest && !showLunch && !showDinner ? (
+                          <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 text-slate-700">
+                            Riposo
                           </div>
                         ) : (
                           <div className="space-y-0.5">
@@ -1042,6 +1064,23 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Giorno di Riposo Settimanale</label>
+                <select
+                  value={staffForm.weeklyRestDay ?? ''}
+                  onChange={(e) => setStaffForm({
+                    ...staffForm,
+                    weeklyRestDay: e.target.value === '' ? null : Number(e.target.value)
+                  })}
+                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">Nessuno</option>
+                  {WEEKDAY_LABELS.map((label, idx) => (
+                    <option key={idx} value={idx}>{label}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

@@ -1239,6 +1239,7 @@ app.get('/staff', authenticate, async (req, res) => {
             role: row.role,
             hireDate: row.hire_date,
             contractEndDate: row.contract_end_date,
+            weeklyRestDay: row.weekly_rest_day,
             notes: row.notes,
             isActive: row.is_active,
             createdAt: row.created_at,
@@ -1255,17 +1256,17 @@ app.get('/staff', authenticate, async (req, res) => {
 // Create staff member
 app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes } = req.body;
 
         if (!name || !surname || !category || !staffType) {
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
 
         const result = await pool.query(
-            `INSERT INTO staff_members (name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `INSERT INTO staff_members (name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING *`,
-            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, notes || null]
+            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null]
         );
 
         const row = result.rows[0];
@@ -1280,6 +1281,7 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
             role: row.role,
             hireDate: row.hire_date,
             contractEndDate: row.contract_end_date,
+            weeklyRestDay: row.weekly_rest_day,
             notes: row.notes,
             isActive: row.is_active,
             createdAt: row.created_at,
@@ -1675,14 +1677,20 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             cucina: { lunch: [] as any[], dinner: [] as any[] }
         };
 
+        // Day of week for the requested date (0=Sunday … 6=Saturday)
+        const dayOfWeek = new Date(`${dateStr}T00:00:00`).getDay();
+
         for (const row of staffResult.rows) {
             if (onTimeOff.has(row.id)) continue;
+            // Weekly rest day overrides implicit presence (explicit shifts can still override below)
+            const isWeeklyRest = row.weekly_rest_day !== null && row.weekly_rest_day === dayOfWeek;
 
             const isFisso = row.staff_type === 'FISSO';
             // Open boundaries: no hire_date means "always active until contract end",
             // no contract_end_date means "no end". Without this, a FISSO added without
             // explicit dates would never appear in the presence list.
             const inHirePeriod = isFisso
+                && !isWeeklyRest
                 && (!row.hire_date || row.hire_date <= dateStr)
                 && (!row.contract_end_date || row.contract_end_date >= dateStr);
 
@@ -1742,6 +1750,7 @@ app.get('/staff/:id', authenticate, async (req, res) => {
             role: row.role,
             hireDate: row.hire_date,
             contractEndDate: row.contract_end_date,
+            weeklyRestDay: row.weekly_rest_day,
             notes: row.notes,
             isActive: row.is_active,
             createdAt: row.created_at,
@@ -1757,8 +1766,9 @@ app.get('/staff/:id', authenticate, async (req, res) => {
 app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive } = req.body;
 
+        // weeklyRestDay needs explicit handling so the client can clear it (null clears, undefined keeps)
         const result = await pool.query(
             `UPDATE staff_members SET
                 name = COALESCE($1, name),
@@ -1770,12 +1780,18 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 role = COALESCE($7, role),
                 hire_date = COALESCE($8, hire_date),
                 contract_end_date = COALESCE($9, contract_end_date),
-                notes = COALESCE($10, notes),
-                is_active = COALESCE($11, is_active),
+                weekly_rest_day = CASE WHEN $10::text = 'KEEP' THEN weekly_rest_day ELSE $11::smallint END,
+                notes = COALESCE($12, notes),
+                is_active = COALESCE($13, is_active),
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $12
+             WHERE id = $14
              RETURNING *`,
-            [name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, notes, isActive, id]
+            [
+                name, surname, category, staffType, phone, email, role, hireDate, contractEndDate,
+                weeklyRestDay === undefined ? 'KEEP' : 'SET',
+                weeklyRestDay === undefined ? null : weeklyRestDay,
+                notes, isActive, id
+            ]
         );
 
         if (result.rows.length === 0) {
@@ -1794,6 +1810,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
             role: row.role,
             hireDate: row.hire_date,
             contractEndDate: row.contract_end_date,
+            weeklyRestDay: row.weekly_rest_day,
             notes: row.notes,
             isActive: row.is_active,
             createdAt: row.created_at,

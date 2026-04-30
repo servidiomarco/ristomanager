@@ -285,6 +285,7 @@ export interface StaffMember {
   role?: string; // e.g., "Chef", "Cameriere", "Lavapiatti"
   hireDate?: string;
   contractEndDate?: string; // For seasonal staff
+  weeklyRestDay?: number | null; // 0=Sunday, 1=Monday, ..., 6=Saturday (JS getDay())
   notes?: string;
   isActive: boolean;
   createdAt: string;
