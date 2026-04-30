@@ -50,6 +50,20 @@ const TIME_OFF_COLORS: Record<TimeOffType, string> = {
   [TimeOffType.PERMESSO]: 'bg-violet-100 text-violet-700'
 };
 
+const TIME_OFF_DAY_BG: Record<TimeOffType, string> = {
+  [TimeOffType.RIPOSO]: 'border-slate-300 bg-slate-100',
+  [TimeOffType.VACANZA]: 'border-cyan-300 bg-cyan-50',
+  [TimeOffType.MALATTIA]: 'border-rose-300 bg-rose-50',
+  [TimeOffType.PERMESSO]: 'border-violet-300 bg-violet-50'
+};
+
+const TIME_OFF_LEGEND_DOT: Record<TimeOffType, string> = {
+  [TimeOffType.RIPOSO]: 'bg-slate-300',
+  [TimeOffType.VACANZA]: 'bg-cyan-300',
+  [TimeOffType.MALATTIA]: 'bg-rose-300',
+  [TimeOffType.PERMESSO]: 'bg-violet-300'
+};
+
 interface StaffManagementProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
@@ -696,36 +710,58 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     const isToday = day.toDateString() === new Date().toDateString();
                     const dayShifts = getShiftsForDay(day, selectedStaff.id);
                     const dayTimeOff = getTimeOffForDay(day, selectedStaff.id);
-                    const hasLunch = dayShifts.some(s => s.shift === Shift.LUNCH);
-                    const hasDinner = dayShifts.some(s => s.shift === Shift.DINNER);
+                    const lunchShift = dayShifts.find(s => s.shift === Shift.LUNCH);
+                    const dinnerShift = dayShifts.find(s => s.shift === Shift.DINNER);
+
+                    const dayBgClass = !isCurrentMonth
+                      ? 'border-transparent bg-slate-50/50 opacity-40'
+                      : dayTimeOff
+                        ? TIME_OFF_DAY_BG[dayTimeOff.type]
+                        : isToday
+                          ? 'border-indigo-300 bg-indigo-50'
+                          : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50';
 
                     return (
                       <div
                         key={idx}
                         onClick={() => handleOpenAddShift(day)}
-                        className={`min-h-[60px] p-1 rounded-lg border cursor-pointer transition-all ${
-                          isCurrentMonth
-                            ? isToday
-                              ? 'border-indigo-300 bg-indigo-50'
-                              : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'
-                            : 'border-transparent bg-slate-50/50 opacity-50'
-                        }`}
+                        className={`min-h-[72px] p-1.5 rounded-lg border cursor-pointer transition-all flex flex-col ${dayBgClass}`}
                       >
-                        <div className={`text-xs font-medium mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-600'}`}>
+                        <div className={`text-xs font-semibold mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
                           {day.getDate()}
                         </div>
 
                         {dayTimeOff ? (
-                          <div className={`text-[9px] px-1 py-0.5 rounded ${TIME_OFF_COLORS[dayTimeOff.type]}`}>
+                          <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff.type]}`}>
                             {TIME_OFF_LABELS[dayTimeOff.type]}
                           </div>
                         ) : (
-                          <div className="flex gap-0.5">
-                            {hasLunch && (
-                              <div className="flex-1 h-2 bg-amber-400 rounded-sm" title="Pranzo" />
+                          <div className="space-y-0.5">
+                            {lunchShift && (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
+                                  lunchShift.present
+                                    ? 'bg-amber-200 text-amber-800'
+                                    : 'bg-slate-100 text-slate-400 line-through'
+                                }`}
+                                title={lunchShift.present ? 'Presente a Pranzo' : 'Assente a Pranzo'}
+                              >
+                                <Sun className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">Pranzo</span>
+                              </div>
                             )}
-                            {hasDinner && (
-                              <div className="flex-1 h-2 bg-indigo-400 rounded-sm" title="Cena" />
+                            {dinnerShift && (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
+                                  dinnerShift.present
+                                    ? 'bg-indigo-200 text-indigo-800'
+                                    : 'bg-slate-100 text-slate-400 line-through'
+                                }`}
+                                title={dinnerShift.present ? 'Presente a Cena' : 'Assente a Cena'}
+                              >
+                                <Moon className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">Cena</span>
+                              </div>
                             )}
                           </div>
                         )}
@@ -735,18 +771,26 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 </div>
 
                 {/* Legend */}
-                <div className="flex gap-4 mt-4 justify-center text-xs text-slate-500">
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-2 bg-amber-400 rounded-sm" />
-                    Pranzo
+                    <div className="w-3 h-3 bg-amber-200 rounded-sm flex items-center justify-center">
+                      <Sun className="h-2 w-2 text-amber-800" />
+                    </div>
+                    Presente Pranzo
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-2 bg-indigo-400 rounded-sm" />
-                    Cena
+                    <div className="w-3 h-3 bg-indigo-200 rounded-sm flex items-center justify-center">
+                      <Moon className="h-2 w-2 text-indigo-800" />
+                    </div>
+                    Presente Cena
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3 h-3 bg-slate-100 rounded-sm border border-slate-200" />
+                    Assente
                   </div>
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
                     <div key={key} className="flex items-center gap-1.5">
-                      <div className={`w-3 h-2 rounded-sm ${TIME_OFF_COLORS[key as TimeOffType].replace('text-', 'bg-').split(' ')[0]}`} />
+                      <div className={`w-3 h-3 rounded-sm ${TIME_OFF_LEGEND_DOT[key as TimeOffType]}`} />
                       {label}
                     </div>
                   ))}
