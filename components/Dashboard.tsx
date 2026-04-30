@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
@@ -7,7 +7,7 @@ import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, TrendingUp, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -54,6 +54,8 @@ interface DashboardProps {
   tables: Table[];
   dishes: Dish[];
   rooms: Room[];
+  banquetMenus: BanquetMenu[];
+  onNavigateToBanquets: () => void;
 }
 
 // Shopping List Labels and Colors
@@ -75,7 +77,7 @@ const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
   'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -632,9 +634,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const totalTables = Array.isArray(tables) ? tables.length : 0;
   const totalCapacity = Array.isArray(tables) ? tables.reduce((acc, t) => acc + (Number(t.seats) || 0), 0) : 0;
 
-  // Current occupancy (real-time status)
-  const occupiedTables = Array.isArray(tables) ? tables.filter(t => t.status === 'OCCUPIED').length : 0;
-  const occupancyRate = totalTables > 0 ? Math.round((occupiedTables / totalTables) * 100) : 0;
+  // Banchetti scheduled for the selected day
+  const banquetsToday = Array.isArray(banquetMenus)
+    ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
+    : 0;
 
   // Selected day stats
   const selectedDayGuests = selectedDayReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -893,15 +896,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{arrivedGuests}</p>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+        <button
+          type="button"
+          onClick={onNavigateToBanquets}
+          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group"
+        >
           <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
-            <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div className="min-w-0">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Occupazione</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{occupancyRate}%</p>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Banchetti</p>
+            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{banquetsToday}</p>
           </div>
-        </div>
+          <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+        </button>
         <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-amber-50 text-amber-600 rounded-xl flex-shrink-0">
             <Utensils className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />

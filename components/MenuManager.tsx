@@ -26,6 +26,7 @@ interface MenuManagerProps {
   onUpdateBanquetMenu: (id: number, menu: Partial<BanquetMenu>) => void;
   onDeleteBanquetMenu: (id: number) => void;
   canEdit?: boolean;
+  initialTab?: 'DISHES' | 'BANQUETS';
 }
 
 export const MenuManager: React.FC<MenuManagerProps> = ({
@@ -37,10 +38,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onAddBanquetMenu,
     onUpdateBanquetMenu,
     onDeleteBanquetMenu,
-    canEdit = true
+    canEdit = true,
+    initialTab = 'DISHES'
 }) => {
-  console.log("MenuManager: banquetMenus prop received:", banquetMenus);
-  const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
+  const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);

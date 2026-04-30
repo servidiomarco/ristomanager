@@ -45,6 +45,7 @@ const App: React.FC = () => {
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
 
   // Redirect to first accessible view when user changes or doesn't have access to current view
   useEffect(() => {
@@ -658,7 +659,7 @@ const App: React.FC = () => {
               icon={<MenuIcon size={20} />}
               label="Menu & Banchetti"
               active={view === ViewState.MENU}
-              onClick={() => setView(ViewState.MENU)}
+              onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -781,6 +782,8 @@ const App: React.FC = () => {
             tables={tables}
             dishes={dishes}
             rooms={rooms}
+            banquetMenus={banquetMenus}
+            onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
           />
         )}
 
@@ -828,6 +831,7 @@ const App: React.FC = () => {
             onUpdateBanquetMenu={handleUpdateBanquet}
             onDeleteBanquetMenu={handleDeleteBanquet}
             canEdit={hasPermission('menu:full')}
+            initialTab={menuInitialTab}
           />
         )}
 
@@ -957,7 +961,7 @@ const App: React.FC = () => {
                 icon={<MenuIcon size={24} />}
                 label="Menu"
                 active={view === ViewState.MENU}
-                onClick={() => setView(ViewState.MENU)}
+                onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
               />
             )}
             {canAccessView(ViewState.STAFF) && (
