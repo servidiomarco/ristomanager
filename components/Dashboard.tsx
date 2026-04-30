@@ -777,15 +777,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Clock + Date Navigation */}
-        <div className="flex flex-wrap items-center gap-2 md:gap-3">
-          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-2 md:gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5 self-start sm:self-auto">
             <Clock className="h-5 w-5 text-indigo-600" />
             <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
               {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
 
-          <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
+          <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
             {!isToday && (
               <button
                 onClick={goToToday}
@@ -928,34 +928,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
         {/* Shift Occupancy Summary */}
         <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
-            <div className="flex items-center justify-between mb-2">
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-3 sm:p-4 border border-amber-100">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
               <span className="text-sm font-medium text-amber-800">Pranzo</span>
-              <span className="text-xs text-amber-600">{lunchTableIds.size}/{totalTables} tavoli</span>
+              <span className="text-[11px] sm:text-xs text-amber-600 whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-amber-700">{lunchOccupancy}%</span>
-              <span className="text-sm text-amber-600 mb-1">occupazione</span>
+            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
+              <span className="text-2xl sm:text-3xl font-bold text-amber-700 leading-none">{lunchOccupancy}%</span>
+              <span className="text-xs sm:text-sm text-amber-600 mb-0.5 sm:mb-1">occupazione</span>
             </div>
             <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
               <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
             </div>
-            <p className="text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+            <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-            <div className="flex items-center justify-between mb-2">
+          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
               <span className="text-sm font-medium text-indigo-800">Cena</span>
-              <span className="text-xs text-indigo-600">{dinnerTableIds.size}/{totalTables} tavoli</span>
+              <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold text-indigo-700">{dinnerOccupancy}%</span>
-              <span className="text-sm text-indigo-600 mb-1">occupazione</span>
+            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
+              <span className="text-2xl sm:text-3xl font-bold text-indigo-700 leading-none">{dinnerOccupancy}%</span>
+              <span className="text-xs sm:text-sm text-indigo-600 mb-0.5 sm:mb-1">occupazione</span>
             </div>
             <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
               <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
             </div>
-            <p className="text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+            <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
         </div>
 

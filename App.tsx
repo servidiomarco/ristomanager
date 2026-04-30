@@ -927,7 +927,7 @@ const App: React.FC = () => {
 
         {/* Bottom Navigation - Visible only on mobile */}
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 lg:hidden z-30">
-          <div className="flex items-center py-2 overflow-x-auto scrollbar-hide px-1">
+          <div className="flex items-center py-2 overflow-x-auto scrollbar-hide px-2 gap-1">
             {canAccessView(ViewState.DASHBOARD) && (
               <BottomNavItem
                 icon={<LayoutDashboard size={24} />}

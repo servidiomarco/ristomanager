@@ -740,122 +740,118 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
 
             <div className="flex bg-slate-100 p-1 rounded-xl">
-                <button 
-                   onClick={() => setViewMode('LIST')} 
+                <button
+                   onClick={() => setViewMode('LIST')}
                    className={`p-2 rounded-lg transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
                    title="Vista Elenco"
                 >
                     <List className="h-5 w-5" />
                 </button>
-                <button 
-                   onClick={() => setViewMode('MAP')} 
+                <button
+                   onClick={() => setViewMode('MAP')}
                    className={`p-2 rounded-lg transition-all ${viewMode === 'MAP' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
                    title="Vista Mappa Sala"
                 >
                     <MapIcon className="h-5 w-5" />
                 </button>
             </div>
+        </div>
+      </div>
+
+      {/* Search & Filters Bar */}
+      <div className="flex flex-wrap items-stretch gap-3 bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200">
+            <div className="relative flex-1 min-w-[200px] h-11">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
+                <input
+                    type="text"
+                    placeholder="Cerca prenotazione..."
+                    className="w-full h-full pl-10 pr-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
+
+            <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 h-11">
+                <Clock className="h-5 w-5 text-indigo-600" />
+                <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
+                    {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 px-1 h-11">
+                {!isToday && (
+                    <button
+                        onClick={goToToday}
+                        className="px-3 h-9 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                    >
+                        Oggi
+                    </button>
+                )}
+
+                <button
+                    onClick={goToPreviousDay}
+                    className="h-9 w-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
+                    aria-label="Giorno precedente"
+                >
+                    <ChevronLeft className="h-5 w-5 text-slate-600" />
+                </button>
+
+                <div className="relative h-9 flex items-center">
+                    <div className="flex items-center gap-2 px-3 sm:px-4 h-9 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
+                        <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                        <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
+                            {formatSelectedDate(selectedDateObj)}
+                        </span>
+                    </div>
+                    <input
+                        ref={dateInputRef}
+                        type="date"
+                        value={selectedDateStr}
+                        onChange={handleDateInputChange}
+                        onClick={(e) => {
+                            const input = e.currentTarget;
+                            try {
+                                if (typeof input.showPicker === 'function') input.showPicker();
+                            } catch {
+                                // ignore — fall back to native focus
+                            }
+                        }}
+                        aria-label="Seleziona data"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                </div>
+
+                <button
+                    onClick={goToNextDay}
+                    className="h-9 w-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
+                    aria-label="Giorno successivo"
+                >
+                    <ChevronRight className="h-5 w-5 text-slate-600" />
+                </button>
+            </div>
 
             {/* Main Shift Toggle */}
-            <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
+            <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
                 {viewMode === 'MAP' && (
                     <button
                         onClick={() => setSelectedShift('ALL')}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         Tutte
                     </button>
                 )}
                 <button
                     onClick={() => setSelectedShift(Shift.LUNCH)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     <Sun className="h-4 w-4" /> Pranzo
                 </button>
                 <button
                     onClick={() => setSelectedShift(Shift.DINNER)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     <Moon className="h-4 w-4" /> Cena
                 </button>
-            </div>
-        </div>
-      </div>
-
-      {/* Search & Filters Bar */}
-      <div className="flex flex-wrap items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-            <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
-                <input 
-                    type="text" 
-                    placeholder="Cerca prenotazione..." 
-                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-            </div>
-            <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
-
-            {/* Clock + Date Navigation */}
-            <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5">
-                    <Clock className="h-5 w-5 text-indigo-600" />
-                    <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
-                        {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                </div>
-
-                <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
-                    {!isToday && (
-                        <button
-                            onClick={goToToday}
-                            className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                        >
-                            Oggi
-                        </button>
-                    )}
-
-                    <button
-                        onClick={goToPreviousDay}
-                        className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-                        aria-label="Giorno precedente"
-                    >
-                        <ChevronLeft className="h-5 w-5 text-slate-600" />
-                    </button>
-
-                    <div className="relative">
-                        <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                            <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-                            <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
-                                {formatSelectedDate(selectedDateObj)}
-                            </span>
-                        </div>
-                        <input
-                            ref={dateInputRef}
-                            type="date"
-                            value={selectedDateStr}
-                            onChange={handleDateInputChange}
-                            onClick={(e) => {
-                                const input = e.currentTarget;
-                                try {
-                                    if (typeof input.showPicker === 'function') input.showPicker();
-                                } catch {
-                                    // ignore — fall back to native focus
-                                }
-                            }}
-                            aria-label="Seleziona data"
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        />
-                    </div>
-
-                    <button
-                        onClick={goToNextDay}
-                        className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-                        aria-label="Giorno successivo"
-                    >
-                        <ChevronRight className="h-5 w-5 text-slate-600" />
-                    </button>
-                </div>
             </div>
       </div>
 
@@ -885,10 +881,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
                     const borderColor = arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
 
+                    const tableBadgeColor = arrivalStatus === ArrivalStatus.ARRIVED
+                        ? 'bg-orange-50 border-orange-300 text-orange-700'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-700';
+                    const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
+
                     return (
-                        <div key={res.id} className={`bg-white p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row lg:items-center justify-between gap-4`}>
-                            <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
+                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
                                     <h3 className="font-bold text-lg text-slate-800">{res.customer_name}</h3>
                                     {/* Payment status - only show if paid */}
                                     {res.payment_status !== PaymentStatus.PENDING && (
@@ -897,7 +898,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-slate-500">
                                     {/* Time with lateness indicator */}
                                     {(() => {
                                         const minutesLate = getMinutesLate(res.reservation_time);
@@ -918,23 +919,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div className="flex items-center gap-1">
                                         <Users className="h-4 w-4" /> {res.guests} Ospiti
                                     </div>
-                                    {/* Table & Room - Better highlighted */}
-                                    {isLoadingMerges && res.table_id ? (
-                                        <div className="flex items-center gap-2 bg-slate-100 text-slate-400 px-3 py-1 rounded-lg animate-pulse">
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                            <span className="text-xs">Caricamento tavolo…</span>
-                                        </div>
-                                    ) : table ? (
-                                        <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-semibold">
-                                            <span className="text-indigo-900 font-bold">T. {table.name}</span>
-                                            <span className="text-indigo-500">•</span>
-                                            <span>{rooms.find(r => r.id === table.room_id)?.name}</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center gap-1 text-rose-500 font-medium bg-rose-50 px-3 py-1 rounded-lg">
-                                            <AlertCircle className="h-3 w-3" /> Nessun Tavolo
-                                        </div>
-                                    )}
                                 </div>
                                 {menu && (
                                     <div className="mt-2 text-sm bg-slate-50 inline-block px-3 py-1 rounded border border-slate-200 text-slate-700">
@@ -942,47 +926,58 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 )}
                                 {res.notes && <p className="text-xs text-slate-400 mt-2 italic">{res.notes}</p>}
-                            </div>
-
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
-                                {/* Totale Stimato - Hidden for now */}
-                                {/* <div className="text-right mr-4">
-                                    <p className="text-xs text-slate-400">Totale Stimato</p>
-                                    <p className="text-xl font-bold text-slate-800">
-                                        €{menu ? (menu.price_per_person * res.guests).toFixed(2) : '0.00'}
-                                    </p>
-                                </div> */}
 
                                 {/* Actions - Only shown in edit mode */}
                                 {canEdit && (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => handleToggleArrivalStatus(res)}
-                                        className={`p-2 rounded-lg transition-colors ${
-                                            arrivalStatus === ArrivalStatus.ARRIVED
-                                                ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
-                                                : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                                        }`}
-                                        title={arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                    >
-                                        <UserCheck className="h-5 w-5" />
-                                    </button>
+                                    <div className="flex items-center gap-2 mt-3">
+                                        <button
+                                            onClick={() => handleToggleArrivalStatus(res)}
+                                            className={`p-2 rounded-lg transition-colors ${
+                                                arrivalStatus === ArrivalStatus.ARRIVED
+                                                    ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                            }`}
+                                            title={arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                        >
+                                            <UserCheck className="h-5 w-5" />
+                                        </button>
 
-                                    <button
-                                        onClick={() => handleEditClick(res)}
-                                        className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                                        title="Modifica"
-                                    >
-                                        <Edit2 className="h-5 w-5" />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteClick(res.id, res.customer_name)}
-                                        className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
-                                        title="Elimina"
-                                    >
-                                        <Trash2 className="h-5 w-5" />
-                                    </button>
-                                </div>
+                                        <button
+                                            onClick={() => handleEditClick(res)}
+                                            className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                            title="Modifica"
+                                        >
+                                            <Edit2 className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteClick(res.id, res.customer_name)}
+                                            className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
+                                            title="Elimina"
+                                        >
+                                            <Trash2 className="h-5 w-5" />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Right: big table+room badge, color matches arrival status */}
+                            <div className="flex-shrink-0">
+                                {isLoadingMerges && res.table_id ? (
+                                    <div className="flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 border-slate-200 bg-slate-50">
+                                        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                                    </div>
+                                ) : table ? (
+                                    <div className={`flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 ${tableBadgeColor}`}>
+                                        <span className="text-2xl sm:text-3xl font-bold leading-none">T. {table.name}</span>
+                                        {tableRoomName && (
+                                            <span className="text-xs sm:text-sm font-medium mt-1.5 truncate max-w-full">{tableRoomName}</span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600">
+                                        <AlertCircle className="h-6 w-6" />
+                                        <span className="text-[10px] font-semibold mt-1 text-center leading-tight">Nessun Tavolo</span>
+                                    </div>
                                 )}
                             </div>
                         </div>
