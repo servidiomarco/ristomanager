@@ -83,6 +83,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // Tick the header clock once per minute (start of each minute)
+  useEffect(() => {
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    let interval: ReturnType<typeof setInterval>;
+    const timeout = setTimeout(() => {
+      setCurrentTime(new Date());
+      interval = setInterval(() => setCurrentTime(new Date()), 60_000);
+    }, msUntilNextMinute);
+    return () => {
+      clearTimeout(timeout);
+      if (interval) clearInterval(interval);
+    };
+  }, []);
 
   // Get selected date string for filtering (defined early for use in shopping/todo functions)
   // Use local date components to avoid UTC timezone shift
@@ -597,6 +614,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     setSelectedDate(new Date());
   };
 
+  const openDatePicker = () => {
+    const input = dateInputRef.current;
+    if (!input) return;
+    if (typeof input.showPicker === 'function') {
+      input.showPicker();
+    } else {
+      input.click();
+    }
+  };
+
+  const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (!value) return;
+    const [y, m, d] = value.split('-').map(Number);
+    if (y && m && d) setSelectedDate(new Date(y, m - 1, d));
+  };
+
   // Filter reservations for selected date
   const selectedDayReservations = useMemo(() => {
     return Array.isArray(reservations)
@@ -752,37 +786,61 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <p className="text-slate-500 text-base lg:text-lg">Benvenuto su RistoCRM, {user?.full_name}</p>
         </div>
 
-        {/* Date Navigation */}
-        <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 p-1">
-          <button
-            onClick={goToPreviousDay}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <ChevronLeft className="h-5 w-5 text-slate-600" />
-          </button>
-
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <Calendar className="h-4 w-4 text-indigo-600" />
-            <span className="font-medium text-slate-700 capitalize min-w-[200px] text-center">
-              {formatDate(selectedDate)}
+        {/* Clock + Date Navigation */}
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5">
+            <Clock className="h-5 w-5 text-indigo-600" />
+            <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
+              {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
 
-          <button
-            onClick={goToNextDay}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <ChevronRight className="h-5 w-5 text-slate-600" />
-          </button>
-
-          {!isToday && (
+          <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
             <button
-              onClick={goToToday}
-              className="px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              onClick={goToPreviousDay}
+              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="Giorno precedente"
             >
-              Oggi
+              <ChevronLeft className="h-5 w-5 text-slate-600" />
             </button>
-          )}
+
+            <div className="relative">
+              <div
+                onClick={openDatePicker}
+                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Calendar className="h-5 w-5 text-indigo-600" />
+                <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
+                  {formatDate(selectedDate)}
+                </span>
+              </div>
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={selectedDateStr}
+                onChange={handleDateInputChange}
+                aria-label="Seleziona data"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+
+            <button
+              onClick={goToNextDay}
+              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="Giorno successivo"
+            >
+              <ChevronRight className="h-5 w-5 text-slate-600" />
+            </button>
+
+            {!isToday && (
+              <button
+                onClick={goToToday}
+                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                Oggi
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
