@@ -693,6 +693,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const renderMapTable = (table: Table) => {
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
+      const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
 
       // Responsive table sizes - smaller on mobile and tablets
       const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
@@ -712,9 +713,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         <div
             key={table.id}
             className={`absolute flex flex-col items-center justify-center border-2 shadow-sm transition-all select-none
-                ${isOccupied 
-                    ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 z-10 ring-2 ring-red-200' 
-                    : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
+                ${isArrived
+                    ? 'bg-orange-100 border-orange-500 text-orange-900 shadow-orange-200 z-10 ring-2 ring-orange-200'
+                    : isOccupied
+                        ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 z-10 ring-2 ring-red-200'
+                        : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
                 }
             `}
             style={{ 
@@ -736,7 +739,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </span>
             )}
             {isOccupied && (
-                <div className="absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white">
+                <div className={`absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white ${isArrived ? 'bg-orange-600' : 'bg-red-600'}`}>
                     {toTitleCase(reservation.customer_name)}
                 </div>
             )}
@@ -1140,6 +1143,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                    </div>
                                    <div className="flex items-center gap-2 text-slate-600">
                                        <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
+                                   </div>
+                                   <div className="flex items-center gap-2 text-slate-600">
+                                       <div className="w-3 h-3 bg-orange-100 border border-orange-500 rounded-sm"></div> Arrivato
                                    </div>
                                    <div className="border-t border-slate-200 mt-1 pt-2">
                                        <div className="font-semibold text-slate-700">Occupazione:</div>
