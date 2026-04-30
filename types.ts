@@ -69,6 +69,14 @@ export enum Shift {
   DINNER = 'DINNER'
 }
 
+export interface TableMerge {
+  id: number;
+  date: string; // YYYY-MM-DD
+  shift: Shift;
+  primary_id: number;
+  merged_ids: number[];
+}
+
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa - green border
   ARRIVED = 'ARRIVED'       // Arrivato - orange border

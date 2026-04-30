@@ -1,9 +1,24 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar } from 'lucide-react';
+import { getTableMerges } from '../services/apiService';
+import { applyMerges } from '../utils/tableMerge';
+import { socketClient } from '../services/socketClient';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
+
+const formatLocalDate = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const detectShiftFromNow = (): Shift => {
+  const hour = new Date().getHours();
+  return hour >= 11 && hour < 17 ? Shift.LUNCH : Shift.DINNER;
+};
 
 interface FloorPlanProps {
   rooms: Room[];
@@ -12,8 +27,8 @@ interface FloorPlanProps {
   onUpdateTable: (updatedTable: Table) => void;
   onDeleteTable: (tableId: number) => void;
   onAddTable: (table: Omit<Table, 'id'>) => void;
-  onMergeTables: (tableIds: number[]) => void;
-  onSplitTable: (tableId: number) => void;
+  onMergeTables: (tableIds: number[], date: string, shift: Shift) => void;
+  onSplitTable: (tableId: number, date: string, shift: Shift) => void;
   onAddRoom: (roomName: string) => void;
   onDeleteRoom: (room_id: number) => void;
   canEdit?: boolean;
@@ -41,6 +56,64 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedTables, setSelectedTables] = useState<number[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+  // Per-shift merge context
+  const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDate(new Date()));
+  const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
+  const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+
+  // Fetch merges whenever date/shift changes
+  useEffect(() => {
+    let cancelled = false;
+    getTableMerges(selectedDate, selectedShift)
+      .then(merges => {
+        if (!cancelled) setTableMerges(merges);
+      })
+      .catch(err => {
+        console.error('Error fetching table merges:', err);
+        if (!cancelled) setTableMerges([]);
+      });
+    return () => { cancelled = true; };
+  }, [selectedDate, selectedShift]);
+
+  // Listen for merge socket events filtered by current date+shift
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+
+    const matches = (m: TableMerge) => m.date === selectedDate && m.shift === selectedShift;
+
+    const handleCreated = (m: TableMerge) => {
+      if (!matches(m)) return;
+      setTableMerges(prev => {
+        const existing = prev.findIndex(p => p.primary_id === m.primary_id);
+        if (existing >= 0) {
+          const next = [...prev];
+          next[existing] = m;
+          return next;
+        }
+        return [...prev, m];
+      });
+    };
+
+    const handleDeleted = (m: TableMerge) => {
+      if (!matches(m)) return;
+      setTableMerges(prev => prev.filter(p => p.primary_id !== m.primary_id));
+    };
+
+    socket.on('tableMerge:created', handleCreated);
+    socket.on('tableMerge:deleted', handleDeleted);
+    return () => {
+      socket.off('tableMerge:created', handleCreated);
+      socket.off('tableMerge:deleted', handleDeleted);
+    };
+  }, [selectedDate, selectedShift]);
+
+  // Compose display tables: raw tables + per-shift merges
+  const displayTables = useMemo(
+    () => applyMerges(tables, tableMerges),
+    [tables, tableMerges]
+  );
 
   // Use refs for drag state to avoid re-renders during drag
   const dragStateRef = useRef<{
@@ -76,66 +149,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // Debug: Log all tables
-  useEffect(() => {
-    const roomTables = tables.filter(t => t.room_id === activeRoomId);
-    const tableIds = roomTables.map(t => t.id);
-    const uniqueIds = new Set(tableIds);
-
-    if (tableIds.length !== uniqueIds.size) {
-      console.error('DUPLICATE TABLE IDs DETECTED IN STATE!');
-      console.error('All table IDs:', tableIds);
-      console.error('Duplicate tables:', roomTables.filter((t, i, arr) =>
-        arr.findIndex(t2 => t2.id === t.id) !== i
-      ));
-    }
-
-    roomTables.forEach(t => {
-      if (t.merged_with && t.merged_with.length > 0) {
-        console.log(`Table ${t.name} (ID: ${t.id}) has merged_with:`, t.merged_with);
-      }
-    });
-  }, [tables, activeRoomId]);
-
-  // Filter tables for the current room and hide merged tables
-  console.log('🔍 STARTING FILTER - activeRoomId:', activeRoomId, 'Total tables:', tables.length);
-
-  const currentTables = tables
+  // Filter tables for the current room and hide secondaries of any active merge
+  const currentTables = displayTables
     .filter(t => t.room_id === activeRoomId)
-    // Deduplicate first - keep only the first occurrence of each ID
     .filter((t, index, self) => self.findIndex(t2 => t2.id === t.id) === index)
-    .filter(t => {
-      // Hide tables that are merged into another table
-      // A table is hidden if its ID appears in another table's merged_with array
-      const isMergedIntoAnother = tables.some(other => {
-        if (other.merged_with && other.merged_with.length > 0) {
-          // Convert both to numbers for comparison (in case of type mismatch)
-          const mergedIds = other.merged_with.map(id => Number(id));
-          const tableId = Number(t.id);
-          const isIncluded = mergedIds.includes(tableId);
-
-          if (isIncluded) {
-            console.log(`Table ${t.name} (ID: ${tableId}) is merged into table ${other.name} (merged_with: [${mergedIds}]) - WILL BE HIDDEN`);
-          }
-
-          return isIncluded;
-        }
-        return false;
-      });
-
-      if (isMergedIntoAnother) {
-        console.log(`❌ HIDING Table ${t.name} (ID: ${t.id}) because it's merged into another table`);
-      } else if (t.merged_with && t.merged_with.length > 0) {
-        console.log(`✅ SHOWING Table ${t.name} (ID: ${t.id}) - this is the PRIMARY merged table with merged_with: [${t.merged_with}]`);
-      }
-
-      return !isMergedIntoAnother;
-    });
-
-  // Debug: Log final filtered tables
-  useEffect(() => {
-    console.log('📋 FINAL currentTables after filtering:', currentTables.map(t => `${t.name} (ID: ${t.id})`));
-  }, [currentTables, activeRoomId]);
+    .filter(t => !displayTables.some(other =>
+      other.merged_with && other.merged_with.map(id => Number(id)).includes(Number(t.id))
+    ));
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -582,7 +602,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     );
   };
 
-  const singleSelectedTable = selectedTables.length === 1 ? tables.find(t => t.id === selectedTables[0]) : null;
+  const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
 
   return (
     <div
@@ -592,6 +612,40 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      {/* Date + Shift Picker (controls per-shift merge scope) */}
+      <div className="bg-white px-3 sm:px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center gap-3 z-20">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-indigo-500" />
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="px-2 py-1.5 text-sm rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          />
+        </div>
+        <div className="inline-flex bg-slate-100 rounded-lg p-1">
+          <button
+            onClick={() => setSelectedShift(Shift.LUNCH)}
+            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+              selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Sun size={14} /> Pranzo
+          </button>
+          <button
+            onClick={() => setSelectedShift(Shift.DINNER)}
+            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+              selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Moon size={14} /> Cena
+          </button>
+        </div>
+        <span className="text-xs text-slate-400 hidden sm:inline">
+          Le unioni tavoli sono valide solo per questa data e turno.
+        </span>
+      </div>
+
       {/* Toolbar */}
       <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
@@ -758,9 +812,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             )}
 
             {selectedTables.length > 1 && !selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
-                <button 
+                <button
                     onClick={() => {
-                        onMergeTables(selectedTables);
+                        onMergeTables(selectedTables, selectedDate, selectedShift);
                         setSelectedTables([]);
                     }}
                     className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 font-medium text-sm"
@@ -768,11 +822,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <Combine size={16} /> Unisci
                 </button>
             )}
-            
+
             {selectedTables.length === 1 && singleSelectedTable?.merged_with && singleSelectedTable.merged_with.length > 0 && !singleSelectedTable?.is_locked && (
                 <button
                     onClick={() => {
-                        onSplitTable(selectedTables[0]);
+                        onSplitTable(selectedTables[0], selectedDate, selectedShift);
                         setSelectedTables([]);
                     }}
                     className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 font-medium text-sm"

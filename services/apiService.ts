@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, Shift } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -136,6 +136,42 @@ export const deleteTable = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/tables/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// PER-SHIFT TABLE MERGES
+// ============================================
+
+export const getTableMerges = async (date: string, shift: Shift): Promise<TableMerge[]> => {
+  const params = new URLSearchParams({ date, shift });
+  return apiRequest<TableMerge[]>(`${API_URL}/table-merges?${params.toString()}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createTableMerge = async (
+  date: string,
+  shift: Shift,
+  primary_id: number,
+  merged_ids: number[]
+): Promise<TableMerge> => {
+  return apiRequest<TableMerge>(`${API_URL}/table-merges`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, primary_id, merged_ids }),
+  });
+};
+
+export const deleteTableMerge = async (
+  date: string,
+  shift: Shift,
+  primary_id: number
+): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/table-merges`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, primary_id }),
   }, false);
 };
 

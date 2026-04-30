@@ -89,17 +89,25 @@ class AuthApiService {
 
   // Login
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const response = await fetch(`${API_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(credentials)
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(credentials)
+      });
+    } catch {
+      throw new Error('Impossibile contattare il server. Verifica la connessione.');
+    }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Login failed' }));
-      throw new Error(error.error || 'Login failed');
+      if (response.status === 400) throw new Error('Email e password sono obbligatori');
+      if (response.status === 401) throw new Error('Email o password non corretti');
+      if (response.status === 403) throw new Error('Account disattivato. Contatta un amministratore.');
+      if (response.status >= 500) throw new Error('Errore del server, riprova tra qualche istante');
+      throw new Error('Accesso non riuscito');
     }
 
     const data: AuthResponse = await response.json();

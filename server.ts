@@ -426,10 +426,136 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
 });
 
 
+// ============================================
+// PER-SHIFT TABLE MERGES
+// ============================================
+
+// GET /table-merges?date=YYYY-MM-DD&shift=LUNCH|DINNER
+app.get('/table-merges', authenticate, async (req, res) => {
+    try {
+        const { date, shift } = req.query;
+        if (!date || !shift) {
+            return res.status(400).json({ error: 'date and shift query params are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const result = await pool.query(
+            'SELECT id, date, shift, primary_id, merged_ids FROM table_merges WHERE date = $1 AND shift = $2',
+            [date, shift]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching table merges:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /table-merges  body: { date, shift, primary_id, merged_ids }
+// Idempotent — replaces an existing merge for the same (date, shift, primary_id).
+app.post('/table-merges', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, primary_id, merged_ids } = req.body;
+        if (!date || !shift || primary_id == null || !Array.isArray(merged_ids) || merged_ids.length === 0) {
+            return res.status(400).json({ error: 'date, shift, primary_id and non-empty merged_ids are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const result = await pool.query(
+            `INSERT INTO table_merges (date, shift, primary_id, merged_ids)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (date, shift, primary_id)
+             DO UPDATE SET merged_ids = EXCLUDED.merged_ids
+             RETURNING id, date, shift, primary_id, merged_ids`,
+            [date, shift, primary_id, merged_ids]
+        );
+        const merge = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.TABLE,
+                primary_id,
+                `Merge ${date} ${shift}`,
+                { date, shift, merged_ids }
+            );
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastTableMergeCreated(merge, socketId);
+
+        res.status(201).json(merge);
+    } catch (err) {
+        console.error('Error creating table merge:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// DELETE /table-merges  body: { date, shift, primary_id }
+app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, primary_id } = req.body;
+        if (!date || !shift || primary_id == null) {
+            return res.status(400).json({ error: 'date, shift and primary_id are required' });
+        }
+        const result = await pool.query(
+            `DELETE FROM table_merges
+             WHERE date = $1 AND shift = $2 AND primary_id = $3
+             RETURNING id, date, shift, primary_id, merged_ids`,
+            [date, shift, primary_id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Merge not found' });
+        }
+        const deleted = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.TABLE,
+                primary_id,
+                `Unmerge ${date} ${shift}`,
+                { date, shift }
+            );
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastTableMergeDeleted(deleted, socketId);
+
+        res.json(deleted);
+    } catch (err) {
+        console.error('Error deleting table merge:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
 // Rooms - require authentication
 app.get('/rooms', authenticate, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM rooms ORDER BY name');
+        // Custom display order: Veranda, Macine, Fiume, Fuori, Tettoia, Pergolato.
+        // Names not in the list fall to the end, alphabetically.
+        const result = await pool.query(`
+            SELECT * FROM rooms
+            ORDER BY
+                CASE LOWER(TRIM(name))
+                    WHEN 'veranda'   THEN 1
+                    WHEN 'macine'    THEN 2
+                    WHEN 'fiume'     THEN 3
+                    WHEN 'fuori'     THEN 4
+                    WHEN 'tettoia'   THEN 5
+                    WHEN 'pergolato' THEN 6
+                    ELSE 99
+                END,
+                name
+        `);
         res.json(result.rows);
     } catch (err) {
         console.error(err);

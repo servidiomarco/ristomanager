@@ -14,6 +14,7 @@ import { useSocket } from './hooks/useSocket';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { useAuth } from './contexts/AuthContext';
+import { sortRooms } from './utils/roomOrder';
 
 import {
   getReservations,
@@ -35,6 +36,8 @@ import {
   createBanquetMenu,
   updateBanquetMenu,
   deleteBanquetMenu,
+  createTableMerge,
+  deleteTableMerge,
 } from './services/apiService';
 
 const App: React.FC = () => {
@@ -120,7 +123,7 @@ const App: React.FC = () => {
         }
       });
 
-      setRooms(roomsData);
+      setRooms(sortRooms(roomsData));
       setTables(uniqueTables);
       setDishes(dishesData);
       setBanquetMenus(banquetMenusData);
@@ -207,7 +210,7 @@ const App: React.FC = () => {
         if (prev.some(r => r.id === room.id)) {
           return prev;
         }
-        return [...prev, room];
+        return sortRooms([...prev, room]);
       });
     });
 
@@ -353,105 +356,38 @@ const App: React.FC = () => {
     }
   };
 
-  const handleMergeTables = async (tableIds: number[]) => {
+  // Merge tables for a specific (date, shift). Persists to table_merges only —
+  // raw tables are not modified, so the merge is scoped to that one service.
+  const handleMergeTables = async (tableIds: number[], date: string, shift: Shift) => {
     if (tableIds.length < 2) {
       addToast('Seleziona almeno 2 tavoli da unire', 'error');
       return;
     }
 
     try {
-      console.log('handleMergeTables called with tableIds:', tableIds);
-
-      // Get tables in the same order as tableIds
-      const selectedTables = tableIds.map(id => tables.find(t => t.id === id)).filter(Boolean) as Table[];
-
-      console.log('Merging tables:', selectedTables.map(t => `${t.name} (ID: ${t.id})`));
-
-      // Use the first table ID as the primary table
-      const primaryTableId = tableIds[0];
-      const primaryTable = selectedTables[0];
-      const otherTableIds = tableIds.slice(1);
-
-      // Calculate total seats
-      const totalSeats = selectedTables.reduce((sum, t) => sum + t.seats, 0);
-
-      // Create combined name - use the order from selectedTables
-      const combinedName = selectedTables.map(t => t.name).join('+');
-
-      console.log('Primary table:', primaryTable.name, 'ID:', primaryTable.id);
-      console.log('Other table IDs to merge:', otherTableIds);
-
-      // Update the primary table with merged data
-      const updatedPrimaryTable = {
-        ...primaryTable,
-        name: combinedName,
-        seats: totalSeats,
-        merged_with: otherTableIds
-      };
-
-      console.log('Updated primary table:', updatedPrimaryTable);
-
-      // Optimistic update - with deduplication
-      setTables(prev => {
-        // Remove duplicates
-        const uniqueTables = prev.filter((t, index, self) =>
-          self.findIndex(t2 => t2.id === t.id) === index
-        );
-        return uniqueTables.map(t => t.id === primaryTable.id ? updatedPrimaryTable : t);
-      });
-
-      // Sync with backend
-      const result = await updateTable(primaryTable.id, updatedPrimaryTable);
-      console.log('Backend response:', result);
-
-      // Update with backend response to ensure we have the exact data
-      setTables(prev => {
-        // Remove duplicates
-        const uniqueTables = prev.filter((t, index, self) =>
-          self.findIndex(t2 => t2.id === t.id) === index
-        );
-        return uniqueTables.map(t => t.id === result.id ? result : t);
-      });
-
-      addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
-    } catch (error) {
-      console.error('Error merging tables:', error);
-      addToast('Errore durante l\'unione dei tavoli', 'error');
-    }
-  };
-
-  const handleSplitTable = async (tableId: number) => {
-    try {
-      const table = tables.find(t => t.id === tableId);
-      if (!table || !table.merged_with || table.merged_with.length === 0) {
-        addToast('Questo tavolo non è unito', 'error');
+      const selectedTables = tableIds
+        .map(id => tables.find(t => t.id === id))
+        .filter((t): t is Table => !!t);
+      if (selectedTables.length !== tableIds.length) {
+        addToast('Tavolo non trovato', 'error');
         return;
       }
 
-      // Get all the original tables that were merged
-      const allMergedIds = [table.id, ...table.merged_with];
-      const allMergedTables = tables.filter(t => allMergedIds.includes(t.id));
+      const [primary, ...others] = selectedTables;
+      await createTableMerge(date, shift, primary.id, others.map(t => t.id));
 
-      // Calculate seats per table (divide equally)
-      const seatsPerTable = Math.floor(table.seats / allMergedIds.length);
+      const combinedName = selectedTables.map(t => t.name).join('+');
+      const totalSeats = selectedTables.reduce((sum, t) => sum + t.seats, 0);
+      addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
+    } catch (error) {
+      console.error('Error merging tables:', error);
+      addToast("Errore durante l'unione dei tavoli", 'error');
+    }
+  };
 
-      // Split the name back (e.g., "T1+T2+T3" -> ["T1", "T2", "T3"])
-      const originalNames = table.name.split('+');
-
-      // Update the primary table to remove merge
-      const updatedPrimaryTable = {
-        ...table,
-        name: originalNames[0] || table.name.split('+')[0],
-        seats: seatsPerTable,
-        merged_with: []
-      };
-
-      // Optimistic update
-      setTables(prev => prev.map(t => t.id === table.id ? updatedPrimaryTable : t));
-
-      // Sync with backend
-      await updateTable(table.id, updatedPrimaryTable);
-
+  const handleSplitTable = async (primaryId: number, date: string, shift: Shift) => {
+    try {
+      await deleteTableMerge(date, shift, primaryId);
       addToast('Tavoli divisi con successo', 'success');
     } catch (error) {
       console.error('Error splitting table:', error);

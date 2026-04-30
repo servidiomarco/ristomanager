@@ -21,6 +21,21 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? {
         rejectUnauthorized: false,
     } : false,
+    // Cap concurrent DB connections (Railway hobby plans cap around 20-100).
+    max: 10,
+    // Close idle clients after 30s so we evict before the Railway TCP proxy does.
+    // Without this, the pool serves a half-closed socket and the next query
+    // throws "Connection terminated unexpectedly", surfacing as random 500s.
+    idleTimeoutMillis: 30_000,
+    // Cap how long we wait for a fresh connection before failing the request.
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+});
+
+// Without this handler, an error event from an idle client crashes the worker
+// (Node treats unhandled "error" events on EventEmitters as uncaught).
+pool.on('error', (err) => {
+    console.error('Postgres pool idle client error:', err);
 });
 
 // Retry logic for schema creation
@@ -74,6 +89,45 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Add min_seats and max_seats columns if they don't exist (migration)
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS min_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS max_seats INTEGER;`);
+
+        // Per-shift table merges. Replaces the global tables.merged_with column,
+        // which was a single state shared across all shifts and dates.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS table_merges (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                shift VARCHAR(10) NOT NULL CHECK (shift IN ('LUNCH', 'DINNER')),
+                primary_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                merged_ids INTEGER[] NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, shift, primary_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_merges_date_shift ON table_merges(date, shift);`);
+
+        // One-time migration: copy any pre-existing global merges into today's
+        // LUNCH and DINNER so the user's current setup remains visible after
+        // deploy. Runs only when table_merges is empty (first time).
+        const mergeCount = await client.query('SELECT COUNT(*)::int AS c FROM table_merges');
+        if (mergeCount.rows[0].c === 0) {
+            await client.query(`
+                INSERT INTO table_merges (date, shift, primary_id, merged_ids)
+                SELECT CURRENT_DATE, 'LUNCH', id, merged_with
+                FROM tables
+                WHERE merged_with IS NOT NULL AND array_length(merged_with, 1) > 0
+                ON CONFLICT DO NOTHING;
+            `);
+            await client.query(`
+                INSERT INTO table_merges (date, shift, primary_id, merged_ids)
+                SELECT CURRENT_DATE, 'DINNER', id, merged_with
+                FROM tables
+                WHERE merged_with IS NOT NULL AND array_length(merged_with, 1) > 0
+                ON CONFLICT DO NOTHING;
+            `);
+            // Clear the legacy global state — it would otherwise still surface
+            // through any code path that hasn't been updated.
+            await client.query(`UPDATE tables SET merged_with = NULL WHERE merged_with IS NOT NULL;`);
+        }
         
         await client.query(`
             CREATE TABLE IF NOT EXISTS dishes (

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, COMMON_ALLERGENS } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic } from 'lucide-react';
-import { sendWhatsAppConfirmation } from '../services/apiService';
+import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
+import { applyMerges } from '../utils/tableMerge';
+import { socketClient } from '../services/socketClient';
 
 // Helper to format datetime without timezone conversion
 const formatDateTime = (isoString: string): string => {
@@ -43,8 +45,8 @@ interface ReservationListProps {
   onUpdateReservation: (r: Reservation) => void;
   onAddReservation: (r: Omit<Reservation, 'id'>) => void;
   onDeleteReservation: (id: number) => void;
-  onMergeTables: (tableIds: number[]) => Promise<void>;
-  onSplitTable: (tableId: number) => Promise<void>;
+  onMergeTables: (tableIds: number[], date: string, shift: Shift) => Promise<void>;
+  onSplitTable: (tableId: number, date: string, shift: Shift) => Promise<void>;
   onUpdateTable: (table: Table) => Promise<void>;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   canEdit?: boolean;
@@ -127,6 +129,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       reminder_sent: false,
       arrival_status: ArrivalStatus.WAITING
   });
+
+  // Per-shift table merges. Use the form's date+shift while the modal is open;
+  // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
+  const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+
+  const focalDate = isFormOpen && formData.reservation_time
+    ? formData.reservation_time.split('T')[0]
+    : selectedDate.split('T')[0];
+  const focalShift: Shift = isFormOpen && formData.shift
+    ? formData.shift
+    : (selectedShift !== 'ALL' ? selectedShift : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER));
+
+  useEffect(() => {
+    let cancelled = false;
+    getTableMerges(focalDate, focalShift)
+      .then(merges => { if (!cancelled) setTableMerges(merges); })
+      .catch(err => {
+        console.error('Error fetching table merges:', err);
+        if (!cancelled) setTableMerges([]);
+      });
+    return () => { cancelled = true; };
+  }, [focalDate, focalShift]);
+
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const matches = (m: TableMerge) => m.date === focalDate && m.shift === focalShift;
+    const onCreated = (m: TableMerge) => {
+      if (!matches(m)) return;
+      setTableMerges(prev => {
+        const existing = prev.findIndex(p => p.primary_id === m.primary_id);
+        if (existing >= 0) {
+          const next = [...prev];
+          next[existing] = m;
+          return next;
+        }
+        return [...prev, m];
+      });
+    };
+    const onDeleted = (m: TableMerge) => {
+      if (!matches(m)) return;
+      setTableMerges(prev => prev.filter(p => p.primary_id !== m.primary_id));
+    };
+    socket.on('tableMerge:created', onCreated);
+    socket.on('tableMerge:deleted', onDeleted);
+    return () => {
+      socket.off('tableMerge:created', onCreated);
+      socket.off('tableMerge:deleted', onDeleted);
+    };
+  }, [focalDate, focalShift]);
+
+  const displayTables = useMemo(
+    () => applyMerges(tables, tableMerges),
+    [tables, tableMerges]
+  );
 
   // Filter Logic for Main List
   const filteredReservations = reservations.filter(r => {
@@ -415,21 +472,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       // Check if table is too small
       if (table.seats < guests) {
-          // Find suitable alternatives
-          const suitableTables = tables
+          // Find suitable alternatives (use displayTables for current shift context)
+          const suitableTables = displayTables
               .filter(t => t.seats >= guests)
               .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
               .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)
-              // Hide merged tables
-              .filter(t => {
-                  const isMergedIntoAnother = tables.some(other => {
-                      if (other.merged_with && other.merged_with.length > 0) {
-                          return other.merged_with.map(id => Number(id)).includes(Number(t.id));
-                      }
-                      return false;
-                  });
-                  return !isMergedIntoAnother;
-              })
+              .filter(t => !displayTables.some(other =>
+                  other.merged_with && other.merged_with.length > 0 &&
+                  other.merged_with.map(id => Number(id)).includes(Number(t.id))
+              ))
               .sort((a, b) => a.seats - b.seats);
 
           if (suitableTables.length > 0) {
@@ -491,20 +542,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleAutoAssign = () => {
       if (!formData.guests || !formData.reservation_time || !formData.shift) return;
 
-      const availableTables = tables
+      const availableTables = displayTables
         .filter(t => t.seats >= (formData.guests || 0))
         .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
         .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)
-        // Hide merged tables
-        .filter(t => {
-            const isMergedIntoAnother = tables.some(other => {
-                if (other.merged_with && other.merged_with.length > 0) {
-                    return other.merged_with.map(id => Number(id)).includes(Number(t.id));
-                }
-                return false;
-            });
-            return !isMergedIntoAnother;
-        })
+        .filter(t => !displayTables.some(other =>
+            other.merged_with && other.merged_with.length > 0 &&
+            other.merged_with.map(id => Number(id)).includes(Number(t.id))
+        ))
         .sort((a, b) => a.seats - b.seats);
 
       if (availableTables.length > 0) {
@@ -554,12 +599,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const displayedRooms = modalRoomFilter === 'ALL' ? rooms : rooms.filter(r => r.id === modalRoomFilter);
-  const selectedTableObj = tables.find(t => t.id === formData.table_id);
+  const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
 
   // Calculate Free Tables for the form header
   // Helper to check if a table is merged into another table (and thus should be hidden)
   const isTableMergedIntoAnother = (tableId: number) => {
-    return tables.some(other =>
+    return displayTables.some(other =>
       other.merged_with &&
       other.merged_with.length > 0 &&
       other.merged_with.map(id => Number(id)).includes(Number(tableId))
@@ -567,7 +612,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   // Get visible tables (not merged into another table)
-  const visibleTables = tables.filter(t =>
+  const visibleTables = displayTables.filter(t =>
     (modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter) &&
     !isTableMergedIntoAnother(t.id)
   );
@@ -769,7 +814,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
             ) : (
                 filteredReservations.map(res => {
-                    const table = tables.find(t => t.id === res.table_id);
+                    const table = displayTables.find(t => t.id === res.table_id);
                     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
                     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
                     const borderColor = arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
@@ -878,20 +923,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       {/* --- MAP VIEW --- */}
       {viewMode === 'MAP' && (() => {
-          const tablesInRoom = tables
+          const tablesInRoom = displayTables
               .filter(t => t.room_id === activeMapRoomId)
-              // Hide tables that are merged into another table
-              .filter(t => {
-                  const isMergedIntoAnother = tables.some(other => {
-                      if (other.merged_with && other.merged_with.length > 0) {
-                          const mergedIds = other.merged_with.map(id => Number(id));
-                          const tableId = Number(t.id);
-                          return mergedIds.includes(tableId);
-                      }
-                      return false;
-                  });
-                  return !isMergedIntoAnother;
-              });
+              .filter(t => !displayTables.some(other =>
+                  other.merged_with && other.merged_with.length > 0 &&
+                  other.merged_with.map(id => Number(id)).includes(Number(t.id))
+              ));
           const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
@@ -1370,9 +1407,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button
                                             type="button"
                                             onClick={async () => {
+                                                if (!formData.reservation_time || !formData.shift) {
+                                                    showToast('Imposta data e turno della prenotazione prima di unire i tavoli', 'error');
+                                                    return;
+                                                }
                                                 try {
                                                     const primaryTableId = selectedTablesForMerge[0];
-                                                    await onMergeTables(selectedTablesForMerge);
+                                                    const mergeDate = formData.reservation_time.split('T')[0];
+                                                    await onMergeTables(selectedTablesForMerge, mergeDate, formData.shift);
                                                     // Auto-select the merged table for the reservation
                                                     setFormData(prev => ({ ...prev, table_id: primaryTableId }));
                                                     showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
@@ -1392,8 +1434,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button
                                             type="button"
                                             onClick={async () => {
+                                                if (!formData.reservation_time || !formData.shift) {
+                                                    showToast('Imposta data e turno della prenotazione prima di dividere i tavoli', 'error');
+                                                    return;
+                                                }
                                                 try {
-                                                    await onSplitTable(selectedTableObj.id);
+                                                    const splitDate = formData.reservation_time.split('T')[0];
+                                                    await onSplitTable(selectedTableObj.id, splitDate, formData.shift);
                                                     showToast('Tavoli divisi con successo', 'success');
                                                     setFormData({...formData, table_id: undefined});
                                                 } catch (error) {
@@ -1437,20 +1484,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
                                         <h4 className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-2 sticky top-0 bg-slate-50 py-1 z-10">{room.name}</h4>
                                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
-                                                                                         {tables
+                                                                                         {displayTables
                                                 .filter(t => t.room_id === room.id)
-                                                // Hide tables that are merged into another table
-                                                .filter(t => {
-                                                    const isMergedIntoAnother = tables.some(other => {
-                                                        if (other.merged_with && other.merged_with.length > 0) {
-                                                            const mergedIds = other.merged_with.map(id => Number(id));
-                                                            const tableId = Number(t.id);
-                                                            return mergedIds.includes(tableId);
-                                                        }
-                                                        return false;
-                                                    });
-                                                    return !isMergedIntoAnother;
-                                                })
+                                                .filter(t => !displayTables.some(other =>
+                                                    other.merged_with && other.merged_with.length > 0 &&
+                                                    other.merged_with.map(id => Number(id)).includes(Number(t.id))
+                                                ))
                                                 .map(table => {
                                                 const occupiedReservation = getReservationForTableInForm(table.id);
                                                 const isOccupied = !!occupiedReservation;
