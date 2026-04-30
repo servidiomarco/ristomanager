@@ -1760,13 +1760,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         )}
 
                                                         <div className={`text-xs sm:text-sm font-bold truncate ${isSelectedForMerge ? 'text-purple-700' : isSelected ? 'text-indigo-700' : isOccupied ? 'text-red-900' : 'text-slate-700'}`}>
-                                                            {isOccupied && occupiedReservation ? toTitleCase(occupiedReservation.customer_name) : table.name}
+                                                            {table.name}
                                                         </div>
                                                         <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-red-800' : 'text-slate-500'}`}>
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
                                                             {table.seats}
                                                         </div>
+                                                        {isOccupied && occupiedReservation && (
+                                                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap shadow-md max-w-[140px] truncate border-2 border-white z-10">
+                                                                {toTitleCase(occupiedReservation.customer_name)}
+                                                            </div>
+                                                        )}
                                                         {isSelected && !isSelectedForMerge && (
                                                             <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm z-20">
                                                                 <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
