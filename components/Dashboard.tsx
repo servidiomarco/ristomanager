@@ -614,21 +614,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     setSelectedDate(new Date());
   };
 
-  const openDatePicker = () => {
-    const input = dateInputRef.current;
-    if (!input) return;
-    try {
-      if (typeof input.showPicker === 'function') {
-        input.showPicker();
-        return;
-      }
-    } catch {
-      // showPicker can throw if not invoked from a user gesture; fall through
-    }
-    input.focus();
-    input.click();
-  };
-
   const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     if (!value) return;
@@ -810,25 +795,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </button>
 
             <div className="relative">
-              <button
-                type="button"
-                onClick={openDatePicker}
-                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
-                aria-label="Seleziona data"
-              >
+              <div className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
                 <Calendar className="h-5 w-5 text-indigo-600" />
                 <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
                   {formatDate(selectedDate)}
                 </span>
-              </button>
+              </div>
               <input
                 ref={dateInputRef}
                 type="date"
                 value={selectedDateStr}
                 onChange={handleDateInputChange}
-                tabIndex={-1}
-                aria-hidden="true"
-                className="absolute left-0 bottom-0 w-px h-px opacity-0 pointer-events-none"
+                onClick={(e) => {
+                  // Desktop Chrome: clicking an opacity:0 date input doesn't
+                  // open the picker; force it via showPicker (mobile opens
+                  // natively on tap and treats this as a no-op or harmless).
+                  const input = e.currentTarget;
+                  try {
+                    if (typeof input.showPicker === 'function') input.showPicker();
+                  } catch {
+                    // ignore — fall back to native focus
+                  }
+                }}
+                aria-label="Seleziona data"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
             </div>
 
