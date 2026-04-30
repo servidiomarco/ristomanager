@@ -164,6 +164,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const scaleRef = useRef(1);
+
+  // Track canvas size so we can fit the room into the available space
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Filter tables for the current room and hide secondaries of any active merge
   const currentTables = displayTables
@@ -172,6 +187,42 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     .filter(t => !displayTables.some(other =>
       other.merged_with && other.merged_with.map(id => Number(id)).includes(Number(t.id))
     ));
+
+  // Compute the natural bounding box of the room from current tables, then
+  // a scale factor that shrinks the room to fit the available canvas size.
+  const roomExtent = useMemo(() => {
+    const PADDING = 40;
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const baseSize = isMobile ? 45 : 80;
+    const baseWidth = isMobile ? 60 : 100;
+    const seatMultiplier = isMobile ? 8 : 15;
+
+    if (currentTables.length === 0) return { width: 800, height: 600 };
+
+    let maxRight = 0;
+    let maxBottom = 0;
+    for (const t of currentTables) {
+      let w: number, h: number;
+      if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) {
+        w = baseSize; h = baseSize;
+      } else {
+        w = Math.max(baseWidth, t.seats * seatMultiplier);
+        h = baseSize;
+      }
+      maxRight = Math.max(maxRight, t.x + w);
+      maxBottom = Math.max(maxBottom, t.y + h);
+    }
+    return { width: maxRight + PADDING, height: maxBottom + PADDING };
+  }, [currentTables]);
+
+  const scale = useMemo(() => {
+    if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
+    const sx = canvasSize.width / roomExtent.width;
+    const sy = canvasSize.height / roomExtent.height;
+    return Math.min(sx, sy, 1);
+  }, [canvasSize, roomExtent]);
+
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -296,15 +347,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dragState = dragStateRef.current;
     if (!dragState.isDragging || !draggedElementRef.current) return;
 
-    // Calculate delta from start position
-    const deltaX = e.clientX - dragState.startX;
-    const deltaY = e.clientY - dragState.startY;
+    const s = scaleRef.current || 1;
+    const deltaX = (e.clientX - dragState.startX) / s;
+    const deltaY = (e.clientY - dragState.startY) / s;
 
-    // Apply CSS transform for smooth visual dragging (no React re-render)
+    // Apply CSS transform for smooth visual dragging (no React re-render).
+    // Translation is in unscaled coords; the scaled wrapper maps it to screen.
     draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
-    // Update current position in ref
     dragState.currentX = e.clientX;
     dragState.currentY = e.clientY;
   };
@@ -415,14 +466,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     if (!dragState.isDragging || !draggedElementRef.current) return;
 
     const touch = e.touches[0];
-    const deltaX = touch.clientX - dragState.startX;
-    const deltaY = touch.clientY - dragState.startY;
+    const s = scaleRef.current || 1;
+    const deltaX = (touch.clientX - dragState.startX) / s;
+    const deltaY = (touch.clientY - dragState.startY) / s;
 
-    // Apply CSS transform for smooth visual dragging
     draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
-    // Update current position in ref
     dragState.currentX = touch.clientX;
     dragState.currentY = touch.clientY;
   };
@@ -871,16 +921,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       </div>
 
       {/* Canvas */}
-      <div 
+      <div
         ref={canvasRef}
         className={`flex-1 bg-slate-100 rounded-xl border-2 border-dashed border-slate-300 relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
-        style={{ 
+        style={{
             backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
             backgroundSize: '20px 20px'
         }}
       >
-          {currentTables.map(renderTableShape)}
+          <div
+            className="absolute top-0 left-0"
+            style={{
+                width: `${roomExtent.width}px`,
+                height: `${roomExtent.height}px`,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left'
+            }}
+          >
+            {currentTables.map(renderTableShape)}
+          </div>
 
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-slate-100/70 backdrop-blur-[1px] flex items-center justify-center">
