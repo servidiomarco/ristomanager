@@ -729,7 +729,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           <p className="text-slate-500">Gestisci turni, tavoli e pagamenti.</p>
         </div>
         
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
             {canEdit && (
             <button
                 onClick={handleOpenNew}
@@ -771,14 +771,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 />
             </div>
 
-            <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 h-11">
-                <Clock className="h-5 w-5 text-indigo-600" />
-                <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
-                    {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-            </div>
-
-            <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 px-1 h-11">
+            <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 px-1 h-11 w-full sm:w-auto">
                 {!isToday && (
                     <button
                         onClick={goToToday}
@@ -830,28 +823,37 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
             </div>
 
-            {/* Main Shift Toggle */}
-            <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
-                {viewMode === 'MAP' && (
+            {/* Clock + Shift Toggle - share a row, justified on mobile */}
+            <div className="flex items-stretch justify-between sm:justify-start gap-3 w-full sm:w-auto">
+                <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 h-11">
+                    <Clock className="h-5 w-5 text-indigo-600" />
+                    <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
+                        {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                </div>
+
+                <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
+                    {viewMode === 'MAP' && (
+                        <button
+                            onClick={() => setSelectedShift('ALL')}
+                            className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            Tutte
+                        </button>
+                    )}
                     <button
-                        onClick={() => setSelectedShift('ALL')}
-                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        onClick={() => setSelectedShift(Shift.LUNCH)}
+                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                        Tutte
+                        <Sun className="h-4 w-4" /> Pranzo
                     </button>
-                )}
-                <button
-                    onClick={() => setSelectedShift(Shift.LUNCH)}
-                    className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Sun className="h-4 w-4" /> Pranzo
-                </button>
-                <button
-                    onClick={() => setSelectedShift(Shift.DINNER)}
-                    className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Moon className="h-4 w-4" /> Cena
-                </button>
+                    <button
+                        onClick={() => setSelectedShift(Shift.DINNER)}
+                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        <Moon className="h-4 w-4" /> Cena
+                    </button>
+                </div>
             </div>
       </div>
 
