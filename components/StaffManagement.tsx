@@ -3,7 +3,7 @@ import {
   StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType,
   Shift, TimeOffType
 } from '../types';
-import { staffApiService, CreateStaffInput, CreateShiftInput, CreateTimeOffInput } from '../services/staffApiService';
+import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
 import {
   Users, UserPlus, Edit2, Trash2, X, Plus, ChevronLeft, ChevronRight,
   Calendar, Clock, Sun, Moon, Coffee, UtensilsCrossed, Check, AlertTriangle,
@@ -108,10 +108,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     notes: ''
   });
 
-  const [shiftForm, setShiftForm] = useState<CreateShiftInput>({
+  const [shiftForm, setShiftForm] = useState({
     staffId: '',
     date: '',
-    shift: Shift.LUNCH,
+    lunch: true,
+    dinner: false,
     present: true,
     notes: ''
   });
@@ -316,7 +317,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     setShiftForm({
       staffId: selectedStaff.id,
       date: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      shift: Shift.LUNCH,
+      lunch: true,
+      dinner: false,
       present: true,
       notes: ''
     });
@@ -324,11 +326,39 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   };
 
   const handleSaveShift = async () => {
+    if (!shiftForm.lunch && !shiftForm.dinner) {
+      showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
+      return;
+    }
+
+    const shiftsToCreate: Shift[] = [];
+    if (shiftForm.lunch) shiftsToCreate.push(Shift.LUNCH);
+    if (shiftForm.dinner) shiftsToCreate.push(Shift.DINNER);
+
     try {
-      const created = await staffApiService.createShift(shiftForm);
-      setShifts(prev => [...prev, created]);
+      const created = await Promise.all(
+        shiftsToCreate.map(shift =>
+          staffApiService.createShift({
+            staffId: shiftForm.staffId,
+            date: shiftForm.date,
+            shift,
+            present: shiftForm.present,
+            notes: shiftForm.notes
+          })
+        )
+      );
+      setShifts(prev => {
+        // Replace existing shifts for the same staff/date/shift, append new ones
+        const filtered = prev.filter(s => !created.some(c =>
+          c.staffId === s.staffId && c.date === s.date && c.shift === s.shift
+        ));
+        return [...filtered, ...created];
+      });
       setShowShiftModal(false);
-      showToast('Turno aggiunto', 'success');
+      showToast(
+        shiftsToCreate.length === 2 ? 'Turni Pranzo e Cena aggiunti' : 'Turno aggiunto',
+        'success'
+      );
     } catch (error) {
       showToast('Errore nel salvataggio del turno', 'error');
     }
@@ -1006,26 +1036,31 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Turno</label>
+                <p className="text-[11px] text-slate-400 mb-2">Seleziona uno o entrambi i turni</p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setShiftForm({ ...shiftForm, shift: Shift.LUNCH })}
+                    type="button"
+                    onClick={() => setShiftForm({ ...shiftForm, lunch: !shiftForm.lunch })}
                     className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
-                      shiftForm.shift === Shift.LUNCH
+                      shiftForm.lunch
                         ? 'border-amber-500 bg-amber-50 text-amber-700'
                         : 'border-slate-200 text-slate-500 hover:border-slate-300'
                     }`}
                   >
+                    {shiftForm.lunch && <Check className="h-4 w-4" />}
                     <Sun className="h-5 w-5" />
                     Pranzo
                   </button>
                   <button
-                    onClick={() => setShiftForm({ ...shiftForm, shift: Shift.DINNER })}
+                    type="button"
+                    onClick={() => setShiftForm({ ...shiftForm, dinner: !shiftForm.dinner })}
                     className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
-                      shiftForm.shift === Shift.DINNER
+                      shiftForm.dinner
                         ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
                         : 'border-slate-200 text-slate-500 hover:border-slate-300'
                     }`}
                   >
+                    {shiftForm.dinner && <Check className="h-4 w-4" />}
                     <Moon className="h-5 w-5" />
                     Cena
                   </button>
