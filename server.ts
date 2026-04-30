@@ -1645,7 +1645,9 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
     }
 });
 
-// Get staff presence for a specific date
+// Get staff presence for a specific date.
+// FISSO staff are implicitly present on both shifts during their hire period
+// unless covered by a time-off entry or an explicit shift with present=false.
 app.get('/staff/presence', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
@@ -1654,39 +1656,52 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'date is required' });
         }
 
-        // Get all active staff with their shifts for the date
-        const result = await pool.query(`
-            SELECT
-                sm.*,
-                ss.shift,
-                ss.present
-            FROM staff_members sm
-            LEFT JOIN staff_shifts ss ON sm.id = ss.staff_id AND ss.date = $1
-            WHERE sm.is_active = true
-            ORDER BY sm.category, sm.surname, sm.name
-        `, [date]);
+        const dateStr = String(date);
+
+        const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
+            pool.query('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
+            pool.query('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
+            pool.query('SELECT staff_id FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
+        ]);
+
+        const onTimeOff = new Set(timeOffResult.rows.map(r => r.staff_id));
+        const explicitShifts = new Map<string, boolean>();
+        for (const row of shiftsResult.rows) {
+            explicitShifts.set(`${row.staff_id}-${row.shift}`, row.present);
+        }
 
         const staffByShift = {
             sala: { lunch: [] as any[], dinner: [] as any[] },
             cucina: { lunch: [] as any[], dinner: [] as any[] }
         };
 
-        result.rows.forEach(row => {
-            if (row.shift && row.present !== false) {
-                const staff = {
-                    id: row.id,
-                    name: row.name,
-                    surname: row.surname,
-                    category: row.category,
-                    staffType: row.staff_type,
-                    role: row.role
-                };
+        for (const row of staffResult.rows) {
+            if (onTimeOff.has(row.id)) continue;
 
-                const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
-                const shiftKey = row.shift === 'LUNCH' ? 'lunch' : 'dinner';
-                staffByShift[categoryKey][shiftKey].push(staff);
+            const isFisso = row.staff_type === 'FISSO';
+            const inHirePeriod = isFisso && row.hire_date && row.hire_date <= dateStr
+                && (!row.contract_end_date || row.contract_end_date >= dateStr);
+
+            const staff = {
+                id: row.id,
+                name: row.name,
+                surname: row.surname,
+                category: row.category,
+                staffType: row.staff_type,
+                role: row.role
+            };
+
+            const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
+
+            for (const shift of ['LUNCH', 'DINNER'] as const) {
+                const explicit = explicitShifts.get(`${row.id}-${shift}`);
+                const present = explicit !== undefined ? explicit : inHirePeriod;
+                if (present) {
+                    const shiftKey = shift === 'LUNCH' ? 'lunch' : 'dinner';
+                    staffByShift[categoryKey][shiftKey].push(staff);
+                }
             }
-        });
+        }
 
         res.json(staffByShift);
     } catch (err) {

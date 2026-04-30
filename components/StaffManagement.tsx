@@ -241,6 +241,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     );
   };
 
+  // FISSO staff are implicitly present on both shifts during their contract
+  // period unless there's a time-off entry or an explicit absent shift.
+  const isWithinHirePeriod = (staff: StaffMember, dateStr: string): boolean => {
+    if (!staff.hireDate) return false;
+    if (dateStr < toDateOnly(staff.hireDate)) return false;
+    if (staff.contractEndDate && dateStr > toDateOnly(staff.contractEndDate)) return false;
+    return true;
+  };
+
   // ============================================
   // HANDLERS
   // ============================================
@@ -755,10 +764,23 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   {calendarDays.map((day, idx) => {
                     const isCurrentMonth = day.getMonth() === calendarDate.getMonth();
                     const isToday = day.toDateString() === new Date().toDateString();
+                    const dateStr = formatLocalDate(day);
                     const dayShifts = getShiftsForDay(day, selectedStaff.id);
                     const dayTimeOff = getTimeOffForDay(day, selectedStaff.id);
                     const lunchShift = dayShifts.find(s => s.shift === Shift.LUNCH);
                     const dinnerShift = dayShifts.find(s => s.shift === Shift.DINNER);
+
+                    const inHirePeriod = selectedStaff.staffType === StaffType.FISSO
+                      && isWithinHirePeriod(selectedStaff, dateStr);
+
+                    // Show shift if explicit DB row exists OR FISSO implicit presence applies
+                    const showLunch = !!lunchShift || (inHirePeriod && !dayTimeOff);
+                    const lunchPresent = lunchShift ? lunchShift.present : inHirePeriod;
+                    const lunchImplicit = !lunchShift && inHirePeriod;
+
+                    const showDinner = !!dinnerShift || (inHirePeriod && !dayTimeOff);
+                    const dinnerPresent = dinnerShift ? dinnerShift.present : inHirePeriod;
+                    const dinnerImplicit = !dinnerShift && inHirePeriod;
 
                     const dayBgClass = !isCurrentMonth
                       ? 'border-transparent bg-slate-50/50 opacity-40'
@@ -784,27 +806,39 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                           </div>
                         ) : (
                           <div className="space-y-0.5">
-                            {lunchShift && (
+                            {showLunch && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
-                                  lunchShift.present
-                                    ? 'bg-amber-200 text-amber-800'
+                                  lunchPresent
+                                    ? lunchImplicit
+                                      ? 'bg-amber-100 text-amber-700 border border-dashed border-amber-300'
+                                      : 'bg-amber-200 text-amber-800'
                                     : 'bg-slate-100 text-slate-400 line-through'
                                 }`}
-                                title={lunchShift.present ? 'Presente a Pranzo' : 'Assente a Pranzo'}
+                                title={
+                                  lunchImplicit ? 'Presenza automatica (Fisso) — Pranzo'
+                                  : lunchPresent ? 'Presente a Pranzo'
+                                  : 'Assente a Pranzo'
+                                }
                               >
                                 <Sun className="h-2.5 w-2.5 shrink-0" />
                                 <span className="truncate">Pranzo</span>
                               </div>
                             )}
-                            {dinnerShift && (
+                            {showDinner && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
-                                  dinnerShift.present
-                                    ? 'bg-indigo-200 text-indigo-800'
+                                  dinnerPresent
+                                    ? dinnerImplicit
+                                      ? 'bg-indigo-100 text-indigo-700 border border-dashed border-indigo-300'
+                                      : 'bg-indigo-200 text-indigo-800'
                                     : 'bg-slate-100 text-slate-400 line-through'
                                 }`}
-                                title={dinnerShift.present ? 'Presente a Cena' : 'Assente a Cena'}
+                                title={
+                                  dinnerImplicit ? 'Presenza automatica (Fisso) — Cena'
+                                  : dinnerPresent ? 'Presente a Cena'
+                                  : 'Assente a Cena'
+                                }
                               >
                                 <Moon className="h-2.5 w-2.5 shrink-0" />
                                 <span className="truncate">Cena</span>
@@ -831,6 +865,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     </div>
                     Presente Cena
                   </div>
+                  {selectedStaff.staffType === StaffType.FISSO && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3 h-3 bg-amber-100 rounded-sm border border-dashed border-amber-300" />
+                      Auto (Fisso)
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 bg-slate-100 rounded-sm border border-slate-200" />
                     Assente
