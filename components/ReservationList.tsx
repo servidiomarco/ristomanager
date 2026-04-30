@@ -962,23 +962,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 )}
                             </div>
 
-                            {/* Right: big table+room badge, color matches arrival status */}
-                            <div className="flex-shrink-0">
+                            {/* Right: table+room badge, color matches arrival status */}
+                            <div className="flex-shrink-0 self-stretch">
                                 {isLoadingMerges && res.table_id ? (
-                                    <div className="flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 border-slate-200 bg-slate-50">
+                                    <div className="h-full flex flex-col items-center justify-center min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-slate-200 bg-slate-50">
                                         <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
                                     </div>
                                 ) : table ? (
-                                    <div className={`flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 ${tableBadgeColor}`}>
-                                        <span className="text-2xl sm:text-3xl font-bold leading-none">T. {table.name}</span>
+                                    <div className={`h-full flex flex-col items-center justify-center gap-2 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 ${tableBadgeColor}`}>
+                                        <span className="text-xl sm:text-2xl font-bold leading-none">T. {table.name}</span>
                                         {tableRoomName && (
-                                            <span className="text-xs sm:text-sm font-medium mt-1.5 truncate max-w-full">{tableRoomName}</span>
+                                            <span className="text-xs sm:text-sm font-medium truncate max-w-full">{tableRoomName}</span>
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center min-w-[88px] sm:min-w-[110px] px-3 py-3 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600">
+                                    <div className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600">
                                         <AlertCircle className="h-6 w-6" />
-                                        <span className="text-[10px] font-semibold mt-1 text-center leading-tight">Nessun Tavolo</span>
+                                        <span className="text-[10px] font-semibold text-center leading-tight">Nessun Tavolo</span>
                                     </div>
                                 )}
                             </div>
