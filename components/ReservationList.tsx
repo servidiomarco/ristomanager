@@ -726,11 +726,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             onClick={() => isOccupied && handleEditClick(reservation)}
         >
             <span className="font-bold text-sm truncate px-1 max-w-full">{table.name}</span>
-            <span className="text-[10px] flex items-center gap-1 opacity-80">
-                <Armchair size={10} /> {table.seats}
+            <span className={`flex items-center gap-1 opacity-80 ${isOccupied ? 'text-sm sm:text-base font-semibold' : 'text-[10px]'}`}>
+                <Armchair size={isOccupied ? 16 : 10} /> {table.seats}
             </span>
             {isOccupied && (
-                <div className="absolute -bottom-3 bg-red-600 text-white text-[9px] px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm max-w-[120px] truncate border border-white">
+                <div className="absolute -bottom-3 bg-red-600 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white">
                     {toTitleCase(reservation.customer_name)}
                 </div>
             )}
@@ -1018,6 +1018,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
+          // Total guests (coperti) for the selected day + shift
+          const reservationsForDayShift = reservations.filter(r => {
+              const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+              const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+              return matchesDate && matchesShift;
+          });
+          const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
+          const reservationCountForDayShift = reservationsForDayShift.length;
+
           // Compute the natural bounding box of the room and a scale factor
           // so the room fits the available canvas width/height on tablet+desktop.
           // On mobile (<768px) we keep scale=1 and rely on overflow scrolling.
@@ -1081,6 +1090,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                </div>
                            </div>
                        )}
+
+                       {/* Coperti badge */}
+                       <div className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 py-2 rounded-xl shadow-sm border border-slate-200 flex items-center gap-2 text-xs">
+                           <Users size={14} className="text-indigo-500" />
+                           <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
+                           <span className="text-slate-500">coperti</span>
+                           <span className="text-slate-300">·</span>
+                           <span className="font-semibold text-slate-600">{reservationCountForDayShift}</span>
+                           <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+                       </div>
                        <div
                            style={{
                                width: extentWidth,
@@ -1120,6 +1139,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                        <div className="font-semibold text-slate-700">Occupazione:</div>
                                        <div className="text-sm">
                                            <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
+                                       </div>
+                                   </div>
+                                   <div className="border-t border-slate-200 mt-1 pt-2">
+                                       <div className="font-semibold text-slate-700">Coperti:</div>
+                                       <div className="text-sm">
+                                           <span className="font-bold">{totalGuestsForDayShift}</span> in <span className="font-bold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
                                        </div>
                                    </div>
                                </div>
@@ -1729,25 +1754,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         )}
 
                                                         <div className={`text-xs sm:text-sm font-bold truncate ${isSelectedForMerge ? 'text-purple-700' : isSelected ? 'text-indigo-700' : isOccupied ? 'text-red-900' : 'text-slate-700'}`}>
-                                                            {table.name}
+                                                            {isOccupied && occupiedReservation ? toTitleCase(occupiedReservation.customer_name) : table.name}
                                                         </div>
                                                         <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-red-800' : 'text-slate-500'}`}>
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
                                                             {table.seats}
                                                         </div>
-                                                        {isOccupied && occupiedReservation && (
-                                                            <>
-                                                                <div className="absolute inset-0 flex items-center justify-center bg-red-100/50 rounded-xl">
-                                                                    <span className="text-[11px] sm:text-xs font-bold text-red-700 bg-white/90 px-2.5 py-1 rounded-lg shadow-sm border border-red-200 -mt-14 sm:-mt-16">OCCUPATO</span>
-                                                                </div>
-                                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex justify-center">
-                                                                    <div className="bg-red-600 text-white text-[11px] sm:text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap shadow-md max-w-[120px] truncate border-2 border-white">
-                                                                        {occupiedReservation.customer_name}
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        )}
                                                         {isSelected && !isSelectedForMerge && (
                                                             <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm z-20">
                                                                 <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
