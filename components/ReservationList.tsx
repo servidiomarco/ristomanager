@@ -4,6 +4,7 @@ import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
+import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 
 // Helper to format datetime without timezone conversion
@@ -293,7 +294,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       try {
           await sendWhatsAppConfirmation(res.id);
-          showToast(`Conferma WhatsApp inviata a ${res.customer_name}`, 'success');
+          showToast(`Conferma WhatsApp inviata a ${toTitleCase(res.customer_name)}`, 'success');
       } catch (error) {
           console.error('Error sending WhatsApp confirmation:', error);
           showToast('Errore durante l\'invio della conferma WhatsApp', 'error');
@@ -306,7 +307,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           return;
       }
       const subject = `Conferma Prenotazione RistoManager - ${new Date(res.reservation_time).toLocaleDateString()}`;
-      const body = `Gentile ${res.customer_name},\n\nConfermiamo con piacere la sua prenotazione per:\nData: ${new Date(res.reservation_time).toLocaleDateString()}\nOra: ${new Date(res.reservation_time).toLocaleTimeString()}\nOspiti: ${res.guests}\n\nCordiali saluti,\nRistoManager Team`;
+      const body = `Gentile ${toTitleCase(res.customer_name)},\n\nConfermiamo con piacere la sua prenotazione per:\nData: ${new Date(res.reservation_time).toLocaleDateString()}\nOra: ${new Date(res.reservation_time).toLocaleTimeString()}\nOspiti: ${res.guests}\n\nCordiali saluti,\nRistoManager Team`;
       
       const url = `mailto:${res.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       window.location.href = url;
@@ -319,7 +320,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           return;
       }
       onUpdateReservation({ ...res, reminder_sent: true });
-      showToast(`Promemoria inviato a ${res.customer_name}`, 'success');
+      showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
   const handleToggleArrivalStatus = (res: Reservation) => {
@@ -328,8 +329,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       onUpdateReservation({ ...res, arrival_status: newStatus });
       showToast(
           newStatus === ArrivalStatus.ARRIVED
-              ? `${res.customer_name} è arrivato`
-              : `${res.customer_name} è in attesa`,
+              ? `${toTitleCase(res.customer_name)} è arrivato`
+              : `${toTitleCase(res.customer_name)} è in attesa`,
           'success'
       );
   };
@@ -705,7 +706,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 top: table.y,
                 ...shapeStyles
             }}
-            title={isOccupied ? `Occupato da: ${reservation.customer_name}` : 'Libero'}
+            title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero'}
             onClick={() => isOccupied && handleEditClick(reservation)}
         >
             <span className="font-bold text-sm truncate px-1 max-w-full">{table.name}</span>
@@ -714,7 +715,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </span>
             {isOccupied && (
                 <div className="absolute -bottom-3 bg-red-600 text-white text-[9px] px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm max-w-[120px] truncate border border-white">
-                    {reservation.customer_name}
+                    {toTitleCase(reservation.customer_name)}
                 </div>
             )}
         </div>
@@ -892,7 +893,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
                             <div className="flex-1 min-w-0">
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-                                    <h3 className="font-bold text-lg text-slate-800">{res.customer_name}</h3>
+                                    <h3 className="font-bold text-lg text-slate-800">{toTitleCase(res.customer_name)}</h3>
                                     {/* Payment status - only show if paid */}
                                     {res.payment_status !== PaymentStatus.PENDING && (
                                         <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>

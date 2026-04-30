@@ -4,6 +4,7 @@ import {
   Shift, TimeOffType
 } from '../types';
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
+import { toTitleCase } from '../utils/text';
 import {
   Users, UserPlus, Edit2, Trash2, X, Plus, ChevronLeft, ChevronRight,
   Calendar, Clock, Sun, Moon, Coffee, UtensilsCrossed, Check, AlertTriangle,
@@ -591,10 +592,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
-                        {staff.name[0]}{staff.surname[0]}
+                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{staff.name} {staff.surname}</p>
+                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
                         <p className="text-xs text-slate-500">{staff.role || 'Cameriere'}</p>
                       </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
@@ -632,10 +633,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-semibold">
-                        {staff.name[0]}{staff.surname[0]}
+                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{staff.name} {staff.surname}</p>
+                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
                         <p className="text-xs text-slate-500">{staff.role || 'Cuoco'}</p>
                       </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
@@ -659,11 +660,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold ${
                     selectedStaff.category === StaffCategory.SALA ? 'bg-emerald-200 text-emerald-700' : 'bg-orange-200 text-orange-700'
                   }`}>
-                    {selectedStaff.name[0]}{selectedStaff.surname[0]}
+                    {selectedStaff.name[0]?.toUpperCase()}{selectedStaff.surname[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-slate-800">{selectedStaff.name} {selectedStaff.surname}</h2>
+                      <h2 className="text-xl font-bold text-slate-800">{toTitleCase(selectedStaff.name)} {toTitleCase(selectedStaff.surname)}</h2>
                       {!selectedStaff.isActive && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Inattivo</span>
                       )}
