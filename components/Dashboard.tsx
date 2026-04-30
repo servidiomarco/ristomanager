@@ -617,11 +617,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const openDatePicker = () => {
     const input = dateInputRef.current;
     if (!input) return;
-    if (typeof input.showPicker === 'function') {
-      input.showPicker();
-    } else {
-      input.click();
+    try {
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+        return;
+      }
+    } catch {
+      // showPicker can throw if not invoked from a user gesture; fall through
     }
+    input.focus();
+    input.click();
   };
 
   const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -805,22 +810,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </button>
 
             <div className="relative">
-              <div
+              <button
+                type="button"
                 onClick={openDatePicker}
                 className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                aria-label="Seleziona data"
               >
                 <Calendar className="h-5 w-5 text-indigo-600" />
                 <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
                   {formatDate(selectedDate)}
                 </span>
-              </div>
+              </button>
               <input
                 ref={dateInputRef}
                 type="date"
                 value={selectedDateStr}
                 onChange={handleDateInputChange}
-                aria-label="Seleziona data"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="absolute left-0 bottom-0 w-px h-px opacity-0 pointer-events-none"
               />
             </div>
 
