@@ -726,11 +726,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             onClick={() => isOccupied && handleEditClick(reservation)}
         >
             <span className="font-bold text-sm truncate px-1 max-w-full">{table.name}</span>
-            <span className={`flex items-center gap-1 opacity-80 ${isOccupied ? 'text-sm sm:text-base font-semibold' : 'text-[10px]'}`}>
-                <Armchair size={isOccupied ? 16 : 10} /> {table.seats}
-            </span>
+            {isOccupied ? (
+                <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
+                    <Users size={16} /> {reservation.guests}
+                </span>
+            ) : (
+                <span className="text-[10px] flex items-center gap-1 opacity-80">
+                    <Armchair size={10} /> {table.seats}
+                </span>
+            )}
             {isOccupied && (
-                <div className="absolute -bottom-3 bg-red-600 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white">
+                <div className="absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white">
                     {toTitleCase(reservation.customer_name)}
                 </div>
             )}
