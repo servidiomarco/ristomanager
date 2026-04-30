@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2 } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info } from 'lucide-react';
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -56,6 +56,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedTables, setSelectedTables] = useState<number[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
 
   // Per-shift merge context
   const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDate(new Date()));
@@ -963,27 +964,43 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </div>
           )}
 
-          {/* Legend */}
-          <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-sm border border-slate-200 text-xs space-y-2 pointer-events-none select-none z-10">
-               <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
-               <div className="flex items-center gap-2 text-slate-600">
-                   <div className="w-3 h-3 bg-white border border-emerald-300 rounded-sm"></div> Libero
-               </div>
-               <div className="flex items-center gap-2 text-slate-600">
-                   <div className="w-3 h-3 bg-red-50 border border-red-300 rounded-sm relative">
-                       <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full"></div>
-                   </div> Occupato (In corso)
-               </div>
-               <div className="flex items-center gap-2 text-slate-600">
-                   <div className="w-3 h-3 bg-amber-50 border border-amber-300 rounded-sm"></div> Riservato (Prossime 2h)
-               </div>
-               <div className="flex items-center gap-2 text-slate-400 border-t pt-2 mt-1">
-                   <Lock size={12} /> Tavolo Bloccato
-               </div>
-                <div className="flex items-center gap-2 text-slate-400">
-                   <Timer size={12} /> Blocco Temporaneo
-               </div>
-           </div>
+          {/* Legend - collapsible */}
+          <div className="absolute bottom-4 right-4 z-10 select-none">
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
+                aria-expanded={isLegendOpen}
+            >
+                <Info size={14} className="text-indigo-500" />
+                Legenda
+            </button>
+            {isLegendOpen && (
+                <div
+                    className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
+                    <div className="flex items-center gap-2 text-slate-600">
+                        <div className="w-3 h-3 bg-white border border-emerald-300 rounded-sm"></div> Libero
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-600">
+                        <div className="w-3 h-3 bg-red-50 border border-red-300 rounded-sm relative">
+                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full"></div>
+                        </div> Occupato (In corso)
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-600">
+                        <div className="w-3 h-3 bg-amber-50 border border-amber-300 rounded-sm"></div> Riservato (Prossime 2h)
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-400 border-t pt-2 mt-1">
+                        <Lock size={12} /> Tavolo Bloccato
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-400">
+                        <Timer size={12} /> Blocco Temporaneo
+                    </div>
+                </div>
+            )}
+          </div>
       </div>
 
       {/* Alert Modal */}
