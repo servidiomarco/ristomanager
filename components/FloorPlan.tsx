@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2 } from 'lucide-react';
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -61,6 +61,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDate(new Date()));
   const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+  const [isLoadingMerges, setIsLoadingMerges] = useState(false);
 
   // Refresh merges from the server for the current date+shift. Used after
   // local merge/split actions so the originating client updates immediately
@@ -77,6 +78,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Fetch merges whenever date/shift changes
   useEffect(() => {
     let cancelled = false;
+    setIsLoadingMerges(true);
     getTableMerges(selectedDate, selectedShift)
       .then(merges => {
         if (!cancelled) setTableMerges(merges);
@@ -84,7 +86,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       .catch(err => {
         console.error('Error fetching table merges:', err);
         if (!cancelled) setTableMerges([]);
-      });
+      })
+      .finally(() => { if (!cancelled) setIsLoadingMerges(false); });
     return () => { cancelled = true; };
   }, [selectedDate, selectedShift]);
 
@@ -878,8 +881,17 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         }}
       >
           {currentTables.map(renderTableShape)}
-          
-          {currentTables.length === 0 && (
+
+          {isLoadingMerges && (
+              <div className="absolute inset-0 z-30 bg-slate-100/70 backdrop-blur-[1px] flex items-center justify-center">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                      <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                  </div>
+              </div>
+          )}
+
+          {currentTables.length === 0 && !isLoadingMerges && (
               <div className="absolute inset-0 flex items-center justify-center text-slate-400 pointer-events-none">
                   <p>Trascina o aggiungi tavoli in questa sala</p>
               </div>

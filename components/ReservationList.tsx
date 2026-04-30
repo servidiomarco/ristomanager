@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2 } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
@@ -133,6 +133,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Per-shift table merges. Use the form's date+shift while the modal is open;
   // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+  const [isLoadingMerges, setIsLoadingMerges] = useState(false);
 
   const focalDate = isFormOpen && formData.reservation_time
     ? formData.reservation_time.split('T')[0]
@@ -154,12 +155,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoadingMerges(true);
     getTableMerges(focalDate, focalShift)
       .then(merges => { if (!cancelled) setTableMerges(merges); })
       .catch(err => {
         console.error('Error fetching table merges:', err);
         if (!cancelled) setTableMerges([]);
-      });
+      })
+      .finally(() => { if (!cancelled) setIsLoadingMerges(false); });
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
@@ -865,7 +868,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <Users className="h-4 w-4" /> {res.guests} Ospiti
                                     </div>
                                     {/* Table & Room - Better highlighted */}
-                                    {table ? (
+                                    {isLoadingMerges && res.table_id ? (
+                                        <div className="flex items-center gap-2 bg-slate-100 text-slate-400 px-3 py-1 rounded-lg animate-pulse">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <span className="text-xs">Caricamento tavolo…</span>
+                                        </div>
+                                    ) : table ? (
                                         <div className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-semibold">
                                             <span className="text-indigo-900 font-bold">T. {table.name}</span>
                                             <span className="text-indigo-500">•</span>
@@ -972,6 +980,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
                     }}
                   >
+                       {isLoadingMerges && (
+                           <div className="absolute inset-0 z-30 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center">
+                               <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+                                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                                   <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                               </div>
+                           </div>
+                       )}
                        {tablesInRoom.map(renderMapTable)}
     
                        {/* Legend Overlay */}
@@ -1494,6 +1510,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              </div>
 
                              <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
+                                {isLoadingMerges && (
+                                    <div className="absolute inset-0 z-20 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center rounded-xl">
+                                        <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+                                            <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                                            <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                                        </div>
+                                    </div>
+                                )}
                                 {displayedRooms.map(room => (
                                     <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
                                         <h4 className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-2 sticky top-0 bg-slate-50 py-1 z-10">{room.name}</h4>
