@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2 } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
@@ -73,6 +73,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // Tick the header clock once per minute (aligned to start of each minute)
+  useEffect(() => {
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    let interval: ReturnType<typeof setInterval>;
+    const timeout = setTimeout(() => {
+      setCurrentTime(new Date());
+      interval = setInterval(() => setCurrentTime(new Date()), 60_000);
+    }, msUntilNextMinute);
+    return () => {
+      clearTimeout(timeout);
+      if (interval) clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (rooms.length > 0 && activeMapRoomId === 'ALL') {
@@ -234,6 +251,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const goToToday = () => {
     const time = selectedDate.split('T')[1] || '12:00';
     setSelectedDate(new Date().toISOString().split('T')[0] + 'T' + time);
+  };
+
+  const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (!value) return;
+    const time = selectedDate.split('T')[1] || '12:00';
+    setSelectedDate(`${value}T${time}`);
   };
 
   const formatSelectedDate = (date: Date) => {
@@ -772,39 +796,66 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
 
-            {/* Date Navigation */}
-            <div className="flex items-center gap-1 bg-slate-50 rounded-xl p-1">
-                <button
-                    onClick={goToPreviousDay}
-                    className="p-2 hover:bg-white rounded-lg transition-colors"
-                    title="Giorno precedente"
-                >
-                    <ChevronLeft className="h-5 w-5 text-slate-600" />
-                </button>
-
-                <div className="flex items-center gap-2 px-3 py-1.5 min-w-[180px]">
-                    <Calendar className="h-4 w-4 text-indigo-600" />
-                    <span className="font-medium text-slate-700 capitalize text-sm">
-                        {formatSelectedDate(selectedDateObj)}
+            {/* Clock + Date Navigation */}
+            <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5">
+                    <Clock className="h-5 w-5 text-indigo-600" />
+                    <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
+                        {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                 </div>
 
-                <button
-                    onClick={goToNextDay}
-                    className="p-2 hover:bg-white rounded-lg transition-colors"
-                    title="Giorno successivo"
-                >
-                    <ChevronRight className="h-5 w-5 text-slate-600" />
-                </button>
+                <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
+                    {!isToday && (
+                        <button
+                            onClick={goToToday}
+                            className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        >
+                            Oggi
+                        </button>
+                    )}
 
-                {!isToday && (
                     <button
-                        onClick={goToToday}
-                        className="px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        onClick={goToPreviousDay}
+                        className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+                        aria-label="Giorno precedente"
                     >
-                        Oggi
+                        <ChevronLeft className="h-5 w-5 text-slate-600" />
                     </button>
-                )}
+
+                    <div className="relative">
+                        <div className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
+                            <Calendar className="h-5 w-5 text-indigo-600" />
+                            <span className="font-semibold text-base lg:text-lg text-slate-700 capitalize min-w-[220px] lg:min-w-[260px] text-center">
+                                {formatSelectedDate(selectedDateObj)}
+                            </span>
+                        </div>
+                        <input
+                            ref={dateInputRef}
+                            type="date"
+                            value={selectedDateStr}
+                            onChange={handleDateInputChange}
+                            onClick={(e) => {
+                                const input = e.currentTarget;
+                                try {
+                                    if (typeof input.showPicker === 'function') input.showPicker();
+                                } catch {
+                                    // ignore — fall back to native focus
+                                }
+                            }}
+                            aria-label="Seleziona data"
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                    </div>
+
+                    <button
+                        onClick={goToNextDay}
+                        className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+                        aria-label="Giorno successivo"
+                    >
+                        <ChevronRight className="h-5 w-5 text-slate-600" />
+                    </button>
+                </div>
             </div>
       </div>
 
