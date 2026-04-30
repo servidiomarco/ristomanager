@@ -786,6 +786,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
+            {!isToday && (
+              <button
+                onClick={goToToday}
+                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                Oggi
+              </button>
+            )}
+
             <button
               onClick={goToPreviousDay}
               className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
@@ -829,15 +838,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             >
               <ChevronRight className="h-5 w-5 text-slate-600" />
             </button>
-
-            {!isToday && (
-              <button
-                onClick={goToToday}
-                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-              >
-                Oggi
-              </button>
-            )}
           </div>
         </div>
       </div>
