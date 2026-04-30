@@ -243,9 +243,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
   // FISSO staff are implicitly present on both shifts during their contract
   // period unless there's a time-off entry or an explicit absent shift.
+  // If hireDate or contractEndDate are missing, that boundary is treated
+  // as open (a FISSO with no dates is assumed currently active).
   const isWithinHirePeriod = (staff: StaffMember, dateStr: string): boolean => {
-    if (!staff.hireDate) return false;
-    if (dateStr < toDateOnly(staff.hireDate)) return false;
+    if (staff.hireDate && dateStr < toDateOnly(staff.hireDate)) return false;
     if (staff.contractEndDate && dateStr > toDateOnly(staff.contractEndDate)) return false;
     return true;
   };

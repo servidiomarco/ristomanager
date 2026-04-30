@@ -1679,7 +1679,11 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             if (onTimeOff.has(row.id)) continue;
 
             const isFisso = row.staff_type === 'FISSO';
-            const inHirePeriod = isFisso && row.hire_date && row.hire_date <= dateStr
+            // Open boundaries: no hire_date means "always active until contract end",
+            // no contract_end_date means "no end". Without this, a FISSO added without
+            // explicit dates would never appear in the presence list.
+            const inHirePeriod = isFisso
+                && (!row.hire_date || row.hire_date <= dateStr)
                 && (!row.contract_end_date || row.contract_end_date >= dateStr);
 
             const staff = {
