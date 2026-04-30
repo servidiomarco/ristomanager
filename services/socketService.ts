@@ -27,6 +27,9 @@ export class SocketService {
           // Allow Railway URLs
           if (origin.includes('railway.app')) return callback(null, true);
 
+          // Allow custom production domain
+          if (origin.includes('crm.vecchiofrantoio.com')) return callback(null, true);
+
           // Reject other origins
           callback(new Error('Not allowed by CORS'));
         },
