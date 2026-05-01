@@ -7,7 +7,7 @@ import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -632,18 +632,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Calculate stats for selected day
   const totalTables = Array.isArray(tables) ? tables.length : 0;
-  const totalCapacity = Array.isArray(tables) ? tables.reduce((acc, t) => acc + (Number(t.seats) || 0), 0) : 0;
 
   // Banchetti scheduled for the selected day
   const banquetsToday = Array.isArray(banquetMenus)
     ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
     : 0;
-
-  // Selected day stats
-  const selectedDayGuests = selectedDayReservations.reduce((acc, r) => acc + r.guests, 0);
-  const arrivedGuests = selectedDayReservations
-    .filter(r => r.arrival_status === ArrivalStatus.ARRIVED)
-    .reduce((acc, r) => acc + r.guests, 0);
 
   // Reservations by shift for selected day
   const lunchReservations = selectedDayReservations.filter(r => r.shift === Shift.LUNCH);
@@ -651,6 +644,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const lunchTableIds = new Set(lunchReservations.map(r => r.table_id).filter(Boolean));
   const dinnerTableIds = new Set(dinnerReservations.map(r => r.table_id).filter(Boolean));
+
+  // Per-shift KPI stats (guests + tables, expected vs arrived)
+  const lunchExpectedGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
+  const dinnerExpectedGuests = dinnerReservations.reduce((acc, r) => acc + r.guests, 0);
+  const lunchArrivedRes = lunchReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED);
+  const dinnerArrivedRes = dinnerReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED);
+  const lunchArrivedGuests = lunchArrivedRes.reduce((acc, r) => acc + r.guests, 0);
+  const dinnerArrivedGuests = dinnerArrivedRes.reduce((acc, r) => acc + r.guests, 0);
+  const lunchArrivedTableIds = new Set(lunchArrivedRes.map(r => r.table_id).filter(Boolean));
+  const dinnerArrivedTableIds = new Set(dinnerArrivedRes.map(r => r.table_id).filter(Boolean));
 
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
@@ -876,58 +879,107 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* KPI Cards */}
+      {/* KPI Cards — per shift (Pranzo / Cena) */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
         <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
             <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Attesi</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayGuests}</p>
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
+              <div className="flex items-center gap-1">
+                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchExpectedGuests}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerExpectedGuests}</span>
+              </div>
+            </div>
           </div>
         </div>
         <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
             <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Arrivati</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{arrivedGuests}</p>
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
+              <div className="flex items-center gap-1">
+                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedGuests}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedGuests}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-sky-50 text-sky-600 rounded-xl flex-shrink-0">
+            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Attesi</p>
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
+              <div className="flex items-center gap-1">
+                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchTableIds.size}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerTableIds.size}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-teal-50 text-teal-600 rounded-xl flex-shrink-0">
+            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Arrivati</p>
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
+              <div className="flex items-center gap-1">
+                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedTableIds.size}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedTableIds.size}</span>
+              </div>
+            </div>
           </div>
         </div>
         <button
           type="button"
           onClick={onNavigateToBanquets}
-          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group"
+          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group col-span-2 md:col-span-1"
         >
           <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
             <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Banchetti</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{banquetsToday}</p>
+            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Prenotazioni & Banchetti</p>
+            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
+              <div className="flex items-center gap-1">
+                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchReservations.length}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerReservations.length}</span>
+              </div>
+              <div className="flex items-center gap-1 pl-1 sm:pl-2 border-l border-slate-200">
+                <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-rose-500 flex-shrink-0" />
+                <span className="text-base sm:text-xl lg:text-2xl font-bold text-rose-600 tabular-nums">{banquetsToday}</span>
+              </div>
+            </div>
           </div>
           <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
         </button>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-amber-50 text-amber-600 rounded-xl flex-shrink-0">
-            <Utensils className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Coperti Totali</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{totalCapacity}</p>
-          </div>
-        </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 col-span-2 md:col-span-1">
-          <div className="p-2 sm:p-3 bg-blue-50 text-blue-600 rounded-xl flex-shrink-0">
-            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Prenotazioni</p>
-            <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-800">{selectedDayReservations.length}</p>
-          </div>
-        </div>
       </div>
 
       {/* Row 1: Stato Tavoli (full width) */}
