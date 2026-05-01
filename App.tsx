@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Search, Clock } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -607,7 +607,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+    <div className="flex h-screen bg-[var(--risto-background)] font-sans text-[var(--risto-text-secondary)]">
       {/* User Management Modal */}
       {showUserManagement && canManageUsers() && (
         <UserManagement onClose={() => setShowUserManagement(false)} />
@@ -630,27 +630,28 @@ const App: React.FC = () => {
       )}
 
       {/* Connection Status Indicator */}
-      <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
-        isConnected
-          ? 'bg-emerald-100 text-emerald-700'
-          : 'bg-red-100 text-red-700 animate-pulse'
+      <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-[10px] font-medium tracking-[0.3px] uppercase transition-all duration-300 ${
+        isConnected ? 'risto-pill risto-pill-live' : 'risto-pill risto-pill-red animate-pulse'
       }`}>
-        {isConnected ? '🟢 Live' : '🔴 Offline'}
+        {isConnected ? <><span className="risto-live-dot risto-live-dot-sm" />Live</> : 'Offline'}
       </div>
 
       {/* Sidebar - Hidden on mobile, visible on lg+ */}
-      <aside className={`hidden lg:flex ${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-slate-200 flex-col transition-all duration-300 z-20 relative`}>
-        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-6'} border-b border-slate-100`}>
-          <div className="flex items-center">
-            <div className="bg-indigo-600 p-2 rounded-lg">
-               <ChefHat className="text-white h-6 w-6" />
-            </div>
-            {!sidebarCollapsed && <span className="ml-3 font-bold text-xl text-slate-800">RistoCRM</span>}
+      <aside
+        className={`hidden lg:flex ${sidebarCollapsed ? 'w-20' : 'w-60'} bg-white flex-col transition-all duration-300 z-20 relative`}
+        style={{ borderRight: '1px solid rgba(0, 0, 0, 0.04)', padding: sidebarCollapsed ? '20px 12px' : '24px' }}
+      >
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} mb-8`}>
+          <div className="flex items-center gap-3 py-2">
+            <div className="risto-mark">R</div>
+            {!sidebarCollapsed && (
+              <span className="text-[15px] font-medium tracking-[-0.2px] text-[var(--risto-text-secondary)]">Risto</span>
+            )}
           </div>
           {!sidebarCollapsed && (
             <button
               onClick={() => setSidebarCollapsed(true)}
-              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
               title="Comprimi sidebar"
             >
               <PanelLeftClose size={18} />
@@ -658,165 +659,207 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* Expand button when collapsed */}
         {sidebarCollapsed && (
           <button
             onClick={() => setSidebarCollapsed(false)}
-            className="mx-auto mt-4 p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            className="mx-auto mb-6 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
             title="Espandi sidebar"
           >
             <PanelLeft size={20} />
           </button>
         )}
 
-        <nav className={`flex-1 py-6 space-y-2 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
-          {canAccessView(ViewState.DASHBOARD) && (
-            <SidebarItem
-              icon={<LayoutDashboard size={20} />}
-              label="Dashboard"
-              active={view === ViewState.DASHBOARD}
-              onClick={() => setView(ViewState.DASHBOARD)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.RESERVATIONS) && (
-            <SidebarItem
-              icon={<Calendar size={20} />}
-              label="Prenotazioni"
-              active={view === ViewState.RESERVATIONS}
-              onClick={() => setView(ViewState.RESERVATIONS)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.FLOOR_PLAN) && (
-            <SidebarItem
-              icon={<Grid size={20} />}
-              label="Sale & Tavoli"
-              active={view === ViewState.FLOOR_PLAN}
-              onClick={() => setView(ViewState.FLOOR_PLAN)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.MENU) && (
-            <SidebarItem
-              icon={<MenuIcon size={20} />}
-              label="Menu & Banchetti"
-              active={view === ViewState.MENU}
-              onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.STAFF) && (
-            <SidebarItem
-              icon={<UsersRound size={20} />}
-              label="Personale"
-              active={view === ViewState.STAFF}
-              onClick={() => setView(ViewState.STAFF)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.SETTINGS) && (
-            <SidebarItem
-              icon={<Settings size={20} />}
-              label="Impostazioni"
-              active={view === ViewState.SETTINGS}
-              onClick={() => setView(ViewState.SETTINGS)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
+        <nav className="flex-1 flex flex-col gap-8">
+          {/* Stasera section */}
+          <div className="flex flex-col gap-1">
+            {!sidebarCollapsed && (
+              <div className="risto-eyebrow px-3 mb-1" style={{ fontSize: 10, letterSpacing: '0.5px' }}>Stasera</div>
+            )}
+            {canAccessView(ViewState.DASHBOARD) && (
+              <SidebarItem
+                icon={<LayoutDashboard size={16} />}
+                label="Polso del servizio"
+                active={view === ViewState.DASHBOARD}
+                onClick={() => setView(ViewState.DASHBOARD)}
+                collapsed={sidebarCollapsed}
+                badge="Live"
+              />
+            )}
+            {canAccessView(ViewState.RESERVATIONS) && (
+              <SidebarItem
+                icon={<Calendar size={16} />}
+                label="Prenotazioni"
+                active={view === ViewState.RESERVATIONS}
+                onClick={() => setView(ViewState.RESERVATIONS)}
+                collapsed={sidebarCollapsed}
+                badge={reservations.length > 0 ? String(reservations.length) : undefined}
+              />
+            )}
+            {canAccessView(ViewState.FLOOR_PLAN) && (
+              <SidebarItem
+                icon={<Grid size={16} />}
+                label="Pianta sala"
+                active={view === ViewState.FLOOR_PLAN}
+                onClick={() => setView(ViewState.FLOOR_PLAN)}
+                collapsed={sidebarCollapsed}
+              />
+            )}
+          </div>
+
+          {/* Ristorante section */}
+          <div className="flex flex-col gap-1">
+            {!sidebarCollapsed && (
+              <div className="risto-eyebrow px-3 mb-1" style={{ fontSize: 10, letterSpacing: '0.5px' }}>Ristorante</div>
+            )}
+            {canAccessView(ViewState.MENU) && (
+              <SidebarItem
+                icon={<MenuIcon size={16} />}
+                label="Menu & Banchetti"
+                active={view === ViewState.MENU}
+                onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
+                collapsed={sidebarCollapsed}
+              />
+            )}
+            {canAccessView(ViewState.STAFF) && (
+              <SidebarItem
+                icon={<UsersRound size={16} />}
+                label="Personale"
+                active={view === ViewState.STAFF}
+                onClick={() => setView(ViewState.STAFF)}
+                collapsed={sidebarCollapsed}
+              />
+            )}
+            {canAccessView(ViewState.SETTINGS) && (
+              <SidebarItem
+                icon={<Settings size={16} />}
+                label="Impostazioni"
+                active={view === ViewState.SETTINGS}
+                onClick={() => setView(ViewState.SETTINGS)}
+                collapsed={sidebarCollapsed}
+              />
+            )}
+            {canManageUsers() && (
+              <SidebarItem
+                icon={<Users size={16} />}
+                label="Gestione utenti"
+                active={false}
+                onClick={() => setShowUserManagement(true)}
+                collapsed={sidebarCollapsed}
+              />
+            )}
+          </div>
         </nav>
 
-        <div className={`p-4 border-t border-slate-100 space-y-2 ${sidebarCollapsed ? 'px-2' : ''}`}>
-          {/* User Management Button (Owner only) */}
-          {canManageUsers() && (
+        {/* User card */}
+        {sidebarCollapsed ? (
+          <div className="flex flex-col items-center gap-2 mt-6">
+            <div className="w-9 h-9 rounded-full bg-[var(--risto-primary)] text-white flex items-center justify-center font-medium text-sm">
+              {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+            </div>
             <button
-              onClick={() => setShowUserManagement(true)}
-              className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl transition-all`}
-              title={sidebarCollapsed ? 'Gestione Utenti' : undefined}
+              onClick={logout}
+              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+              title="Esci"
             >
-              <Users size={20} />
-              {!sidebarCollapsed && <span className="text-sm font-medium">Gestione Utenti</span>}
+              <LogOut size={16} />
             </button>
-          )}
-
-          {/* User Info */}
-          {sidebarCollapsed ? (
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">
-                {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-              </div>
-              <button
-                onClick={logout}
-                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                title="Esci"
-              >
-                <LogOut size={18} />
-              </button>
+          </div>
+        ) : (
+          <div className="mt-6 flex items-center gap-3 p-3 rounded-2xl bg-[var(--risto-surface-light)]">
+            <div className="w-9 h-9 rounded-full bg-[var(--risto-primary)] text-white flex items-center justify-center font-medium text-sm flex-shrink-0">
+              {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
             </div>
-          ) : (
-            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
-                {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-700 truncate">{user?.full_name || 'Utente'}</p>
-                <p className="text-xs text-slate-400">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
-              </div>
-              <button
-                onClick={logout}
-                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                title="Esci"
-              >
-                <LogOut size={16} />
-              </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-[var(--risto-text-secondary)] truncate">{user?.full_name || 'Utente'}</p>
+              <p className="text-[11px] text-[var(--risto-text-primary)]">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
             </div>
-          )}
-        </div>
+            <button
+              onClick={logout}
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+              title="Esci"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
       <main className="flex-1 overflow-y-auto relative pb-20 lg:pb-0">
         {/* Header with Notification Center */}
-        <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6">
-           <span className="font-bold text-lg lg:hidden">RistoCRM</span>
-           <div className="ml-auto flex items-center gap-4">
-               <div className="relative">
-                   <button 
-                      onClick={() => setShowNotifications(!showNotifications)}
-                      className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg relative"
-                    >
-                       <Bell className="h-5 w-5" />
-                       {notifications.some(n => !n.read) && (
-                           <span className="absolute top-1.5 right-2 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>
-                       )}
-                   </button>
+        <header className="sticky top-0 z-10 bg-[var(--risto-background)]/85 backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-4 px-4 lg:px-8 py-5">
+            <div className="flex flex-col gap-1 min-w-0">
+              <div className="risto-eyebrow flex items-center gap-2">
+                <span className="risto-live-dot" />
+                {(() => {
+                  const h = new Date().getHours();
+                  if (h < 12) return 'Servizio · in preparazione';
+                  if (h < 17) return 'Servizio pranzo · in corso';
+                  return 'Servizio cena · in corso';
+                })()}
+              </div>
+              <h1 className="text-[22px] lg:text-[28px] font-medium tracking-[-0.5px] text-[var(--risto-text-secondary)] leading-tight">
+                {(() => {
+                  const h = new Date().getHours();
+                  const greeting = h < 12 ? 'Buongiorno' : h < 18 ? 'Buon pomeriggio' : 'Buonasera';
+                  const firstName = user?.full_name?.split(' ')[0] || '';
+                  return firstName ? `${greeting}, ${firstName}.` : `${greeting}.`;
+                })()}
+              </h1>
+            </div>
 
-                   {/* Notification Dropdown */}
-                   {showNotifications && (
-                       <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                           <div className="p-3 border-b border-slate-100 flex justify-between items-center">
-                               <h3 className="font-semibold text-sm text-slate-700">Notifiche</h3>
-                               <button onClick={() => setShowNotifications(false)}><X className="h-4 w-4 text-slate-400" /></button>
-                           </div>
-                           <div className="max-h-64 overflow-y-auto">
-                               {notifications.length === 0 ? (
-                                   <div className="p-4 text-center text-sm text-slate-400">Nessuna notifica</div>
-                               ) : (
-                                   notifications.map(notif => (
-                                       <div key={notif.id} className="p-3 hover:bg-slate-50 border-b border-slate-50 last:border-0">
-                                           <div className="flex justify-between items-start">
-                                                <p className="text-sm font-medium text-slate-800">{notif.title}</p>
-                                                <span className="text-[10px] text-slate-400">{notif.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                           </div>
-                                           <p className="text-xs text-slate-500 mt-1">{notif.message}</p>
-                                       </div>
-                                   ))
-                               )}
-                           </div>
-                       </div>
-                   )}
-               </div>
-           </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="risto-time-pill hidden sm:inline-flex">
+                <Clock size={14} />
+                {new Date().toLocaleDateString('it-IT', { weekday: 'long' }).replace(/^\w/, c => c.toUpperCase())}
+                {', '}
+                {new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              <button className="risto-icon-btn" aria-label="Cerca">
+                <Search size={16} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="risto-icon-btn"
+                  aria-label="Notifiche"
+                >
+                  <Bell size={16} />
+                  {notifications.some(n => !n.read) && (
+                    <span
+                      className="absolute top-[10px] right-[10px] w-2 h-2 rounded-full"
+                      style={{ background: 'var(--risto-red)', border: '2px solid white' }}
+                    />
+                  )}
+                </button>
+
+                {showNotifications && (
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 z-30">
+                    <div className="p-3 border-b border-slate-100 flex justify-between items-center">
+                      <h3 className="font-medium text-sm text-[var(--risto-text-secondary)]">Notifiche</h3>
+                      <button onClick={() => setShowNotifications(false)}><X className="h-4 w-4 text-slate-400" /></button>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="p-4 text-center text-sm text-slate-400">Nessuna notifica</div>
+                      ) : (
+                        notifications.map(notif => (
+                          <div key={notif.id} className="p-3 hover:bg-slate-50 border-b border-slate-50 last:border-0">
+                            <div className="flex justify-between items-start">
+                              <p className="text-sm font-medium text-[var(--risto-text-secondary)]">{notif.title}</p>
+                              <span className="text-[10px] text-slate-400">{notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">{notif.message}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </header>
 
         {view === ViewState.DASHBOARD && (
@@ -1086,21 +1129,17 @@ const App: React.FC = () => {
 };
 
 // Helper Component for Sidebar
-const SidebarItem = ({ icon, label, active, onClick, collapsed = false }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed?: boolean }) => (
+const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed?: boolean, badge?: string }) => (
   <button
     onClick={onClick}
     title={collapsed ? label : undefined}
-    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-3 rounded-xl transition-all duration-200 group ${
-      active
-        ? 'bg-indigo-50 text-indigo-600'
-        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-    }`}
+    className={`risto-sidebar-link ${active ? 'active' : ''} ${collapsed ? 'justify-center' : ''}`}
   >
-    <span className={`${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+    <span className="flex items-center justify-center w-[18px] h-[18px] flex-shrink-0">
       {icon}
     </span>
-    {!collapsed && <span className="font-medium text-sm">{label}</span>}
-    {active && !collapsed && <ChevronRight className="ml-auto h-4 w-4" />}
+    {!collapsed && <span>{label}</span>}
+    {!collapsed && badge && <span className="risto-sidebar-badge">{badge}</span>}
   </button>
 );
 
@@ -1109,13 +1148,11 @@ const BottomNavItem = ({ icon, label, active, onClick }: { icon: React.ReactNode
   <button
     onClick={onClick}
     className={`flex flex-1 flex-col items-center justify-center px-1 py-2 min-w-[48px] flex-shrink-0 transition-colors duration-200 ${
-      active
-        ? 'text-indigo-600'
-        : 'text-slate-400'
+      active ? 'text-[var(--risto-text-secondary)]' : 'text-[var(--risto-text-primary)]'
     }`}
   >
     {icon}
-    <span className={`text-[10px] mt-1 font-medium whitespace-nowrap ${active ? 'text-indigo-600' : 'text-slate-500'}`}>
+    <span className={`text-[10px] mt-1 font-medium whitespace-nowrap ${active ? 'text-[var(--risto-text-secondary)]' : 'text-[var(--risto-text-primary)]'}`}>
       {label}
     </span>
   </button>
