@@ -82,7 +82,8 @@ export interface TableMerge {
 
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa - green border
-  ARRIVED = 'ARRIVED'       // Arrivato - orange border
+  ARRIVED = 'ARRIVED',      // Arrivato - orange border
+  DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
 }
 
 export interface Reservation {

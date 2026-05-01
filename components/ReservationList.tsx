@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
@@ -423,12 +423,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const handleToggleArrivalStatus = (res: Reservation) => {
       const currentStatus = res.arrival_status || ArrivalStatus.WAITING;
-      const newStatus = currentStatus === ArrivalStatus.WAITING ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING;
-      onUpdateReservation({ ...res, arrival_status: newStatus });
+      // DEPARTED → WAITING (reopen), ARRIVED → WAITING, WAITING → ARRIVED
+      const newStatus = currentStatus === ArrivalStatus.ARRIVED ? ArrivalStatus.WAITING : ArrivalStatus.ARRIVED;
+      const finalStatus = currentStatus === ArrivalStatus.DEPARTED ? ArrivalStatus.WAITING : newStatus;
+      onUpdateReservation({ ...res, arrival_status: finalStatus });
       showToast(
-          newStatus === ArrivalStatus.ARRIVED
+          finalStatus === ArrivalStatus.ARRIVED
               ? `${toTitleCase(res.customer_name)} è arrivato`
               : `${toTitleCase(res.customer_name)} è in attesa`,
+          'success'
+      );
+  };
+
+  const handleFreeTable = (res: Reservation) => {
+      onUpdateReservation({ ...res, arrival_status: ArrivalStatus.DEPARTED });
+      const tableName = tables.find(t => t.id === res.table_id)?.name;
+      showToast(
+          tableName
+              ? `Tavolo ${tableName} liberato (${toTitleCase(res.customer_name)})`
+              : `Prenotazione di ${toTitleCase(res.customer_name)} chiusa`,
           'success'
       );
   };
@@ -579,29 +592,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // --- Helper Logic ---
 
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
-    return reservations.some(r => 
-        r.table_id === table_id && 
-        r.reservation_time.split('T')[0] === checkDate && 
-        r.shift === checkShift && 
-        r.id !== formData.id 
+    return reservations.some(r =>
+        r.table_id === table_id &&
+        r.reservation_time.split('T')[0] === checkDate &&
+        r.shift === checkShift &&
+        r.id !== formData.id &&
+        r.arrival_status !== ArrivalStatus.DEPARTED
     );
   };
 
   const getReservationForTable = (table_id: number) => {
-      return reservations.find(r => 
-          r.table_id === table_id && 
-          r.reservation_time.split('T')[0] === selectedDate.split('T')[0] && 
-          r.shift === selectedShift
+      return reservations.find(r =>
+          r.table_id === table_id &&
+          r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
+          r.shift === selectedShift &&
+          r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
 
   const getReservationForTableInForm = (table_id: number) => {
       if (!formData.reservation_time || !formData.shift) return null;
-      return reservations.find(r => 
-          r.table_id === table_id && 
-          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] && 
+      return reservations.find(r =>
+          r.table_id === table_id &&
+          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] &&
           r.shift === formData.shift &&
-          r.id !== formData.id 
+          r.id !== formData.id &&
+          r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
 
@@ -1065,6 +1081,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               { value: 'ALL', label: 'Tutti' },
                               { value: ArrivalStatus.WAITING, label: 'In attesa' },
                               { value: ArrivalStatus.ARRIVED, label: 'Arrivato' },
+                              { value: ArrivalStatus.DEPARTED, label: 'Liberato' },
                           ].map(opt => (
                               <button
                                   key={opt.value}
@@ -1159,18 +1176,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     const table = displayTables.find(t => t.id === res.table_id);
                     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
                     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-                    const borderColor = arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
+                    const isDeparted = arrivalStatus === ArrivalStatus.DEPARTED;
+                    const borderColor = isDeparted
+                        ? 'border-l-slate-400'
+                        : arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
+                    const cardOpacity = isDeparted ? 'opacity-70' : '';
 
-                    const tableBadgeColor = arrivalStatus === ArrivalStatus.ARRIVED
-                        ? 'bg-orange-50 border-orange-300 text-orange-700'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-700';
+                    const tableBadgeColor = isDeparted
+                        ? 'bg-slate-100 border-slate-300 text-slate-500'
+                        : arrivalStatus === ArrivalStatus.ARRIVED
+                            ? 'bg-orange-50 border-orange-300 text-orange-700'
+                            : 'bg-emerald-50 border-emerald-300 text-emerald-700';
                     const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
 
                     return (
-                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
+                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} ${cardOpacity} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
                             <div className="flex-1 min-w-0">
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
                                     <h3 className="font-bold text-lg text-slate-800">{toTitleCase(res.customer_name)}</h3>
+                                    {isDeparted && (
+                                        <span className="text-xs font-bold px-2 py-0.5 rounded border bg-slate-100 border-slate-300 text-slate-500">
+                                            LIBERATO
+                                        </span>
+                                    )}
                                     {/* Payment status - only show if paid */}
                                     {res.payment_status !== PaymentStatus.PENDING && (
                                         <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>
@@ -1213,14 +1241,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button
                                             onClick={() => handleToggleArrivalStatus(res)}
                                             className={`p-2 rounded-lg transition-colors ${
-                                                arrivalStatus === ArrivalStatus.ARRIVED
-                                                    ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
-                                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                                isDeparted
+                                                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                    : arrivalStatus === ArrivalStatus.ARRIVED
+                                                        ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                                                        : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
                                             }`}
-                                            title={arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                            title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
                                         >
                                             <UserCheck className="h-5 w-5" />
                                         </button>
+
+                                        {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                                            <button
+                                                onClick={() => handleFreeTable(res)}
+                                                className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
+                                                title="Libera tavolo (fine pasto)"
+                                            >
+                                                <LogOut className="h-5 w-5" />
+                                            </button>
+                                        )}
 
                                         <button
                                             onClick={() => handleEditClick(res)}
