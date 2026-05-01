@@ -5,7 +5,7 @@ import { User, UserRole } from '../types.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
-const JWT_EXPIRES_IN = '15m';
+const JWT_EXPIRES_IN = '6h';
 const JWT_REFRESH_EXPIRES_IN = '7d';
 
 export interface TokenPayload {

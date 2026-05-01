@@ -25,6 +25,7 @@ export interface Table {
   is_locked?: boolean;
   merged_with?: number[];
   temp_lock_expires_at?: number;
+  rotation?: number;
 }
 
 export interface Room {

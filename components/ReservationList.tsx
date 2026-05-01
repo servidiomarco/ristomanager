@@ -1,11 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
+
+// Helpers for local-date formatting (avoid UTC shift from toISOString)
+const formatLocalDate = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const formatLocalDateTime = (date: Date): string => {
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${formatLocalDate(date)}T${h}:${min}`;
+};
 
 // Helper to format datetime without timezone conversion
 const formatDateTime = (isoString: string): string => {
@@ -69,9 +83,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 }) => {
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().substring(0, 16));
+  const [selectedDate, setSelectedDate] = useState<string>(formatLocalDateTime(new Date()));
   const [selectedShift, setSelectedShift] = useState<Shift | 'ALL'>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [filterArrivalStatus, setFilterArrivalStatus] = useState<ArrivalStatus | 'ALL'>('ALL');
+  const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
+  const [filterHasAllergens, setFilterHasAllergens] = useState(false);
+  const [filterHasNotes, setFilterHasNotes] = useState(false);
+  const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
@@ -91,6 +111,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (interval) clearInterval(interval);
     };
   }, []);
+
+  // Auto-advance the selected date when midnight rolls over while the user
+  // is still viewing the previous "today". Manual navigation away from today
+  // is preserved.
+  const prevTodayRef = useRef<string>(formatLocalDate(new Date()));
+  useEffect(() => {
+    const newToday = formatLocalDate(currentTime);
+    if (newToday !== prevTodayRef.current) {
+      const selectedOnly = selectedDate.split('T')[0];
+      if (selectedOnly === prevTodayRef.current) {
+        const time = selectedDate.split('T')[1] || '12:00';
+        setSelectedDate(`${newToday}T${time}`);
+      }
+      prevTodayRef.current = newToday;
+    }
+  }, [currentTime, selectedDate]);
 
   useEffect(() => {
     if (rooms.length > 0 && activeMapRoomId === 'ALL') {
@@ -235,17 +271,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   );
 
   // Filter Logic for Main List
-  const filteredReservations = reservations.filter(r => {
-    const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
-    const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
-    const matchesStatus = filterStatus === 'ALL' ? true : r.payment_status === filterStatus;
-    const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
-    return matchesDate && matchesStatus && matchesShift && matchesSearch;
-  });
+  const activeFilterCount =
+    (filterStatus !== 'ALL' ? 1 : 0) +
+    (filterArrivalStatus !== 'ALL' ? 1 : 0) +
+    (filterGuestRange !== 'ALL' ? 1 : 0) +
+    (filterHasAllergens ? 1 : 0) +
+    (filterHasNotes ? 1 : 0);
+
+  const matchesGuestRange = (guests: number): boolean => {
+    switch (filterGuestRange) {
+      case '1-2': return guests >= 1 && guests <= 2;
+      case '3-4': return guests >= 3 && guests <= 4;
+      case '5-6': return guests >= 5 && guests <= 6;
+      case '7+': return guests >= 7;
+      default: return true;
+    }
+  };
+
+  const filteredReservations = reservations
+    .filter(r => {
+      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      const matchesStatus = filterStatus === 'ALL' ? true : r.payment_status === filterStatus;
+      const matchesArrival = filterArrivalStatus === 'ALL'
+        ? true
+        : (r.arrival_status || ArrivalStatus.WAITING) === filterArrivalStatus;
+      const matchesGuests = matchesGuestRange(r.guests || 0);
+      const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
+      const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
+      const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
+      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesSearch;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'time-asc': return a.reservation_time.localeCompare(b.reservation_time);
+        case 'time-desc': return b.reservation_time.localeCompare(a.reservation_time);
+        case 'name-asc': return (a.customer_name || '').localeCompare(b.customer_name || '', 'it', { sensitivity: 'base' });
+        case 'name-desc': return (b.customer_name || '').localeCompare(a.customer_name || '', 'it', { sensitivity: 'base' });
+        case 'guests-asc': return (a.guests || 0) - (b.guests || 0);
+        case 'guests-desc': return (b.guests || 0) - (a.guests || 0);
+        default: return 0;
+      }
+    });
+
+  const resetFilters = () => {
+    setFilterStatus('ALL');
+    setFilterArrivalStatus('ALL');
+    setFilterGuestRange('ALL');
+    setFilterHasAllergens(false);
+    setFilterHasNotes(false);
+    setSortBy('time-asc');
+  };
 
   // Date Navigation Helpers
   const selectedDateObj = new Date(selectedDate);
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatLocalDate(new Date());
   const selectedDateStr = selectedDate.split('T')[0];
   const isToday = selectedDateStr === todayStr;
 
@@ -254,7 +334,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     current.setDate(current.getDate() - 1);
     // Keep the same time
     const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(current.toISOString().split('T')[0] + 'T' + time);
+    setSelectedDate(formatLocalDate(current) + 'T' + time);
   };
 
   const goToNextDay = () => {
@@ -262,12 +342,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     current.setDate(current.getDate() + 1);
     // Keep the same time
     const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(current.toISOString().split('T')[0] + 'T' + time);
+    setSelectedDate(formatLocalDate(current) + 'T' + time);
   };
 
   const goToToday = () => {
     const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(new Date().toISOString().split('T')[0] + 'T' + time);
+    setSelectedDate(formatLocalDate(new Date()) + 'T' + time);
   };
 
   const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -694,6 +774,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
       const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+      const trimmedSearch = searchTerm.trim().toLowerCase();
+      const isSearchMatch = !!(trimmedSearch && reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch));
 
       // Responsive table sizes - smaller on mobile and tablets
       const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
@@ -719,16 +801,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 z-10 ring-2 ring-red-200'
                         : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
                 }
+                ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}
             `}
-            style={{ 
+            style={{
                 left: table.x,
                 top: table.y,
-                ...shapeStyles
+                ...shapeStyles,
+                transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
             }}
             title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero'}
             onClick={() => isOccupied && handleEditClick(reservation)}
         >
-            <span className="font-bold text-sm truncate px-1 max-w-full">{table.name}</span>
+            <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
             {isOccupied ? (
                 <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
                     <Users size={16} /> {reservation.guests}
@@ -881,7 +965,171 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </button>
                 </div>
             </div>
+
+            {viewMode === 'LIST' && (
+                <div className="flex items-stretch gap-2 w-full sm:w-auto">
+                    <div className="relative h-11">
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                            className="appearance-none h-11 pl-10 pr-9 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                            aria-label="Ordina prenotazioni"
+                        >
+                            <option value="time-asc">Orario ↑</option>
+                            <option value="time-desc">Orario ↓</option>
+                            <option value="name-asc">Nome A–Z</option>
+                            <option value="name-desc">Nome Z–A</option>
+                            <option value="guests-asc">Coperti ↑</option>
+                            <option value="guests-desc">Coperti ↓</option>
+                        </select>
+                        <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setShowFiltersPanel(o => !o)}
+                        className={`relative h-11 px-4 rounded-xl border text-sm font-medium transition-colors flex items-center gap-2 ${
+                            showFiltersPanel || activeFilterCount > 0
+                                ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                        aria-expanded={showFiltersPanel}
+                    >
+                        <Filter className="h-4 w-4" />
+                        Filtri
+                        {activeFilterCount > 0 && (
+                            <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold">
+                                {activeFilterCount}
+                            </span>
+                        )}
+                    </button>
+                </div>
+            )}
       </div>
+
+      {/* Filters Panel */}
+      {viewMode === 'LIST' && showFiltersPanel && (
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-indigo-500" />
+                      Filtri
+                  </h3>
+                  {activeFilterCount > 0 && (
+                      <button
+                          type="button"
+                          onClick={resetFilters}
+                          className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors"
+                      >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Reimposta
+                      </button>
+                  )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Stato pagamento</label>
+                      <div className="flex flex-wrap gap-1.5">
+                          {[
+                              { value: 'ALL', label: 'Tutti' },
+                              { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                              { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                              { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                              { value: PaymentStatus.REFUNDED, label: 'Rimborsato' },
+                          ].map(opt => (
+                              <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setFilterStatus(opt.value)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                      filterStatus === opt.value
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                              >
+                                  {opt.label}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  <div>
+                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Stato arrivo</label>
+                      <div className="flex flex-wrap gap-1.5">
+                          {[
+                              { value: 'ALL', label: 'Tutti' },
+                              { value: ArrivalStatus.WAITING, label: 'In attesa' },
+                              { value: ArrivalStatus.ARRIVED, label: 'Arrivato' },
+                          ].map(opt => (
+                              <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setFilterArrivalStatus(opt.value as ArrivalStatus | 'ALL')}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                      filterArrivalStatus === opt.value
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                              >
+                                  {opt.label}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  <div>
+                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Coperti</label>
+                      <div className="flex flex-wrap gap-1.5">
+                          {(['ALL', '1-2', '3-4', '5-6', '7+'] as const).map(range => (
+                              <button
+                                  key={range}
+                                  type="button"
+                                  onClick={() => setFilterGuestRange(range)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                      filterGuestRange === range
+                                          ? 'bg-indigo-600 text-white'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                              >
+                                  {range === 'ALL' ? 'Tutti' : range}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  <div className="md:col-span-2 lg:col-span-3">
+                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Altri filtri</label>
+                      <div className="flex flex-wrap gap-2">
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
+                              <input
+                                  type="checkbox"
+                                  checked={filterHasAllergens}
+                                  onChange={(e) => setFilterHasAllergens(e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                  Solo con allergeni
+                              </span>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
+                              <input
+                                  type="checkbox"
+                                  checked={filterHasNotes}
+                                  onChange={(e) => setFilterHasNotes(e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                                  <StickyNote className="h-3.5 w-3.5 text-slate-500" />
+                                  Solo con note
+                              </span>
+                          </label>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* --- LIST VIEW --- */}
       {viewMode === 'LIST' && (
@@ -1191,6 +1439,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <p className="text-xs text-slate-500">Compila i dati del cliente</p>
                                 </div>
                             </div>
+
                             {/* Customer Name with Voice Input */}
                             <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Nome Cliente</label>

@@ -290,10 +290,10 @@ app.get('/tables', authenticate, async (req, res) => {
 
 app.post('/tables', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
-        const { name, shape, seats, x, y, room_id, status } = req.body;
+        const { name, shape, seats, x, y, room_id, status, rotation } = req.body;
         const result = await pool.query(
-            'INSERT INTO tables (name, shape, seats, x, y, room_id, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [name, shape, seats, x, y, room_id, status]
+            'INSERT INTO tables (name, shape, seats, x, y, room_id, status, rotation) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [name, shape, seats, x, y, room_id, status, rotation || 0]
         );
         const newTable = result.rows[0];
 
@@ -333,7 +333,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         const values: any[] = [];
         let paramIndex = 1;
 
-        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at'];
+        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation'];
 
         allowedFields.forEach(field => {
             if (req.body.hasOwnProperty(field)) {
