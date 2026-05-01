@@ -135,14 +135,18 @@ const App: React.FC = () => {
     }
   };
 
-  const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const addToast = (
+    message: string,
+    type: 'success' | 'error' | 'info' = 'info',
+    options?: { title?: string; details?: string[]; duration?: number }
+  ) => {
       const id = Math.random().toString(36).substr(2, 9);
-      setToasts(prev => [...prev, { id, message, type }]);
-      
-      // Auto remove after 3 seconds
+      const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
+      setToasts(prev => [...prev, { id, message, type, title: options?.title, details: options?.details, duration }]);
+
       setTimeout(() => {
           setToasts(prev => prev.filter(t => t.id !== id));
-      }, 3000);
+      }, duration);
   };
 
   // Socket.IO Real-time Event Listeners
@@ -486,11 +490,30 @@ const App: React.FC = () => {
   };
 
   // --- Reservation Logic ---
+  const buildReservationDetails = (res: Reservation): string[] => {
+    const resDate = new Date(res.reservation_time);
+    const dateLabel = resDate.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+    const timeLabel = resDate.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    const shiftLabel = res.shift === Shift.LUNCH ? 'Pranzo' : 'Cena';
+    const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
+
+    const details = [
+      `${res.customer_name} · ${res.guests} ${res.guests === 1 ? 'ospite' : 'ospiti'}`,
+      `${dateLabel} · ${timeLabel} (${shiftLabel})`,
+      tableName ? `Tavolo ${tableName}` : 'Tavolo non assegnato',
+    ];
+    if (res.phone) details.push(res.phone);
+    return details;
+  };
+
   const handleUpdateReservation = async (updatedRes: Reservation) => {
     try {
       const returnedRes = await updateReservation(updatedRes.id as number, updatedRes);
       setReservations(prev => prev.map(r => r.id === returnedRes.id ? returnedRes : r));
-      addToast('Prenotazione aggiornata', 'success');
+      addToast('Prenotazione aggiornata', 'success', {
+        title: 'Modifica Prenotazione',
+        details: buildReservationDetails(returnedRes),
+      });
     } catch (error) {
       console.error("Error updating reservation:", error);
       addToast('Error updating reservation', 'error');
@@ -509,7 +532,11 @@ const App: React.FC = () => {
         timestamp: new Date(),
         read: false
       }, ...prev]);
-      addToast('Prenotazione inserita con successo', 'success');
+
+      addToast('Prenotazione inserita con successo', 'success', {
+        title: 'Nuova Prenotazione',
+        details: buildReservationDetails(returnedRes),
+      });
     } catch (error) {
       console.error("Error adding reservation:", error);
       addToast('Error adding reservation', 'error');
@@ -517,6 +544,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteReservation = async (id: number) => {
+    const targetRes = reservations.find(r => r.id === id);
     try {
       await deleteReservation(id);
       setReservations(prev => prev.filter(r => r.id !== id));
@@ -528,7 +556,9 @@ const App: React.FC = () => {
         timestamp: new Date(),
         read: false
       }, ...prev]);
-      addToast('Prenotazione cancellata', 'info');
+      addToast('Prenotazione cancellata', 'info', targetRes
+        ? { title: 'Prenotazione Cancellata', details: buildReservationDetails(targetRes) }
+        : undefined);
     } catch (error) {
       console.error("Error deleting reservation:", error);
       addToast('Error deleting reservation', 'error');
@@ -991,23 +1021,51 @@ const App: React.FC = () => {
         </nav>
 
         {/* Global Toasts */}
-        <div className="fixed bottom-20 lg:bottom-4 right-4 z-50 flex flex-col gap-2">
-            {toasts.map(toast => (
-                <div 
-                    key={toast.id}
-                    className={`
-                        flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border animate-in slide-in-from-right duration-300
-                        ${toast.type === 'success' ? 'bg-white border-emerald-200 text-emerald-700' : 
-                          toast.type === 'error' ? 'bg-white border-rose-200 text-rose-700' : 
-                          'bg-white border-indigo-200 text-indigo-700'}
-                    `}
-                >
-                    {toast.type === 'success' && <CheckCircle className="h-5 w-5" />}
-                    {toast.type === 'error' && <AlertTriangle className="h-5 w-5" />}
-                    {toast.type === 'info' && <Info className="h-5 w-5" />}
-                    <span className="text-sm font-medium text-slate-800">{toast.message}</span>
-                </div>
-            ))}
+        <div className="fixed bottom-20 lg:bottom-4 right-4 z-50 flex flex-col gap-3 max-w-[calc(100vw-2rem)] sm:max-w-md">
+            {toasts.map(toast => {
+                const hasDetails = toast.details && toast.details.length > 0;
+                const accent = toast.type === 'success'
+                    ? { border: 'border-emerald-200', iconBg: 'bg-emerald-50', iconText: 'text-emerald-600', titleText: 'text-emerald-700' }
+                    : toast.type === 'error'
+                    ? { border: 'border-rose-200', iconBg: 'bg-rose-50', iconText: 'text-rose-600', titleText: 'text-rose-700' }
+                    : { border: 'border-indigo-200', iconBg: 'bg-indigo-50', iconText: 'text-indigo-600', titleText: 'text-indigo-700' };
+                return (
+                    <div
+                        key={toast.id}
+                        className={`bg-white shadow-xl border ${accent.border} rounded-xl animate-in slide-in-from-right duration-300 ${
+                            hasDetails ? 'p-4 min-w-[300px] sm:min-w-[360px]' : 'flex items-center gap-3 px-4 py-3'
+                        }`}
+                    >
+                        {hasDetails ? (
+                            <div className="flex items-start gap-3">
+                                <div className={`p-2 rounded-lg ${accent.iconBg} ${accent.iconText} flex-shrink-0`}>
+                                    {toast.type === 'success' && <CheckCircle className="h-6 w-6" />}
+                                    {toast.type === 'error' && <AlertTriangle className="h-6 w-6" />}
+                                    {toast.type === 'info' && <Info className="h-6 w-6" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    {toast.title && (
+                                        <p className={`text-sm font-bold ${accent.titleText} mb-0.5`}>{toast.title}</p>
+                                    )}
+                                    <p className="text-base font-semibold text-slate-800 mb-1.5">{toast.message}</p>
+                                    <ul className="space-y-0.5">
+                                        {toast.details!.map((d, i) => (
+                                            <li key={i} className="text-sm text-slate-600 leading-snug">{d}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {toast.type === 'success' && <CheckCircle className={`h-5 w-5 ${accent.iconText}`} />}
+                                {toast.type === 'error' && <AlertTriangle className={`h-5 w-5 ${accent.iconText}`} />}
+                                {toast.type === 'info' && <Info className={`h-5 w-5 ${accent.iconText}`} />}
+                                <span className="text-sm font-medium text-slate-800">{toast.message}</span>
+                            </>
+                        )}
+                    </div>
+                );
+            })}
         </div>
       </main>
     </div>

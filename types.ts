@@ -117,6 +117,9 @@ export interface Toast {
     id: string;
     message: string;
     type: 'success' | 'error' | 'info';
+    title?: string;
+    details?: string[];
+    duration?: number;
 }
 
 export enum ViewState {
