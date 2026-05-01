@@ -735,7 +735,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     for (let i = 0; i < 7; i++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + i);
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(date);
 
       let dayReservations = Array.isArray(reservations)
         ? reservations.filter(r => r.reservation_time.startsWith(dateStr))
@@ -1512,11 +1512,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="text-xs font-medium text-emerald-700">Sala</span>
                     <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.sala.length}</span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.lunch.sala.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">Nessuno</p>
                     ) : (
-                      staffPresence.lunch.sala.slice(0, 4).map(s => (
+                      staffPresence.lunch.sala.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
                             {s.name[0]}{s.surname[0]}
@@ -1524,9 +1524,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <span className="text-xs text-slate-700 truncate">{s.name}</span>
                         </div>
                       ))
-                    )}
-                    {staffPresence.lunch.sala.length > 4 && (
-                      <p className="text-[10px] text-slate-400">+{staffPresence.lunch.sala.length - 4} altri</p>
                     )}
                   </div>
                 </div>
@@ -1537,11 +1534,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="text-xs font-medium text-orange-700">Cucina</span>
                     <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.cucina.length}</span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.lunch.cucina.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">Nessuno</p>
                     ) : (
-                      staffPresence.lunch.cucina.slice(0, 4).map(s => (
+                      staffPresence.lunch.cucina.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
                             {s.name[0]}{s.surname[0]}
@@ -1549,9 +1546,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <span className="text-xs text-slate-700 truncate">{s.name}</span>
                         </div>
                       ))
-                    )}
-                    {staffPresence.lunch.cucina.length > 4 && (
-                      <p className="text-[10px] text-slate-400">+{staffPresence.lunch.cucina.length - 4} altri</p>
                     )}
                   </div>
                 </div>
@@ -1577,11 +1571,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="text-xs font-medium text-emerald-700">Sala</span>
                     <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.sala.length}</span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.dinner.sala.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">Nessuno</p>
                     ) : (
-                      staffPresence.dinner.sala.slice(0, 4).map(s => (
+                      staffPresence.dinner.sala.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
                             {s.name[0]}{s.surname[0]}
@@ -1589,9 +1583,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <span className="text-xs text-slate-700 truncate">{s.name}</span>
                         </div>
                       ))
-                    )}
-                    {staffPresence.dinner.sala.length > 4 && (
-                      <p className="text-[10px] text-slate-400">+{staffPresence.dinner.sala.length - 4} altri</p>
                     )}
                   </div>
                 </div>
@@ -1602,11 +1593,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="text-xs font-medium text-orange-700">Cucina</span>
                     <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.cucina.length}</span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.dinner.cucina.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">Nessuno</p>
                     ) : (
-                      staffPresence.dinner.cucina.slice(0, 4).map(s => (
+                      staffPresence.dinner.cucina.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
                             {s.name[0]}{s.surname[0]}
@@ -1614,9 +1605,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <span className="text-xs text-slate-700 truncate">{s.name}</span>
                         </div>
                       ))
-                    )}
-                    {staffPresence.dinner.cucina.length > 4 && (
-                      <p className="text-[10px] text-slate-400">+{staffPresence.dinner.cucina.length - 4} altri</p>
                     )}
                   </div>
                 </div>

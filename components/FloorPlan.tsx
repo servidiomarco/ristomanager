@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw } from 'lucide-react';
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -354,7 +354,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // Apply CSS transform for smooth visual dragging (no React re-render).
     // Translation is in unscaled coords; the scaled wrapper maps it to screen.
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    // Translate must come first so the matrix's tx/ty entries match the
+    // unrotated drag delta (rotation last preserves values[4]/values[5]).
+    const dragTable = tables.find(t => t.id === dragState.tableId);
+    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = e.clientX;
@@ -471,7 +475,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const deltaX = (touch.clientX - dragState.startX) / s;
     const deltaY = (touch.clientY - dragState.startY) / s;
 
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    const dragTable = tables.find(t => t.id === dragState.tableId);
+    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = touch.clientX;
@@ -532,6 +538,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     if (singleSelectedTable) {
         onUpdateTable({ ...singleSelectedTable, name: newName });
     }
+  };
+
+  const handleRotate = (delta: number) => {
+      selectedTables.forEach(id => {
+          const table = tables.find(t => t.id === id);
+          if (table && !table.is_locked) {
+              const next = (((table.rotation || 0) + delta) % 360 + 360) % 360;
+              onUpdateTable({ ...table, rotation: next });
+          }
+      });
   };
 
   // New Room Handler (Inline)
@@ -621,6 +637,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           left: table.x,
           top: table.y,
           ...shapeStyles,
+          transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
           zIndex: isSelected ? 10 : 1
         }}
         onMouseDown={(e) => {
@@ -867,8 +884,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {singleSelectedTable && !singleSelectedTable.is_locked && (
                 <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 shadow-sm rounded-lg px-2 py-1">
                     <Users size={14} className="text-indigo-500" />
-                    <input 
-                        type="number" 
+                    <input
+                        type="number"
                         min="1"
                         max="20"
                         className="w-12 text-sm outline-none text-indigo-700 font-bold bg-transparent"
@@ -876,6 +893,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         onChange={(e) => handleSeatsChange(parseInt(e.target.value) || 1)}
                     />
                 </div>
+            )}
+
+            {/* Rotate Table */}
+            {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
+                <button
+                    onClick={(e) => handleRotate(e.shiftKey ? -15 : 15)}
+                    onContextMenu={(e) => { e.preventDefault(); handleRotate(-15); }}
+                    className="flex items-center gap-1 px-2 py-2 rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors"
+                    title={`Ruota +15° (Shift/click destro per -15°)${singleSelectedTable ? ` — attuale: ${singleSelectedTable.rotation || 0}°` : ''}`}
+                >
+                    <RotateCw size={16} />
+                    {singleSelectedTable && (singleSelectedTable.rotation || 0) !== 0 && (
+                        <span className="text-xs font-bold tabular-nums">{singleSelectedTable.rotation}°</span>
+                    )}
+                </button>
             )}
 
             {selectedTables.length > 1 && !selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (

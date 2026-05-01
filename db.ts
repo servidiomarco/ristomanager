@@ -82,13 +82,15 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 status VARCHAR(50) NOT NULL,
                 is_locked BOOLEAN DEFAULT false,
                 merged_with INTEGER[],
-                temp_lock_expires_at TIMESTAMPTZ
+                temp_lock_expires_at TIMESTAMPTZ,
+                rotation INTEGER DEFAULT 0
             );
         `);
 
         // Add min_seats and max_seats columns if they don't exist (migration)
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS min_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS max_seats INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS rotation INTEGER DEFAULT 0;`);
 
         // Per-shift table merges. Replaces the global tables.merged_with column,
         // which was a single state shared across all shifts and dates.
