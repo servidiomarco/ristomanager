@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
+import { PrintReservationsModal } from './PrintReservationsModal';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -155,6 +156,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // Map view canvas size tracking for responsive scaling
   const mapCanvasRef = useRef<HTMLDivElement>(null);
@@ -1002,6 +1004,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {activeFilterCount}
                             </span>
                         )}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsPrintModalOpen(true)}
+                        className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center gap-2"
+                        title="Stampa lista prenotazioni"
+                    >
+                        <Printer className="h-4 w-4" />
+                        Stampa
                     </button>
                 </div>
             )}
@@ -2201,6 +2212,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
         </div>
       )}
+
+      <PrintReservationsModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        reservations={reservations}
+        banquetMenus={banquetMenus}
+        rooms={rooms}
+        tables={tables}
+        initialDate={selectedDate.split('T')[0]}
+        initialShift={selectedShift}
+      />
     </div>
   );
 };
