@@ -774,84 +774,91 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [selectedDate]);
 
   return (
-    <div className="px-4 lg:px-8 pb-8 space-y-3">
-      {/* Date Navigation */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 mb-4">
-        <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-full border border-slate-200/60 p-1.5 shadow-[rgba(0,0,0,0.04)_0px_1px_3px]">
-          {!isToday && (
-            <button
-              onClick={goToToday}
-              className="px-3 py-1.5 text-xs font-medium text-[var(--risto-text-secondary)] hover:bg-[var(--risto-surface-light)] rounded-full transition-colors"
-            >
-              Oggi
-            </button>
-          )}
+    <div className="p-6 lg:p-8 space-y-6 lg:space-y-8">
+      {/* Header with Calendar Navigation */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+        <div>
+          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Dashboard</h1>
+          <p className="text-slate-500 text-base lg:text-lg">Hello on RistoCRM, {user?.full_name}</p>
+        </div>
 
-          <button
-            onClick={goToPreviousDay}
-            className="p-2 hover:bg-[var(--risto-surface-light)] rounded-full transition-colors"
-            aria-label="Giorno precedente"
-          >
-            <ChevronLeft className="h-4 w-4 text-[var(--risto-text-primary)]" />
-          </button>
-
-          <div className="relative">
-            <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 hover:bg-[var(--risto-surface-light)] rounded-full transition-colors pointer-events-none">
-              <Calendar className="h-4 w-4 text-[var(--risto-text-primary)] flex-shrink-0" />
-              <span className="font-medium text-[13px] text-[var(--risto-text-secondary)] capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
-                {formatDate(selectedDate)}
-              </span>
-            </div>
-            <input
-              ref={dateInputRef}
-              type="date"
-              value={selectedDateStr}
-              onChange={handleDateInputChange}
-              onClick={(e) => {
-                const input = e.currentTarget;
-                try {
-                  if (typeof input.showPicker === 'function') input.showPicker();
-                } catch {
-                  // ignore — fall back to native focus
-                }
-              }}
-              aria-label="Seleziona data"
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            />
+        {/* Clock + Date Navigation */}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-2 md:gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5 self-start sm:self-auto">
+            <Clock className="h-5 w-5 text-indigo-600" />
+            <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
+              {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+            </span>
           </div>
 
-          <button
-            onClick={goToNextDay}
-            className="p-2 hover:bg-[var(--risto-surface-light)] rounded-full transition-colors"
-            aria-label="Giorno successivo"
-          >
-            <ChevronRight className="h-4 w-4 text-[var(--risto-text-primary)]" />
-          </button>
+          <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
+            {!isToday && (
+              <button
+                onClick={goToToday}
+                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                Oggi
+              </button>
+            )}
+
+            <button
+              onClick={goToPreviousDay}
+              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="Giorno precedente"
+            >
+              <ChevronLeft className="h-5 w-5 text-slate-600" />
+            </button>
+
+            <div className="relative">
+              <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
+                <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
+                  {formatDate(selectedDate)}
+                </span>
+              </div>
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={selectedDateStr}
+                onChange={handleDateInputChange}
+                onClick={(e) => {
+                  // Desktop Chrome: clicking an opacity:0 date input doesn't
+                  // open the picker; force it via showPicker (mobile opens
+                  // natively on tap and treats this as a no-op or harmless).
+                  const input = e.currentTarget;
+                  try {
+                    if (typeof input.showPicker === 'function') input.showPicker();
+                  } catch {
+                    // ignore — fall back to native focus
+                  }
+                }}
+                aria-label="Seleziona data"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+
+            <button
+              onClick={goToNextDay}
+              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="Giorno successivo"
+            >
+              <ChevronRight className="h-5 w-5 text-slate-600" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* My Tasks Alert Banner */}
       {myTodos.length > 0 && (
-        <div
-          className="text-white p-4 sm:p-5 relative overflow-hidden"
-          style={{
-            background: 'var(--risto-primary)',
-            borderRadius: 24,
-            boxShadow: 'var(--risto-shadow-card)',
-          }}
-        >
-          <div
-            className="pointer-events-none absolute -top-10 -right-10 w-40 h-40 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(255, 237, 213, 0.2) 0%, transparent 70%)' }}
-          />
-          <div className="relative flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="p-2 bg-white/10 rounded-full">
-                <UserCircle className="h-5 w-5" />
+        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-white/20 rounded-lg">
+                <UserCircle className="h-6 w-6" />
               </div>
-              <div className="min-w-0">
-                <h3 className="font-medium text-[15px]">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
-                <p className="text-xs text-white/60 truncate">
+              <div>
+                <h3 className="font-semibold">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
+                <p className="text-sm text-white/80">
                   {myTodos.filter(isAssignedToMe).length > 0 && (
                     <span>{myTodos.filter(isAssignedToMe).length} personali</span>
                   )}
@@ -864,7 +871,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
             <button
               onClick={() => setShowMyTasksModal(true)}
-              className="px-4 py-2 bg-white/15 hover:bg-white/25 rounded-full text-[11px] font-medium tracking-[0.35px] uppercase transition-colors flex-shrink-0"
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
             >
               Visualizza
             </button>
@@ -874,8 +881,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* KPI Cards — per shift (Pranzo / Cena) */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
-        <div className="bg-white p-3 sm:p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)] flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-[var(--risto-tertiary)]/40 text-[#4338CA] rounded-2xl flex-shrink-0">
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
+          <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
             <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
           <div className="min-w-0 flex-1">
@@ -892,7 +899,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)] flex items-center gap-3 sm:gap-4">
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
             <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
@@ -910,7 +917,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)] flex items-center gap-3 sm:gap-4">
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-sky-50 text-sky-600 rounded-xl flex-shrink-0">
             <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
@@ -928,7 +935,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)] flex items-center gap-3 sm:gap-4">
+        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
           <div className="p-2 sm:p-3 bg-teal-50 text-teal-600 rounded-xl flex-shrink-0">
             <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
           </div>
@@ -949,7 +956,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <button
           type="button"
           onClick={onNavigateToBanquets}
-          className="bg-white p-3 sm:p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)] flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group col-span-2 md:col-span-1"
+          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group col-span-2 md:col-span-1"
         >
           <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
             <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
@@ -976,7 +983,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 1: Stato Tavoli (full width) */}
-      <div className="bg-white p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)]">
+      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
         <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
 
         {/* Shift Occupancy Summary */}
@@ -996,7 +1003,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
 
-          <div className="bg-[var(--risto-tertiary)]/40 rounded-xl p-3 sm:p-4 border border-indigo-100">
+          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
               <span className="text-sm font-medium text-indigo-800">Cena</span>
               <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
@@ -1049,7 +1056,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
         {/* Affluenza per Sala con orari - 75% */}
-        <div className="lg:col-span-3 bg-white p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)]">
+        <div className="lg:col-span-3 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
             <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
@@ -1077,7 +1084,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 onClick={() => setAffluenceShiftFilter('DINNER')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   affluenceShiftFilter === 'DINNER'
-                    ? 'bg-[var(--risto-primary)] text-white'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -1181,7 +1188,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Affluenza Settimanale - 25% */}
-        <div className="lg:col-span-1 bg-white p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)]">
+        <div className="lg:col-span-1 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex flex-col gap-3 mb-4">
             <div>
               <h2 className="text-base font-semibold text-slate-800">Affluenza Settimanale</h2>
@@ -1212,7 +1219,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 onClick={() => setChartShiftFilter('DINNER')}
                 className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
                   chartShiftFilter === 'DINNER'
-                    ? 'bg-[var(--risto-primary)] text-white'
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -1262,10 +1269,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 3: Attività + Spesa del giorno */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
-        <div ref={todoSectionRef} className="bg-white p-6 lg:p-8 risto-card-md shadow-[var(--risto-shadow-card)] flex flex-col">
+        <div ref={todoSectionRef} className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-[var(--risto-tertiary)]/40 text-[#4338CA] rounded-2xl">
+              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
                 <ListTodo className="h-6 w-6" />
               </div>
               <div>
@@ -1275,7 +1282,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
             <button
               onClick={handleOpenAddTodo}
-              className="p-2 bg-[var(--risto-primary)] text-white rounded-full hover:bg-[#1F2937] transition-colors"
+              className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
             >
               <Plus className="h-5 w-5" />
             </button>
@@ -1319,7 +1326,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
             {todosLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-8 w-8 text-[var(--risto-text-primary)] mx-auto mb-2 animate-spin" />
+                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
                 <p className="text-slate-400 text-sm">Caricamento attività...</p>
               </div>
             ) : filteredTodos.length === 0 ? (
@@ -1349,7 +1356,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                           todo.completed
                             ? 'bg-emerald-500 border-emerald-500 text-white'
-                            : 'border-slate-300 hover:border-[var(--risto-primary)]'
+                            : 'border-slate-300 hover:border-indigo-400'
                         }`}
                       >
                         {todo.completed && <Check className="h-3 w-3" />}
@@ -1362,7 +1369,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={() => handleOpenEditTodo(todo)}
-                              className="p-1 text-slate-400 hover:text-[var(--risto-text-secondary)] transition-colors"
+                              className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
@@ -1407,7 +1414,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa del Giorno (Shopping List) */}
-        <div className="bg-white p-6 lg:p-8 risto-card-md shadow-[var(--risto-shadow-card)] flex flex-col">
+        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
@@ -1521,7 +1528,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 4: Staff Presence */}
-      <div className="bg-white p-5 lg:p-6 risto-card-md shadow-[var(--risto-shadow-card)]">
+      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2.5 bg-violet-50 text-violet-600 rounded-xl">
             <UsersRound className="h-6 w-6" />
@@ -1598,7 +1605,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Cena */}
-            <div className="bg-[var(--risto-tertiary)]/40 rounded-xl p-4 border border-indigo-100">
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-8 h-8 rounded-lg bg-indigo-200 flex items-center justify-center">
                   <span className="text-indigo-700 text-sm font-bold">C</span>
@@ -1663,7 +1670,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {showMyTasksModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-[var(--risto-primary)]">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600">
               <div className="flex items-center gap-3 text-white">
                 <div className="p-2 bg-white/20 rounded-lg">
                   <UserCircle className="h-5 w-5" />
@@ -1693,7 +1700,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         <div className="flex items-start gap-3">
                           <button
                             onClick={() => handleToggleTodo(todo.id)}
-                            className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-[var(--risto-primary)] flex items-center justify-center transition-colors"
+                            className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-indigo-400 flex items-center justify-center transition-colors"
                           >
                           </button>
                           <div className="flex-1 min-w-0">
@@ -1737,7 +1744,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div className="p-4 border-t border-slate-100 bg-slate-50">
               <button
                 onClick={() => setShowMyTasksModal(false)}
-                className="w-full px-4 py-3 bg-[var(--risto-primary)] text-white rounded-full hover:bg-[#1F2937] transition-colors font-medium"
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
               >
                 Chiudi
               </button>
@@ -1757,16 +1764,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div className="p-4 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Titolo</label>
-                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none" autoFocus />
+                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Descrizione (opzionale)</label>
-                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none h-20 resize-none" />
+                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Priorità</label>
-                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none">
+                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
                     <option value={TodoPriority.LOW}>Bassa</option>
                     <option value={TodoPriority.MEDIUM}>Media</option>
                     <option value={TodoPriority.HIGH}>Alta</option>
@@ -1774,14 +1781,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria</label>
-                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none">
+                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
                     {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
                   </select>
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Scadenza (opzionale)</label>
-                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none" />
+                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1789,7 +1796,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <select
                     value={todoForm.assignedToUserId || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none"
+                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Nessuno</option>
                     {staffUsers.map(u => (
@@ -1802,7 +1809,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <select
                     value={todoForm.assignedToTeam || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-[var(--risto-primary)] outline-none"
+                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Nessun team</option>
                     {Object.entries(TEAM_LABELS).map(([key, label]) => (
@@ -1814,7 +1821,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
             <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
               <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="px-4 py-2 bg-[var(--risto-primary)] text-white rounded-full hover:bg-[#1F2937] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                 {editingTodo ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
@@ -1844,7 +1851,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-[var(--risto-tertiary)]/40 p-6 rounded-2xl border border-indigo-100 animate-fade-in">
+        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl border border-indigo-100 animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="h-5 w-5 text-indigo-600" />
             <h2 className="text-lg font-bold text-indigo-900">Analisi AI Gemini</h2>
