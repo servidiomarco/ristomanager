@@ -135,13 +135,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [rooms, activeMapRoomId]);
 
-  // Auto-switch from 'ALL' to a specific shift when in LIST view
+  // Auto-switch from 'ALL' to a specific shift (no 'Tutte' option in UI)
   useEffect(() => {
-    if (viewMode === 'LIST' && selectedShift === 'ALL') {
+    if (selectedShift === 'ALL') {
       const hour = new Date().getHours();
       setSelectedShift(hour >= 11 && hour < 17 ? Shift.LUNCH : Shift.DINNER);
     }
-  }, [viewMode, selectedShift]);
+  }, [selectedShift]);
 
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -945,14 +945,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
-                    {viewMode === 'MAP' && (
-                        <button
-                            onClick={() => setSelectedShift('ALL')}
-                            className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            Tutte
-                        </button>
-                    )}
                     <button
                         onClick={() => setSelectedShift(Shift.LUNCH)}
                         className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -1008,11 +1000,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button
                         type="button"
                         onClick={() => setIsPrintModalOpen(true)}
-                        className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center gap-2"
+                        className="ml-auto sm:ml-0 h-11 px-3 sm:px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                         title="Stampa lista prenotazioni"
+                        aria-label="Stampa lista prenotazioni"
                     >
                         <Printer className="h-4 w-4" />
-                        Stampa
+                        <span className="hidden sm:inline">Stampa</span>
                     </button>
                 </div>
             )}
@@ -1261,10 +1254,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleEditClick(res)}
+                                        className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:border-rose-400 transition-colors cursor-pointer"
+                                        title="Assegna un tavolo"
+                                    >
                                         <AlertCircle className="h-6 w-6" />
-                                        <span className="text-[10px] font-semibold text-center leading-tight">Nessun Tavolo</span>
-                                    </div>
+                                        <span className="text-[10px] font-semibold text-center leading-tight">Assegna Tavolo</span>
+                                    </button>
                                 )}
                             </div>
                         </div>
