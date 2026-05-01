@@ -491,9 +491,22 @@ const App: React.FC = () => {
 
   // --- Reservation Logic ---
   const buildReservationDetails = (res: Reservation): string[] => {
-    const resDate = new Date(res.reservation_time);
-    const dateLabel = resDate.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-    const timeLabel = resDate.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    // Treat reservation_time as a wall-clock string ("YYYY-MM-DDTHH:MM[:SS]")
+    // and parse the components directly, otherwise new Date() may shift it
+    // by the local UTC offset (e.g. 21:00 → 23:00 in CEST).
+    const [datePart, timePartRaw] = res.reservation_time.split('T');
+    const [yStr, mStr, dStr] = (datePart || '').split('-');
+    const [hhStr, mmStr] = (timePartRaw || '00:00').split(':');
+    const localDate = new Date(
+      Number(yStr),
+      Number(mStr) - 1,
+      Number(dStr),
+      Number(hhStr) || 0,
+      Number(mmStr) || 0,
+    );
+
+    const dateLabel = localDate.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+    const timeLabel = `${(hhStr || '00').padStart(2, '0')}:${(mmStr || '00').padStart(2, '0').slice(0, 2)}`;
     const shiftLabel = res.shift === Shift.LUNCH ? 'Pranzo' : 'Cena';
     const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
 
