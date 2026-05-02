@@ -333,7 +333,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         const values: any[] = [];
         let paramIndex = 1;
 
-        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation'];
+        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes'];
 
         allowedFields.forEach(field => {
             if (req.body.hasOwnProperty(field)) {
