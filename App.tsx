@@ -640,15 +640,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Connection Status Indicator */}
-      <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-medium transition-all duration-300 ${
-        isConnected
-          ? 'bg-emerald-100 text-emerald-700'
-          : 'bg-red-100 text-red-700 animate-pulse'
-      }`}>
-        {isConnected ? '🟢 Live' : '🔴 Offline'}
-      </div>
-
       {/* Sidebar - Hidden on mobile, visible on lg+ */}
       <aside className={`hidden lg:flex ${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-slate-200 flex-col transition-all duration-300 z-20 relative`}>
         <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-6'} border-b border-slate-100`}>
@@ -788,9 +779,10 @@ const App: React.FC = () => {
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
       <main className="flex-1 overflow-y-auto relative pb-20 lg:pb-0">
         {/* Header with Notification Center */}
-        <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6">
-           <span className="font-bold text-lg lg:hidden">RistoCRM</span>
-           <div className="ml-auto flex items-center gap-4">
+        <header className="h-16 bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6 gap-4">
+           <span className="font-bold text-lg lg:hidden flex-shrink-0">RistoCRM</span>
+           <div id="page-header-slot" className="flex-1 min-w-0 flex items-center justify-between gap-3" />
+           <div className="flex-shrink-0 flex items-center gap-4">
                <div className="relative">
                    <button 
                       onClick={() => setShowNotifications(!showNotifications)}
