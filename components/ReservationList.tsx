@@ -164,6 +164,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Draft restore banner — only shown while creating a new reservation
   const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
 
+  // Map-view: assign a free table to an unassigned reservation
+  const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
+
   // Map view canvas size tracking for responsive scaling
   const mapCanvasRef = useRef<HTMLDivElement>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
@@ -896,8 +899,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 ...shapeStyles,
                 transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
             }}
-            title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero'}
-            onClick={() => isOccupied && handleEditClick(reservation)}
+            title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione'}
+            onClick={() => {
+                if (isOccupied) {
+                    handleEditClick(reservation);
+                } else if (canEdit) {
+                    setAssignTableModal(table);
+                }
+            }}
         >
             <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
             {isOccupied ? (
@@ -2341,6 +2350,111 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         initialDate={selectedDate.split('T')[0]}
         initialShift={selectedShift}
       />
+
+      {/* Assign-to-free-table modal: click on a free table in Map view */}
+      {assignTableModal && (() => {
+          const table = assignTableModal;
+          const dateOnly = selectedDate.split('T')[0];
+          const effectiveShift: Shift = selectedShift !== 'ALL'
+            ? selectedShift
+            : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+          const unassigned = reservations
+            .filter(r => r.reservation_time.split('T')[0] === dateOnly)
+            .filter(r => r.shift === effectiveShift)
+            .filter(r => !r.table_id)
+            .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+
+          const assign = (r: Reservation) => {
+              onUpdateReservation({ ...r, table_id: table.id });
+              showToast(`Tavolo ${table.name} assegnato a ${toTitleCase(r.customer_name)}`, 'success');
+              setAssignTableModal(null);
+          };
+
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800">Assegna Tavolo {table.name}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                      <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAssignTableModal(null)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3">
+                  {unassigned.length === 0 ? (
+                    <div className="text-center py-10 px-4">
+                      <div className="mx-auto w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                        <Info className="h-6 w-6 text-slate-400" />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-700">Nessuna prenotazione senza tavolo</p>
+                      <p className="text-xs text-slate-500 mt-1">Tutte le prenotazioni di questo turno hanno già un tavolo assegnato.</p>
+                      <button
+                        onClick={() => {
+                            setAssignTableModal(null);
+                            handleOpenNew();
+                            setFormData(prev => ({ ...prev, table_id: table.id }));
+                        }}
+                        className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Crea nuova prenotazione
+                      </button>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {unassigned.map(r => {
+                        const insufficient = (r.guests || 0) > table.seats;
+                        return (
+                          <li key={r.id}>
+                            <button
+                              onClick={() => assign(r)}
+                              className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                  {insufficient && (
+                                    <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                                      Capienza insufficiente
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
+                                  {r.phone && <span className="truncate">{r.phone}</span>}
+                                </div>
+                              </div>
+                              <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {unassigned.length > 0 && (
+                  <div className="p-3 border-t border-slate-100 bg-slate-50">
+                    <button
+                      onClick={() => setAssignTableModal(null)}
+                      className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                    >
+                      Annulla
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+      })()}
     </div>
   );
 };
