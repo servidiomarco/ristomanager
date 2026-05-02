@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
-import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge } from '../types.js';
+import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride } from '../types.js';
 import { AuthService, TokenPayload } from '../auth/authService.js';
 
 // Extended socket type with user data
@@ -149,6 +149,17 @@ export class SocketService {
       this.io.emit('tableMerge:deleted', merge);
     }
     console.log(`Broadcasting tableMerge:deleted for ${merge.date} ${merge.shift} primary=${merge.primary_id}`);
+  }
+
+  // Per-shift hidden table events
+  broadcastTableHiddenCreated(hidden: TableHiddenOverride) {
+    this.io.emit('tableHidden:created', hidden);
+    console.log(`Broadcasting tableHidden:created for ${hidden.date} ${hidden.shift} table=${hidden.table_id}`);
+  }
+
+  broadcastTableHiddenDeleted(hidden: TableHiddenOverride) {
+    this.io.emit('tableHidden:deleted', hidden);
+    console.log(`Broadcasting tableHidden:deleted for ${hidden.date} ${hidden.shift} table=${hidden.table_id}`);
   }
 
   // Room broadcast methods

@@ -90,6 +90,13 @@ export interface TableMerge {
   merged_ids: number[];
 }
 
+export interface TableHiddenOverride {
+  id: number;
+  date: string; // YYYY-MM-DD
+  shift: Shift;
+  table_id: number;
+}
+
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa - green border
   ARRIVED = 'ARRIVED',      // Arrivato - orange border

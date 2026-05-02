@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote } from 'lucide-react';
-import { getTableMerges } from '../services/apiService';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff } from 'lucide-react';
+import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -64,6 +64,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
+  const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   // Refresh merges from the server for the current date+shift. Used after
   // local merge/split actions so the originating client updates immediately
@@ -74,6 +76,32 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setTableMerges(merges);
     } catch (err) {
       console.error('Error fetching table merges:', err);
+    }
+  };
+
+  const handleToggleHide = async (ids: number[]) => {
+    const allHidden = ids.every(id => hiddenTableIds.has(id));
+    try {
+      if (allHidden) {
+        await Promise.all(ids.map(id => deleteTableHidden(selectedDate, selectedShift, id)));
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          ids.forEach(id => next.delete(id));
+          return next;
+        });
+      } else {
+        const targets = ids.filter(id => !hiddenTableIds.has(id));
+        for (const id of targets) {
+          await createTableHidden(selectedDate, selectedShift, id);
+        }
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          targets.forEach(id => next.add(id));
+          return next;
+        });
+      }
+    } catch (err: any) {
+      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
     }
   };
 
@@ -90,6 +118,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         if (!cancelled) setTableMerges([]);
       })
       .finally(() => { if (!cancelled) setIsLoadingMerges(false); });
+    return () => { cancelled = true; };
+  }, [selectedDate, selectedShift]);
+
+  // Fetch hidden tables for the current date/shift
+  useEffect(() => {
+    let cancelled = false;
+    getTableHidden(selectedDate, selectedShift)
+      .then(rows => {
+        if (!cancelled) setHiddenTableIds(new Set(rows.map(r => r.table_id)));
+      })
+      .catch(err => {
+        console.error('Error fetching hidden tables:', err);
+        if (!cancelled) setHiddenTableIds(new Set());
+      });
     return () => { cancelled = true; };
   }, [selectedDate, selectedShift]);
 
@@ -124,6 +166,38 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return () => {
       socket.off('tableMerge:created', handleCreated);
       socket.off('tableMerge:deleted', handleDeleted);
+    };
+  }, [socket, selectedDate, selectedShift]);
+
+  // Listen for hidden-table socket events filtered by current date+shift
+  useEffect(() => {
+    if (!socket) return;
+
+    const matches = (h: TableHiddenOverride) => h.date === selectedDate && h.shift === selectedShift;
+
+    const handleHiddenCreated = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.add(h.table_id);
+        return next;
+      });
+    };
+
+    const handleHiddenDeleted = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.delete(h.table_id);
+        return next;
+      });
+    };
+
+    socket.on('tableHidden:created', handleHiddenCreated);
+    socket.on('tableHidden:deleted', handleHiddenDeleted);
+    return () => {
+      socket.off('tableHidden:created', handleHiddenCreated);
+      socket.off('tableHidden:deleted', handleHiddenDeleted);
     };
   }, [socket, selectedDate, selectedShift]);
 
@@ -190,7 +264,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     .filter((t, index, self) => self.findIndex(t2 => t2.id === t.id) === index)
     .filter(t => !displayTables.some(other =>
       other.merged_with && other.merged_with.map(id => Number(id)).includes(Number(t.id))
-    ));
+    ))
+    // Apply per-shift hide override unless the user toggled "show hidden".
+    .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
   // Compute the natural bounding box of the room from current tables, then
   // a scale factor that shrinks the room to fit the available canvas size.
@@ -597,6 +673,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
     const isMerged = table.merged_with && table.merged_with.length > 0;
+    const isHidden = hiddenTableIds.has(table.id);
 
     // Calculate remaining time if temp locked
     let timerDisplay = null;
@@ -614,7 +691,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       [TableStatus.DIRTY]: 'bg-gray-200 border-gray-400 text-gray-600'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
+    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -686,6 +763,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <Combine size={8} />
             </div>
         )}
+
+        {/* Hidden-for-shift Badge */}
+        {isHidden && (
+            <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                <EyeOff size={8} />
+            </div>
+        )}
       </div>
     );
   };
@@ -732,6 +816,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <span className="text-xs text-slate-400 hidden sm:inline">
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
+        {hiddenTableIds.size > 0 && (
+            <button
+                onClick={() => setShowHidden(s => !s)}
+                className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                    showHidden
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+                title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+            >
+                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
+            </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -961,6 +1059,29 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <Scissors size={16} /> Dividi
                 </button>
             )}
+
+            {/* Hide / Unhide for the current shift */}
+            {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (() => {
+                const allHidden = selectedTables.every(id => hiddenTableIds.has(id));
+                return (
+                    <button
+                        onClick={async () => {
+                            await handleToggleHide([...selectedTables]);
+                            setSelectedTables([]);
+                        }}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm ${
+                            allHidden
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                        title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
+                    >
+                        {allHidden
+                            ? <><Eye size={16} /> Mostra</>
+                            : <><EyeOff size={16} /> Nascondi</>}
+                    </button>
+                );
+            })()}
 
             {/* Delete only if not locked */}
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (

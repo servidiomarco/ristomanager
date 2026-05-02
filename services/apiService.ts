@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, Shift } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -66,7 +66,9 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
+    const message = errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage;
+    throw new Error(message);
   }
 
   if (expectJson) {
@@ -172,6 +174,41 @@ export const deleteTableMerge = async (
     method: 'DELETE',
     headers: getHeaders(),
     body: JSON.stringify({ date, shift, primary_id }),
+  }, false);
+};
+
+// ============================================
+// PER-SHIFT HIDDEN TABLES
+// ============================================
+
+export const getTableHidden = async (date: string, shift: Shift): Promise<TableHiddenOverride[]> => {
+  const params = new URLSearchParams({ date, shift });
+  return apiRequest<TableHiddenOverride[]>(`${API_URL}/table-hidden?${params.toString()}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createTableHidden = async (
+  date: string,
+  shift: Shift,
+  table_id: number
+): Promise<TableHiddenOverride> => {
+  return apiRequest<TableHiddenOverride>(`${API_URL}/table-hidden`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, table_id }),
+  });
+};
+
+export const deleteTableHidden = async (
+  date: string,
+  shift: Shift,
+  table_id: number
+): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/table-hidden`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, table_id }),
   }, false);
 };
 
