@@ -67,6 +67,10 @@ interface ReservationListProps {
   onUpdateTable: (table: Table) => Promise<void>;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   canEdit?: boolean;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
+  modalOnly?: boolean;
+  onModalClose?: () => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -81,7 +85,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onSplitTable,
   onUpdateTable,
   showToast,
-  canEdit = true
+  canEdit = true,
+  autoOpenNew = false,
+  onAutoOpenNewHandled,
+  modalOnly = false,
+  onModalClose
 }) => {
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
@@ -594,6 +602,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setIsFormOpen(true);
   };
 
+  // Auto-open new reservation form when triggered from outside (e.g. Dashboard CTA)
+  useEffect(() => {
+    if (autoOpenNew) {
+      handleOpenNew();
+      onAutoOpenNewHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenNew]);
+
+  // In modal-only mode, notify parent when the form closes
+  const wasFormOpenRef = useRef(false);
+  useEffect(() => {
+    if (modalOnly && wasFormOpenRef.current && !isFormOpen) {
+      onModalClose?.();
+    }
+    wasFormOpenRef.current = isFormOpen;
+  }, [isFormOpen, modalOnly, onModalClose]);
+
   // --- Helper Logic ---
 
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
@@ -855,7 +881,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   return (
-    <div className={`${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-4 sm:p-6 lg:p-8'} space-y-6`}>
+    <div className={modalOnly ? 'contents' : `${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-4 sm:p-6 lg:p-8'} space-y-6`}>
+      {!modalOnly && (
+      <React.Fragment>
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-[20px] sm:text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">Gestione Prenotazioni</h1>
@@ -1483,6 +1511,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           );
       })()}
 
+      </React.Fragment>
+      )}
       {/* Reservation Modal */}
       {isFormOpen && (
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4">

@@ -57,6 +57,7 @@ interface DashboardProps {
   rooms: Room[];
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
+  onNewReservation?: () => void;
 }
 
 // Shopping List Labels and Colors
@@ -78,7 +79,7 @@ const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
   'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNewReservation }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -791,16 +792,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
         const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
         const serviceLabel = inLunch
-          ? { text: 'SERVIZIO PRANZO · IN CORSO', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700' }
           : inDinner
-          ? { text: 'SERVIZIO CENA · IN CORSO', dot: 'bg-emerald-500', color: 'text-emerald-700' }
-          : { text: 'FUORI SERVIZIO', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
+          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
         return (
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
-                <span className={`text-[11px] uppercase tracking-[0.1em] font-semibold ${serviceLabel.color}`}>
+                <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
                   {serviceLabel.text}
                 </span>
               </div>
@@ -809,58 +810,79 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </h1>
             </div>
 
-            {/* Merged date · time pill */}
-            <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 self-start md:self-auto">
-              {!isToday && (
+            {/* Date navigator + time chip + new reservation button */}
+            <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto w-full md:w-auto">
+              {/* Date pill with fixed-position arrows */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 md:flex-none min-w-0">
+                {!isToday && (
+                  <button
+                    onClick={goToToday}
+                    className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors"
+                  >
+                    Oggi
+                  </button>
+                )}
+
                 <button
-                  onClick={goToToday}
-                  className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors"
+                  onClick={goToPreviousDay}
+                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                  aria-label="Giorno precedente"
                 >
-                  Oggi
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
-              )}
 
-              <button
-                onClick={goToPreviousDay}
-                className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                aria-label="Giorno precedente"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              <div className="relative">
-                <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full pointer-events-none">
-                  <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                  <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
-                    <span className="capitalize">{formatDate(selectedDate)}</span>
-                    {isToday && <span className="text-[var(--color-fg-muted)]"> · {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</span>}
-                  </span>
+                <div className="relative flex-1 md:w-[200px] md:flex-none flex justify-center min-w-0">
+                  <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
+                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
+                      {formatDate(selectedDate)}
+                    </span>
+                  </div>
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    value={selectedDateStr}
+                    onChange={handleDateInputChange}
+                    onClick={(e) => {
+                      const input = e.currentTarget;
+                      try {
+                        if (typeof input.showPicker === 'function') input.showPicker();
+                      } catch {
+                        // ignore — fall back to native focus
+                      }
+                    }}
+                    aria-label="Seleziona data"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
                 </div>
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  value={selectedDateStr}
-                  onChange={handleDateInputChange}
-                  onClick={(e) => {
-                    const input = e.currentTarget;
-                    try {
-                      if (typeof input.showPicker === 'function') input.showPicker();
-                    } catch {
-                      // ignore — fall back to native focus
-                    }
-                  }}
-                  aria-label="Seleziona data"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
+
+                <button
+                  onClick={goToNextDay}
+                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                  aria-label="Giorno successivo"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
 
-              <button
-                onClick={goToNextDay}
-                className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                aria-label="Giorno successivo"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
+              {/* Separate time chip — always shows live current time */}
+              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2">
+                <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+                  {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+
+              {/* Nuova prenotazione — primary CTA (desktop only; mobile uses floating FAB) */}
+              {onNewReservation && (
+                <button
+                  type="button"
+                  onClick={onNewReservation}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuova prenotazione
+                </button>
+              )}
             </div>
           </div>
         );
@@ -897,104 +919,116 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* KPI Cards — per shift (Pranzo / Cena), stacked rows */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
-        {/* Ospiti Attesi */}
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-              <Users className="h-4 w-4" />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Ospiti Attesi</p>
+      {/* KPI Cards — per shift (Pranzo / Cena), tinted meal-blocks */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
+        {/* Ospiti attesi */}
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti attesi</h3>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Users className="h-4 w-4" /></span>
           </div>
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <Sun className="h-3.5 w-3.5" />
+                </span>
+                Pranzo
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchExpectedGuests}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchExpectedGuests}</span>
             </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                  <Moon className="h-3.5 w-3.5" />
+                </span>
+                Cena
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerExpectedGuests}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Ospiti Arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-              <Users className="h-4 w-4" />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Ospiti Arrivati</p>
-          </div>
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
-              </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedGuests}</span>
-            </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
-              </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedGuests}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerExpectedGuests}</span>
             </div>
           </div>
         </div>
 
-        {/* Tavoli Attesi */}
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-              <Armchair className="h-4 w-4" />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Tavoli Attesi</p>
+        {/* Ospiti arrivati */}
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti arrivati</h3>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Users className="h-4 w-4" /></span>
           </div>
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <Sun className="h-3.5 w-3.5" />
+                </span>
+                Pranzo
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchTableIds.size}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedGuests}</span>
             </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                  <Moon className="h-3.5 w-3.5" />
+                </span>
+                Cena
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerTableIds.size}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedGuests}</span>
             </div>
           </div>
         </div>
 
-        {/* Tavoli Arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-              <Armchair className="h-4 w-4" />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Tavoli Arrivati</p>
+        {/* Tavoli attesi */}
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli attesi</h3>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Armchair className="h-4 w-4" /></span>
           </div>
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <Sun className="h-3.5 w-3.5" />
+                </span>
+                Pranzo
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedTableIds.size}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchTableIds.size}</span>
             </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                  <Moon className="h-3.5 w-3.5" />
+                </span>
+                Cena
               </span>
-              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedTableIds.size}</span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerTableIds.size}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tavoli arrivati */}
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli arrivati</h3>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Armchair className="h-4 w-4" /></span>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <Sun className="h-3.5 w-3.5" />
+                </span>
+                Pranzo
+              </span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedTableIds.size}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                  <Moon className="h-3.5 w-3.5" />
+                </span>
+                Cena
+              </span>
+              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedTableIds.size}</span>
             </div>
           </div>
         </div>
@@ -1003,42 +1037,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <button
           type="button"
           onClick={onNavigateToBanquets}
-          className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4 text-left hover:bg-[var(--color-surface-hover)] transition-colors group"
+          className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4 text-left hover:bg-[var(--color-surface-hover)] transition-colors group"
         >
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-              <Calendar className="h-4 w-4" />
-            </div>
-            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] flex-1">Prenotazioni & Banchetti</p>
-            <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] group-hover:text-[var(--color-fg)] group-hover:translate-x-0.5 transition-all" />
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0 group-hover:text-[var(--color-fg)] group-hover:translate-x-0.5 transition-all"><ChevronRight className="h-4 w-4" /></span>
           </div>
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                  <Sun className="h-3.5 w-3.5" />
+                </span>
+                Pranzo
               </span>
-              <span className="tabular text-[22px] leading-none font-semibold text-[var(--color-fg)]">{lunchReservations.length}</span>
+              <span className="tabular text-[24px] leading-none font-semibold text-[var(--color-fg)]">{lunchReservations.length}</span>
             </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                  <Moon className="h-3.5 w-3.5" />
+                </span>
+                Cena
               </span>
-              <span className="tabular text-[22px] leading-none font-semibold text-[var(--color-fg)]">{dinnerReservations.length}</span>
+              <span className="tabular text-[24px] leading-none font-semibold text-[var(--color-fg)]">{dinnerReservations.length}</span>
             </div>
-            <div className="border-t border-[var(--color-line)]" />
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
-                <Calendar className="h-3.5 w-3.5 text-rose-500" /> Banchetti
+            <div className="flex items-center justify-between rounded-xl bg-rose-50 px-3 py-2.5">
+              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                  <Calendar className="h-3.5 w-3.5" />
+                </span>
+                Banchetti
               </span>
-              <span className="tabular text-[22px] leading-none font-semibold text-rose-600">{banquetsToday}</span>
+              <span className="tabular text-[24px] leading-none font-semibold text-rose-600">{banquetsToday}</span>
             </div>
           </div>
         </button>
       </div>
 
       {/* Row 1: Stato Tavoli (full width) */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
         {/* Shift Occupancy Summary */}
@@ -1111,7 +1149,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
         {/* Affluenza per Sala con orari - 75% */}
-        <div className="lg:col-span-3 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
+        <div className="lg:col-span-3 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza per Orario</h2>
             <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
@@ -1243,7 +1281,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Affluenza Settimanale - 25% */}
-        <div className="lg:col-span-1 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
+        <div className="lg:col-span-1 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
           <div className="flex flex-col gap-3 mb-4">
             <div>
               <h2 className="text-base font-semibold text-[var(--color-fg)]">Affluenza Settimanale</h2>
@@ -1327,7 +1365,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 3: Attività + Spesa del giorno */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
-        <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] flex flex-col">
+        <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
@@ -1473,7 +1511,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa del Giorno (Shopping List) */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
@@ -1588,7 +1626,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 4: Staff Presence */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
             <UsersRound className="h-5 w-5" />
@@ -1891,7 +1929,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Today's Tasks Summary */}
       {todaysTodos.length > 0 && (
-        <div className="bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-line)]">
+        <div className="bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
           <div className="flex items-center gap-2 mb-2">
             <Clock className="h-4 w-4 text-[var(--color-fg-muted)]" />
             <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Attività di oggi</h3>
@@ -1911,7 +1949,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] animate-fade-in">
+        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>

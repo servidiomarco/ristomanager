@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -46,6 +46,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
+  const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
 
   // Theme (light/dark) — persisted, respects prefers-color-scheme on first visit
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -722,7 +723,7 @@ const App: React.FC = () => {
           )}
           {canAccessView(ViewState.MENU) && (
             <SidebarItem
-              icon={<MenuIcon size={20} />}
+              icon={<UtensilsCrossed size={20} />}
               label="Menu & Banchetti"
               active={view === ViewState.MENU}
               onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
@@ -815,10 +816,22 @@ const App: React.FC = () => {
               </div>
               <span className="font-semibold text-[15px] tracking-tight text-[var(--color-fg)]">RistoCRM</span>
            </div>
-           <div className="ml-auto flex items-center gap-1">
-              {/* Connection state pill */}
+           {/* Global search — visual only for now */}
+           <div className="hidden md:flex flex-1 max-w-md mx-4">
+              <label className="relative w-full">
+                <span className="sr-only">Cerca</span>
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
+                <input
+                  type="search"
+                  placeholder="Cerca..."
+                  className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
+                />
+              </label>
+           </div>
+           <div className="ml-auto flex items-center gap-2">
+              {/* Connection state — full pill on md+, status dot only on mobile */}
               <div
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
                   isConnected
                     ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] bg-[var(--color-surface)]'
                     : 'border-rose-200 text-rose-700 bg-rose-50 animate-pulse'
@@ -827,14 +840,50 @@ const App: React.FC = () => {
                 aria-live={isConnected ? 'polite' : 'assertive'}
                 aria-label={isConnected ? 'Connesso' : 'Non connesso'}
               >
-                {isConnected ? <Wifi className="h-3 w-3" aria-hidden /> : <WifiOff className="h-3 w-3" aria-hidden />}
-                <span className="hidden sm:inline">{isConnected ? 'Live' : 'Offline'}</span>
+                {isConnected ? (
+                  <>
+                    <span className="relative flex h-2 w-2" aria-hidden>
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping"></span>
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <Wifi className="h-3 w-3 text-emerald-600" aria-hidden />
+                  </>
+                ) : (
+                  <WifiOff className="h-3 w-3" aria-hidden />
+                )}
+                <span>{isConnected ? 'Live' : 'Offline'}</span>
               </div>
+              {/* Mobile-only status dot */}
+              <span
+                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
+                role="status"
+                aria-live={isConnected ? 'polite' : 'assertive'}
+                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
+                title={isConnected ? 'Connesso' : 'Non connesso'}
+              >
+                {isConnected && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" aria-hidden></span>
+                )}
+                <span
+                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                  aria-hidden
+                ></span>
+              </span>
+
+              {/* Search trigger — mobile only (visual stub) */}
+              <button
+                type="button"
+                className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                aria-label="Cerca"
+                title="Cerca"
+              >
+                <Search className="h-4 w-4" />
+              </button>
 
               {/* Theme toggle */}
               <button
                 onClick={toggleTheme}
-                className="p-2 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] rounded-md transition-colors"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
                 aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
                 title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
               >
@@ -844,7 +893,7 @@ const App: React.FC = () => {
                <div className="relative">
                    <button
                       onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
-                      className="p-2 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] rounded-md relative transition-colors"
+                      className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] relative transition-colors"
                       aria-label="Notifiche"
                       aria-expanded={showNotifications}
                     >
@@ -880,49 +929,41 @@ const App: React.FC = () => {
                    )}
                </div>
 
-               {/* Mobile-only user menu trigger — last in row */}
-               <div className="relative lg:hidden">
-                   <button
-                      onClick={() => { setShowUserMenu(o => !o); setShowNotifications(false); setShowMoreMenu(false); }}
-                      className="ml-1 w-8 h-8 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] flex items-center justify-center text-[11px] font-medium hover:opacity-90 transition-opacity"
-                      aria-label="Menu utente"
-                      aria-expanded={showUserMenu}
-                    >
-                       {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-                   </button>
-                   {showUserMenu && (
-                       <div className="absolute right-0 top-full mt-2 w-64 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-lg)] border border-[var(--color-line)] overflow-hidden z-30 animate-in fade-in slide-in-from-top-2">
-                           <div className="px-3 py-3 border-b border-[var(--color-line)] flex items-center gap-3">
-                               <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] font-medium text-xs">
-                                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-                               </div>
-                               <div className="flex-1 min-w-0">
-                                   <p className="text-sm font-medium text-[var(--color-fg)] truncate">{user?.full_name || 'Utente'}</p>
-                                   <p className="text-[11px] text-[var(--color-fg-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
-                               </div>
-                           </div>
-                           <button
-                               onClick={() => { setShowUserMenu(false); logout(); }}
-                               className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
-                           >
-                               <LogOut className="h-4 w-4" />
-                               Esci
-                           </button>
-                       </div>
-                   )}
-               </div>
            </div>
         </header>
 
         {view === ViewState.DASHBOARD && (
-          <Dashboard
-            reservations={reservations}
-            tables={tables}
-            dishes={dishes}
-            rooms={rooms}
-            banquetMenus={banquetMenus}
-            onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
-          />
+          <>
+            <Dashboard
+              reservations={reservations}
+              tables={tables}
+              dishes={dishes}
+              rooms={rooms}
+              banquetMenus={banquetMenus}
+              onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+              onNewReservation={() => setAutoOpenNewReservation(true)}
+            />
+            {autoOpenNewReservation && (
+              <ReservationList
+                reservations={reservations}
+                banquetMenus={banquetMenus}
+                tables={tables}
+                rooms={rooms}
+                onUpdateReservation={handleUpdateReservation}
+                onAddReservation={handleAddReservation}
+                onDeleteReservation={handleDeleteReservation}
+                onMergeTables={handleMergeTables}
+                onSplitTable={handleSplitTable}
+                onUpdateTable={handleUpdateTable}
+                showToast={addToast}
+                canEdit={hasPermission('reservations:full')}
+                modalOnly
+                autoOpenNew
+                onAutoOpenNewHandled={() => { /* noop — keep flag until modal closes */ }}
+                onModalClose={() => setAutoOpenNewReservation(false)}
+              />
+            )}
+          </>
         )}
 
         {view === ViewState.RESERVATIONS && (
@@ -939,6 +980,8 @@ const App: React.FC = () => {
                 onUpdateTable={handleUpdateTable}
                 showToast={addToast}
                 canEdit={hasPermission('reservations:full')}
+                autoOpenNew={autoOpenNewReservation}
+                onAutoOpenNewHandled={() => setAutoOpenNewReservation(false)}
             />
         )}
 
@@ -1099,7 +1142,7 @@ const App: React.FC = () => {
             )}
             {canAccessView(ViewState.MENU) && (
               <BottomNavItem
-                icon={<MenuIcon size={20} />}
+                icon={<UtensilsCrossed size={20} />}
                 label="Menu"
                 active={view === ViewState.MENU}
                 onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
@@ -1115,6 +1158,18 @@ const App: React.FC = () => {
             )}
           </div>
         </nav>
+
+        {/* Floating "Nuova prenotazione" FAB — mobile only, hidden during the new-reservation modal */}
+        {hasPermission('reservations:full') && !autoOpenNewReservation && !showMoreMenu && (
+          <button
+            type="button"
+            onClick={() => setAutoOpenNewReservation(true)}
+            aria-label="Nuova prenotazione"
+            className="fixed bottom-20 right-4 z-40 lg:hidden h-14 w-14 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all"
+          >
+            <Plus className="h-6 w-6" />
+          </button>
+        )}
 
         {/* "Altro" bottom sheet — mobile */}
         {showMoreMenu && (
@@ -1133,7 +1188,17 @@ const App: React.FC = () => {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="px-2 pb-6">
+              {/* User identity card */}
+              <div className="mx-4 mb-2 px-3 py-3 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] flex items-center justify-center text-[12px] font-medium shrink-0">
+                  {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-fg)] truncate">{user?.full_name || 'Utente'}</p>
+                  <p className="text-[11px] text-[var(--color-fg-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+                </div>
+              </div>
+              <div className="px-2 pb-2">
                 {canAccessView(ViewState.STAFF) && (
                   <button
                     onClick={() => { setShowMoreMenu(false); setView(ViewState.STAFF); }}
@@ -1155,13 +1220,22 @@ const App: React.FC = () => {
                   </button>
                 )}
               </div>
+              <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
+                <button
+                  onClick={() => { setShowMoreMenu(false); logout(); }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-rose-600 hover:bg-rose-50 transition-colors"
+                >
+                  <LogOut className="h-5 w-5" />
+                  <span className="text-sm font-medium">Esci</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* Global Toasts */}
         <div
-          className="fixed bottom-20 lg:bottom-4 right-4 z-50 flex flex-col gap-2 max-w-[calc(100vw-2rem)] sm:max-w-md"
+          className="fixed bottom-20 lg:bottom-4 left-4 right-auto lg:left-auto lg:right-4 z-50 flex flex-col gap-2 max-w-[calc(100vw-6rem)] sm:max-w-md"
           role="region"
           aria-label="Notifiche"
           aria-live="polite"
