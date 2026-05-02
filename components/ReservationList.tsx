@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
@@ -199,6 +200,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // Portal target for the page-level title/actions inside the global sticky header
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHeaderSlot(document.getElementById('page-header-slot'));
+  }, []);
+
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -264,7 +271,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
-  const { socket } = useSocket();
+  const { socket, isConnected } = useSocket();
 
   useEffect(() => {
     if (!socket) return;
@@ -945,41 +952,59 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   return (
-    <div className={`${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-6'} space-y-6`}>
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">Gestione Prenotazioni</h1>
-          <p className="text-slate-500">Gestisci turni, tavoli e pagamenti.</p>
-        </div>
-        
-        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+    <div className={`${viewMode === 'MAP' ? 'p-4 sm:p-6 pt-4' : 'max-w-7xl mx-auto p-6 pt-4'} space-y-4`}>
+      {headerSlot && createPortal(
+        <>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <h1 className="text-base sm:text-lg font-bold text-slate-800 truncate">Gestione Prenotazioni</h1>
+            <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium transition-all duration-300 ${
+              isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700 animate-pulse'
+            }`}>
+              {isConnected ? '🟢 Live' : '🔴 Offline'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             {canEdit && (
-            <button
+              <button
                 onClick={handleOpenNew}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all"
-            >
-                <Plus className="h-5 w-5" /> Nuova
-            </button>
+                className="hidden sm:flex items-center gap-2 bg-indigo-600 text-white px-3 sm:px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-all text-sm font-medium"
+              >
+                <Plus className="h-5 w-5" />
+                <span>Nuova</span>
+              </button>
             )}
-
             <div className="flex bg-slate-100 p-1 rounded-xl">
-                <button
-                   onClick={() => setViewMode('LIST')}
-                   className={`p-2 rounded-lg transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
-                   title="Vista Elenco"
-                >
-                    <List className="h-5 w-5" />
-                </button>
-                <button
-                   onClick={() => setViewMode('MAP')}
-                   className={`p-2 rounded-lg transition-all ${viewMode === 'MAP' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
-                   title="Vista Mappa Sala"
-                >
-                    <MapIcon className="h-5 w-5" />
-                </button>
+              <button
+                onClick={() => setViewMode('LIST')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
+                title="Vista Elenco"
+              >
+                <List className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setViewMode('MAP')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'MAP' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
+                title="Vista Mappa Sala"
+              >
+                <MapIcon className="h-5 w-5" />
+              </button>
             </div>
-        </div>
-      </div>
+          </div>
+        </>,
+        headerSlot
+      )}
+
+      {/* Floating Action Button — Nuova (mobile only) */}
+      {canEdit && (
+        <button
+          onClick={handleOpenNew}
+          className="sm:hidden fixed bottom-24 right-4 z-40 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl shadow-indigo-300 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center"
+          title="Nuova prenotazione"
+          aria-label="Nuova prenotazione"
+        >
+          <Plus className="h-7 w-7" />
+        </button>
+      )}
 
       {/* Search & Filters Bar */}
       <div className="flex flex-wrap items-stretch gap-3 bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200">
@@ -1469,26 +1494,58 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               : 1;
 
           return (
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-220px)] animate-in fade-in duration-300">
-                  {/* Room Selector for Map */}
-                  <div className="flex gap-2 mb-4 border-b border-slate-100 pb-2 overflow-x-auto scrollbar-hide">
-                      {rooms.map(room => (
-                          <button
-                              key={room.id}
-                              onClick={() => setActiveMapRoomId(room.id)}
-                              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
-                                  activeMapRoomId === room.id
-                                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                              }`}
-                          >
-                              {room.name}
-                          </button>
-                      ))}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-180px)] animate-in fade-in duration-300">
+                  {/* Combined room selector + stats row */}
+                  <div className="flex items-center gap-3 mb-3 border-b border-slate-100 pb-2">
+                      <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+                          {rooms.map(room => (
+                              <button
+                                  key={room.id}
+                                  onClick={() => setActiveMapRoomId(room.id)}
+                                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
+                                      activeMapRoomId === room.id
+                                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                              >
+                                  {room.name}
+                              </button>
+                          ))}
+                      </div>
+                      <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
+                          <div className="flex items-center gap-1.5">
+                              <Users size={14} className="text-indigo-500 flex-shrink-0" />
+                              <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
+                              <span className="text-slate-500">coperti</span>
+                          </div>
+                          <span className="text-slate-300">·</span>
+                          <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-slate-700">{reservationCountForDayShift}</span>
+                              <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+                          </div>
+                          {unassignedCountForDayShift > 0 && (
+                              <button
+                                  type="button"
+                                  onClick={() => setShowUnassignedModal(true)}
+                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm"
+                                  title="Tocca per vedere le prenotazioni senza tavolo"
+                              >
+                                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                                  <span className="text-sm font-bold">{unassignedCountForDayShift}</span>
+                                  <span className="text-xs">senza tavolo</span>
+                                  <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+                              </button>
+                          )}
+                          <span className="text-slate-300">·</span>
+                          <div className="flex items-center gap-1.5 text-slate-500">
+                              <span className="font-semibold text-slate-700">{occupiedTablesCount}</span>
+                              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+                          </div>
+                      </div>
                   </div>
 
-                  {/* Stats bar — visible above the map/list */}
-                  <div className="mb-3 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-x-4 gap-y-2 text-xs">
+                  {/* Mobile/tablet stats bar (shown below room tabs when md breakpoint is too narrow) */}
+                  <div className="md:hidden mb-3 px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                       <div className="flex items-center gap-1.5">
                           <Users size={14} className="text-indigo-500 flex-shrink-0" />
                           <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
@@ -1502,16 +1559,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           <button
                               type="button"
                               onClick={() => setShowUnassignedModal(true)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm"
+                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm w-fit"
                               title="Tocca per vedere le prenotazioni senza tavolo"
                           >
                               <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
                               <span className="text-sm font-bold">{unassignedCountForDayShift}</span>
-                              <span className="text-xs">{unassignedCountForDayShift === 1 ? 'senza tavolo' : 'senza tavolo'}</span>
+                              <span className="text-xs">senza tavolo</span>
                               <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
                           </button>
                       )}
-                      <div className="flex items-center gap-1.5 text-slate-500 sm:ml-auto justify-self-end">
+                      <div className="flex items-center gap-1.5 text-slate-500 justify-self-end">
                           <span className="font-semibold text-slate-700">{occupiedTablesCount}</span>
                           <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
                       </div>
