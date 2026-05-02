@@ -169,20 +169,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Map-view: list of reservations without an assigned table for the selected date+shift
   const [showUnassignedModal, setShowUnassignedModal] = useState(false);
 
-  // Map view canvas size tracking for responsive scaling
-  const mapCanvasRef = useRef<HTMLDivElement>(null);
+  // Map view canvas size tracking for responsive scaling.
+  // Use a state-based callback ref so the measurement re-runs whenever the
+  // canvas element mounts/unmounts (e.g. when viewMode or isPhone changes).
+  const [mapCanvasNode, setMapCanvasNode] = useState<HTMLDivElement | null>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
-    const el = mapCanvasRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!mapCanvasNode) {
+      setMapCanvasSize({ width: 0, height: 0 });
+      return;
+    }
+    const rect = mapCanvasNode.getBoundingClientRect();
+    setMapCanvasSize({ width: rect.width, height: rect.height });
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
         setMapCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
       }
     });
-    observer.observe(el);
+    observer.observe(mapCanvasNode);
     return () => observer.disconnect();
-  }, [viewMode]);
+  }, [mapCanvasNode]);
+
+  // Phone breakpoint detection (< 640px = Tailwind's sm) for list-style Map view on smartphones
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+  useEffect(() => {
+    const onResize = () => setIsPhone(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -1472,102 +1487,205 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       ))}
                   </div>
 
-                  {/* Map Canvas */}
-                  <div
-                    ref={mapCanvasRef}
-                    className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto md:overflow-hidden"
-                    style={{
-                        backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                        backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
-                    }}
-                  >
-                       {isLoadingMerges && (
-                           <div className="absolute inset-0 z-30 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center">
-                               <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                                   <span className="text-sm text-slate-600">Caricamento tavoli…</span>
-                               </div>
-                           </div>
-                       )}
-
-                       {/* Coperti badge */}
-                       <div className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur px-3 py-2 rounded-xl shadow-sm border border-slate-200 flex items-center gap-2 text-xs">
-                           <Users size={14} className="text-indigo-500" />
-                           <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
-                           <span className="text-slate-500">coperti</span>
-                           <span className="text-slate-300">·</span>
-                           <span className="font-semibold text-slate-600">{reservationCountForDayShift}</span>
-                           <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                           {unassignedCountForDayShift > 0 && (
-                               <>
-                                   <span className="text-slate-300">·</span>
-                                   <button
-                                       type="button"
-                                       onClick={() => setShowUnassignedModal(true)}
-                                       className="flex items-center gap-1 text-amber-700 font-semibold hover:bg-amber-50 -mx-1 px-1 rounded transition-colors"
-                                       title="Mostra prenotazioni senza tavolo"
-                                   >
-                                       <AlertTriangle size={12} className="text-amber-500" />
-                                       <span>{unassignedCountForDayShift}</span>
-                                       <span className="text-amber-600 font-medium">senza tavolo</span>
-                                   </button>
-                               </>
-                           )}
-                       </div>
-                       <div
-                           style={{
-                               width: extentWidth,
-                               height: extentHeight,
-                               transform: `scale(${scale})`,
-                               transformOrigin: 'top left',
-                               position: 'relative'
-                           }}
-                       >
-                           {tablesInRoom.map(renderMapTable)}
-                       </div>
-
-                       {/* Legend - collapsible */}
-                       <div className="absolute bottom-4 right-4 z-10 select-none">
-                           <button
-                               type="button"
-                               onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                               className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
-                               aria-expanded={isLegendOpen}
-                           >
-                               <Info size={14} className="text-indigo-500" />
-                               Legenda
-                           </button>
-                           {isLegendOpen && (
-                               <div
-                                   className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
-                                   onClick={(e) => e.stopPropagation()}
-                               >
-                                   <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
-                                   <div className="flex items-center gap-2 text-slate-600">
-                                       <div className="w-3 h-3 bg-white border border-emerald-400 rounded-sm"></div> Libero
-                                   </div>
-                                   <div className="flex items-center gap-2 text-slate-600">
-                                       <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
-                                   </div>
-                                   <div className="flex items-center gap-2 text-slate-600">
-                                       <div className="w-3 h-3 bg-orange-100 border border-orange-500 rounded-sm"></div> Arrivato
-                                   </div>
-                                   <div className="border-t border-slate-200 mt-1 pt-2">
-                                       <div className="font-semibold text-slate-700">Occupazione:</div>
-                                       <div className="text-sm">
-                                           <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
-                                       </div>
-                                   </div>
-                                   <div className="border-t border-slate-200 mt-1 pt-2">
-                                       <div className="font-semibold text-slate-700">Coperti:</div>
-                                       <div className="text-sm">
-                                           <span className="font-bold">{totalGuestsForDayShift}</span> in <span className="font-bold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
-                                       </div>
-                                   </div>
-                               </div>
-                           )}
-                       </div>
+                  {/* Stats bar — visible above the map/list */}
+                  <div className="mb-3 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-x-4 gap-y-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                          <Users size={14} className="text-indigo-500 flex-shrink-0" />
+                          <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
+                          <span className="text-slate-500">coperti</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-700">{reservationCountForDayShift}</span>
+                          <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+                      </div>
+                      {unassignedCountForDayShift > 0 && (
+                          <button
+                              type="button"
+                              onClick={() => setShowUnassignedModal(true)}
+                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm"
+                              title="Tocca per vedere le prenotazioni senza tavolo"
+                          >
+                              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                              <span className="text-sm font-bold">{unassignedCountForDayShift}</span>
+                              <span className="text-xs">{unassignedCountForDayShift === 1 ? 'senza tavolo' : 'senza tavolo'}</span>
+                              <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+                          </button>
+                      )}
+                      <div className="flex items-center gap-1.5 text-slate-500 sm:ml-auto justify-self-end">
+                          <span className="font-semibold text-slate-700">{occupiedTablesCount}</span>
+                          <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+                      </div>
                   </div>
+
+                  {isPhone ? (
+                      /* Mobile (smartphone) list view */
+                      <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white relative">
+                          {isLoadingMerges && (
+                              <div className="absolute inset-0 z-30 bg-white/70 backdrop-blur-[1px] flex items-center justify-center">
+                                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+                                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                                      <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                                  </div>
+                              </div>
+                          )}
+                          {tablesInRoom.length === 0 ? (
+                              <div className="text-center py-10 px-4 text-sm text-slate-500">
+                                  Nessun tavolo in questa sala.
+                              </div>
+                          ) : (
+                              <ul className="divide-y divide-slate-100">
+                                  {[...tablesInRoom]
+                                      .sort((a, b) => {
+                                          const ra = getReservationForTable(a.id);
+                                          const rb = getReservationForTable(b.id);
+                                          if (!!ra !== !!rb) return ra ? -1 : 1;
+                                          if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
+                                          return a.name.localeCompare(b.name, 'it', { numeric: true });
+                                      })
+                                      .map(table => {
+                                          const reservation = getReservationForTable(table.id);
+                                          const isOccupied = !!reservation;
+                                          const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                                          const trimmedSearch = searchTerm.trim().toLowerCase();
+                                          const isSearchMatch = !!(trimmedSearch && reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch));
+                                          const mergedNames = (table.merged_with && table.merged_with.length > 0)
+                                              ? table.merged_with
+                                                  .map(id => tables.find(t => Number(t.id) === Number(id))?.name)
+                                                  .filter((n): n is string => !!n)
+                                              : [];
+                                          const displayName = mergedNames.length > 0
+                                              ? `${table.name}+${mergedNames.join('+')}`
+                                              : table.name;
+                                          const isMerged = mergedNames.length > 0;
+                                          return (
+                                              <li key={table.id}>
+                                                  <button
+                                                      onClick={() => {
+                                                          if (isOccupied) {
+                                                              handleEditClick(reservation);
+                                                          } else if (canEdit) {
+                                                              setAssignTableModal(table);
+                                                          }
+                                                      }}
+                                                      className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
+                                                          isSearchMatch ? 'bg-indigo-50' : 'hover:bg-slate-50'
+                                                      }`}
+                                                  >
+                                                      <div className={`min-w-[4.5rem] h-16 px-2 rounded-xl flex items-center justify-center flex-shrink-0 border-2 font-bold ${isMerged ? 'text-base' : 'text-xl'} ${
+                                                          isArrived
+                                                              ? 'bg-orange-100 border-orange-500 text-orange-900'
+                                                              : isOccupied
+                                                                  ? 'bg-red-100 border-red-500 text-red-900'
+                                                                  : 'bg-white border-emerald-400 text-emerald-700'
+                                                      }`}>
+                                                          <span className="text-center leading-tight break-all">{displayName}</span>
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                          {isOccupied ? (
+                                                              <>
+                                                                  <div className="flex items-center gap-2">
+                                                                      <span className="font-semibold text-slate-800 truncate">{toTitleCase(reservation.customer_name)}</span>
+                                                                      {isArrived && (
+                                                                          <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded flex-shrink-0">Arrivato</span>
+                                                                      )}
+                                                                  </div>
+                                                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
+                                                                      <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                                                      <span className="flex items-center gap-1 text-slate-400"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                                                  </div>
+                                                              </>
+                                                          ) : (
+                                                              <>
+                                                                  <div className="font-semibold text-emerald-700">Libero</div>
+                                                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                                                      <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
+                                                                      {canEdit && <span className="text-indigo-500 font-medium">Tocca per assegnare</span>}
+                                                                  </div>
+                                                              </>
+                                                          )}
+                                                      </div>
+                                                      <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                                                  </button>
+                                              </li>
+                                          );
+                                      })}
+                              </ul>
+                          )}
+                      </div>
+                  ) : (
+                      /* Desktop / tablet positioned canvas view */
+                      <div
+                        ref={setMapCanvasNode}
+                        className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto md:overflow-hidden"
+                        style={{
+                            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+                            backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
+                        }}
+                      >
+                           {isLoadingMerges && (
+                               <div className="absolute inset-0 z-30 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center">
+                                   <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+                                       <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                                       <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                                   </div>
+                               </div>
+                           )}
+                           <div
+                               style={{
+                                   width: extentWidth,
+                                   height: extentHeight,
+                                   transform: `scale(${scale})`,
+                                   transformOrigin: 'top left',
+                                   position: 'relative'
+                               }}
+                           >
+                               {tablesInRoom.map(renderMapTable)}
+                           </div>
+
+                           {/* Legend - collapsible */}
+                           <div className="absolute bottom-4 right-4 z-10 select-none">
+                               <button
+                                   type="button"
+                                   onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                                   className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
+                                   aria-expanded={isLegendOpen}
+                               >
+                                   <Info size={14} className="text-indigo-500" />
+                                   Legenda
+                               </button>
+                               {isLegendOpen && (
+                                   <div
+                                       className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                                       onClick={(e) => e.stopPropagation()}
+                                   >
+                                       <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
+                                       <div className="flex items-center gap-2 text-slate-600">
+                                           <div className="w-3 h-3 bg-white border border-emerald-400 rounded-sm"></div> Libero
+                                       </div>
+                                       <div className="flex items-center gap-2 text-slate-600">
+                                           <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
+                                       </div>
+                                       <div className="flex items-center gap-2 text-slate-600">
+                                           <div className="w-3 h-3 bg-orange-100 border border-orange-500 rounded-sm"></div> Arrivato
+                                       </div>
+                                       <div className="border-t border-slate-200 mt-1 pt-2">
+                                           <div className="font-semibold text-slate-700">Occupazione:</div>
+                                           <div className="text-sm">
+                                               <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
+                                           </div>
+                                       </div>
+                                       <div className="border-t border-slate-200 mt-1 pt-2">
+                                           <div className="font-semibold text-slate-700">Coperti:</div>
+                                           <div className="text-sm">
+                                               <span className="font-bold">{totalGuestsForDayShift}</span> in <span className="font-bold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
+                                           </div>
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+                      </div>
+                  )}
               </div>
           );
       })()}
