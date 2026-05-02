@@ -3,6 +3,7 @@ import { X, Plus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, 
 import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UserManagementProps {
   onClose: () => void;
@@ -381,35 +382,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
       </div>
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertTriangle className="h-8 w-8 text-red-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Elimina Utente</h3>
-              <p className="text-slate-600 mb-6">
-                Sei sicuro di voler eliminare <strong>{deleteConfirmUser.full_name}</strong>? Questa azione non può essere annullata.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteConfirmUser(null)}
-                  className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors font-medium"
-                >
-                  Annulla
-                </button>
-                <button
-                  onClick={handleDeleteConfirm}
-                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium"
-                >
-                  Elimina
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={!!deleteConfirmUser}
+        title="Elimina Utente"
+        message="Stai per eliminare l'utente:"
+        itemName={deleteConfirmUser?.full_name}
+        onCancel={() => setDeleteConfirmUser(null)}
+        onConfirm={handleDeleteConfirm}
+      />
 
       {/* Error Modal */}
       {deleteError && (

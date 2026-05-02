@@ -644,10 +644,10 @@ app.get('/dishes', authenticate, async (req, res) => {
 
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price, category, allergens } = req.body;
+        const { name, description, price, category, allergens, photo_url } = req.body;
         const result = await pool.query(
-            'INSERT INTO dishes (name, description, price, category, allergens) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [name, description, price, category, allergens]
+            'INSERT INTO dishes (name, description, price, category, allergens, photo_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null]
         );
         const newDish = result.rows[0];
 
@@ -678,10 +678,10 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
 app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price, category, allergens } = req.body;
+        const { name, description, price, category, allergens, photo_url } = req.body;
         const result = await pool.query(
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5 WHERE id = $6 RETURNING *',
-            [name, description, price, category, allergens, id]
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id]
         );
         const updatedDish = result.rows[0];
 
@@ -747,7 +747,7 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount FROM banquet_menus ORDER BY event_date NULLS LAST, name"
         );
         res.json(result.rows);
     } catch (err) {
@@ -758,13 +758,18 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, event_date, deposit_amount } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, deposit_amount } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
+        // Derive flat dish_ids from courses if courses provided, else use the supplied flat list
+        const flatDishIds: number[] = Array.isArray(courses) && courses.length > 0
+            ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
+            : (Array.isArray(dish_ids) ? dish_ids : []);
+        const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await pool.query(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, event_date, deposit_amount) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
-            [name, description, price_per_person, dish_ids, event_date, deposit_amount ?? null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, deposit_amount) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null]
         );
         const newMenu = result.rows[0];
 
@@ -778,7 +783,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
                 ResourceType.BANQUET_MENU,
                 newMenu.id,
                 name,
-                { price_per_person, dish_count: dish_ids?.length || 0 }
+                { price_per_person, dish_count: flatDishIds.length }
             );
         }
 
@@ -795,13 +800,17 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, event_date, deposit_amount } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, deposit_amount } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
+        const flatDishIds: number[] = Array.isArray(courses) && courses.length > 0
+            ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
+            : (Array.isArray(dish_ids) ? dish_ids : []);
+        const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await pool.query(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, event_date = $5, deposit_amount = $6 WHERE id = $7 RETURNING id, name, description, price_per_person, dish_ids, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
-            [name, description, price_per_person, dish_ids, event_date, deposit_amount ?? null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, deposit_amount = $7 WHERE id = $8 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null, id]
         );
         const updatedMenu = result.rows[0];
 
@@ -815,7 +824,7 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
                 ResourceType.BANQUET_MENU,
                 parseInt(id, 10),
                 name,
-                { price_per_person, dish_count: dish_ids?.length || 0 }
+                { price_per_person, dish_count: flatDishIds.length }
             );
         }
 

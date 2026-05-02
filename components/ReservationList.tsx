@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -91,6 +92,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
   const [filterHasAllergens, setFilterHasAllergens] = useState(false);
   const [filterHasNotes, setFilterHasNotes] = useState(false);
+  const [filterNoTable, setFilterNoTable] = useState(false);
   const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -135,13 +137,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [rooms, activeMapRoomId]);
 
-  // Auto-switch from 'ALL' to a specific shift when in LIST view
+  // Auto-switch from 'ALL' to a specific shift (no 'Tutte' option in UI)
   useEffect(() => {
-    if (viewMode === 'LIST' && selectedShift === 'ALL') {
+    if (selectedShift === 'ALL') {
       const hour = new Date().getHours();
       setSelectedShift(hour >= 11 && hour < 17 ? Shift.LUNCH : Shift.DINNER);
     }
-  }, [viewMode, selectedShift]);
+  }, [selectedShift]);
 
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -278,7 +280,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     (filterArrivalStatus !== 'ALL' ? 1 : 0) +
     (filterGuestRange !== 'ALL' ? 1 : 0) +
     (filterHasAllergens ? 1 : 0) +
-    (filterHasNotes ? 1 : 0);
+    (filterHasNotes ? 1 : 0) +
+    (filterNoTable ? 1 : 0);
 
   const matchesGuestRange = (guests: number): boolean => {
     switch (filterGuestRange) {
@@ -301,8 +304,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesGuests = matchesGuestRange(r.guests || 0);
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
+      const matchesNoTable = !filterNoTable || !r.table_id;
       const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
-      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesSearch;
+      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -322,6 +326,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterGuestRange('ALL');
     setFilterHasAllergens(false);
     setFilterHasNotes(false);
+    setFilterNoTable(false);
     setSortBy('time-asc');
   };
 
@@ -423,12 +428,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const handleToggleArrivalStatus = (res: Reservation) => {
       const currentStatus = res.arrival_status || ArrivalStatus.WAITING;
-      const newStatus = currentStatus === ArrivalStatus.WAITING ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING;
-      onUpdateReservation({ ...res, arrival_status: newStatus });
+      // DEPARTED → WAITING (reopen), ARRIVED → WAITING, WAITING → ARRIVED
+      const newStatus = currentStatus === ArrivalStatus.ARRIVED ? ArrivalStatus.WAITING : ArrivalStatus.ARRIVED;
+      const finalStatus = currentStatus === ArrivalStatus.DEPARTED ? ArrivalStatus.WAITING : newStatus;
+      onUpdateReservation({ ...res, arrival_status: finalStatus });
       showToast(
-          newStatus === ArrivalStatus.ARRIVED
+          finalStatus === ArrivalStatus.ARRIVED
               ? `${toTitleCase(res.customer_name)} è arrivato`
               : `${toTitleCase(res.customer_name)} è in attesa`,
+          'success'
+      );
+  };
+
+  const handleFreeTable = (res: Reservation) => {
+      onUpdateReservation({ ...res, arrival_status: ArrivalStatus.DEPARTED });
+      const tableName = tables.find(t => t.id === res.table_id)?.name;
+      showToast(
+          tableName
+              ? `Tavolo ${tableName} liberato (${toTitleCase(res.customer_name)})`
+              : `Prenotazione di ${toTitleCase(res.customer_name)} chiusa`,
           'success'
       );
   };
@@ -579,29 +597,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // --- Helper Logic ---
 
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
-    return reservations.some(r => 
-        r.table_id === table_id && 
-        r.reservation_time.split('T')[0] === checkDate && 
-        r.shift === checkShift && 
-        r.id !== formData.id 
+    return reservations.some(r =>
+        r.table_id === table_id &&
+        r.reservation_time.split('T')[0] === checkDate &&
+        r.shift === checkShift &&
+        r.id !== formData.id &&
+        r.arrival_status !== ArrivalStatus.DEPARTED
     );
   };
 
   const getReservationForTable = (table_id: number) => {
-      return reservations.find(r => 
-          r.table_id === table_id && 
-          r.reservation_time.split('T')[0] === selectedDate.split('T')[0] && 
-          r.shift === selectedShift
+      return reservations.find(r =>
+          r.table_id === table_id &&
+          r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
+          r.shift === selectedShift &&
+          r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
 
   const getReservationForTableInForm = (table_id: number) => {
       if (!formData.reservation_time || !formData.shift) return null;
-      return reservations.find(r => 
-          r.table_id === table_id && 
-          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] && 
+      return reservations.find(r =>
+          r.table_id === table_id &&
+          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] &&
           r.shift === formData.shift &&
-          r.id !== formData.id 
+          r.id !== formData.id &&
+          r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
 
@@ -945,14 +966,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
-                    {viewMode === 'MAP' && (
-                        <button
-                            onClick={() => setSelectedShift('ALL')}
-                            className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            Tutte
-                        </button>
-                    )}
                     <button
                         onClick={() => setSelectedShift(Shift.LUNCH)}
                         className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -1008,11 +1021,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button
                         type="button"
                         onClick={() => setIsPrintModalOpen(true)}
-                        className="h-11 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center gap-2"
+                        className="ml-auto sm:ml-0 h-11 px-3 sm:px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                         title="Stampa lista prenotazioni"
+                        aria-label="Stampa lista prenotazioni"
                     >
                         <Printer className="h-4 w-4" />
-                        Stampa
+                        <span className="hidden sm:inline">Stampa</span>
                     </button>
                 </div>
             )}
@@ -1072,6 +1086,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               { value: 'ALL', label: 'Tutti' },
                               { value: ArrivalStatus.WAITING, label: 'In attesa' },
                               { value: ArrivalStatus.ARRIVED, label: 'Arrivato' },
+                              { value: ArrivalStatus.DEPARTED, label: 'Liberato' },
                           ].map(opt => (
                               <button
                                   key={opt.value}
@@ -1136,6 +1151,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   Solo con note
                               </span>
                           </label>
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
+                              <input
+                                  type="checkbox"
+                                  checked={filterNoTable}
+                                  onChange={(e) => setFilterNoTable(e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                                  <Armchair className="h-3.5 w-3.5 text-rose-500" />
+                                  Senza tavolo
+                              </span>
+                          </label>
                       </div>
                   </div>
               </div>
@@ -1166,18 +1193,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     const table = displayTables.find(t => t.id === res.table_id);
                     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
                     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-                    const borderColor = arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
+                    const isDeparted = arrivalStatus === ArrivalStatus.DEPARTED;
+                    const borderColor = isDeparted
+                        ? 'border-l-slate-400'
+                        : arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
+                    const cardOpacity = isDeparted ? 'opacity-70' : '';
 
-                    const tableBadgeColor = arrivalStatus === ArrivalStatus.ARRIVED
-                        ? 'bg-orange-50 border-orange-300 text-orange-700'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-700';
+                    const tableBadgeColor = isDeparted
+                        ? 'bg-slate-100 border-slate-300 text-slate-500'
+                        : arrivalStatus === ArrivalStatus.ARRIVED
+                            ? 'bg-orange-50 border-orange-300 text-orange-700'
+                            : 'bg-emerald-50 border-emerald-300 text-emerald-700';
                     const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
 
                     return (
-                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
+                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} ${cardOpacity} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
                             <div className="flex-1 min-w-0">
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
                                     <h3 className="font-bold text-lg text-slate-800">{toTitleCase(res.customer_name)}</h3>
+                                    {isDeparted && (
+                                        <span className="text-xs font-bold px-2 py-0.5 rounded border bg-slate-100 border-slate-300 text-slate-500">
+                                            LIBERATO
+                                        </span>
+                                    )}
                                     {/* Payment status - only show if paid */}
                                     {res.payment_status !== PaymentStatus.PENDING && (
                                         <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>
@@ -1220,14 +1258,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button
                                             onClick={() => handleToggleArrivalStatus(res)}
                                             className={`p-2 rounded-lg transition-colors ${
-                                                arrivalStatus === ArrivalStatus.ARRIVED
-                                                    ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
-                                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                                isDeparted
+                                                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                    : arrivalStatus === ArrivalStatus.ARRIVED
+                                                        ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                                                        : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
                                             }`}
-                                            title={arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                            title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
                                         >
                                             <UserCheck className="h-5 w-5" />
                                         </button>
+
+                                        {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                                            <button
+                                                onClick={() => handleFreeTable(res)}
+                                                className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
+                                                title="Libera tavolo (fine pasto)"
+                                            >
+                                                <LogOut className="h-5 w-5" />
+                                            </button>
+                                        )}
 
                                         <button
                                             onClick={() => handleEditClick(res)}
@@ -1261,10 +1311,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleEditClick(res)}
+                                        className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:border-rose-400 transition-colors cursor-pointer"
+                                        title="Assegna un tavolo"
+                                    >
                                         <AlertCircle className="h-6 w-6" />
-                                        <span className="text-[10px] font-semibold text-center leading-tight">Nessun Tavolo</span>
-                                    </div>
+                                        <span className="text-[10px] font-semibold text-center leading-tight">Assegna Tavolo</span>
+                                    </button>
                                 )}
                             </div>
                         </div>
@@ -2177,41 +2232,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmModal.show && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mb-4">
-                <Trash2 className="h-8 w-8 text-rose-600" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">Conferma Eliminazione</h3>
-              <p className="text-slate-600 mb-1">
-                Stai per eliminare la prenotazione di:
-              </p>
-              <p className="text-lg font-semibold text-slate-800 mb-4">
-                {deleteConfirmModal.customerName}
-              </p>
-              <p className="text-sm text-slate-500">
-                Questa azione non può essere annullata.
-              </p>
-            </div>
-            <div className="flex border-t border-slate-100">
-              <button
-                onClick={handleCancelDelete}
-                className="flex-1 px-6 py-4 text-slate-700 font-medium hover:bg-slate-50 transition-colors border-r border-slate-100"
-              >
-                Annulla
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                className="flex-1 px-6 py-4 text-rose-600 font-medium hover:bg-rose-50 transition-colors"
-              >
-                Elimina
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={deleteConfirmModal.show}
+        message="Stai per eliminare la prenotazione di:"
+        itemName={deleteConfirmModal.customerName}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
+      />
 
       <PrintReservationsModal
         isOpen={isPrintModalOpen}

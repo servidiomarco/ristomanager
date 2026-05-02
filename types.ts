@@ -42,6 +42,7 @@ export interface Dish {
   price: number;
   category?: string;
   allergens?: string[];
+  photo_url?: string;
 }
 
 export const COMMON_ALLERGENS = [
@@ -50,13 +51,19 @@ export const COMMON_ALLERGENS = [
   "Sesamo", "Solfiti", "Lupini", "Molluschi"
 ];
 
+export interface BanquetCourse {
+  name: string;          // e.g. "1ª Uscita", "Antipasti"
+  dish_ids: number[];
+}
+
 export interface BanquetMenu {
   id: number;
   name: string;
   description: string;
   price_per_person: number;
-  dish_ids: number[];
-  event_date: string; // YYYY-MM-DD
+  dish_ids: number[];          // flat list, derived from courses for backward compat
+  courses?: BanquetCourse[];   // new structured composition
+  event_date: string;          // YYYY-MM-DD
   deposit_amount?: number;
 }
 
@@ -82,7 +89,8 @@ export interface TableMerge {
 
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa - green border
-  ARRIVED = 'ARRIVED'       // Arrivato - orange border
+  ARRIVED = 'ARRIVED',      // Arrivato - orange border
+  DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
 }
 
 export interface Reservation {
