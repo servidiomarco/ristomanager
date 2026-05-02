@@ -156,6 +156,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                   <option value="ALL">Tutti</option>
                   <option value={ArrivalStatus.WAITING}>In attesa</option>
                   <option value={ArrivalStatus.ARRIVED}>Arrivati</option>
+                  <option value={ArrivalStatus.DEPARTED}>Liberati</option>
                 </select>
               </div>
             </div>

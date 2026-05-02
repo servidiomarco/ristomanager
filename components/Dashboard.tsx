@@ -6,6 +6,7 @@ import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/
 import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -120,6 +121,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [todosLoading, setTodosLoading] = useState(true);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showTodoModal, setShowTodoModal] = useState(false);
+  const [deleteTodoConfirm, setDeleteTodoConfirm] = useState<TodoItem | null>(null);
   const [showMyTasksModal, setShowMyTasksModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [staffUsers, setStaffUsers] = useState<User[]>([]);
@@ -1374,7 +1376,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
-                              onClick={() => handleDeleteTodo(todo.id)}
+                              onClick={() => setDeleteTodoConfirm(todo)}
                               className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1861,6 +1863,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteTodoConfirm}
+        title="Elimina Attività"
+        message="Stai per eliminare l'attività:"
+        itemName={deleteTodoConfirm?.title}
+        onCancel={() => setDeleteTodoConfirm(null)}
+        onConfirm={() => {
+          if (deleteTodoConfirm) handleDeleteTodo(deleteTodoConfirm.id);
+          setDeleteTodoConfirm(null);
+        }}
+      />
     </div>
   );
 };
