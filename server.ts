@@ -140,8 +140,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 notes ?? null,
                 email ?? null,
                 phone ?? null,
-                payment_status,
-                arrival_status || 'WAITING',
+                payment_status ?? 'PENDING',
+                arrival_status ?? 'WAITING',
             ]
         );
         const newReservation = result.rows[0];
@@ -165,9 +165,15 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
 
         res.status(201).json(newReservation);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
+    } catch (err: any) {
+        console.error('POST /reservations error:', err);
+        console.error('  body:', JSON.stringify(req.body));
+        res.status(500).json({
+            error: 'Internal server error',
+            detail: err?.message,
+            code: err?.code,
+            constraint: err?.constraint,
+        });
     }
 });
 
@@ -186,7 +192,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 notes ?? null,
                 email ?? null,
                 phone ?? null,
-                payment_status,
+                payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
                 id,
             ]
@@ -212,9 +218,15 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (socketService) socketService.broadcastReservationUpdated(updatedReservation, socketId);
 
         res.json(updatedReservation);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
+    } catch (err: any) {
+        console.error('PUT /reservations/:id error:', err);
+        console.error('  body:', JSON.stringify(req.body));
+        res.status(500).json({
+            error: 'Internal server error',
+            detail: err?.message,
+            code: err?.code,
+            constraint: err?.constraint,
+        });
     }
 });
 
