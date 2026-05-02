@@ -93,39 +93,39 @@ export const PrintReservationsModal: React.FC<Props> = ({
   return (
     <>
       {/* Modal — visible on screen, hidden in print */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 no-print">
-        <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between p-5 border-b border-slate-200">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <Printer className="h-6 w-6 text-indigo-600" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] p-4 no-print">
+        <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] max-w-4xl w-full max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-line)]">
+            <h2 className="text-[15px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+              <Printer className="h-4 w-4 text-[var(--color-fg-muted)]" />
               Stampa Prenotazioni
             </h2>
-            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg" aria-label="Chiudi">
-              <X className="h-5 w-5 text-slate-600" />
+            <button onClick={onClose} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]" aria-label="Chiudi">
+              <X className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="p-5 overflow-y-auto flex-1">
+          <div className="px-5 py-4 overflow-y-auto flex-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
                   type="date"
                   value={printDate}
                   onChange={(e) => setPrintDate(e.target.value)}
-                  className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Turno</label>
-                <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full w-full">
                   {(['ALL', Shift.LUNCH, Shift.DINNER] as const).map(s => (
                     <button
                       key={s}
                       type="button"
                       onClick={() => setPrintShift(s)}
-                      className={`flex-1 h-9 rounded-lg text-sm font-medium transition-all ${
-                        printShift === s ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                      className={`flex-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                        printShift === s ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
                       }`}
                     >
                       {s === 'ALL' ? 'Tutti' : s === Shift.LUNCH ? 'Pranzo' : 'Cena'}
@@ -134,11 +134,11 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Sala</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Sala</label>
                 <select
                   value={printRoomId === 'ALL' ? 'ALL' : String(printRoomId)}
                   onChange={(e) => setPrintRoomId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                  className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   <option value="ALL">Tutte le sale</option>
                   {rooms.map(r => (
@@ -147,11 +147,11 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Stato arrivo</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Stato arrivo</label>
                 <select
                   value={printArrival}
                   onChange={(e) => setPrintArrival(e.target.value as ArrivalStatus | 'ALL')}
-                  className="w-full h-11 px-3 rounded-lg border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   <option value="ALL">Tutti</option>
                   <option value={ArrivalStatus.WAITING}>In attesa</option>
@@ -166,17 +166,17 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 type="checkbox"
                 checked={includeBanquets}
                 onChange={(e) => setIncludeBanquets(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-4 w-4 rounded border-[var(--color-line)]"
               />
-              <span className="text-sm text-slate-700">Includi banchetti del giorno</span>
+              <span className="text-sm text-[var(--color-fg)]">Includi banchetti del giorno</span>
             </label>
 
-            <div className="border-t border-slate-200 pt-4">
-              <p className="text-xs uppercase text-slate-400 font-medium mb-2 tracking-wider">Anteprima</p>
-              <div className="bg-slate-50 rounded-lg p-3 text-sm space-y-1">
-                <p className="font-semibold text-slate-800 capitalize">{formatPrintDate(printDate)}</p>
-                <p className="text-slate-600">{shiftLabel} · {roomLabel}</p>
-                <p className="text-slate-500">
+            <div className="border-t border-[var(--color-line)] pt-4">
+              <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Anteprima</p>
+              <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md p-3 text-sm space-y-1">
+                <p className="font-semibold text-[var(--color-fg)] capitalize">{formatPrintDate(printDate)}</p>
+                <p className="text-[var(--color-fg-muted)]">{shiftLabel} · {roomLabel}</p>
+                <p className="text-[var(--color-fg-subtle)]">
                   {filteredReservations.length} prenotazioni · {totalGuests} ospiti · {arrivedCount} arrivati
                   {includeBanquets && banquetsForDate.length > 0 && ` · ${banquetsForDate.length} banchetti`}
                 </p>
@@ -184,19 +184,19 @@ export const PrintReservationsModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 p-5 border-t border-slate-200">
+          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--color-line)]">
             <button
               onClick={onClose}
-              className="px-4 h-11 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium"
+              className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
             >
               Annulla
             </button>
             <button
               onClick={handlePrint}
               disabled={filteredReservations.length === 0 && banquetsForDate.length === 0}
-              className="px-5 h-11 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Printer className="h-5 w-5" />
+              <Printer className="h-4 w-4" />
               Stampa
             </button>
           </div>

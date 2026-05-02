@@ -776,104 +776,120 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [selectedDate]);
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 lg:space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
       {/* Header with Calendar Navigation */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-        <div>
-          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-500 text-base lg:text-lg">Hello on RistoCRM, {user?.full_name}</p>
-        </div>
-
-        {/* Clock + Date Navigation */}
-        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-2 md:gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5 self-start sm:self-auto">
-            <Clock className="h-5 w-5 text-indigo-600" />
-            <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
-              {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
-            {!isToday && (
-              <button
-                onClick={goToToday}
-                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-              >
-                Oggi
-              </button>
-            )}
-
-            <button
-              onClick={goToPreviousDay}
-              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Giorno precedente"
-            >
-              <ChevronLeft className="h-5 w-5 text-slate-600" />
-            </button>
-
-            <div className="relative">
-              <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-                <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
-                  {formatDate(selectedDate)}
+      {(() => {
+        const hour = currentTime.getHours();
+        const greeting =
+          hour >= 5 && hour < 12 ? 'Buongiorno'
+          : hour >= 12 && hour < 18 ? 'Buon pomeriggio'
+          : hour >= 18 && hour < 23 ? 'Buonasera'
+          : 'Buonanotte';
+        const firstName = user?.full_name?.trim().split(' ')[0] || 'Utente';
+        // Service window: lunch 11:00-15:30, dinner 18:00-23:30
+        const minutes = hour * 60 + currentTime.getMinutes();
+        const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
+        const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
+        const serviceLabel = inLunch
+          ? { text: 'SERVIZIO PRANZO · IN CORSO', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          : inDinner
+          ? { text: 'SERVIZIO CENA · IN CORSO', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          : { text: 'FUORI SERVIZIO', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
+        return (
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
+                <span className={`text-[11px] uppercase tracking-[0.1em] font-semibold ${serviceLabel.color}`}>
+                  {serviceLabel.text}
                 </span>
               </div>
-              <input
-                ref={dateInputRef}
-                type="date"
-                value={selectedDateStr}
-                onChange={handleDateInputChange}
-                onClick={(e) => {
-                  // Desktop Chrome: clicking an opacity:0 date input doesn't
-                  // open the picker; force it via showPicker (mobile opens
-                  // natively on tap and treats this as a no-op or harmless).
-                  const input = e.currentTarget;
-                  try {
-                    if (typeof input.showPicker === 'function') input.showPicker();
-                  } catch {
-                    // ignore — fall back to native focus
-                  }
-                }}
-                aria-label="Seleziona data"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
+              <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
+                {greeting}, {firstName}.
+              </h1>
             </div>
 
-            <button
-              onClick={goToNextDay}
-              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Giorno successivo"
-            >
-              <ChevronRight className="h-5 w-5 text-slate-600" />
-            </button>
+            {/* Merged date · time pill */}
+            <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 self-start md:self-auto">
+              {!isToday && (
+                <button
+                  onClick={goToToday}
+                  className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors"
+                >
+                  Oggi
+                </button>
+              )}
+
+              <button
+                onClick={goToPreviousDay}
+                className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                aria-label="Giorno precedente"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <div className="relative">
+                <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full pointer-events-none">
+                  <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                  <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+                    <span className="capitalize">{formatDate(selectedDate)}</span>
+                    {isToday && <span className="text-[var(--color-fg-muted)]"> · {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</span>}
+                  </span>
+                </div>
+                <input
+                  ref={dateInputRef}
+                  type="date"
+                  value={selectedDateStr}
+                  onChange={handleDateInputChange}
+                  onClick={(e) => {
+                    const input = e.currentTarget;
+                    try {
+                      if (typeof input.showPicker === 'function') input.showPicker();
+                    } catch {
+                      // ignore — fall back to native focus
+                    }
+                  }}
+                  aria-label="Seleziona data"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+
+              <button
+                onClick={goToNextDay}
+                className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                aria-label="Giorno successivo"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* My Tasks Alert Banner */}
       {myTodos.length > 0 && (
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-lg">
+        <div className="bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] p-4 rounded-xl shadow-[var(--shadow-sm)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/20 rounded-lg">
-                <UserCircle className="h-6 w-6" />
+              <div className="p-2 bg-white/10 rounded-md">
+                <UserCircle className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="font-semibold">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
-                <p className="text-sm text-white/80">
+                <h3 className="font-semibold text-sm">Hai <span className="tabular">{myTodos.length}</span> {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
+                <p className="text-xs text-white/70">
                   {myTodos.filter(isAssignedToMe).length > 0 && (
-                    <span>{myTodos.filter(isAssignedToMe).length} personali</span>
+                    <span><span className="tabular">{myTodos.filter(isAssignedToMe).length}</span> personali</span>
                   )}
                   {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
                   {myTodos.filter(isAssignedToMyTeam).length > 0 && (
-                    <span>{myTodos.filter(isAssignedToMyTeam).length} del team {user?.role && TEAM_LABELS[user.role]}</span>
+                    <span><span className="tabular">{myTodos.filter(isAssignedToMyTeam).length}</span> del team {user?.role && TEAM_LABELS[user.role]}</span>
                   )}
                 </p>
               </div>
             </div>
             <button
               onClick={() => setShowMyTasksModal(true)}
-              className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
+              className="rounded-full px-4 py-2 bg-white/10 hover:bg-white/20 text-xs font-medium transition-colors"
             >
               Visualizza
             </button>
@@ -881,143 +897,180 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* KPI Cards — per shift (Pranzo / Cena) */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
-            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+      {/* KPI Cards — per shift (Pranzo / Cena), stacked rows */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
+        {/* Ospiti Attesi */}
+        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+              <Users className="h-4 w-4" />
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Ospiti Attesi</p>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Attesi</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchExpectedGuests}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerExpectedGuests}</span>
-              </div>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchExpectedGuests}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerExpectedGuests}</span>
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
-            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+
+        {/* Ospiti Arrivati */}
+        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+              <Users className="h-4 w-4" />
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Ospiti Arrivati</p>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Arrivati</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedGuests}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedGuests}</span>
-              </div>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedGuests}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedGuests}</span>
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-sky-50 text-sky-600 rounded-xl flex-shrink-0">
-            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+
+        {/* Tavoli Attesi */}
+        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+              <Armchair className="h-4 w-4" />
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Tavoli Attesi</p>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Attesi</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchTableIds.size}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerTableIds.size}</span>
-              </div>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchTableIds.size}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerTableIds.size}</span>
             </div>
           </div>
         </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-teal-50 text-teal-600 rounded-xl flex-shrink-0">
-            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+
+        {/* Tavoli Arrivati */}
+        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+              <Armchair className="h-4 w-4" />
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Tavoli Arrivati</p>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Arrivati</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedTableIds.size}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedTableIds.size}</span>
-              </div>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedTableIds.size}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+              </span>
+              <span className="tabular text-[26px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedTableIds.size}</span>
             </div>
           </div>
         </div>
+
+        {/* Prenotazioni & Banchetti */}
         <button
           type="button"
           onClick={onNavigateToBanquets}
-          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group col-span-2 md:col-span-1"
+          className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-5 flex flex-col gap-4 text-left hover:bg-[var(--color-surface-hover)] transition-colors group"
         >
-          <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
-            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+              <Calendar className="h-4 w-4" />
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] flex-1">Prenotazioni & Banchetti</p>
+            <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] group-hover:text-[var(--color-fg)] group-hover:translate-x-0.5 transition-all" />
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Prenotazioni & Banchetti</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchReservations.length}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerReservations.length}</span>
-              </div>
-              <div className="flex items-center gap-1 pl-1 sm:pl-2 border-l border-slate-200">
-                <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-rose-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-rose-600 tabular-nums">{banquetsToday}</span>
-              </div>
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Sun className="h-3.5 w-3.5 text-amber-600" /> Pranzo
+              </span>
+              <span className="tabular text-[22px] leading-none font-semibold text-[var(--color-fg)]">{lunchReservations.length}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Moon className="h-3.5 w-3.5 text-indigo-500" /> Cena
+              </span>
+              <span className="tabular text-[22px] leading-none font-semibold text-[var(--color-fg)]">{dinnerReservations.length}</span>
+            </div>
+            <div className="border-t border-[var(--color-line)]" />
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-fg-muted)]">
+                <Calendar className="h-3.5 w-3.5 text-rose-500" /> Banchetti
+              </span>
+              <span className="tabular text-[22px] leading-none font-semibold text-rose-600">{banquetsToday}</span>
             </div>
           </div>
-          <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
         </button>
       </div>
 
       {/* Row 1: Stato Tavoli (full width) */}
-      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
+        <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
         {/* Shift Occupancy Summary */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-3 sm:p-4 border border-amber-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <div className="bg-[var(--color-surface-3)] rounded-lg p-3 sm:p-4 border border-[var(--color-line)]">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-sm font-medium text-amber-800">Pranzo</span>
-              <span className="text-[11px] sm:text-xs text-amber-600 whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
+              <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Pranzo</span>
+              <span className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
             </div>
             <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="text-2xl sm:text-3xl font-bold text-amber-700 leading-none">{lunchOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-amber-600 mb-0.5 sm:mb-1">occupazione</span>
+              <span className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none">{lunchOccupancy}%</span>
+              <span className="text-xs sm:text-sm text-[var(--color-fg-muted)] mb-0.5 sm:mb-1">occupazione</span>
             </div>
-            <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
+            <div className="mt-2 h-1.5 bg-[var(--color-surface-hover)] rounded-full overflow-hidden">
               <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
             </div>
-            <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+            <p className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
+          <div className="bg-[var(--color-surface-3)] rounded-lg p-3 sm:p-4 border border-[var(--color-line)]">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-sm font-medium text-indigo-800">Cena</span>
-              <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
+              <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cena</span>
+              <span className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
             </div>
             <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="text-2xl sm:text-3xl font-bold text-indigo-700 leading-none">{dinnerOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-indigo-600 mb-0.5 sm:mb-1">occupazione</span>
+              <span className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none">{dinnerOccupancy}%</span>
+              <span className="text-xs sm:text-sm text-[var(--color-fg-muted)] mb-0.5 sm:mb-1">occupazione</span>
             </div>
-            <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
+            <div className="mt-2 h-1.5 bg-[var(--color-surface-hover)] rounded-full overflow-hidden">
               <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
             </div>
-            <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+            <p className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
         </div>
 
@@ -1032,19 +1085,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
 
             return (
-              <div key={room.id} className="border border-slate-100 rounded-lg p-2 hover:border-slate-200 transition-colors bg-slate-50/50">
+              <div key={room.id} className="border border-[var(--color-line)] rounded-md p-2 hover:bg-[var(--color-surface-hover)] transition-colors bg-[var(--color-surface)]">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-medium text-slate-700 text-xs truncate">{room.name}</h3>
-                  <span className="text-[10px] text-slate-400">{roomTables.length}</span>
+                  <h3 className="font-medium text-[var(--color-fg)] text-xs truncate">{room.name}</h3>
+                  <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{roomTables.length}</span>
                 </div>
                 <div className="flex gap-1">
-                  <div className="flex-1 bg-amber-50 rounded px-1 py-0.5 border border-amber-100 text-center">
-                    <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  <div className="flex-1 bg-[var(--color-surface-3)] rounded px-1 py-0.5 border border-[var(--color-line)] text-center">
+                    <span className={`tabular text-[10px] font-semibold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {roomLunchAvailable}
                     </span>
                   </div>
-                  <div className="flex-1 bg-indigo-50 rounded px-1 py-0.5 border border-indigo-100 text-center">
-                    <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  <div className="flex-1 bg-[var(--color-surface-3)] rounded px-1 py-0.5 border border-[var(--color-line)] text-center">
+                    <span className={`tabular text-[10px] font-semibold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {roomDinnerAvailable}
                     </span>
                   </div>
@@ -1058,36 +1111,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
         {/* Affluenza per Sala con orari - 75% */}
-        <div className="lg:col-span-3 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+        <div className="lg:col-span-3 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza per Orario</h2>
+            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
               <button
                 onClick={() => setAffluenceShiftFilter('ALL')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
                   affluenceShiftFilter === 'ALL'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Tutti
               </button>
               <button
                 onClick={() => setAffluenceShiftFilter('LUNCH')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
                   affluenceShiftFilter === 'LUNCH'
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Pranzo
               </button>
               <button
                 onClick={() => setAffluenceShiftFilter('DINNER')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
                   affluenceShiftFilter === 'DINNER'
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Cena
@@ -1097,34 +1150,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           <div className="space-y-4 max-h-[400px] overflow-y-auto">
             {timeSlotAffluence.roomTimeSlots.map(room => (
-              <div key={room.roomId} className="border border-slate-100 rounded-lg p-3">
+              <div key={room.roomId} className="border border-[var(--color-line)] rounded-md p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-slate-700">{room.roomName}</h3>
-                  <span className="text-xs text-slate-400">Max {room.maxCapacity} coperti</span>
+                  <h3 className="font-medium text-sm text-[var(--color-fg)]">{room.roomName}</h3>
+                  <span className="tabular text-xs text-[var(--color-fg-subtle)]">Max {room.maxCapacity} coperti</span>
                 </div>
 
                 {/* Lunch Time Slots */}
                 {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
                   <div className={affluenceShiftFilter === 'ALL' ? 'mb-2' : ''}>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-amber-700 w-16">Pranzo</span>
-                      <span className="text-[10px] text-slate-400">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
+                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] w-16">Pranzo</span>
+                      <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
                     </div>
                     <div className={`flex ${affluenceShiftFilter === 'LUNCH' ? 'gap-2' : 'gap-1'}`}>
                       {room.lunchSlots.map(slot => (
                         <div key={slot.time} className="flex-1 text-center">
-                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'LUNCH' ? 'text-xs' : 'text-[9px]'}`}>{slot.time}</div>
-                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'LUNCH' ? 'h-12' : ''}`}>
+                          <div className={`tabular text-[var(--color-fg-subtle)] mb-0.5 ${affluenceShiftFilter === 'LUNCH' ? 'text-xs' : 'text-[9px]'}`}>{slot.time}</div>
+                          <div className={`relative overflow-hidden rounded bg-[var(--color-surface-3)] ${affluenceShiftFilter === 'LUNCH' ? 'h-12' : ''}`}>
                             <div
-                              className="absolute inset-y-0 left-0 bg-amber-300 transition-all duration-300"
+                              className="absolute inset-y-0 left-0 bg-amber-200 transition-all duration-300"
                               style={{ width: `${Math.min(slot.percentage, 100)}%` }}
                             />
-                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'LUNCH' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-amber-800' : 'text-slate-400'}`}>
+                            <div className={`tabular relative font-semibold z-10 flex items-center justify-center ${affluenceShiftFilter === 'LUNCH' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-amber-800' : 'text-[var(--color-fg-subtle)]'}`}>
                               {slot.guests}
                             </div>
                           </div>
                           {affluenceShiftFilter === 'LUNCH' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
+                            <div className="tabular text-[10px] text-[var(--color-fg-subtle)] mt-0.5">{slot.percentage}%</div>
                           )}
                         </div>
                       ))}
@@ -1136,24 +1189,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-indigo-700 w-16">Cena</span>
-                      <span className="text-[10px] text-slate-400">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
+                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] w-16">Cena</span>
+                      <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
                     </div>
                     <div className={`flex overflow-x-auto ${affluenceShiftFilter === 'DINNER' ? 'gap-1.5' : 'gap-0.5'}`}>
                       {room.dinnerSlots.map(slot => (
                         <div key={slot.time} className={`flex-1 text-center ${affluenceShiftFilter === 'DINNER' ? 'min-w-[50px]' : 'min-w-[32px]'}`}>
-                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'DINNER' ? 'text-[10px]' : 'text-[8px]'}`}>{slot.time.substring(0, 5)}</div>
-                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'DINNER' ? 'h-12' : ''}`}>
+                          <div className={`tabular text-[var(--color-fg-subtle)] mb-0.5 ${affluenceShiftFilter === 'DINNER' ? 'text-[10px]' : 'text-[8px]'}`}>{slot.time.substring(0, 5)}</div>
+                          <div className={`relative overflow-hidden rounded bg-[var(--color-surface-3)] ${affluenceShiftFilter === 'DINNER' ? 'h-12' : ''}`}>
                             <div
-                              className="absolute inset-y-0 left-0 bg-indigo-300 transition-all duration-300"
+                              className="absolute inset-y-0 left-0 bg-indigo-200 transition-all duration-300"
                               style={{ width: `${Math.min(slot.percentage, 100)}%` }}
                             />
-                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'DINNER' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-indigo-800' : 'text-slate-400'}`}>
+                            <div className={`tabular relative font-semibold z-10 flex items-center justify-center ${affluenceShiftFilter === 'DINNER' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-indigo-800' : 'text-[var(--color-fg-subtle)]'}`}>
                               {slot.guests}
                             </div>
                           </div>
                           {affluenceShiftFilter === 'DINNER' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
+                            <div className="tabular text-[10px] text-[var(--color-fg-subtle)] mt-0.5">{slot.percentage}%</div>
                           )}
                         </div>
                       ))}
@@ -1165,22 +1218,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {/* Total Summary */}
-          <div className={`mt-4 pt-3 border-t border-slate-100 grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
-              <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+              <div className="bg-[var(--color-surface-3)] rounded-md p-2.5 border border-[var(--color-line)]">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-amber-800">Totale Pranzo</span>
-                  <span className="text-sm font-bold text-amber-700">
+                  <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Totale Pranzo</span>
+                  <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
                     {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
                   </span>
                 </div>
               </div>
             )}
             {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
-              <div className="bg-indigo-50 rounded-lg p-2.5 border border-indigo-100">
+              <div className="bg-[var(--color-surface-3)] rounded-md p-2.5 border border-[var(--color-line)]">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-indigo-800">Totale Cena</span>
-                  <span className="text-sm font-bold text-indigo-700">
+                  <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Totale Cena</span>
+                  <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
                     {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
                   </span>
                 </div>
@@ -1190,39 +1243,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Affluenza Settimanale - 25% */}
-        <div className="lg:col-span-1 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+        <div className="lg:col-span-1 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
           <div className="flex flex-col gap-3 mb-4">
             <div>
-              <h2 className="text-base font-semibold text-slate-800">Affluenza Settimanale</h2>
-              <p className="text-xs text-slate-500">{weekRange}</p>
+              <h2 className="text-base font-semibold text-[var(--color-fg)]">Affluenza Settimanale</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">{weekRange}</p>
             </div>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
               <button
                 onClick={() => setChartShiftFilter('ALL')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
                   chartShiftFilter === 'ALL'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Tutti
               </button>
               <button
                 onClick={() => setChartShiftFilter('LUNCH')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
                   chartShiftFilter === 'LUNCH'
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Pranzo
               </button>
               <button
                 onClick={() => setChartShiftFilter('DINNER')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
+                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
                   chartShiftFilter === 'DINNER'
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 Cena
@@ -1232,23 +1285,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
                 <XAxis
                   dataKey="name"
                   axisLine={false}
                   tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 9}}
+                  stroke="var(--color-chart-axis)"
+                  tick={{fill: 'var(--color-chart-axis)', fontSize: 9}}
                 />
                 <YAxis
                   domain={[0, 'auto']}
                   axisLine={false}
                   tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 9}}
+                  stroke="var(--color-chart-axis)"
+                  tick={{fill: 'var(--color-chart-axis)', fontSize: 9}}
                   width={25}
                 />
                 <Tooltip
-                  cursor={{fill: '#f1f5f9'}}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  cursor={{fill: 'var(--color-surface-hover)'}}
+                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)', borderRadius: '8px', fontSize: '12px' }}
+                  labelStyle={{ color: 'var(--color-fg-muted)' }}
                   formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
                   labelFormatter={(label, payload) => {
                     if (payload && payload[0]) {
@@ -1259,7 +1315,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 />
                 <Bar
                   dataKey="guests"
-                  fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
+                  fill={chartShiftFilter === 'LUNCH' ? 'var(--color-chart-2)' : chartShiftFilter === 'DINNER' ? 'var(--color-chart-1)' : 'var(--color-chart-1)'}
                   radius={[4, 4, 0, 0]}
                 />
               </BarChart>
@@ -1271,27 +1327,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 3: Attività + Spesa del giorno */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
-        <div ref={todoSectionRef} className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
-                <ListTodo className="h-6 w-6" />
+              <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+                <ListTodo className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Attività</h2>
-                <p className="text-base text-slate-500">{pendingCount} da completare</p>
+                <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
+                <p className="tabular text-xs text-[var(--color-fg-muted)]">{pendingCount} da completare</p>
               </div>
             </div>
             <button
               onClick={handleOpenAddTodo}
-              className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition"
+              aria-label="Aggiungi attività"
             >
-              <Plus className="h-5 w-5" />
+              <Plus className="h-4 w-4" />
             </button>
           </div>
 
           {/* Filter Tabs */}
-          <div className="flex gap-1 mb-4 p-1 bg-slate-100 rounded-lg">
+          <div className="flex gap-1 mb-4 p-0.5 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md">
             {[
               { key: 'mine', label: 'Mie', icon: UserCircle },
               { key: 'all', label: 'Tutte', icon: ListTodo },
@@ -1301,10 +1358,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <button
                 key={key}
                 onClick={() => setTodoFilter(key as typeof todoFilter)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                   todoFilter === key
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -1315,10 +1372,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           {/* Overdue Alert */}
           {overdueTodos.length > 0 && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-rose-500 flex-shrink-0" />
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-md flex items-center gap-3">
+              <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
+                <p className="tabular text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
                 <p className="text-xs text-rose-600">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
               </div>
             </div>
@@ -1328,13 +1385,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
             {todosLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
-                <p className="text-slate-400 text-sm">Caricamento attività...</p>
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento attività...</p>
               </div>
             ) : filteredTodos.length === 0 ? (
               <div className="py-8 text-center">
-                <CheckCircle2 className="h-10 w-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">
+                <CheckCircle2 className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">
                   {todoFilter === 'mine' ? 'Nessuna attività assegnata a te' : 'Nessuna attività'}
                 </p>
               </div>
@@ -1344,63 +1401,63 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 return (
                   <div
                     key={todo.id}
-                    className={`group p-3 rounded-xl border transition-all hover:shadow-sm ${
+                    className={`group p-3 rounded-md border transition-colors ${
                       todo.completed
-                        ? 'bg-slate-50 border-slate-100'
+                        ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
                         : isOverdue
                         ? 'bg-rose-50 border-rose-100'
-                        : 'bg-white border-slate-200 hover:border-slate-300'
+                        : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
                     <div className="flex items-start gap-3">
                       <button
                         onClick={() => handleToggleTodo(todo.id)}
-                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
                           todo.completed
                             ? 'bg-emerald-500 border-emerald-500 text-white'
-                            : 'border-slate-300 hover:border-indigo-400'
+                            : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                         }`}
                       >
-                        {todo.completed && <Check className="h-3 w-3" />}
+                        {todo.completed && <Check className="h-2.5 w-2.5" />}
                       </button>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                             {todo.title}
                           </p>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={() => handleOpenEditTodo(todo)}
-                              className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => setDeleteTodoConfirm(todo)}
-                              className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 transition-colors"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[todo.category]}`}>
                             {CATEGORY_LABELS[todo.category]}
                           </span>
                           <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
                           {todo.assignedToUserName && (
-                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                            <span className="text-[11px] text-[var(--color-fg-muted)] flex items-center gap-1">
                               <UserCircle className="h-3 w-3" />
                               {todo.assignedToUserName}
                             </span>
                           )}
                           {todo.assignedToTeam && !todo.assignedToUserId && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${TEAM_COLORS[todo.assignedToTeam]}`}>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${TEAM_COLORS[todo.assignedToTeam]}`}>
                               {TEAM_LABELS[todo.assignedToTeam]}
                             </span>
                           )}
                           {todo.dueDate && (
-                            <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-400'}`}>
+                            <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
                               <Clock className="h-3 w-3" />
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
@@ -1416,21 +1473,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa del Giorno (Shopping List) */}
-        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
-                <ShoppingCart className="h-6 w-6" />
+              <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+                <ShoppingCart className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Spesa del Giorno</h2>
-                <p className="text-base text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
+                <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa del Giorno</h2>
+                <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
               </div>
             </div>
             {checkedItems > 0 && (
               <button
                 onClick={clearCheckedItems}
-                className="text-sm text-slate-500 hover:text-rose-600 transition-colors"
+                className="text-xs text-[var(--color-fg-muted)] hover:text-rose-600 transition-colors"
               >
                 Rimuovi completati
               </button>
@@ -1445,12 +1502,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               onChange={(e) => setNewItemName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addShoppingItem()}
               placeholder="Aggiungi prodotto..."
-              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+              className="flex-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
             <select
               value={newItemCategory}
               onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
-              className="px-2 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-2 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             >
               <option value="CUCINA">Cucina</option>
               <option value="BAR">Bar</option>
@@ -1459,9 +1516,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <button
               onClick={addShoppingItem}
               disabled={!newItemName.trim()}
-              className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Aggiungi prodotto"
             >
-              <Plus className="h-5 w-5" />
+              <Plus className="h-4 w-4" />
             </button>
           </div>
 
@@ -1469,13 +1527,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 overflow-y-auto max-h-[300px] space-y-4">
             {shoppingLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-8 w-8 text-emerald-400 mx-auto mb-2 animate-spin" />
-                <p className="text-slate-400 text-sm">Caricamento...</p>
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
               </div>
             ) : totalItems === 0 ? (
               <div className="py-8 text-center">
-                <ShoppingCart className="h-10 w-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">Nessun prodotto nella lista</p>
+                <ShoppingCart className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Nessun prodotto nella lista</p>
               </div>
             ) : (
               (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(category => {
@@ -1483,36 +1541,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 if (items.length === 0) return null;
                 return (
                   <div key={category}>
-                    <div className={`flex items-center gap-2 px-2 py-1 rounded-lg ${SHOPPING_CATEGORY_COLORS[category]} mb-2`}>
-                      {SHOPPING_CATEGORY_ICONS[category]}
-                      <span className="text-xs font-medium">{SHOPPING_CATEGORY_LABELS[category]}</span>
-                      <span className="text-xs opacity-70">({items.length})</span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[var(--color-fg-muted)]">{SHOPPING_CATEGORY_ICONS[category]}</span>
+                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">{SHOPPING_CATEGORY_LABELS[category]}</span>
+                      <span className="tabular text-[11px] text-[var(--color-fg-subtle)]">({items.length})</span>
                     </div>
-                    <div className="space-y-2 pl-2">
+                    <div className="space-y-2 pl-1">
                       {items.map(item => (
                         <div key={item.id} className="group">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => toggleShoppingItem(item.id)}
-                              className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
                                 item.checked
                                   ? 'bg-emerald-500 border-emerald-500 text-white'
-                                  : 'border-slate-300 hover:border-emerald-400'
+                                  : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                               }`}
                             >
                               {item.checked && <Check className="h-2.5 w-2.5" />}
                             </button>
-                            <span className={`flex-1 text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                            <span className={`flex-1 text-sm ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                               {item.name}
                             </span>
                             <button
                               onClick={() => deleteShoppingItem(item.id)}
-                              className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-all"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                          <div className="ml-6 text-xs text-slate-400">
+                          <div className="tabular ml-6 text-[11px] text-[var(--color-fg-subtle)]">
                             {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
                             {item.createdAt && (
                               <> • {new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} {new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</>
@@ -1530,74 +1588,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 4: Staff Presence */}
-      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)]">
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 bg-violet-50 text-violet-600 rounded-xl">
-            <UsersRound className="h-6 w-6" />
+          <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
+            <UsersRound className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Personale in Servizio</h2>
-            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
+            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
+            <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
           </div>
         </div>
 
         {staffLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-subtle)]" />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Pranzo */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
+            <div className="bg-[var(--color-surface-3)] rounded-lg p-4 border border-[var(--color-line)]">
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-200 flex items-center justify-center">
-                  <span className="text-amber-700 text-sm font-bold">P</span>
+                <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
+                  <Sun className="h-4 w-4 text-amber-700" />
                 </div>
-                <span className="font-semibold text-amber-800">Pranzo</span>
-                <span className="ml-auto text-sm text-amber-600">
+                <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Pranzo</span>
+                <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">
                   {staffPresence.lunch.sala.length + staffPresence.lunch.cucina.length} persone
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {/* Sala */}
-                <div className="bg-white/60 rounded-lg p-2.5">
+                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-4 w-4 text-emerald-600" />
-                    <span className="text-xs font-medium text-emerald-700">Sala</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.sala.length}</span>
+                    <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</span>
+                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.lunch.sala.length}</span>
                   </div>
                   <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.lunch.sala.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
                     ) : (
                       staffPresence.lunch.sala.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
+                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
                             {s.name[0]}{s.surname[0]}
                           </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
                         </div>
                       ))
                     )}
                   </div>
                 </div>
                 {/* Cucina */}
-                <div className="bg-white/60 rounded-lg p-2.5">
+                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-4 w-4 text-orange-600" />
-                    <span className="text-xs font-medium text-orange-700">Cucina</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.cucina.length}</span>
+                    <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</span>
+                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.lunch.cucina.length}</span>
                   </div>
                   <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.lunch.cucina.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
                     ) : (
                       staffPresence.lunch.cucina.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
+                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
                             {s.name[0]}{s.surname[0]}
                           </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
                         </div>
                       ))
                     )}
@@ -1607,56 +1665,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Cena */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
+            <div className="bg-[var(--color-surface-3)] rounded-lg p-4 border border-[var(--color-line)]">
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-indigo-200 flex items-center justify-center">
-                  <span className="text-indigo-700 text-sm font-bold">C</span>
+                <div className="w-7 h-7 rounded-md bg-indigo-100 flex items-center justify-center">
+                  <Moon className="h-4 w-4 text-indigo-700" />
                 </div>
-                <span className="font-semibold text-indigo-800">Cena</span>
-                <span className="ml-auto text-sm text-indigo-600">
+                <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cena</span>
+                <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">
                   {staffPresence.dinner.sala.length + staffPresence.dinner.cucina.length} persone
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {/* Sala */}
-                <div className="bg-white/60 rounded-lg p-2.5">
+                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-4 w-4 text-emerald-600" />
-                    <span className="text-xs font-medium text-emerald-700">Sala</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.sala.length}</span>
+                    <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</span>
+                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.dinner.sala.length}</span>
                   </div>
                   <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.dinner.sala.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
                     ) : (
                       staffPresence.dinner.sala.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
+                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
                             {s.name[0]}{s.surname[0]}
                           </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
                         </div>
                       ))
                     )}
                   </div>
                 </div>
                 {/* Cucina */}
-                <div className="bg-white/60 rounded-lg p-2.5">
+                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
                   <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-4 w-4 text-orange-600" />
-                    <span className="text-xs font-medium text-orange-700">Cucina</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.cucina.length}</span>
+                    <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</span>
+                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.dinner.cucina.length}</span>
                   </div>
                   <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {staffPresence.dinner.cucina.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
+                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
                     ) : (
                       staffPresence.dinner.cucina.map(s => (
                         <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
+                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
                             {s.name[0]}{s.surname[0]}
                           </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
                         </div>
                       ))
                     )}
@@ -1671,64 +1729,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* My Tasks Modal */}
       {showMyTasksModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600">
-              <div className="flex items-center gap-3 text-white">
-                <div className="p-2 bg-white/20 rounded-lg">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between bg-[var(--color-fg)]">
+              <div className="flex items-center gap-3 text-[var(--color-fg-on-brand)]">
+                <div className="p-2 bg-white/10 rounded-md">
                   <UserCircle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold">Le Mie Attività</h3>
-                  <p className="text-sm text-white/80">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
+                  <h3 className="text-base font-semibold">Le Mie Attività</h3>
+                  <p className="tabular text-xs text-white/70">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
                 </div>
               </div>
-              <button onClick={() => setShowMyTasksModal(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X className="h-5 w-5 text-white" />
+              <button onClick={() => setShowMyTasksModal(false)} className="p-1.5 rounded-md hover:bg-white/10 transition-colors">
+                <X className="h-4 w-4 text-white" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {myTodos.length === 0 ? (
                 <div className="py-12 text-center">
-                  <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
-                  <p className="text-slate-600 font-medium">Tutto fatto!</p>
-                  <p className="text-slate-400 text-sm">Non hai attività assegnate</p>
+                  <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
+                  <p className="text-[var(--color-fg)] font-medium">Tutto fatto!</p>
+                  <p className="text-[var(--color-fg-subtle)] text-sm">Non hai attività assegnate</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {myTodos.map(todo => {
                     const isOverdue = todo.dueDate && todo.dueDate < todayStr;
                     return (
-                      <div key={todo.id} className={`p-4 rounded-xl border ${isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'} hover:shadow-md transition-shadow`}>
+                      <div key={todo.id} className={`p-3 rounded-md border ${isOverdue ? 'border-rose-100 bg-rose-50' : 'border-[var(--color-line)] bg-[var(--color-surface)]'} transition-colors`}>
                         <div className="flex items-start gap-3">
                           <button
                             onClick={() => handleToggleTodo(todo.id)}
-                            className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-indigo-400 flex items-center justify-center transition-colors"
+                            className="mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] flex items-center justify-center transition-colors"
                           >
                           </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2">
-                              <p className="font-medium text-slate-800">{todo.title}</p>
+                              <p className="font-medium text-sm text-[var(--color-fg)]">{todo.title}</p>
                               <Flag className={`h-4 w-4 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
                             </div>
                             {todo.description && (
-                              <p className="text-sm text-slate-500 mt-1">{todo.description}</p>
+                              <p className="text-sm text-[var(--color-fg-muted)] mt-1">{todo.description}</p>
                             )}
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
-                              <span className={`text-xs px-2 py-1 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[todo.category]}`}>
                                 {CATEGORY_LABELS[todo.category]}
                               </span>
                               {isAssignedToMe(todo) && (
-                                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-100">
                                   <UserCircle className="h-3 w-3" /> Personale
                                 </span>
                               )}
                               {isAssignedToMyTeam(todo) && !isAssignedToMe(todo) && (
-                                <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${TEAM_COLORS[todo.assignedToTeam!]}`}>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${TEAM_COLORS[todo.assignedToTeam!]}`}>
                                   <UsersRound className="h-3 w-3" /> {TEAM_LABELS[todo.assignedToTeam!]}
                                 </span>
                               )}
                               {todo.dueDate && (
-                                <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-500'}`}>
+                                <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-muted)]'}`}>
                                   <Clock className="h-3 w-3" />
                                   {isOverdue ? 'Scaduto: ' : ''}
                                   {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
@@ -1743,10 +1801,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               )}
             </div>
-            <div className="p-4 border-t border-slate-100 bg-slate-50">
+            <div className="p-4 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
               <button
                 onClick={() => setShowMyTasksModal(false)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 Chiudi
               </button>
@@ -1758,47 +1816,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-500" /></button>
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"><X className="h-4 w-4" /></button>
             </div>
             <div className="p-4 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Titolo</label>
-                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus />
+                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Titolo</label>
+                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" autoFocus />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Descrizione (opzionale)</label>
-                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" />
+                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Descrizione (opzionale)</label>
+                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20 resize-none" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Priorità</label>
-                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Priorità</label>
+                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     <option value={TodoPriority.LOW}>Bassa</option>
                     <option value={TodoPriority.MEDIUM}>Media</option>
                     <option value={TodoPriority.HIGH}>Alta</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria</label>
-                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Categoria</label>
+                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Scadenza (opzionale)</label>
-                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Scadenza (opzionale)</label>
+                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Persona</label>
+                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Assegna a Persona</label>
                   <select
                     value={todoForm.assignedToUserId || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     <option value="">Nessuno</option>
                     {staffUsers.map(u => (
@@ -1807,11 +1865,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Team</label>
+                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Assegna a Team</label>
                   <select
                     value={todoForm.assignedToTeam || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     <option value="">Nessun team</option>
                     {Object.entries(TEAM_LABELS).map(([key, label]) => (
@@ -1821,9 +1879,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {editingTodo ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
@@ -1833,32 +1891,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Today's Tasks Summary */}
       {todaysTodos.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-4 rounded-2xl border border-amber-100">
+        <div className="bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-line)]">
           <div className="flex items-center gap-2 mb-2">
-            <Clock className="h-5 w-5 text-amber-600" />
-            <h3 className="font-semibold text-amber-900">Attività di oggi</h3>
-            <span className="bg-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-full font-medium">{todaysTodos.length}</span>
+            <Clock className="h-4 w-4 text-[var(--color-fg-muted)]" />
+            <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Attività di oggi</h3>
+            <span className="tabular inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] border border-[var(--color-line)]">{todaysTodos.length}</span>
           </div>
           <div className="space-y-2">
             {todaysTodos.slice(0, 3).map(todo => (
-              <div key={todo.id} className="flex items-center gap-2 text-sm text-amber-800">
-                <div className={`w-2 h-2 rounded-full ${PRIORITY_COLORS[todo.priority].replace('text-', 'bg-')}`} />
+              <div key={todo.id} className="flex items-center gap-2 text-sm text-[var(--color-fg)]">
+                <div className={`w-1.5 h-1.5 rounded-full ${PRIORITY_COLORS[todo.priority].replace('text-', 'bg-')}`} />
                 {todo.title}
               </div>
             ))}
-            {todaysTodos.length > 3 && <p className="text-xs text-amber-600">+{todaysTodos.length - 3} altre attività</p>}
+            {todaysTodos.length > 3 && <p className="tabular text-xs text-[var(--color-fg-muted)]">+{todaysTodos.length - 3} altre attività</p>}
           </div>
         </div>
       )}
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl border border-indigo-100 animate-fade-in">
+        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-lg font-bold text-indigo-900">Analisi AI Gemini</h2>
+            <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
+            <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>
           </div>
-          <div className="prose prose-indigo max-w-none text-slate-700">
+          <div className="prose prose-sm max-w-none text-[var(--color-fg-muted)]">
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         </div>

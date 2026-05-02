@@ -140,46 +140,46 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6">
+        <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Gestione Permessi Ruoli</h2>
+            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Gestione Permessi Ruoli</h2>
             <button
               onClick={onClose}
-              className="text-white/80 hover:text-white transition-colors"
+              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <p className="text-purple-100 mt-2">Configura i permessi per ogni ruolo utente</p>
+          <p className="text-xs text-[var(--color-fg-muted)] mt-1">Configura i permessi per ogni ruolo utente</p>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+        <div className="px-5 py-4 overflow-y-auto flex-1">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-fg)]"></div>
             </div>
           ) : error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">
+            <div className="bg-rose-50 border border-rose-100 text-rose-700 px-3 py-2 rounded-md text-sm">
               {error}
             </div>
           ) : (
             <>
               {/* Role Tabs */}
-              <div className="flex gap-2 mb-6 flex-wrap">
+              <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full mb-6">
                 {roles.map(role => (
                   <button
                     key={role}
                     onClick={() => setSelectedRole(role)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
                       selectedRole === role
-                        ? 'bg-purple-600 text-white shadow-lg'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                        : 'text-[var(--color-fg-muted)]'
                     }`}
                   >
                     {ROLE_LABELS[role]}
@@ -188,32 +188,32 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
               </div>
 
               {selectedRole === 'OWNER' && (
-                <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg mb-6">
+                <div className="bg-amber-50 border border-amber-100 text-amber-800 px-3 py-2 rounded-md mb-6">
                   <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
-                    <span className="font-medium">Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.</span>
+                    <span className="text-sm font-medium">Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.</span>
                   </div>
                 </div>
               )}
 
               {/* Permissions Grid */}
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {features.map(feature => (
-                  <div key={feature.feature} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-                      <h3 className="font-semibold text-gray-800">{feature.feature}</h3>
+                  <div key={feature.feature} className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg overflow-hidden">
+                    <div className="bg-[var(--color-surface-3)] px-4 py-2.5 border-b border-[var(--color-line)]">
+                      <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">{feature.feature}</h3>
                     </div>
                     <div className="p-4">
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex flex-wrap gap-2">
                         {feature.permissions.map(permission => (
                           <label
                             key={permission}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all cursor-pointer ${
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition cursor-pointer ${
                               hasPermission(permission)
-                                ? 'bg-purple-50 border-purple-300 text-purple-800'
-                                : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                             } ${selectedRole === 'OWNER' ? 'opacity-60 cursor-not-allowed' : ''}`}
                           >
                             <input
@@ -221,9 +221,9 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                               checked={hasPermission(permission)}
                               onChange={() => handlePermissionToggle(permission)}
                               disabled={selectedRole === 'OWNER'}
-                              className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                              className="w-3.5 h-3.5 rounded"
                             />
-                            <span className="text-sm font-medium">
+                            <span>
                               {PERMISSION_LABELS[permission] || permission}
                             </span>
                           </label>
@@ -236,8 +236,8 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
 
               {/* Success Message */}
               {successMessage && (
-                <div className="mt-6 bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg flex items-center gap-2">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="mt-6 bg-emerald-50 border border-emerald-100 text-emerald-700 px-3 py-2 rounded-md flex items-center gap-2 text-sm">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   {successMessage}
@@ -248,10 +248,10 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-200 p-4 bg-gray-50 flex justify-end gap-3">
+        <div className="border-t border-[var(--color-line)] px-5 py-3 flex gap-2 justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
           >
             Chiudi
           </button>
@@ -259,16 +259,16 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {saving ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-current"></div>
                   Salvataggio...
                 </>
               ) : (
                 <>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   Salva Permessi

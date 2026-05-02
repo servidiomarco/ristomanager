@@ -607,13 +607,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     const statusColors = {
-      [TableStatus.FREE]: 'bg-white border-emerald-300 text-emerald-700',
-      [TableStatus.OCCUPIED]: 'bg-red-100 border-red-300 text-red-700',
-      [TableStatus.RESERVED]: 'bg-amber-100 border-amber-300 text-amber-700',
-      [TableStatus.DIRTY]: 'bg-gray-200 border-gray-400 text-gray-600'
+      [TableStatus.FREE]: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+      [TableStatus.OCCUPIED]: 'bg-rose-50 border-rose-200 text-rose-700',
+      [TableStatus.RESERVED]: 'bg-amber-50 border-amber-200 text-amber-700',
+      [TableStatus.DIRTY]: 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg-muted)]'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'}`;
+    const baseClasses = `absolute flex flex-col items-center justify-center border transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-[var(--shadow-xs)]'}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -652,14 +652,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           handleTouchStart(e, table.id, element);
         }}
       >
-        <span className="font-bold text-sm flex items-center gap-1">
-            {table.is_locked && <Lock size={10} className="text-slate-400" />}
+        <span className="font-semibold text-sm flex items-center gap-1">
+            {table.is_locked && <Lock size={10} className="opacity-60" />}
             {table.name}
         </span>
-        
+
         {/* Show Reservation Name */}
         {reservation && !timerDisplay && (
-            <span className="text-[10px] font-bold truncate max-w-[90%] bg-white/50 px-1 rounded">
+            <span className="text-[10px] font-semibold truncate max-w-[90%] bg-[var(--color-surface)]/70 px-1 rounded">
                 {reservation.customer_name}
             </span>
         )}
@@ -667,21 +667,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <span className="text-xs flex items-center gap-1 opacity-80">
            <Armchair size={10} /> {table.seats}
         </span>
-        
+
         {dynamicStatus === TableStatus.OCCUPIED && (
-             <div className="absolute -top-2 -right-2 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
+             <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-[var(--color-surface)] animate-pulse"></div>
         )}
 
         {/* Timer Badge */}
         {timerDisplay && (
-            <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+            <div className="absolute -top-2.5 -right-2 bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
                 <Timer size={8} /> {timerDisplay}
             </div>
         )}
 
         {/* Merged Table Badge */}
         {isMerged && !timerDisplay && (
-            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+            <div className="absolute -top-2 -left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
                 <Combine size={8} />
             </div>
         )}
@@ -700,41 +700,41 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="bg-white px-3 sm:px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center gap-3 z-20">
+      <div className="bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
         <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-indigo-500" />
+          <Calendar className="h-4 w-4 text-[var(--color-fg-muted)]" />
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-2 py-1.5 text-sm rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
           />
         </div>
-        <div className="inline-flex bg-slate-100 rounded-lg p-1">
+        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
           <button
             onClick={() => setSelectedShift(Shift.LUNCH)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium transition ${
+              selectedShift === Shift.LUNCH ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
             }`}
           >
             <Sun size={14} /> Pranzo
           </button>
           <button
             onClick={() => setSelectedShift(Shift.DINNER)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium transition ${
+              selectedShift === Shift.DINNER ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
             }`}
           >
             <Moon size={14} /> Cena
           </button>
         </div>
-        <span className="text-xs text-slate-400 hidden sm:inline">
+        <span className="text-xs text-[var(--color-fg-subtle)] hidden sm:inline">
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
       </div>
 
       {/* Toolbar */}
-      <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+      <div className="bg-[var(--color-surface)] p-3 sm:p-4 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
@@ -743,16 +743,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+              className={`rounded-full px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium transition whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                  : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
               }`}
             >
               {room.name}
             </button>
           ))}
-          
+
           {/* Add Room UI - Only shown in edit mode */}
           {canEdit && (isAddingRoom ? (
               <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
@@ -761,19 +761,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       value={newRoomName}
                       onChange={e => setNewRoomName(e.target.value)}
                       placeholder="Nome sala..."
-                      className="px-3 py-2 w-32 rounded-lg border border-indigo-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
+                      className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-[var(--color-fg)]"
                       onKeyDown={e => e.key === 'Enter' && handleConfirmAddRoom()}
                   />
                   <button
                     onClick={handleConfirmAddRoom}
-                    className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm"
+                    className="p-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90"
                     title="Conferma"
                   >
                       <Check size={16}/>
                   </button>
                   <button
                     onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }}
-                    className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"
+                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
                     title="Annulla"
                   >
                       <X size={16}/>
@@ -782,7 +782,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           ) : (
             <button
                 onClick={() => setIsAddingRoom(true)}
-                className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 border border-indigo-200 shrink-0 transition-colors"
+                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] border border-[var(--color-line)]"
                 title="Aggiungi Nuova Sala"
             >
                 <Plus size={16} />
@@ -792,15 +792,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
-        <div className="flex items-center gap-3 border-l pl-4 border-slate-200 overflow-x-auto shrink-0">
-          <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Strumenti</span>
+        <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] overflow-x-auto shrink-0 w-full sm:w-auto">
+          <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-[0.08em] hidden xl:block">Strumenti</span>
 
           <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
-            className={`p-2 rounded-lg border transition-all ${
+            className={`p-1.5 rounded-md border transition ${
                 isSelectionMode
-                ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
-                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                ? 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg)]'
+                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
             }`}
             title="Modalità Selezione Multipla"
           >
@@ -810,31 +810,31 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {selectedTables.length > 0 && (
               <button
                 onClick={() => setSelectedTables([])}
-                className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-rose-500 transition-colors"
+                className="p-1.5 rounded-md border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600 transition"
                 title="Deseleziona Tutto"
               >
                   <X className="h-4 w-4" />
               </button>
           )}
 
-          <div className="h-8 w-px bg-slate-200 mx-1"></div>
+          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Rettangolo">
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Rettangolo">
             <div className="w-6 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Quadrato">
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Quadrato">
             <div className="w-4 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Tondo">
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Tondo">
              <div className="w-4 h-4 border-2 border-current rounded-full" />
           </button>
 
-          <div className="h-8 w-px bg-slate-200 mx-1"></div>
+          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
-            className="p-2 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition-colors"
+            className="p-1.5 rounded-md border border-rose-100 text-rose-600 hover:bg-rose-50 transition"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
           >
              <Layout className="h-4 w-4 inline mr-1"/>
@@ -845,53 +845,53 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
-            <div className="flex items-center gap-2 border-l pl-4 border-slate-200 animate-in slide-in-from-right duration-200 shrink-0">
-            <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Modifica</span>
-            
+            <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
+            <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-[0.08em] hidden xl:block">Modifica</span>
+
             {/* Lock/Unlock */}
-            <button 
+            <button
                 onClick={handleToggleLock}
-                className={`p-2 rounded-lg border transition-colors ${
-                    singleSelectedTable?.is_locked 
-                    ? 'bg-amber-50 border-amber-200 text-amber-600' 
-                    : 'bg-white border-slate-200 text-slate-600'
+                className={`p-1.5 rounded-md border transition ${
+                    singleSelectedTable?.is_locked
+                    ? 'bg-amber-50 border-amber-200 text-amber-700'
+                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                 }`}
                 title={singleSelectedTable?.is_locked ? "Sblocca Tavolo" : "Blocca Tavolo"}
             >
                 {singleSelectedTable?.is_locked ? <Unlock size={16} /> : <Lock size={16} />}
             </button>
-            
+
             {/* Temp Lock (Timer) */}
-            <button 
+            <button
                 onClick={handleTempLock}
-                className="p-2 rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200 transition-colors flex items-center gap-1"
+                className="p-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 transition flex items-center gap-1"
                 title="Blocca per 15 minuti"
             >
-                <Clock size={16} /> <span className="text-xs font-bold hidden sm:inline">15m</span>
+                <Clock size={16} /> <span className="text-xs font-semibold hidden sm:inline">15m</span>
             </button>
 
             {/* Table Name Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 shadow-sm rounded-lg px-2 py-1">
-                    <CaseSensitive size={14} className="text-indigo-500" />
-                    <input 
+                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
+                    <CaseSensitive size={14} className="text-[var(--color-fg-muted)]" />
+                    <input
                         type="text"
-                        className="w-20 text-sm outline-none text-indigo-700 font-bold bg-transparent"
+                        className="w-20 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
                         value={singleSelectedTable.name}
                         onChange={(e) => handleNameChange(e.target.value)}
                     />
                 </div>
             )}
 
-            {/* Seats Edit - Updated Styling */}
+            {/* Seats Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 shadow-sm rounded-lg px-2 py-1">
-                    <Users size={14} className="text-indigo-500" />
+                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
+                    <Users size={14} className="text-[var(--color-fg-muted)]" />
                     <input
                         type="number"
                         min="1"
                         max="20"
-                        className="w-12 text-sm outline-none text-indigo-700 font-bold bg-transparent"
+                        className="w-12 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
                         value={singleSelectedTable.seats}
                         onChange={(e) => handleSeatsChange(parseInt(e.target.value) || 1)}
                     />
@@ -903,12 +903,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <button
                     onClick={(e) => handleRotate(e.shiftKey ? -15 : 15)}
                     onContextMenu={(e) => { e.preventDefault(); handleRotate(-15); }}
-                    className="flex items-center gap-1 px-2 py-2 rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
                     title={`Ruota +15° (Shift/click destro per -15°)${singleSelectedTable ? ` — attuale: ${singleSelectedTable.rotation || 0}°` : ''}`}
                 >
                     <RotateCw size={16} />
                     {singleSelectedTable && (singleSelectedTable.rotation || 0) !== 0 && (
-                        <span className="text-xs font-bold tabular-nums">{singleSelectedTable.rotation}°</span>
+                        <span className="text-xs font-semibold tabular-nums">{singleSelectedTable.rotation}°</span>
                     )}
                 </button>
             )}
@@ -920,7 +920,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 font-medium text-sm"
+                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 font-medium text-sm transition"
                 >
                 <Combine size={16} /> Unisci
                 </button>
@@ -933,7 +933,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 font-medium text-sm"
+                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 font-medium text-sm transition"
                     title={`Dividi tavoli: ${singleSelectedTable.name}`}
                 >
                 <Scissors size={16} /> Dividi
@@ -944,7 +944,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                  <button
                  onClick={() => setDeleteTablesConfirm([...selectedTables])}
-                 className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 font-medium text-sm"
+                 className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-700 font-medium text-sm transition"
                 >
                     <Trash2 size={16} /> Elimina
                 </button>
@@ -956,10 +956,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-slate-100 rounded-xl border-2 border-dashed border-slate-300 relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
-            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(rgba(148,163,184,0.4) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
         }}
       >
@@ -976,22 +976,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
 
           {isLoadingMerges && (
-              <div className="absolute inset-0 z-30 bg-slate-100/70 backdrop-blur-[1px] flex items-center justify-center">
-                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                      <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)]">
+                      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                      <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                   </div>
               </div>
           )}
 
           {currentTables.length === 0 && !isLoadingMerges && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-400 pointer-events-none">
-                  <p>Trascina o aggiungi tavoli in questa sala</p>
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--color-fg-muted)] pointer-events-none">
+                  <p className="text-sm">Trascina o aggiungi tavoli in questa sala</p>
               </div>
           )}
-          
+
           {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg pointer-events-none flex items-center gap-2">
+              <div className="absolute top-4 left-4 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-3 py-1 rounded-full text-xs font-medium pointer-events-none flex items-center gap-2">
                   <CheckSquare size={12} /> MODALITÀ SELEZIONE ATTIVA
               </div>
           )}
@@ -1001,33 +1001,33 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] text-xs font-semibold text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
                 aria-expanded={isLegendOpen}
             >
-                <Info size={14} className="text-indigo-500" />
+                <Info size={14} />
                 Legenda
             </button>
             {isLegendOpen && (
                 <div
-                    className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                    className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)] p-3 rounded-md border border-[var(--color-line)] shadow-[var(--shadow-overlay)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-white border border-emerald-300 rounded-sm"></div> Libero
+                    <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-emerald-50 border border-emerald-200 rounded-sm"></div> Libero
                     </div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-red-50 border border-red-300 rounded-sm relative">
-                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full"></div>
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-rose-50 border border-rose-200 rounded-sm relative">
+                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
                         </div> Occupato (In corso)
                     </div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-amber-50 border border-amber-300 rounded-sm"></div> Riservato (Prossime 2h)
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-amber-50 border border-amber-200 rounded-sm"></div> Riservato (Prossime 2h)
                     </div>
-                    <div className="flex items-center gap-2 text-slate-400 border-t pt-2 mt-1">
+                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
                         <Lock size={12} /> Tavolo Bloccato
                     </div>
-                    <div className="flex items-center gap-2 text-slate-400">
+                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)]">
                         <Timer size={12} /> Blocco Temporaneo
                     </div>
                 </div>
@@ -1037,21 +1037,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Alert Modal */}
       {alertModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
-                alertModal.type === 'error' ? 'bg-red-100' : 'bg-amber-100'
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="px-5 py-6 text-center">
+              <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${
+                alertModal.type === 'error' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'
               }`}>
-                <AlertTriangle className={`h-8 w-8 ${
-                  alertModal.type === 'error' ? 'text-red-600' : 'text-amber-600'
+                <AlertTriangle className={`h-5 w-5 ${
+                  alertModal.type === 'error' ? 'text-rose-600' : 'text-amber-600'
                 }`} />
               </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Attenzione</h3>
-              <p className="text-slate-600 mb-6">{alertModal.message}</p>
+              <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">Attenzione</h3>
+              <p className="text-sm text-[var(--color-fg-muted)] mb-6">{alertModal.message}</p>
               <button
                 onClick={() => setAlertModal(null)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 OK
               </button>

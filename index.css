@@ -1,22 +1,268 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   Class-based dark mode
+   ========================================================================= */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ===========================================================================
+   Design tokens (Tailwind v4 @theme)
+   - Re-map a small set of base colors so existing utilities (bg-indigo-600,
+     text-slate-400, etc.) automatically pick up the FlowOps Surgical Precision
+     palette without rewriting every component.
+   - Add semantic tokens for new chrome (sidebar, surfaces) and dark mode.
+   ========================================================================= */
+@theme {
+  /* ---------- Brand & accent ---------- */
+  --color-brand: #111827;
+  --color-brand-hover: #000000;
+  --color-brand-fg: #ffffff;
+  --color-brand-soft: #f3f4f6;
+  --color-brand-soft-fg: #111827;
+
+  /* ---------- Surfaces (light defaults) ---------- */
+  --color-surface: #ffffff;
+  --color-surface-2: #f9fafb;
+  --color-surface-3: #f3f4f6;
+  --color-surface-hover: #f9fafb;
+  --color-surface-sunken: #f3f4f6;
+
+  /* ---------- Borders ---------- */
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+
+  /* ---------- Text ---------- */
+  --color-fg: #111827;
+  --color-fg-muted: #6b7280;
+  --color-fg-subtle: #9ca3af;
+  --color-fg-on-brand: #ffffff;
+
+  /* ---------- Sidebar (Hume-style — blends into page bg) ---------- */
+  --color-sidebar-bg: #f9fafb;          /* same as --color-surface-2 */
+  --color-sidebar-fg: #6b7280;
+  --color-sidebar-fg-strong: #111827;
+  --color-sidebar-active-bg: #ffffff;   /* white card-like active state */
+  --color-sidebar-active-fg: #111827;
+  --color-sidebar-line: #e5e7eb;
+  --color-sidebar-eyebrow: #9ca3af;
+
+  /* ---------- Remap legacy palette so existing utilities pick up the new look ---------- */
+  /* Indigo → near-black accent (was the primary button/active color) */
+  --color-indigo-50: #f3f4f6;
+  --color-indigo-100: #e5e7eb;
+  --color-indigo-200: #d1d5db;
+  --color-indigo-300: #9ca3af;
+  --color-indigo-400: #4b5563;
+  --color-indigo-500: #1f2937;
+  --color-indigo-600: #111827;
+  --color-indigo-700: #000000;
+  --color-indigo-800: #000000;
+  --color-indigo-900: #000000;
+
+  /* Slate stays — but bump the lowest tints up so body text always passes AA. */
+  --color-slate-50: #f9fafb;
+  --color-slate-100: #f3f4f6;
+  --color-slate-200: #e5e7eb;
+  --color-slate-300: #d1d5db;
+  --color-slate-400: #9ca3af;
+  --color-slate-500: #6b7280;
+  --color-slate-600: #4b5563;
+  --color-slate-700: #374151;
+  --color-slate-800: #1f2937;
+  --color-slate-900: #111827;
+
+  /* Semantic states (kept distinct hue + matching dark variants applied below) */
+  --color-emerald-50:  #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+
+  --color-amber-50:  #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+
+  --color-rose-50:  #fef2f2;
+  --color-rose-100: #fee2e2;
+  --color-rose-500: #ef4444;
+  --color-rose-600: #dc2626;
+  --color-rose-700: #b91c1c;
+
+  /* Chart palette — accessible, color-blind friendly, sequential-ish */
+  --color-chart-1: #111827;
+  --color-chart-2: #6b7280;
+  --color-chart-3: #d97706;
+  --color-chart-4: #047857;
+  --color-chart-5: #b91c1c;
+  --color-chart-6: #2563eb;
+  --color-chart-grid: #e5e7eb;
+  --color-chart-axis: #9ca3af;
+
+  /* ---------- Radius ---------- */
+  --radius-sm: 0.25rem;   /*  4px */
+  --radius-md: 0.5rem;    /*  8px */
+  --radius-lg: 0.75rem;   /* 12px */
+  --radius-xl: 1rem;      /* 16px */
+  --radius-2xl: 1.25rem;  /* 20px */
+
+  /* ---------- Shadow recipes ---------- */
+  --shadow-xs: 0 1px 2px rgba(17, 24, 39, 0.05);
+  --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.05), 0 1px 3px rgba(17, 24, 39, 0.06);
+  --shadow-md: 0 4px 8px -2px rgba(17, 24, 39, 0.08), 0 2px 4px -2px rgba(17, 24, 39, 0.04);
+  --shadow-lg: 0 12px 24px -8px rgba(17, 24, 39, 0.12), 0 4px 8px -4px rgba(17, 24, 39, 0.06);
+  --shadow-overlay: 0 24px 48px -12px rgba(17, 24, 39, 0.18);
+
+  /* ---------- Type ---------- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ===========================================================================
+   Dark mode overrides
+   ========================================================================= */
+.dark {
+  --color-brand: #ffffff;
+  --color-brand-hover: #e5e7eb;
+  --color-brand-fg: #0f172a;
+  --color-brand-soft: #1e293b;
+  --color-brand-soft-fg: #ffffff;
+
+  --color-surface: #0f172a;
+  --color-surface-2: #111827;
+  --color-surface-3: #1e293b;
+  --color-surface-hover: #1e293b;
+  --color-surface-sunken: #0b1220;
+
+  --color-line: #1e293b;
+  --color-line-strong: #334155;
+
+  --color-fg: #f9fafb;
+  --color-fg-muted: #94a3b8;
+  --color-fg-subtle: #64748b;
+  --color-fg-on-brand: #0f172a;
+
+  --color-sidebar-bg: #0b1220;
+  --color-sidebar-fg: #94a3b8;
+  --color-sidebar-fg-strong: #f1f5f9;
+  --color-sidebar-active-bg: #1e293b;
+  --color-sidebar-active-fg: #ffffff;
+  --color-sidebar-line: #1e293b;
+  --color-sidebar-eyebrow: #64748b;
+
+  /* Re-map the legacy palette for dark mode so bg-white / text-slate-900 etc.
+     read as dark surfaces and light text without rewriting every component. */
+  --color-white: #0f172a;                /* surface */
+  --color-slate-50:  #1e293b;
+  --color-slate-100: #1f2937;
+  --color-slate-200: #334155;
+  --color-slate-300: #475569;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #cbd5e1;
+  --color-slate-600: #e2e8f0;
+  --color-slate-700: #f1f5f9;
+  --color-slate-800: #f8fafc;
+  --color-slate-900: #ffffff;
+
+  /* Brand accent flips to white-on-dark in dark mode */
+  --color-indigo-50:  #1e293b;
+  --color-indigo-100: #334155;
+  --color-indigo-600: #ffffff;
+  --color-indigo-700: #e2e8f0;
+
+  /* Soften semantic state surfaces so they don't glow on dark */
+  --color-emerald-50:  rgba(16, 185, 129, 0.12);
+  --color-emerald-100: rgba(16, 185, 129, 0.18);
+  --color-amber-50:    rgba(245, 158, 11, 0.12);
+  --color-amber-100:   rgba(245, 158, 11, 0.18);
+  --color-rose-50:     rgba(244, 63, 94, 0.12);
+  --color-rose-100:    rgba(244, 63, 94, 0.18);
+
+  --color-chart-grid:  #1f2937;
+  --color-chart-axis:  #64748b;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 24px -8px rgba(0, 0, 0, 0.6), 0 4px 8px -4px rgba(0, 0, 0, 0.3);
+  --shadow-overlay: 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* ===========================================================================
+   Base typography & resets
+   ========================================================================= */
+html { font-family: var(--font-sans); }
+
+body {
+  background: var(--color-surface-2);
+  color: var(--color-fg);
+  font-feature-settings: "ss01", "cv11"; /* Inter improvements */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Numbers in tables, money, time → tabular */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Hide native scrollbar in horizontal scroll regions but keep scrolling */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ===========================================================================
+   A11y
+   ========================================================================= */
+*:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 8px;
+  background: var(--color-brand);
+  color: var(--color-brand-fg);
+  padding: 8px 16px;
+  border-radius: 8px;
+  z-index: 1000;
+  font-weight: 500;
+  font-size: 14px;
+}
+.skip-link:focus { top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+   Existing animations (kept)
+   ========================================================================= */
 @keyframes glow-pulse {
   0% {
     box-shadow:
-      0 0 0 0 rgba(99, 102, 241, 0.7),
-      0 0 14px 2px rgba(99, 102, 241, 0.65);
+      0 0 0 0 rgba(17, 24, 39, 0.7),
+      0 0 14px 2px rgba(17, 24, 39, 0.55);
     transform: scale(1);
   }
   50% {
     box-shadow:
-      0 0 0 14px rgba(99, 102, 241, 0),
-      0 0 38px 10px rgba(99, 102, 241, 0.95);
-    transform: scale(1.08);
+      0 0 0 14px rgba(17, 24, 39, 0),
+      0 0 38px 10px rgba(17, 24, 39, 0.85);
+    transform: scale(1.06);
   }
   100% {
     box-shadow:
-      0 0 0 0 rgba(99, 102, 241, 0),
-      0 0 14px 2px rgba(99, 102, 241, 0.65);
+      0 0 0 0 rgba(17, 24, 39, 0),
+      0 0 14px 2px rgba(17, 24, 39, 0.55);
     transform: scale(1);
   }
 }
@@ -25,7 +271,9 @@
   animation: glow-pulse 1.4s ease-in-out infinite;
 }
 
-/* Print styles */
+/* ===========================================================================
+   Print
+   ========================================================================= */
 .print-only { display: none; }
 
 @media print {

@@ -22,8 +22,8 @@ const STAFF_CATEGORY_LABELS: Record<StaffCategory, string> = {
 };
 
 const STAFF_CATEGORY_COLORS: Record<StaffCategory, string> = {
-  [StaffCategory.SALA]: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  [StaffCategory.CUCINA]: 'bg-orange-100 text-orange-700 border-orange-200'
+  [StaffCategory.SALA]: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  [StaffCategory.CUCINA]: 'bg-amber-50 text-amber-700 border-amber-100'
 };
 
 const STAFF_TYPE_LABELS: Record<StaffType, string> = {
@@ -33,9 +33,9 @@ const STAFF_TYPE_LABELS: Record<StaffType, string> = {
 };
 
 const STAFF_TYPE_COLORS: Record<StaffType, string> = {
-  [StaffType.FISSO]: 'bg-blue-100 text-blue-700',
-  [StaffType.STAGIONALE]: 'bg-amber-100 text-amber-700',
-  [StaffType.EXTRA]: 'bg-purple-100 text-purple-700'
+  [StaffType.FISSO]: 'bg-blue-50 text-blue-700 border border-blue-100',
+  [StaffType.STAGIONALE]: 'bg-amber-50 text-amber-700 border border-amber-100',
+  [StaffType.EXTRA]: 'bg-violet-50 text-violet-700 border border-violet-100'
 };
 
 const TIME_OFF_LABELS: Record<TimeOffType, string> = {
@@ -46,10 +46,10 @@ const TIME_OFF_LABELS: Record<TimeOffType, string> = {
 };
 
 const TIME_OFF_COLORS: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'bg-slate-200 text-slate-700',
-  [TimeOffType.VACANZA]: 'bg-cyan-100 text-cyan-700',
-  [TimeOffType.MALATTIA]: 'bg-rose-100 text-rose-700',
-  [TimeOffType.PERMESSO]: 'bg-violet-100 text-violet-700'
+  [TimeOffType.RIPOSO]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]',
+  [TimeOffType.VACANZA]: 'bg-cyan-50 text-cyan-700 border border-cyan-100',
+  [TimeOffType.MALATTIA]: 'bg-rose-50 text-rose-700 border border-rose-100',
+  [TimeOffType.PERMESSO]: 'bg-violet-50 text-violet-700 border border-violet-100'
 };
 
 const TIME_OFF_DAY_BG: Record<TimeOffType, string> = {
@@ -463,65 +463,65 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
       </div>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8 space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Personale</h1>
-          <p className="text-slate-500">Gestione dipendenti, turni e assenze</p>
+          <h1 className="text-[20px] font-semibold tracking-tight text-[var(--color-fg)]">Personale</h1>
+          <p className="text-sm text-[var(--color-fg-muted)]">Gestione dipendenti, turni e assenze</p>
         </div>
         <button
           onClick={handleOpenAddStaff}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+          className="w-full md:w-auto justify-center rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
         >
-          <UserPlus className="h-5 w-5" />
+          <UserPlus className="h-4 w-4" />
           Aggiungi Dipendente
         </button>
       </div>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex flex-wrap gap-4 items-center">
+      <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg p-4">
+        <div className="flex flex-wrap gap-3 items-center">
           {/* Search */}
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
             <input
               type="text"
               placeholder="Cerca dipendente..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+              className="w-full pl-9 pr-3 py-2 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
           </div>
 
           {/* Category Filter */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setCategoryFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+                categoryFilter === 'ALL' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.SALA)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === StaffCategory.SALA ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.SALA ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Sala
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.CUCINA)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === StaffCategory.CUCINA ? 'bg-orange-100 text-orange-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.CUCINA ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Cucina
@@ -529,11 +529,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
           </div>
 
           {/* Type Filter */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setTypeFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                typeFilter === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+                typeFilter === 'ALL' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
@@ -542,8 +542,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               <button
                 key={key}
                 onClick={() => setTypeFilter(key as StaffType)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  typeFilter === key ? `${STAFF_TYPE_COLORS[key as StaffType]} shadow-sm` : 'text-slate-500 hover:text-slate-700'
+                className={`px-3 py-1 text-xs font-medium rounded-full transition ${
+                  typeFilter === key ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
                 }`}
               >
                 {label}
@@ -557,9 +557,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               type="checkbox"
               checked={showInactive}
               onChange={(e) => setShowInactive(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="w-4 h-4 rounded border-[var(--color-line)]"
             />
-            <span className="text-sm text-slate-600">Mostra inattivi</span>
+            <span className="text-sm text-[var(--color-fg-muted)]">Mostra inattivi</span>
           </label>
         </div>
       </div>
@@ -569,37 +569,37 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
         {/* Staff Lists */}
         <div className="lg:col-span-1 space-y-6">
           {/* Sala Section */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100">
+          <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-emerald-600" />
-                <h2 className="font-semibold text-emerald-800">Sala</h2>
-                <span className="ml-auto text-sm text-emerald-600 font-medium">{salaStaff.length}</span>
+                <Users className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                <h2 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</h2>
+                <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{salaStaff.length}</span>
               </div>
             </div>
             <div className="p-2 max-h-[300px] overflow-y-auto">
               {salaStaff.length === 0 ? (
-                <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
+                <p className="text-center text-[var(--color-fg-subtle)] py-4 text-sm">Nessun dipendente</p>
               ) : (
                 salaStaff.map(staff => (
                   <div
                     key={staff.id}
                     onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
+                    className={`p-2.5 rounded-md cursor-pointer transition mb-1 ${
                       selectedStaff?.id === staff.id
-                        ? 'bg-emerald-100 border border-emerald-200'
-                        : 'hover:bg-slate-50 border border-transparent'
+                        ? 'bg-[var(--color-surface-3)] border border-[var(--color-line-strong)]'
+                        : 'hover:bg-[var(--color-surface-hover)] border border-transparent'
                     } ${!staff.isActive ? 'opacity-50' : ''}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
+                      <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-medium flex items-center justify-center text-sm">
                         {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cameriere'}</p>
+                        <p className="font-medium text-[var(--color-fg)] truncate text-sm">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                        <p className="text-xs text-[var(--color-fg-muted)]">{staff.role || 'Cameriere'}</p>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[staff.staffType]}`}>
                         {STAFF_TYPE_LABELS[staff.staffType]}
                       </span>
                     </div>
@@ -610,37 +610,37 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
           </div>
 
           {/* Cucina Section */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+          <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
-                <ChefHat className="h-5 w-5 text-orange-600" />
-                <h2 className="font-semibold text-orange-800">Cucina</h2>
-                <span className="ml-auto text-sm text-orange-600 font-medium">{cucinaStaff.length}</span>
+                <ChefHat className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                <h2 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</h2>
+                <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{cucinaStaff.length}</span>
               </div>
             </div>
             <div className="p-2 max-h-[300px] overflow-y-auto">
               {cucinaStaff.length === 0 ? (
-                <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
+                <p className="text-center text-[var(--color-fg-subtle)] py-4 text-sm">Nessun dipendente</p>
               ) : (
                 cucinaStaff.map(staff => (
                   <div
                     key={staff.id}
                     onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
+                    className={`p-2.5 rounded-md cursor-pointer transition mb-1 ${
                       selectedStaff?.id === staff.id
-                        ? 'bg-orange-100 border border-orange-200'
-                        : 'hover:bg-slate-50 border border-transparent'
+                        ? 'bg-[var(--color-surface-3)] border border-[var(--color-line-strong)]'
+                        : 'hover:bg-[var(--color-surface-hover)] border border-transparent'
                     } ${!staff.isActive ? 'opacity-50' : ''}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-semibold">
+                      <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-medium flex items-center justify-center text-sm">
                         {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cuoco'}</p>
+                        <p className="font-medium text-[var(--color-fg)] truncate text-sm">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                        <p className="text-xs text-[var(--color-fg-muted)]">{staff.role || 'Cuoco'}</p>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[staff.staffType]}`}>
                         {STAFF_TYPE_LABELS[staff.staffType]}
                       </span>
                     </div>
@@ -654,74 +654,72 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
         {/* Staff Detail & Calendar */}
         <div className="lg:col-span-2">
           {selectedStaff ? (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
               {/* Staff Detail Header */}
-              <div className={`p-6 ${selectedStaff.category === StaffCategory.SALA ? 'bg-gradient-to-r from-emerald-50 to-teal-50' : 'bg-gradient-to-r from-orange-50 to-amber-50'}`}>
+              <div className="px-5 py-4 border-b border-[var(--color-line)]">
                 <div className="flex items-start gap-4">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold ${
-                    selectedStaff.category === StaffCategory.SALA ? 'bg-emerald-200 text-emerald-700' : 'bg-orange-200 text-orange-700'
-                  }`}>
+                  <div className="w-14 h-14 rounded-lg bg-[var(--color-surface-3)] text-[var(--color-fg)] flex items-center justify-center text-xl font-medium">
                     {selectedStaff.name[0]?.toUpperCase()}{selectedStaff.surname[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-slate-800">{toTitleCase(selectedStaff.name)} {toTitleCase(selectedStaff.surname)}</h2>
+                      <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{toTitleCase(selectedStaff.name)} {toTitleCase(selectedStaff.surname)}</h2>
                       {!selectedStaff.isActive && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Inattivo</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">Inattivo</span>
                       )}
                     </div>
-                    <p className="text-slate-600">{selectedStaff.role || (selectedStaff.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco')}</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <span className={`text-xs px-2 py-1 rounded-full border ${STAFF_CATEGORY_COLORS[selectedStaff.category]}`}>
+                    <p className="text-sm text-[var(--color-fg-muted)]">{selectedStaff.role || (selectedStaff.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco')}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${STAFF_CATEGORY_COLORS[selectedStaff.category]}`}>
                         {STAFF_CATEGORY_LABELS[selectedStaff.category]}
                       </span>
-                      <span className={`text-xs px-2 py-1 rounded-full ${STAFF_TYPE_COLORS[selectedStaff.staffType]}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[selectedStaff.staffType]}`}>
                         {STAFF_TYPE_LABELS[selectedStaff.staffType]}
                       </span>
                       {selectedStaff.weeklyRestDay !== undefined && selectedStaff.weeklyRestDay !== null && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
                           Riposo: {WEEKDAY_LABELS[selectedStaff.weeklyRestDay]}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <button
                       onClick={() => handleOpenEditStaff(selectedStaff)}
-                      className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"
+                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
                     >
-                      <Edit2 className="h-5 w-5" />
+                      <Edit2 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => handleToggleStaffActive(selectedStaff)}
-                      className={`p-2 rounded-lg transition-colors ${
+                      className={`p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] ${
                         selectedStaff.isActive
-                          ? 'text-slate-500 hover:text-amber-600 hover:bg-white'
-                          : 'text-emerald-600 hover:bg-white'
+                          ? 'text-[var(--color-fg-muted)] hover:text-amber-600'
+                          : 'text-emerald-600'
                       }`}
                     >
-                      {selectedStaff.isActive ? <AlertTriangle className="h-5 w-5" /> : <Check className="h-5 w-5" />}
+                      {selectedStaff.isActive ? <AlertTriangle className="h-4 w-4" /> : <Check className="h-4 w-4" />}
                     </button>
                     <button
                       onClick={() => setDeleteStaffConfirm(selectedStaff)}
-                      className="p-2 text-slate-500 hover:text-rose-600 hover:bg-white rounded-lg transition-colors"
+                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
                     >
-                      <Trash2 className="h-5 w-5" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
 
                 {/* Contact Info */}
-                <div className="flex gap-4 mt-4 text-sm">
+                <div className="flex gap-4 mt-3 text-sm">
                   {selectedStaff.phone && (
-                    <div className="flex items-center gap-1.5 text-slate-600">
-                      <Phone className="h-4 w-4" />
+                    <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                      <Phone className="h-3.5 w-3.5" />
                       {selectedStaff.phone}
                     </div>
                   )}
                   {selectedStaff.email && (
-                    <div className="flex items-center gap-1.5 text-slate-600">
-                      <Mail className="h-4 w-4" />
+                    <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                      <Mail className="h-3.5 w-3.5" />
                       {selectedStaff.email}
                     </div>
                   )}
@@ -729,45 +727,46 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               {/* Calendar Navigation */}
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-[var(--color-line)] flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <button onClick={goToPreviousMonth} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                    <ChevronLeft className="h-5 w-5 text-slate-600" />
+                  <button onClick={goToPreviousMonth} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="font-semibold text-slate-800 min-w-[150px] text-center capitalize">
+                  <span className="text-sm font-medium text-[var(--color-fg)] min-w-[150px] text-center capitalize">
                     {calendarDate.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}
                   </span>
-                  <button onClick={goToNextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                    <ChevronRight className="h-5 w-5 text-slate-600" />
+                  <button onClick={goToNextMonth} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    <ChevronRight className="h-4 w-4" />
                   </button>
-                  <button onClick={goToCurrentMonth} className="ml-2 text-xs text-indigo-600 hover:underline">
+                  <button onClick={goToCurrentMonth} className="ml-2 text-xs text-[var(--color-fg)] hover:underline">
                     Oggi
                   </button>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleOpenAddTimeOff}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                    className="rounded-full px-3 py-1.5 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-xs font-medium hover:bg-[var(--color-surface-hover)] transition flex items-center gap-1"
                   >
-                    <Calendar className="h-4 w-4" />
+                    <Calendar className="h-3.5 w-3.5" />
                     Assenza
                   </button>
                   <button
                     onClick={() => handleOpenAddShift()}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors"
+                    className="rounded-full px-3 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition flex items-center gap-1"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-3.5 w-3.5" />
                     Turno
                   </button>
                 </div>
               </div>
 
               {/* Calendar Grid */}
-              <div className="p-4">
+              <div className="p-4 overflow-x-auto">
+                <div className="min-w-[560px]">
                 {/* Day Headers */}
                 <div className="grid grid-cols-7 gap-1 mb-2">
                   {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
-                    <div key={day} className="text-center text-xs font-medium text-slate-500 py-2">
+                    <div key={day} className="text-center text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)] py-2">
                       {day}
                     </div>
                   ))}
@@ -875,6 +874,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     );
                   })}
                 </div>
+                </div>
 
                 {/* Legend */}
                 <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500">
@@ -912,15 +912,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               {/* Time Off List */}
               {timeOffs.filter(t => t.staffId === selectedStaff.id).length > 0 && (
                 <div className="px-4 pb-4">
-                  <h3 className="text-sm font-semibold text-slate-700 mb-2">Assenze Programmate</h3>
-                  <div className="space-y-2">
+                  <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Assenze Programmate</h3>
+                  <div className="space-y-1.5">
                     {timeOffs.filter(t => t.staffId === selectedStaff.id).map(timeOff => (
-                      <div key={timeOff.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
+                      <div key={timeOff.id} className="flex items-center justify-between p-2 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md">
                         <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${TIME_OFF_COLORS[timeOff.type]}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${TIME_OFF_COLORS[timeOff.type]}`}>
                             {TIME_OFF_LABELS[timeOff.type]}
                           </span>
-                          <span className="text-sm text-slate-600">
+                          <span className="text-sm text-[var(--color-fg-muted)]">
                             {new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             {timeOff.startDate !== timeOff.endDate && (
                               <> - {new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</>
@@ -934,7 +934,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                               : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
                             setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
                           }}
-                          className="p-1 text-slate-400 hover:text-rose-500"
+                          className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -945,10 +945,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center h-[500px]">
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] flex items-center justify-center h-[500px]">
               <div className="text-center">
-                <UserCircle className="h-16 w-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-500">Seleziona un dipendente per vedere i dettagli</p>
+                <UserCircle className="h-12 w-12 text-[var(--color-fg-subtle)] mx-auto mb-3" />
+                <p className="text-sm text-[var(--color-fg-muted)]">Seleziona un dipendente per vedere i dettagli</p>
               </div>
             </div>
           )}
@@ -957,47 +957,47 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add/Edit Staff Modal */}
       {showStaffModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
+              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">
                 {editingStaff ? 'Modifica Dipendente' : 'Nuovo Dipendente'}
               </h3>
-              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome *</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome *</label>
                   <input
                     type="text"
                     value={staffForm.name}
                     onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="Mario"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Cognome *</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Cognome *</label>
                   <input
                     type="text"
                     value={staffForm.surname}
                     onChange={(e) => setStaffForm({ ...staffForm, surname: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="Rossi"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria *</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria *</label>
                   <select
                     value={staffForm.category}
                     onChange={(e) => setStaffForm({ ...staffForm, category: e.target.value as StaffCategory })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     {Object.entries(STAFF_CATEGORY_LABELS).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
@@ -1005,11 +1005,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Tipo *</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo *</label>
                   <select
                     value={staffForm.staffType}
                     onChange={(e) => setStaffForm({ ...staffForm, staffType: e.target.value as StaffType })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     {Object.entries(STAFF_TYPE_LABELS).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
@@ -1019,69 +1019,69 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Ruolo</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Ruolo</label>
                 <input
                   type="text"
                   value={staffForm.role}
                   onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="es. Chef, Cameriere, Lavapiatti"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Telefono</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Telefono</label>
                   <input
                     type="tel"
                     value={staffForm.phone}
                     onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="+39 333 1234567"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Email</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Email</label>
                   <input
                     type="email"
                     value={staffForm.email}
                     onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="mario@esempio.com"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data Assunzione</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Assunzione</label>
                   <input
                     type="date"
                     value={staffForm.hireDate}
                     onChange={(e) => setStaffForm({ ...staffForm, hireDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Fine Contratto</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Fine Contratto</label>
                   <input
                     type="date"
                     value={staffForm.contractEndDate}
                     onChange={(e) => setStaffForm({ ...staffForm, contractEndDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Giorno di Riposo Settimanale</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Giorno di Riposo Settimanale</label>
                 <select
                   value={staffForm.weeklyRestDay ?? ''}
                   onChange={(e) => setStaffForm({
                     ...staffForm,
                     weeklyRestDay: e.target.value === '' ? null : Number(e.target.value)
                   })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   <option value="">Nessuno</option>
                   {WEEKDAY_LABELS.map((label, idx) => (
@@ -1091,7 +1091,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <textarea
                   value={staffForm.notes}
                   onChange={(e) => setStaffForm({ ...staffForm, notes: e.target.value })}
@@ -1100,16 +1100,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => { setShowStaffModal(false); resetStaffForm(); }}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveStaff}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 {editingStaff ? 'Salva' : 'Aggiungi'}
               </button>
@@ -1120,77 +1120,77 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add Shift Modal */}
       {showShiftModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Aggiungi Turno</h3>
-              <button onClick={() => setShowShiftModal(false)} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm">
+            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
+              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Aggiungi Turno</h3>
+              <button onClick={() => setShowShiftModal(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="px-5 py-4 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
                   type="date"
                   value={shiftForm.date}
                   onChange={(e) => setShiftForm({ ...shiftForm, date: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Turno</label>
-                <p className="text-[11px] text-slate-400 mb-2">Seleziona uno o entrambi i turni</p>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <p className="text-[11px] text-[var(--color-fg-subtle)] mb-2">Seleziona uno o entrambi i turni</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => setShiftForm({ ...shiftForm, lunch: !shiftForm.lunch })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.lunch
-                        ? 'border-amber-500 bg-amber-50 text-amber-700'
-                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
                     {shiftForm.lunch && <Check className="h-4 w-4" />}
-                    <Sun className="h-5 w-5" />
+                    <Sun className="h-4 w-4" />
                     Pranzo
                   </button>
                   <button
                     type="button"
                     onClick={() => setShiftForm({ ...shiftForm, dinner: !shiftForm.dinner })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.dinner
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                        : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
                     {shiftForm.dinner && <Check className="h-4 w-4" />}
-                    <Moon className="h-5 w-5" />
+                    <Moon className="h-4 w-4" />
                     Cena
                   </button>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={shiftForm.notes}
                   onChange={(e) => setShiftForm({ ...shiftForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="Note opzionali..."
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowShiftModal(false)}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveShift}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 Aggiungi
               </button>
@@ -1201,68 +1201,68 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add Time Off Modal */}
       {showTimeOffModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Registra Assenza</h3>
-              <button onClick={() => setShowTimeOffModal(false)} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm">
+            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
+              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Registra Assenza</h3>
+              <button onClick={() => setShowTimeOffModal(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="px-5 py-4 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Tipo</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo</label>
                 <select
                   value={timeOffForm.type}
                   onChange={(e) => setTimeOffForm({ ...timeOffForm, type: e.target.value as TimeOffType })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Da</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Da</label>
                   <input
                     type="date"
                     value={timeOffForm.startDate}
                     onChange={(e) => setTimeOffForm({ ...timeOffForm, startDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">A</label>
+                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">A</label>
                   <input
                     type="date"
                     value={timeOffForm.endDate}
                     onChange={(e) => setTimeOffForm({ ...timeOffForm, endDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={timeOffForm.notes}
                   onChange={(e) => setTimeOffForm({ ...timeOffForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="Note opzionali..."
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowTimeOffModal(false)}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveTimeOff}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 Registra
               </button>

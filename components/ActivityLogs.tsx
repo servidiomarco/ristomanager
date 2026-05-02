@@ -30,11 +30,11 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
 };
 
 const ACTION_COLORS: Record<ActivityAction, string> = {
-  [ActivityAction.CREATE]: 'bg-emerald-100 text-emerald-700',
-  [ActivityAction.UPDATE]: 'bg-blue-100 text-blue-700',
-  [ActivityAction.DELETE]: 'bg-rose-100 text-rose-700',
-  [ActivityAction.LOGIN]: 'bg-violet-100 text-violet-700',
-  [ActivityAction.LOGOUT]: 'bg-slate-100 text-slate-600'
+  [ActivityAction.CREATE]: 'bg-emerald-50 text-emerald-700 border border-emerald-100',
+  [ActivityAction.UPDATE]: 'bg-blue-50 text-blue-700 border border-blue-100',
+  [ActivityAction.DELETE]: 'bg-rose-50 text-rose-700 border border-rose-100',
+  [ActivityAction.LOGIN]: 'bg-violet-50 text-violet-700 border border-violet-100',
+  [ActivityAction.LOGOUT]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]'
 };
 
 export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) => {
@@ -130,42 +130,42 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-6xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-line)]">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">Log Attività</h2>
-            <p className="text-sm text-slate-500 mt-1">
+            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Log Attività</h2>
+            <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
               {total} {total === 1 ? 'operazione registrata' : 'operazioni registrate'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               onClick={fetchLogs}
-              className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
               title="Aggiorna"
             >
-              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="p-4 border-b border-slate-100 bg-slate-50">
+        <div className="px-5 py-4 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
           <div className="flex items-center gap-2 mb-3">
-            <Filter className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-600">Filtri</span>
+            <Filter className="w-3.5 h-3.5 text-[var(--color-fg-subtle)]" />
+            <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Filtri</span>
             {(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate) && (
               <button
                 onClick={resetFilters}
-                className="text-xs text-indigo-600 hover:text-indigo-700 ml-2"
+                className="text-xs text-[var(--color-fg)] hover:underline ml-2"
               >
                 Azzera filtri
               </button>
@@ -179,7 +179,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedUserId(e.target.value ? parseInt(e.target.value, 10) : undefined);
                 setPage(1);
               }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             >
               <option value="">Tutti gli utenti</option>
               {users.map(user => (
@@ -194,7 +194,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedResourceType(e.target.value as ResourceType || undefined);
                 setPage(1);
               }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             >
               <option value="">Tutte le risorse</option>
               {Object.values(ResourceType).map(type => (
@@ -209,7 +209,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedAction(e.target.value as ActivityAction || undefined);
                 setPage(1);
               }}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             >
               <option value="">Tutte le azioni</option>
               {Object.values(ActivityAction).map(action => (
@@ -226,7 +226,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setPage(1);
               }}
               placeholder="Da"
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
 
             {/* To Date Filter */}
@@ -238,7 +238,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setPage(1);
               }}
               placeholder="A"
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
           </div>
         </div>
@@ -250,70 +250,72 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               {error}
             </div>
           ) : loading && logs.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">
-              <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
+            <div className="p-8 text-center text-[var(--color-fg-muted)]">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
               Caricamento...
             </div>
           ) : logs.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">
+            <div className="p-8 text-center text-[var(--color-fg-muted)]">
               Nessun log trovato
             </div>
           ) : (
             <table className="w-full">
-              <thead className="bg-slate-50 sticky top-0">
+              <thead className="bg-[var(--color-surface-3)] sticky top-0">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Data/Ora
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Utente
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Azione
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Risorsa
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Nome
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Dettagli
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
                     Stato
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {logs.map(log => (
-                  <tr key={log.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                  <tr key={log.id} className="border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]">
+                    <td className="px-4 py-3 text-sm text-[var(--color-fg-muted)] whitespace-nowrap">
                       {formatDate(log.created_at)}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-800">
+                    <td className="px-4 py-3 text-sm text-[var(--color-fg)]">
                       {log.user_name || log.user_email || '-'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${ACTION_COLORS[log.action]}`}>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
                         {ACTION_LABELS[log.action]}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
+                    <td className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
                       {RESOURCE_LABELS[log.resource_type]}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-800 max-w-[150px] truncate" title={log.resource_name || '-'}>
+                    <td className="px-4 py-3 text-sm text-[var(--color-fg)] max-w-[150px] truncate" title={log.resource_name || '-'}>
                       {log.resource_name || '-'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-500 max-w-[200px] truncate" title={formatDetails(log.details)}>
+                    <td className="px-4 py-3 text-sm text-[var(--color-fg-subtle)] max-w-[200px] truncate" title={formatDetails(log.details)}>
                       {formatDetails(log.details)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
                         log.status === 'SUCCESS'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-rose-100 text-rose-700'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                          : 'bg-rose-50 text-rose-700 border-rose-100'
                       }`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
                         {log.status === 'SUCCESS' ? 'OK' : 'Errore'}
                       </span>
                     </td>
@@ -326,22 +328,22 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between p-4 border-t border-slate-100">
-            <div className="text-sm text-slate-500">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--color-line)]">
+            <div className="text-xs text-[var(--color-fg-muted)]">
               Pagina {page} di {totalPages}
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
-                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

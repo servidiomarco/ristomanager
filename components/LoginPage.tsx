@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChefHat, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Loader2, Eye, EyeOff, Check, ChefHat } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
@@ -13,7 +13,6 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load saved credentials on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem(SAVED_CREDENTIALS_KEY);
@@ -24,7 +23,7 @@ export const LoginPage: React.FC = () => {
         setRememberMe(true);
       }
     } catch {
-      // ignore corrupt storage
+      // ignore
     }
   }, []);
 
@@ -51,85 +50,60 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full font-['Inter',sans-serif] text-[#111827] relative flex flex-col">
-      {/* Full-bleed background image */}
-      <div
-        className="absolute inset-0 -z-10 bg-cover bg-center"
-        style={{
-          backgroundImage:
-            "url('https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1920&q=80')",
-        }}
-        aria-hidden="true"
-      />
-      {/* Subtle darkening for legibility */}
-      <div className="absolute inset-0 -z-10 bg-black/15" aria-hidden="true" />
-      {/* Top chrome: logo top-left only */}
-      <header className="w-full flex items-center px-6 py-5">
-        <div className="flex items-center gap-2">
-          <div className="inline-flex items-center justify-center w-7 h-7 bg-white rounded-full">
-            <ChefHat className="h-4 w-4 text-[#111827]" />
+    <div className="min-h-screen w-full flex font-sans text-[var(--color-fg)] bg-[var(--color-surface)]">
+      {/* Left: form column */}
+      <div className="flex-1 min-w-0 relative flex flex-col">
+        {/* Top bar: brand */}
+        <div className="px-6 py-6 flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <div className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--color-fg)]">
+              <ChefHat className="h-6 w-6 text-[var(--color-fg-on-brand)]" />
+            </div>
+            <span className="text-[20px] leading-[28px] font-semibold tracking-tight text-[var(--color-fg)]">
+              Risto CRM
+            </span>
           </div>
-          <span className="text-[14px] leading-[20px] font-medium tracking-[0.35px] text-white drop-shadow-sm">
-            Risto CRM
-          </span>
         </div>
-      </header>
 
-      {/* Centered card */}
-      <main className="flex-1 flex items-center justify-center px-4 pb-16">
-        <div
-          className="w-full max-w-[440px] bg-white rounded-2xl p-2"
-          style={{
-            boxShadow:
-              'rgba(0, 0, 0, 0.06) 0px 0px 0px 1px, rgba(0, 0, 0, 0.06) 0px 1px 1px -0.5px, rgba(0, 0, 0, 0.06) 0px 3px 3px -1.5px, rgba(0, 0, 0, 0.06) 0px 6px 6px -3px, rgba(0, 0, 0, 0.06) 0px 12px 12px -6px, rgba(0, 0, 0, 0.06) 0px 24px 24px -12px',
-          }}
-        >
-          <div className="rounded-xl px-7 pt-7 pb-5">
-            {/* Heading */}
-            <h1 className="text-[24px] leading-[32px] font-medium tracking-[-0.01em] text-[#111827]">
-              Benvenuto in Risto CRM
+        {/* Centered form */}
+        <main className="flex-1 flex items-center justify-center px-6">
+          <div className="w-full max-w-[400px]">
+            <h1 className="text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--color-fg)] text-center mb-1.5">
+              Accedi al tuo ristorante
             </h1>
-            <p className="mt-1 text-[14px] leading-[22.75px] font-light text-[#6B7280]">
-              Accedi al tuo account qui sotto.
+            <p className="text-sm text-[var(--color-fg-muted)] text-center mb-8">
+              Inserisci le tue credenziali per continuare.
             </p>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
               {/* Email */}
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="email"
-                  className="text-[14px] leading-[20px] font-medium tracking-[0.35px] text-[#111827]"
-                >
-                  Email
-                </label>
+              <div>
+                <label htmlFor="email" className="sr-only">Email</label>
                 <input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tu@email.com"
-                  className="w-full bg-white border border-[#E5E7EB] rounded px-3 py-2.5 text-[14px] leading-[20px] font-light text-[#111827] placeholder:text-[#6B7280] focus:outline-none focus:border-[#111827] transition-colors duration-150"
+                  placeholder="Email"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
                   required
                   disabled={isLoading}
                 />
               </div>
 
               {/* Password */}
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="password"
-                  className="text-[14px] leading-[20px] font-medium tracking-[0.35px] text-[#111827]"
-                >
-                  Password
-                </label>
+              <div>
+                <label htmlFor="password" className="sr-only">Password</label>
                 <div className="relative">
                   <input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white border border-[#E5E7EB] rounded px-3 py-2.5 pr-10 text-[14px] leading-[20px] font-light text-[#111827] placeholder:text-[#6B7280] focus:outline-none focus:border-[#111827] transition-colors duration-150"
+                    placeholder="Password"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 pr-12 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
                     required
                     disabled={isLoading}
                   />
@@ -137,7 +111,7 @@ export const LoginPage: React.FC = () => {
                     type="button"
                     onClick={() => setShowPassword((p) => !p)}
                     disabled={isLoading}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#6B7280] hover:text-[#111827] transition-colors duration-150 disabled:opacity-50"
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors duration-150 disabled:opacity-50"
                     aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
                     tabIndex={-1}
                   >
@@ -147,27 +121,36 @@ export const LoginPage: React.FC = () => {
               </div>
 
               {/* Remember me */}
-              <div className="flex items-center gap-2.5 pt-1">
-                <input
-                  id="remember-me"
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  disabled={isLoading}
-                  className="h-4 w-4 rounded-[4px] border-[#E5E7EB] text-[#111827] focus:ring-1 focus:ring-[#111827]"
-                />
-                <label
-                  htmlFor="remember-me"
-                  className="text-[14px] leading-[22.75px] font-light text-[#6B7280] select-none"
-                >
+              <label
+                htmlFor="remember-me"
+                className="flex items-center gap-2 px-1 mt-1 cursor-pointer select-none"
+              >
+                <span className="relative inline-flex items-center justify-center">
+                  <input
+                    id="remember-me"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    disabled={isLoading}
+                    className="peer sr-only"
+                  />
+                  <span
+                    className="h-4 w-4 rounded-[4px] border border-[var(--color-line-strong)] bg-[var(--color-surface)] peer-checked:bg-[var(--color-fg)] peer-checked:border-[var(--color-fg)] peer-disabled:opacity-50 transition-colors duration-150"
+                  />
+                  <Check
+                    className="absolute h-3 w-3 text-[var(--color-fg-on-brand)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"
+                    strokeWidth={3}
+                  />
+                </span>
+                <span className="text-[13px] leading-[18px] text-[var(--color-fg-muted)]">
                   Ricorda le mie credenziali
-                </label>
-              </div>
+                </span>
+              </label>
 
               {/* Error */}
               {error && (
-                <div className="flex items-center gap-2 px-3 py-2.5 bg-white border border-[#E5E7EB] rounded text-[14px] leading-[20px] font-light text-[#111827]">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-[#111827]" />
+                <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
                   <span>{error}</span>
                 </div>
               )}
@@ -176,7 +159,7 @@ export const LoginPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#111827] hover:bg-black text-white text-[14px] leading-[20px] font-medium tracking-[0.35px] rounded-full transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[var(--color-fg)] hover:opacity-90 text-[var(--color-fg-on-brand)] text-[14px] leading-[20px] font-medium tracking-[0.01em] rounded-full transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -187,10 +170,38 @@ export const LoginPage: React.FC = () => {
                   'Accedi'
                 )}
               </button>
+
+              {/* Forgot password */}
+              <div className="text-center mt-3">
+                <button
+                  type="button"
+                  className="text-[13px] leading-[18px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] underline underline-offset-2 transition-colors duration-150"
+                >
+                  Password dimenticata?
+                </button>
+              </div>
             </form>
           </div>
+        </main>
+
+        {/* Footer */}
+        <div className="px-6 py-6 text-center">
+          <p className="text-[12px] leading-[16px] text-[var(--color-fg-subtle)]">
+            Risto Manager · Italia
+          </p>
         </div>
-      </main>
+      </div>
+
+      {/* Right: framed image */}
+      <div className="hidden lg:flex flex-1 min-w-0 bg-[var(--color-surface-3)] p-6">
+        <div className="w-full h-full rounded-2xl overflow-hidden">
+          <img
+            src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1400&q=80"
+            alt=""
+            className="w-full h-full object-cover"
+          />
+        </div>
+      </div>
     </div>
   );
 };
