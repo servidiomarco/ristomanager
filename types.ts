@@ -123,6 +123,7 @@ export interface Toast {
     title?: string;
     details?: string[];
     duration?: number;
+    action?: { label: string; onClick: () => void };
 }
 
 export enum ViewState {
