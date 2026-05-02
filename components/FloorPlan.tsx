@@ -5,6 +5,7 @@ import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, C
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -163,6 +164,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Modal state for alerts
   const [alertModal, setAlertModal] = useState<{ message: string; type: 'error' | 'warning' } | null>(null);
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
+  const [deleteTablesConfirm, setDeleteTablesConfirm] = useState<number[] | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -940,11 +942,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
             {/* Delete only if not locked */}
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
-                 <button 
-                 onClick={() => {
-                     selectedTables.forEach(id => onDeleteTable(id));
-                     setSelectedTables([]);
-                 }}
+                 <button
+                 onClick={() => setDeleteTablesConfirm([...selectedTables])}
                  className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 font-medium text-sm"
                 >
                     <Trash2 size={16} /> Elimina
@@ -1061,36 +1060,40 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         </div>
       )}
 
-      {/* Delete Room Confirmation Modal */}
-      {deleteRoomConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertTriangle className="h-8 w-8 text-red-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Elimina Sala</h3>
-              <p className="text-slate-600 mb-6">
-                Sei sicuro di voler eliminare la sala <strong>"{deleteRoomConfirm.name}"</strong>?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteRoomConfirm(null)}
-                  className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors font-medium"
-                >
-                  Annulla
-                </button>
-                <button
-                  onClick={handleDeleteRoomConfirm}
-                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium"
-                >
-                  Elimina
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={!!deleteRoomConfirm}
+        title="Elimina Sala"
+        message="Stai per eliminare la sala:"
+        itemName={deleteRoomConfirm?.name}
+        onCancel={() => setDeleteRoomConfirm(null)}
+        onConfirm={handleDeleteRoomConfirm}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteTablesConfirm && deleteTablesConfirm.length > 0}
+        title={deleteTablesConfirm && deleteTablesConfirm.length > 1 ? 'Elimina Tavoli' : 'Elimina Tavolo'}
+        message={
+          deleteTablesConfirm && deleteTablesConfirm.length > 1
+            ? `Stai per eliminare ${deleteTablesConfirm.length} tavoli:`
+            : 'Stai per eliminare il tavolo:'
+        }
+        itemName={
+          deleteTablesConfirm
+            ? deleteTablesConfirm
+                .map(id => tables.find(t => t.id === id)?.name)
+                .filter(Boolean)
+                .join(', ')
+            : undefined
+        }
+        onCancel={() => setDeleteTablesConfirm(null)}
+        onConfirm={() => {
+          if (deleteTablesConfirm) {
+            deleteTablesConfirm.forEach(id => onDeleteTable(id));
+            setSelectedTables([]);
+          }
+          setDeleteTablesConfirm(null);
+        }}
+      />
     </div>
   );
 };

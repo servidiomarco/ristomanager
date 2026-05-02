@@ -48,21 +48,41 @@ const groupDishesByCategory = (
 };
 
 export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
-  const grouped = groupDishesByCategory(menu.dish_ids, dishes);
   const eventDate = formatDate(menu.event_date);
   const price = formatEuro(menu.price_per_person);
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
 
-  const dishesHtml = grouped
-    .map(g => `
-      <section class="category">
-        <h3>${escapeHtml(g.category)}</h3>
-        <ul>
-          ${g.items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
-        </ul>
-      </section>
-    `)
-    .join('');
+  let dishesHtml = '';
+  if (menu.courses && menu.courses.length > 0) {
+    dishesHtml = menu.courses
+      .map(course => {
+        const items = course.dish_ids
+          .map(id => dishes.find(d => d.id === id))
+          .filter((d): d is Dish => !!d);
+        if (items.length === 0) return '';
+        return `
+          <section class="category">
+            <h3>${escapeHtml(course.name)}</h3>
+            <ul>
+              ${items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
+            </ul>
+          </section>
+        `;
+      })
+      .join('');
+  } else {
+    const grouped = groupDishesByCategory(menu.dish_ids, dishes);
+    dishesHtml = grouped
+      .map(g => `
+        <section class="category">
+          <h3>${escapeHtml(g.category)}</h3>
+          <ul>
+            ${g.items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
+          </ul>
+        </section>
+      `)
+      .join('');
+  }
 
   const html = `<!doctype html>
 <html lang="it">

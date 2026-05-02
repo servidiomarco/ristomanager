@@ -138,9 +138,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 description TEXT,
                 price DECIMAL(10, 2) NOT NULL,
                 category VARCHAR(100),
-                allergens TEXT[]
+                allergens TEXT[],
+                photo_url TEXT
             );
         `);
+
+        // Migration: add photo_url column to existing dishes table
+        await client.query(`ALTER TABLE dishes ADD COLUMN IF NOT EXISTS photo_url TEXT;`);
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS banquet_menus (
@@ -150,7 +154,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 price_per_person DECIMAL(10, 2) NOT NULL,
                 dish_ids INTEGER[],
                 event_date DATE,
-                deposit_amount DECIMAL(10, 2)
+                deposit_amount DECIMAL(10, 2),
+                courses JSONB
             );
         `);
 
@@ -178,6 +183,25 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     ALTER TABLE banquet_menus ADD COLUMN deposit_amount DECIMAL(10, 2);
                 END IF;
             END $$;
+        `);
+
+        // Add courses (JSONB) column to existing banquet_menus if missing
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS courses JSONB;`);
+
+        // Backfill courses for rows that have dish_ids but no courses yet:
+        // wrap the existing flat list into a single course "Composizione" so old
+        // banquets keep working in the new courses-based UI.
+        await client.query(`
+            UPDATE banquet_menus
+            SET courses = jsonb_build_array(
+                jsonb_build_object(
+                    'name', 'Composizione',
+                    'dish_ids', COALESCE(to_jsonb(dish_ids), '[]'::jsonb)
+                )
+            )
+            WHERE courses IS NULL
+              AND dish_ids IS NOT NULL
+              AND array_length(dish_ids, 1) > 0;
         `);
 
         await client.query(`

@@ -7,6 +7,7 @@ import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -91,6 +92,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
   const [filterHasAllergens, setFilterHasAllergens] = useState(false);
   const [filterHasNotes, setFilterHasNotes] = useState(false);
+  const [filterNoTable, setFilterNoTable] = useState(false);
   const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -278,7 +280,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     (filterArrivalStatus !== 'ALL' ? 1 : 0) +
     (filterGuestRange !== 'ALL' ? 1 : 0) +
     (filterHasAllergens ? 1 : 0) +
-    (filterHasNotes ? 1 : 0);
+    (filterHasNotes ? 1 : 0) +
+    (filterNoTable ? 1 : 0);
 
   const matchesGuestRange = (guests: number): boolean => {
     switch (filterGuestRange) {
@@ -301,8 +304,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesGuests = matchesGuestRange(r.guests || 0);
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
+      const matchesNoTable = !filterNoTable || !r.table_id;
       const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
-      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesSearch;
+      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -322,6 +326,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterGuestRange('ALL');
     setFilterHasAllergens(false);
     setFilterHasNotes(false);
+    setFilterNoTable(false);
     setSortBy('time-asc');
   };
 
@@ -1144,6 +1149,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
                                   <StickyNote className="h-3.5 w-3.5 text-slate-500" />
                                   Solo con note
+                              </span>
+                          </label>
+                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
+                              <input
+                                  type="checkbox"
+                                  checked={filterNoTable}
+                                  onChange={(e) => setFilterNoTable(e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                                  <Armchair className="h-3.5 w-3.5 text-rose-500" />
+                                  Senza tavolo
                               </span>
                           </label>
                       </div>
@@ -2215,41 +2232,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmModal.show && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mb-4">
-                <Trash2 className="h-8 w-8 text-rose-600" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">Conferma Eliminazione</h3>
-              <p className="text-slate-600 mb-1">
-                Stai per eliminare la prenotazione di:
-              </p>
-              <p className="text-lg font-semibold text-slate-800 mb-4">
-                {deleteConfirmModal.customerName}
-              </p>
-              <p className="text-sm text-slate-500">
-                Questa azione non può essere annullata.
-              </p>
-            </div>
-            <div className="flex border-t border-slate-100">
-              <button
-                onClick={handleCancelDelete}
-                className="flex-1 px-6 py-4 text-slate-700 font-medium hover:bg-slate-50 transition-colors border-r border-slate-100"
-              >
-                Annulla
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                className="flex-1 px-6 py-4 text-rose-600 font-medium hover:bg-rose-50 transition-colors"
-              >
-                Elimina
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={deleteConfirmModal.show}
+        message="Stai per eliminare la prenotazione di:"
+        itemName={deleteConfirmModal.customerName}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
+      />
 
       <PrintReservationsModal
         isOpen={isPrintModalOpen}

@@ -1,9 +1,10 @@
 
 
 import React, { useState, useMemo } from 'react';
-import { Dish, BanquetMenu, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
+import { Dish, BanquetMenu, BanquetCourse, COMMON_ALLERGENS } from '../types';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -51,6 +52,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [isEditingBanquet, setIsEditingBanquet] = useState(false);
   const [editingDishId, setEditingDishId] = useState<number | null>(null);
   const [editingBanquetId, setEditingBanquetId] = useState<number | null>(null);
+  const [deleteDishConfirm, setDeleteDishConfirm] = useState<Dish | null>(null);
+  const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
 
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
@@ -58,7 +61,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     description: '',
     price: 0,
     category: 'Antipasti',
-    allergens: []
+    allergens: [],
+    photo_url: ''
   });
 
   // New Banquet Menu State
@@ -67,6 +71,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       description: '',
       price_per_person: 0,
       dish_ids: [],
+      courses: [],
       event_date: '',
       deposit_amount: undefined
   });
@@ -81,7 +86,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         description: newDish.description || '',
         price: Number(newDish.price),
         category: newDish.category || 'Antipasti',
-        allergens: newDish.allergens || []
+        allergens: newDish.allergens || [],
+        photo_url: newDish.photo_url?.trim() || undefined
       });
     } else {
       onAddDish({
@@ -89,14 +95,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         description: newDish.description || '',
         price: Number(newDish.price),
         category: newDish.category || 'Antipasti',
-        allergens: newDish.allergens || []
+        allergens: newDish.allergens || [],
+        photo_url: newDish.photo_url?.trim() || undefined
       } as Dish);
     }
 
     setIsDishFormOpen(false);
     setIsEditingDish(false);
     setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [] });
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
   };
 
   const handleEditDish = (dish: Dish) => {
@@ -105,7 +112,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       description: dish.description,
       price: dish.price,
       category: dish.category,
-      allergens: dish.allergens
+      allergens: dish.allergens,
+      photo_url: dish.photo_url || ''
     });
     setEditingDishId(dish.id);
     setIsEditingDish(true);
@@ -116,11 +124,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       e.preventDefault();
       if(!newBanquet.name || !newBanquet.price_per_person || !newBanquet.event_date) return;
 
+      const courses = (newBanquet.courses || []).filter(c => c.name.trim() !== '');
+      const flatDishIds = courses.flatMap(c => c.dish_ids);
+
       const payload = {
           name: newBanquet.name!,
           description: newBanquet.description || '',
           price_per_person: Number(newBanquet.price_per_person),
-          dish_ids: newBanquet.dish_ids || [],
+          dish_ids: flatDishIds,
+          courses,
           event_date: newBanquet.event_date!,
           deposit_amount: newBanquet.deposit_amount != null && newBanquet.deposit_amount !== ('' as any)
               ? Number(newBanquet.deposit_amount)
@@ -136,15 +148,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], event_date: '', deposit_amount: undefined });
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', deposit_amount: undefined });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
+    // Derive courses: use stored courses if present, otherwise wrap legacy flat list into a single course
+    const courses: BanquetCourse[] = menu.courses && menu.courses.length > 0
+      ? menu.courses.map(c => ({ name: c.name, dish_ids: [...(c.dish_ids || [])] }))
+      : (menu.dish_ids && menu.dish_ids.length > 0
+          ? [{ name: 'Composizione', dish_ids: [...menu.dish_ids] }]
+          : []);
     setNewBanquet({
       name: menu.name,
       description: menu.description,
       price_per_person: menu.price_per_person,
       dish_ids: menu.dish_ids,
+      courses,
       event_date: menu.event_date || '',
       deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined
     });
@@ -153,15 +172,61 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsBanquetFormOpen(true);
   };
 
-  const toggleDishInBanquet = (dishId: number) => {
-      setNewBanquet(prev => {
-          const currentIds = prev.dish_ids || [];
-          if (currentIds.includes(dishId)) {
-              return { ...prev, dish_ids: currentIds.filter(id => id !== dishId) };
-          } else {
-              return { ...prev, dish_ids: [...currentIds, dishId] };
-          }
+  const handleOpenNewBanquet = () => {
+    setIsEditingBanquet(false);
+    setEditingBanquetId(null);
+    setNewBanquet({
+      name: '', description: '', price_per_person: 0,
+      dish_ids: [],
+      courses: [{ name: '1ª Uscita', dish_ids: [] }],
+      event_date: '', deposit_amount: undefined
+    });
+    setIsBanquetFormOpen(true);
+  };
+
+  const addCourse = () => {
+    setNewBanquet(prev => {
+      const courses = prev.courses ? [...prev.courses] : [];
+      const ordinals = ['1ª', '2ª', '3ª', '4ª', '5ª', '6ª', '7ª', '8ª', '9ª', '10ª'];
+      const next = ordinals[courses.length] || `${courses.length + 1}ª`;
+      courses.push({ name: `${next} Uscita`, dish_ids: [] });
+      return { ...prev, courses };
+    });
+  };
+
+  const removeCourse = (index: number) => {
+    setNewBanquet(prev => {
+      const courses = (prev.courses || []).filter((_, i) => i !== index);
+      return { ...prev, courses };
+    });
+  };
+
+  const renameCourse = (index: number, name: string) => {
+    setNewBanquet(prev => {
+      const courses = (prev.courses || []).map((c, i) => i === index ? { ...c, name } : c);
+      return { ...prev, courses };
+    });
+  };
+
+  const toggleDishInCourse = (courseIndex: number, dishId: number) => {
+    setNewBanquet(prev => {
+      const courses = (prev.courses || []).map((c, i) => {
+        if (i !== courseIndex) return c;
+        const has = c.dish_ids.includes(dishId);
+        return { ...c, dish_ids: has ? c.dish_ids.filter(id => id !== dishId) : [...c.dish_ids, dishId] };
       });
+      return { ...prev, courses };
+    });
+  };
+
+  const moveCourse = (index: number, direction: -1 | 1) => {
+    setNewBanquet(prev => {
+      const courses = [...(prev.courses || [])];
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= courses.length) return prev;
+      [courses[index], courses[newIndex]] = [courses[newIndex], courses[index]];
+      return { ...prev, courses };
+    });
   };
 
   const toggleAllergen = (allergen: string) => {
@@ -198,7 +263,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                </button>
             ) : (
                 <button
-                onClick={() => setIsBanquetFormOpen(true)}
+                onClick={handleOpenNewBanquet}
                 className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-lg shadow-indigo-200"
               >
                 <Plus className="h-5 w-5" /> Nuovo Banchetto
@@ -251,6 +316,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <table className="w-full text-left">
                 <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
+                    <th className="px-4 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-16">Foto</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Nome Piatto</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Categoria</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Prezzo</th>
@@ -261,6 +327,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <tbody className="divide-y divide-slate-100">
                     {filteredDishes.map((dish) => (
                     <tr key={dish.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3">
+                        {dish.photo_url ? (
+                            <img
+                                src={dish.photo_url}
+                                alt={dish.name}
+                                className="w-12 h-12 rounded-lg object-cover border border-slate-200"
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                            />
+                        ) : (
+                            <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center">
+                                <ImageIcon className="h-5 w-5 text-slate-300" />
+                            </div>
+                        )}
+                        </td>
                         <td className="px-6 py-4">
                         <div className="font-medium text-slate-900">{dish.name}</div>
                         <div className="text-sm text-slate-500 truncate max-w-xs">{dish.description}</div>
@@ -292,7 +372,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <Edit2 className="h-5 w-5" />
                             </button>
                             <button
-                                onClick={() => onDeleteDish(dish.id)}
+                                onClick={() => setDeleteDishConfirm(dish)}
                                 className="text-slate-400 hover:text-rose-600 transition-colors p-1 rounded-full hover:bg-rose-50"
                             >
                                 <Trash2 className="h-5 w-5" />
@@ -349,7 +429,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               <Edit2 className="h-5 w-5" />
                           </button>
                           <button
-                              onClick={() => onDeleteBanquetMenu(menu.id)}
+                              onClick={() => setDeleteBanquetConfirm(menu)}
                               className="text-slate-300 hover:text-rose-500 transition-colors"
                           >
                               <Trash2 className="h-5 w-5" />
@@ -381,14 +461,31 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               </div>
                           )}
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Composizione:</p>
-                          <ul className="text-sm text-slate-700 space-y-1">
-                              {menu.dish_ids.map(id => {
-                                  const dish = dishes.find(d => d.id === id);
-                                  return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
-                              })}
-                          </ul>
+                          {menu.courses && menu.courses.length > 0 ? (
+                            <div className="space-y-2.5">
+                              {menu.courses.map((course, idx) => (
+                                <div key={idx}>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-1">{course.name}</div>
+                                  <ul className="text-sm text-slate-700 space-y-1">
+                                    {course.dish_ids.map(id => {
+                                      const dish = dishes.find(d => d.id === id);
+                                      return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
+                                    })}
+                                    {course.dish_ids.length === 0 && <li className="text-xs text-slate-400 italic">Nessun piatto</li>}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <ul className="text-sm text-slate-700 space-y-1">
+                                {menu.dish_ids.map(id => {
+                                    const dish = dishes.find(d => d.id === id);
+                                    return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
+                                })}
+                            </ul>
+                          )}
                       </div>
                   </div>
               ))}
@@ -415,7 +512,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-800">Aggiungi Nuovo Piatto</h2>
+              <h2 className="text-xl font-bold text-slate-800">{isEditingDish ? 'Modifica Piatto' : 'Aggiungi Nuovo Piatto'}</h2>
             </div>
             <form onSubmit={handleAddDishSubmit} className="p-6 space-y-4 overflow-y-auto bg-white">
               <div>
@@ -457,13 +554,38 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Descrizione</label>
-                <textarea 
+                <textarea
                   className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-20"
                   value={newDish.description}
                   onChange={e => setNewDish({...newDish, description: e.target.value})}
                 />
               </div>
-              
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">URL Foto <span className="text-slate-400 font-normal">— opzionale</span></label>
+                <div className="flex gap-3 items-start">
+                  <input
+                    type="url"
+                    placeholder="https://..."
+                    className="flex-1 rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={newDish.photo_url || ''}
+                    onChange={e => setNewDish({...newDish, photo_url: e.target.value})}
+                  />
+                  {newDish.photo_url ? (
+                    <img
+                      src={newDish.photo_url}
+                      alt="Anteprima"
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 flex-shrink-0"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
+                      <ImageIcon className="h-5 w-5 text-slate-300" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div>
                  <label className="block text-sm font-medium text-slate-700 mb-2">Allergeni</label>
                  <div className="flex flex-wrap gap-2">
@@ -513,7 +635,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-800">Crea Menu Banchetto</h2>
+              <h2 className="text-xl font-bold text-slate-800">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h2>
             </div>
             <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 bg-white">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -570,75 +692,154 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Seleziona Piatti</label>
-                <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 max-h-72 overflow-y-auto space-y-3">
-                    {BANQUET_DISH_CATEGORIES.map(category => {
-                        const categoryDishes = dishes.filter(d => d.category === category);
-                        if (categoryDishes.length === 0) return null;
-                        return (
-                            <div key={category}>
-                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5 sticky top-0 bg-slate-50 py-0.5">
-                                    {category}
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700">Composizione del Menu — Uscite</label>
+                  <button
+                    type="button"
+                    onClick={addCourse}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-indigo-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Aggiungi Uscita
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
+
+                <div className="space-y-3">
+                  {(newBanquet.courses || []).map((course, courseIndex) => {
+                    const totalCourses = (newBanquet.courses || []).length;
+                    return (
+                      <div key={courseIndex} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-200">
+                          <div className="flex flex-col">
+                            <button
+                              type="button"
+                              onClick={() => moveCourse(courseIndex, -1)}
+                              disabled={courseIndex === 0}
+                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Sposta su"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveCourse(courseIndex, 1)}
+                              disabled={courseIndex === totalCourses - 1}
+                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Sposta giù"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={course.name}
+                            onChange={e => renameCourse(courseIndex, e.target.value)}
+                            placeholder={`Nome uscita (es. ${courseIndex + 1}ª Uscita)`}
+                            className="flex-1 bg-transparent border-0 focus:ring-0 outline-none text-sm font-semibold text-slate-800 px-1 py-0.5"
+                          />
+                          <span className="text-xs text-slate-500 whitespace-nowrap">
+                            {course.dish_ids.length} {course.dish_ids.length === 1 ? 'piatto' : 'piatti'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeCourse(courseIndex)}
+                            className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50"
+                            title="Elimina uscita"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        <div className="p-3 max-h-60 overflow-y-auto space-y-3">
+                          {BANQUET_DISH_CATEGORIES.map(category => {
+                            const categoryDishes = dishes.filter(d => d.category === category);
+                            if (categoryDishes.length === 0) return null;
+                            return (
+                              <div key={category}>
+                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                                  {category}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    {categoryDishes.map(dish => (
-                                        <div
-                                            key={dish.id}
-                                            onClick={() => toggleDishInBanquet(dish.id)}
-                                            className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
-                                                newBanquet.dish_ids?.includes(dish.id)
-                                                ? 'bg-indigo-50 border-indigo-500'
-                                                : 'bg-white border-slate-200 hover:border-slate-300'
-                                            }`}
-                                        >
-                                            <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                newBanquet.dish_ids?.includes(dish.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
-                                            }`}>
-                                                {newBanquet.dish_ids?.includes(dish.id) && <div className="w-2 h-2 bg-white rounded-full" />}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
-                                                <div className="text-xs text-slate-500">€{dish.price}</div>
-                                            </div>
+                                  {categoryDishes.map(dish => {
+                                    const checked = course.dish_ids.includes(dish.id);
+                                    return (
+                                      <div
+                                        key={dish.id}
+                                        onClick={() => toggleDishInCourse(courseIndex, dish.id)}
+                                        className={`p-2 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
+                                          checked
+                                            ? 'bg-indigo-50 border-indigo-500'
+                                            : 'bg-white border-slate-200 hover:border-slate-300'
+                                        }`}
+                                      >
+                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                                          checked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
+                                        }`}>
+                                          {checked && <div className="w-2 h-2 bg-white rounded-full" />}
                                         </div>
-                                    ))}
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
+                                          <div className="text-xs text-slate-500">€{dish.price}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                            </div>
-                        );
-                    })}
-                    {/* Uncategorized dishes (if any custom categories exist) */}
-                    {(() => {
-                        const orphan = dishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
-                        if (orphan.length === 0) return null;
-                        return (
-                            <div>
+                              </div>
+                            );
+                          })}
+                          {(() => {
+                            const orphan = dishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
+                            if (orphan.length === 0) return null;
+                            return (
+                              <div>
                                 <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Altro</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    {orphan.map(dish => (
-                                        <div
-                                            key={dish.id}
-                                            onClick={() => toggleDishInBanquet(dish.id)}
-                                            className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
-                                                newBanquet.dish_ids?.includes(dish.id)
-                                                ? 'bg-indigo-50 border-indigo-500'
-                                                : 'bg-white border-slate-200 hover:border-slate-300'
-                                            }`}
-                                        >
-                                            <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                newBanquet.dish_ids?.includes(dish.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
-                                            }`}>
-                                                {newBanquet.dish_ids?.includes(dish.id) && <div className="w-2 h-2 bg-white rounded-full" />}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
-                                                <div className="text-xs text-slate-500">{dish.category} · €{dish.price}</div>
-                                            </div>
+                                  {orphan.map(dish => {
+                                    const checked = course.dish_ids.includes(dish.id);
+                                    return (
+                                      <div
+                                        key={dish.id}
+                                        onClick={() => toggleDishInCourse(courseIndex, dish.id)}
+                                        className={`p-2 rounded-lg border cursor-pointer transition-all flex items-start gap-2 ${
+                                          checked ? 'bg-indigo-50 border-indigo-500' : 'bg-white border-slate-200 hover:border-slate-300'
+                                        }`}
+                                      >
+                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                                          checked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'
+                                        }`}>
+                                          {checked && <div className="w-2 h-2 bg-white rounded-full" />}
                                         </div>
-                                    ))}
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-medium text-slate-800 truncate">{dish.name}</div>
+                                          <div className="text-xs text-slate-500">{dish.category} · €{dish.price}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                            </div>
-                        );
-                    })()}
+                              </div>
+                            );
+                          })()}
+                          {dishes.length === 0 && (
+                            <div className="text-xs text-slate-400 text-center py-4">Aggiungi prima dei piatti alla carta.</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(newBanquet.courses || []).length === 0 && (
+                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                      <p className="text-sm text-slate-500 mb-2">Nessuna uscita</p>
+                      <button
+                        type="button"
+                        onClick={addCourse}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                      >
+                        + Aggiungi la prima uscita
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -651,17 +852,41 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 >
                   Annulla
                 </button>
-                <button 
+                <button
                   onClick={handleAddBanquetSubmit}
                   type="submit"
                   className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
                 >
-                  Crea Menu
+                  {isEditingBanquet ? 'Salva Modifiche' : 'Crea Menu'}
                 </button>
               </div>
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteDishConfirm}
+        title="Elimina Piatto"
+        message="Stai per eliminare il piatto:"
+        itemName={deleteDishConfirm?.name}
+        onCancel={() => setDeleteDishConfirm(null)}
+        onConfirm={() => {
+          if (deleteDishConfirm) onDeleteDish(deleteDishConfirm.id);
+          setDeleteDishConfirm(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteBanquetConfirm}
+        title="Elimina Menu Banchetto"
+        message="Stai per eliminare il menu banchetto:"
+        itemName={deleteBanquetConfirm?.name}
+        onCancel={() => setDeleteBanquetConfirm(null)}
+        onConfirm={() => {
+          if (deleteBanquetConfirm) onDeleteBanquetMenu(deleteBanquetConfirm.id);
+          setDeleteBanquetConfirm(null);
+        }}
+      />
     </div>
   );
 };

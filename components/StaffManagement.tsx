@@ -5,6 +5,7 @@ import {
 } from '../types';
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
 import { toTitleCase } from '../utils/text';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import {
   Users, UserPlus, Edit2, Trash2, X, Plus, ChevronLeft, ChevronRight,
   Calendar, Clock, Sun, Moon, Coffee, UtensilsCrossed, Check, AlertTriangle,
@@ -108,6 +109,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [showShiftModal, setShowShiftModal] = useState(false);
   const [showTimeOffModal, setShowTimeOffModal] = useState(false);
+  const [deleteStaffConfirm, setDeleteStaffConfirm] = useState<StaffMember | null>(null);
+  const [deleteTimeOffConfirm, setDeleteTimeOffConfirm] = useState<{ id: string; label: string } | null>(null);
 
   // Forms
   const [staffForm, setStaffForm] = useState<CreateStaffInput>({
@@ -324,8 +327,6 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   };
 
   const handleDeleteStaff = async (id: string) => {
-    if (!confirm('Sei sicuro di voler eliminare questo dipendente?')) return;
-
     try {
       await staffApiService.deleteStaffMember(id);
       setStaffMembers(prev => prev.filter(s => s.id !== id));
@@ -702,7 +703,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                       {selectedStaff.isActive ? <AlertTriangle className="h-5 w-5" /> : <Check className="h-5 w-5" />}
                     </button>
                     <button
-                      onClick={() => handleDeleteStaff(selectedStaff.id)}
+                      onClick={() => setDeleteStaffConfirm(selectedStaff)}
                       className="p-2 text-slate-500 hover:text-rose-600 hover:bg-white rounded-lg transition-colors"
                     >
                       <Trash2 className="h-5 w-5" />
@@ -927,7 +928,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                           </span>
                         </div>
                         <button
-                          onClick={() => handleDeleteTimeOff(timeOff.id)}
+                          onClick={() => {
+                            const dateRange = timeOff.startDate === timeOff.endDate
+                              ? new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
+                              : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+                            setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
+                          }}
                           className="p-1 text-slate-400 hover:text-rose-500"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -1264,6 +1270,30 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteStaffConfirm}
+        title="Elimina Dipendente"
+        message="Stai per eliminare il dipendente:"
+        itemName={deleteStaffConfirm ? `${toTitleCase(deleteStaffConfirm.name)} ${toTitleCase(deleteStaffConfirm.surname)}` : undefined}
+        onCancel={() => setDeleteStaffConfirm(null)}
+        onConfirm={() => {
+          if (deleteStaffConfirm) handleDeleteStaff(deleteStaffConfirm.id);
+          setDeleteStaffConfirm(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteTimeOffConfirm}
+        title="Elimina Assenza"
+        message="Stai per eliminare l'assenza:"
+        itemName={deleteTimeOffConfirm?.label}
+        onCancel={() => setDeleteTimeOffConfirm(null)}
+        onConfirm={() => {
+          if (deleteTimeOffConfirm) handleDeleteTimeOff(deleteTimeOffConfirm.id);
+          setDeleteTimeOffConfirm(null);
+        }}
+      />
     </div>
   );
 };
