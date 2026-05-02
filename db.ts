@@ -154,6 +154,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_merges_date_shift ON table_merges(date, shift);`);
 
+        // Per-shift table hiding. Lets the floor crew temporarily exclude a
+        // table from the active map for a given service without deleting it
+        // from the global layout (e.g. a corner table not opened tonight).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS table_hidden_overrides (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                shift VARCHAR(10) NOT NULL CHECK (shift IN ('LUNCH', 'DINNER')),
+                table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, shift, table_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_hidden_date_shift ON table_hidden_overrides(date, shift);`);
+
         // One-time migration: copy any pre-existing global merges into today's
         // LUNCH and DINNER so the user's current setup remains visible after
         // deploy. Runs only when table_merges is empty (first time).

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff } from 'lucide-react';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
@@ -239,6 +239,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
+  const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   const focalDate = isFormOpen && formData.reservation_time
     ? formData.reservation_time.split('T')[0]
@@ -258,6 +260,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
+  const handleToggleTableHidden = async (table: Table) => {
+    const isCurrentlyHidden = hiddenTableIds.has(table.id);
+    try {
+      if (isCurrentlyHidden) {
+        await deleteTableHidden(focalDate, focalShift, table.id);
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          next.delete(table.id);
+          return next;
+        });
+        showToast(`Tavolo ${table.name} riattivato`, 'success');
+      } else {
+        await createTableHidden(focalDate, focalShift, table.id);
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          next.add(table.id);
+          return next;
+        });
+        showToast(`Tavolo ${table.name} nascosto per questo turno`, 'success');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Operazione non riuscita', 'error');
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     setIsLoadingMerges(true);
@@ -268,6 +295,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         if (!cancelled) setTableMerges([]);
       })
       .finally(() => { if (!cancelled) setIsLoadingMerges(false); });
+    return () => { cancelled = true; };
+  }, [focalDate, focalShift]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTableHidden(focalDate, focalShift)
+      .then(rows => { if (!cancelled) setHiddenTableIds(new Set(rows.map(r => r.table_id))); })
+      .catch(err => {
+        console.error('Error fetching hidden tables:', err);
+        if (!cancelled) setHiddenTableIds(new Set());
+      });
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
@@ -297,6 +335,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => {
       socket.off('tableMerge:created', onCreated);
       socket.off('tableMerge:deleted', onDeleted);
+    };
+  }, [socket, focalDate, focalShift]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const matches = (h: TableHiddenOverride) => h.date === focalDate && h.shift === focalShift;
+    const onCreated = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.add(h.table_id);
+        return next;
+      });
+    };
+    const onDeleted = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.delete(h.table_id);
+        return next;
+      });
+    };
+    socket.on('tableHidden:created', onCreated);
+    socket.on('tableHidden:deleted', onDeleted);
+    return () => {
+      socket.off('tableHidden:created', onCreated);
+      socket.off('tableHidden:deleted', onDeleted);
     };
   }, [socket, focalDate, focalShift]);
 
@@ -805,6 +870,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             other.merged_with && other.merged_with.length > 0 &&
             other.merged_with.map(id => Number(id)).includes(Number(t.id))
         ))
+        .filter(t => !hiddenTableIds.has(t.id))
         .sort((a, b) => a.seats - b.seats);
 
       if (availableTables.length > 0) {
@@ -895,6 +961,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
       const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+      const isHidden = hiddenTableIds.has(table.id);
       const trimmedSearch = searchTerm.trim().toLowerCase();
       const isSearchMatch = !!(trimmedSearch && (
         (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
@@ -926,6 +993,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
                 }
                 ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}
+                ${isHidden ? 'opacity-40 grayscale' : ''}
             `}
             style={{
                 left: table.x,
@@ -933,7 +1001,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 ...shapeStyles,
                 transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
             }}
-            title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione'}
+            title={isHidden
+                ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
+                : (isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione')}
             onClick={() => {
                 if (isOccupied) {
                     handleEditClick(reservation);
@@ -942,6 +1012,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 }
             }}
         >
+            {isHidden && (
+                <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                    <EyeOff size={8} />
+                </div>
+            )}
             <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
             {isOccupied ? (
                 <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
@@ -1472,7 +1547,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               .filter(t => !displayTables.some(other =>
                   other.merged_with && other.merged_with.length > 0 &&
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
-              ));
+              ))
+              // Hide per-shift unless user toggled "show hidden".
+              .filter(t => showHidden || !hiddenTableIds.has(t.id));
           const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
@@ -1533,6 +1610,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               </button>
                           ))}
                       </div>
+                      {hiddenTableIds.size > 0 && (
+                          <button
+                              type="button"
+                              onClick={() => setShowHidden(v => !v)}
+                              className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                                  showHidden
+                                      ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800'
+                                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                              title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}
+                          >
+                              {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                              <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
+                          </button>
+                      )}
                       <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
                           <div className="flex items-center gap-1.5">
                               <Users size={14} className="text-indigo-500 flex-shrink-0" />
@@ -2666,22 +2758,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               setAssignTableModal(null);
           };
 
+          const isHidden = hiddenTableIds.has(table.id);
+
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800">Assegna Tavolo {table.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <span className="truncate">Assegna Tavolo {table.name}</span>
+                      {isHidden && (
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                          <EyeOff size={10} /> Nascosto
+                        </span>
+                      )}
+                    </h3>
                     <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
                       <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
-                  <button
-                    onClick={() => setAssignTableModal(null)}
-                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {canEdit && (
+                      <button
+                        onClick={async () => {
+                          await handleToggleTableHidden(table);
+                          setAssignTableModal(null);
+                        }}
+                        className={`p-2 rounded-lg transition-colors ${
+                          isHidden
+                            ? 'text-emerald-600 hover:bg-emerald-50'
+                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                        }`}
+                        title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
+                      >
+                        {isHidden ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setAssignTableModal(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3">

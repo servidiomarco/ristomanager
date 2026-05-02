@@ -573,6 +573,146 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
 });
 
 
+// ============================================
+// PER-SHIFT HIDDEN TABLES
+// ============================================
+
+// GET /table-hidden?date=YYYY-MM-DD&shift=LUNCH|DINNER
+app.get('/table-hidden', authenticate, async (req, res) => {
+    try {
+        const { date, shift } = req.query;
+        if (!date || !shift) {
+            return res.status(400).json({ error: 'date and shift query params are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const result = await queryWithRetry(
+            'SELECT id, date, shift, table_id FROM table_hidden_overrides WHERE date = $1 AND shift = $2',
+            [date, shift]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching hidden tables:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /table-hidden body: { date, shift, table_id }
+// Refuses to hide a table that has a reservation or is in an active merge
+// for the same (date, shift) — caller must reassign/split first.
+app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, table_id } = req.body;
+        if (!date || !shift || table_id == null) {
+            return res.status(400).json({ error: 'date, shift and table_id are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+
+        // Block if a reservation is on this table for the given date+shift.
+        const reservationCheck = await queryWithRetry(
+            `SELECT id, customer_name FROM reservations
+             WHERE table_id = $1
+               AND shift = $2
+               AND DATE(reservation_time AT TIME ZONE 'Europe/Rome') = $3`,
+            [table_id, shift, date]
+        );
+        if (reservationCheck.rowCount && reservationCheck.rowCount > 0) {
+            return res.status(409).json({
+                error: 'Tavolo con prenotazioni',
+                detail: `Il tavolo ha ${reservationCheck.rowCount} prenotazione/i per questo turno. Riassegnale prima di nascondere il tavolo.`,
+                blocking_reservation_ids: reservationCheck.rows.map((r: any) => r.id),
+            });
+        }
+
+        // Block if the table participates in an active merge for the given date+shift,
+        // either as primary or inside merged_ids.
+        const mergeCheck = await queryWithRetry(
+            `SELECT id, primary_id, merged_ids FROM table_merges
+             WHERE date = $1 AND shift = $2 AND ($3 = primary_id OR $3 = ANY(merged_ids))`,
+            [date, shift, table_id]
+        );
+        if (mergeCheck.rowCount && mergeCheck.rowCount > 0) {
+            return res.status(409).json({
+                error: 'Tavolo unito',
+                detail: 'Il tavolo fa parte di un\'unione attiva per questo turno. Dividi prima di nascondere.',
+            });
+        }
+
+        const result = await queryWithRetry(
+            `INSERT INTO table_hidden_overrides (date, shift, table_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (date, shift, table_id) DO UPDATE SET date = EXCLUDED.date
+             RETURNING id, date, shift, table_id`,
+            [date, shift, table_id]
+        );
+        const hidden = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.TABLE,
+                table_id,
+                `Hide ${date} ${shift}`,
+                { date, shift }
+            );
+        }
+
+        if (socketService) socketService.broadcastTableHiddenCreated(hidden);
+
+        res.status(201).json(hidden);
+    } catch (err) {
+        console.error('Error hiding table:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// DELETE /table-hidden body: { date, shift, table_id }
+app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, table_id } = req.body;
+        if (!date || !shift || table_id == null) {
+            return res.status(400).json({ error: 'date, shift and table_id are required' });
+        }
+        const result = await queryWithRetry(
+            `DELETE FROM table_hidden_overrides
+             WHERE date = $1 AND shift = $2 AND table_id = $3
+             RETURNING id, date, shift, table_id`,
+            [date, shift, table_id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Hidden override not found' });
+        }
+        const deleted = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.TABLE,
+                table_id,
+                `Unhide ${date} ${shift}`,
+                { date, shift }
+            );
+        }
+
+        if (socketService) socketService.broadcastTableHiddenDeleted(deleted);
+
+        res.json(deleted);
+    } catch (err) {
+        console.error('Error unhiding table:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
 // Rooms - require authentication
 app.get('/rooms', authenticate, async (req, res) => {
     try {
