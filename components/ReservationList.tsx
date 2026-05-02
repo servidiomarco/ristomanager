@@ -3,6 +3,7 @@ import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Roo
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
+import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
@@ -159,6 +160,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // Draft restore banner — only shown while creating a new reservation
+  const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
 
   // Map view canvas size tracking for responsive scaling
   const mapCanvasRef = useRef<HTMLDivElement>(null);
@@ -592,7 +596,65 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
+
+      const existing = loadDraft<{
+        formData: Partial<Reservation>;
+        selectedAllergens: string[];
+        selectedQuickNotes: string[];
+      }>(DRAFT_KEYS.RESERVATION_NEW);
+      setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
   };
+
+  const handleRestoreDraft = () => {
+      const existing = loadDraft<{
+        formData: Partial<Reservation>;
+        selectedAllergens: string[];
+        selectedQuickNotes: string[];
+      }>(DRAFT_KEYS.RESERVATION_NEW);
+      if (!existing) {
+        setDraftBanner(null);
+        return;
+      }
+      setFormData(existing.data.formData);
+      setSelectedAllergens(existing.data.selectedAllergens || []);
+      setSelectedQuickNotes(existing.data.selectedQuickNotes || []);
+      setShowAllergensSection((existing.data.selectedAllergens || []).length > 0);
+      setShowNotesSection(
+        (existing.data.selectedQuickNotes || []).length > 0 ||
+        !!existing.data.formData?.notes
+      );
+      setDraftBanner(null);
+      showToast('Bozza ripristinata', 'success');
+  };
+
+  const handleDiscardDraft = () => {
+      clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+      setDraftBanner(null);
+  };
+
+  // Persist a draft of the new-reservation form (debounced).
+  // Only while creating (not editing) and only if the user has typed something meaningful.
+  useEffect(() => {
+    if (!isFormOpen || isEditing) return;
+
+    const hasContent =
+      (formData.customer_name && formData.customer_name.trim() !== '') ||
+      (formData.phone && formData.phone.trim() !== '') ||
+      (formData.email && formData.email.trim() !== '') ||
+      (formData.notes && formData.notes.trim() !== '') ||
+      selectedAllergens.length > 0 ||
+      selectedQuickNotes.length > 0;
+    if (!hasContent) return;
+
+    const timer = setTimeout(() => {
+      saveDraft(DRAFT_KEYS.RESERVATION_NEW, {
+        formData,
+        selectedAllergens,
+        selectedQuickNotes,
+      });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [isFormOpen, isEditing, formData, selectedAllergens, selectedQuickNotes]);
 
   // --- Helper Logic ---
 
@@ -742,8 +804,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           onUpdateReservation(dataToSave as Reservation);
       } else {
           onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+          clearDraft(DRAFT_KEYS.RESERVATION_NEW);
       }
 
+      setDraftBanner(null);
       setIsFormOpen(false);
   };
 
@@ -1493,6 +1557,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
+                    {!isEditing && draftBanner && (
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-amber-900">Bozza non salvata trovata</p>
+                                <p className="text-xs text-amber-700 mt-0.5">
+                                    Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                                </p>
+                            </div>
+                            <div className="flex gap-2 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={handleRestoreDraft}
+                                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700"
+                                >
+                                    Riprendi
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDiscardDraft}
+                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100"
+                                >
+                                    Scarta
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
                         {/* Left Column: Details (5 cols) */}
                         <div className="lg:col-span-5 space-y-5 sm:space-y-6">

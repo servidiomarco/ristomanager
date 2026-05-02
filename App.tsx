@@ -11,6 +11,7 @@ import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
 import { useSocket } from './hooks/useSocket';
+import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { useAuth } from './contexts/AuthContext';
@@ -138,16 +139,26 @@ const App: React.FC = () => {
   const addToast = (
     message: string,
     type: 'success' | 'error' | 'info' = 'info',
-    options?: { title?: string; details?: string[]; duration?: number }
+    options?: { title?: string; details?: string[]; duration?: number; action?: { label: string; onClick: () => void } }
   ) => {
       const id = Math.random().toString(36).substr(2, 9);
       const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
-      setToasts(prev => [...prev, { id, message, type, title: options?.title, details: options?.details, duration }]);
+      setToasts(prev => [...prev, {
+          id,
+          message,
+          type,
+          title: options?.title,
+          details: options?.details,
+          duration,
+          action: options?.action,
+      }]);
 
       setTimeout(() => {
           setToasts(prev => prev.filter(t => t.id !== id));
       }, duration);
   };
+
+  useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {
@@ -1066,6 +1077,18 @@ const App: React.FC = () => {
                                             <li key={i} className="text-sm text-slate-600 leading-snug">{d}</li>
                                         ))}
                                     </ul>
+                                    {toast.action && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                toast.action!.onClick();
+                                                setToasts(prev => prev.filter(t => t.id !== toast.id));
+                                            }}
+                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg ${accent.iconBg} ${accent.iconText} hover:opacity-80`}
+                                        >
+                                            {toast.action.label}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -1073,7 +1096,19 @@ const App: React.FC = () => {
                                 {toast.type === 'success' && <CheckCircle className={`h-5 w-5 ${accent.iconText}`} />}
                                 {toast.type === 'error' && <AlertTriangle className={`h-5 w-5 ${accent.iconText}`} />}
                                 {toast.type === 'info' && <Info className={`h-5 w-5 ${accent.iconText}`} />}
-                                <span className="text-sm font-medium text-slate-800">{toast.message}</span>
+                                <span className="text-sm font-medium text-slate-800 flex-1">{toast.message}</span>
+                                {toast.action && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            toast.action!.onClick();
+                                            setToasts(prev => prev.filter(t => t.id !== toast.id));
+                                        }}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-lg ${accent.iconBg} ${accent.iconText} hover:opacity-80 flex-shrink-0`}
+                                    >
+                                        {toast.action.label}
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>

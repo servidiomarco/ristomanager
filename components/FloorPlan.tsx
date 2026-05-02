@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote } from 'lucide-react';
 import { getTableMerges } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -164,6 +164,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Modal state for alerts
   const [alertModal, setAlertModal] = useState<{ message: string; type: 'error' | 'warning' } | null>(null);
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
+  const [detailsModal, setDetailsModal] = useState<{ table: Table; widthCm: string; lengthCm: string; notes: string } | null>(null);
   const [deleteTablesConfirm, setDeleteTablesConfirm] = useState<number[] | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -898,6 +899,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </div>
             )}
 
+            {/* Table Details (dimensions + notes) */}
+            {singleSelectedTable && !singleSelectedTable.is_locked && (
+                <button
+                    onClick={() => setDetailsModal({
+                        table: singleSelectedTable,
+                        widthCm: singleSelectedTable.width_cm != null ? String(singleSelectedTable.width_cm) : '',
+                        lengthCm: singleSelectedTable.length_cm != null ? String(singleSelectedTable.length_cm) : '',
+                        notes: singleSelectedTable.notes || ''
+                    })}
+                    className={`flex items-center gap-1 px-2 py-2 rounded-lg border transition-colors ${
+                        (singleSelectedTable.notes || singleSelectedTable.width_cm || singleSelectedTable.length_cm)
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                    }`}
+                    title="Dettagli tavolo (dimensioni, note)"
+                >
+                    <Info size={16} />
+                    <span className="text-xs font-semibold hidden sm:inline">Dettagli</span>
+                </button>
+            )}
+
             {/* Rotate Table */}
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                 <button
@@ -1094,6 +1116,95 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           setDeleteTablesConfirm(null);
         }}
       />
+
+      {/* Table Details Modal (dimensions + notes) */}
+      {detailsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Info className="h-5 w-5 text-indigo-600" />
+                <h3 className="text-lg font-semibold text-slate-800">Dettagli Tavolo {detailsModal.table.name}</h3>
+              </div>
+              <button
+                onClick={() => setDetailsModal(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                  <Ruler className="h-3.5 w-3.5 text-slate-400" /> Dimensioni (cm)
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[11px] text-slate-500 block mb-1">Larghezza</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="es. 80"
+                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={detailsModal.widthCm}
+                      onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
+                    />
+                  </div>
+                  <span className="text-slate-400 mt-5">×</span>
+                  <div className="flex-1">
+                    <label className="text-[11px] text-slate-500 block mb-1">Lunghezza</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="es. 120"
+                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={detailsModal.lengthCm}
+                      onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-slate-400" /> Note
+                </label>
+                <textarea
+                  className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
+                  placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
+                  value={detailsModal.notes}
+                  onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
+              <button
+                onClick={() => setDetailsModal(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-white font-medium"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={() => {
+                  const widthRaw = detailsModal.widthCm.trim();
+                  const lengthRaw = detailsModal.lengthCm.trim();
+                  const widthNum = widthRaw === '' ? null : Number(widthRaw);
+                  const lengthNum = lengthRaw === '' ? null : Number(lengthRaw);
+                  onUpdateTable({
+                    ...detailsModal.table,
+                    width_cm: widthNum != null && Number.isFinite(widthNum) ? widthNum : null,
+                    length_cm: lengthNum != null && Number.isFinite(lengthNum) ? lengthNum : null,
+                    notes: detailsModal.notes.trim() === '' ? null : detailsModal.notes.trim(),
+                  });
+                  setDetailsModal(null);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+              >
+                Salva
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

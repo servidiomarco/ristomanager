@@ -26,6 +26,9 @@ export interface Table {
   merged_with?: number[];
   temp_lock_expires_at?: number;
   rotation?: number;
+  width_cm?: number | null;
+  length_cm?: number | null;
+  notes?: string | null;
 }
 
 export interface Room {
@@ -128,6 +131,7 @@ export interface Toast {
     title?: string;
     details?: string[];
     duration?: number;
+    action?: { label: string; onClick: () => void };
 }
 
 export enum ViewState {

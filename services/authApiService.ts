@@ -244,18 +244,29 @@ class AuthApiService {
     return !!this.getAccessToken();
   }
 
+  // Internal: fetch with auth header + automatic refresh on 401
+  private async authFetch(url: string, init: RequestInit = {}, retried = false): Promise<Response> {
+    const token = this.getAccessToken();
+    const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(url, { ...init, headers });
+
+    if (response.status === 401 && !retried) {
+      const refreshed = await this.refreshToken();
+      if (refreshed) {
+        return this.authFetch(url, init, true);
+      }
+    }
+    return response;
+  }
+
   // ============================================
   // USER MANAGEMENT (Owner only)
   // ============================================
 
   async getUsers(): Promise<User[]> {
-    const token = this.getAccessToken();
-
-    const response = await fetch(`${API_URL}/auth/users`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+    const response = await this.authFetch(`${API_URL}/auth/users`);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch users' }));
@@ -271,14 +282,9 @@ class AuthApiService {
     full_name: string;
     role: UserRole;
   }): Promise<User> {
-    const token = this.getAccessToken();
-
-    const response = await fetch(`${API_URL}/auth/users`, {
+    const response = await this.authFetch(`${API_URL}/auth/users`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData)
     });
 
@@ -297,14 +303,9 @@ class AuthApiService {
     role?: UserRole;
     is_active?: boolean;
   }): Promise<User> {
-    const token = this.getAccessToken();
-
-    const response = await fetch(`${API_URL}/auth/users/${userId}`, {
+    const response = await this.authFetch(`${API_URL}/auth/users/${userId}`, {
       method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData)
     });
 
@@ -317,13 +318,8 @@ class AuthApiService {
   }
 
   async deleteUser(userId: number): Promise<void> {
-    const token = this.getAccessToken();
-
-    const response = await fetch(`${API_URL}/auth/users/${userId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+    const response = await this.authFetch(`${API_URL}/auth/users/${userId}`, {
+      method: 'DELETE'
     });
 
     if (!response.ok) {

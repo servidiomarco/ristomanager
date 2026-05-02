@@ -83,7 +83,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 is_locked BOOLEAN DEFAULT false,
                 merged_with INTEGER[],
                 temp_lock_expires_at TIMESTAMPTZ,
-                rotation INTEGER DEFAULT 0
+                rotation INTEGER DEFAULT 0,
+                width_cm INTEGER,
+                length_cm INTEGER,
+                notes TEXT
             );
         `);
 
@@ -91,6 +94,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS min_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS max_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS rotation INTEGER DEFAULT 0;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS width_cm INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS length_cm INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS notes TEXT;`);
 
         // Per-shift table merges. Replaces the global tables.merged_with column,
         // which was a single state shared across all shifts and dates.
