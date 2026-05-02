@@ -8,7 +8,7 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
-import pool, { createSchema } from './db.js';
+import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
@@ -118,7 +118,7 @@ app.post('/webhook/vonage-status', (req, res) => {
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM reservations ORDER BY reservation_time DESC');
+        const result = await queryWithRetry('SELECT * FROM reservations ORDER BY reservation_time DESC');
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -129,7 +129,7 @@ app.get('/reservations', authenticate, async (req, res) => {
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
             [
                 customer_name,
@@ -181,7 +181,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
     try {
         const { id } = req.params;
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
             [
                 customer_name,
@@ -235,10 +235,10 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         const { id } = req.params;
 
         // Get reservation name before deleting
-        const existing = await pool.query('SELECT customer_name FROM reservations WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT customer_name FROM reservations WHERE id = $1', [id]);
         const resourceName = existing.rows[0]?.customer_name;
 
-        await pool.query('DELETE FROM reservations WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM reservations WHERE id = $1', [id]);
 
         // Log activity
         if (req.user) {

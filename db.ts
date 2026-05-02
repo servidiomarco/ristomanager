@@ -1,8 +1,20 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import dns from 'dns';
+import net from 'net';
 import { Pool, types } from 'pg';
 import bcrypt from 'bcryptjs';
+
+// Railway's internal DNS returns both AAAA (IPv6) and A (IPv4) for the
+// postgres host. In production we observed the IPv6 endpoint returning
+// ECONNREFUSED while IPv4 timed out after 10s, surfacing as AggregateError
+// [ETIMEDOUT] on PUT /reservations and /auth/me. Pin DNS to IPv4 first and
+// disable Node's "happy eyeballs" so we don't burn time racing both families.
+dns.setDefaultResultOrder('ipv4first');
+if (typeof (net as any).setDefaultAutoSelectFamily === 'function') {
+    (net as any).setDefaultAutoSelectFamily(false);
+}
 
 // Return DATE columns as plain YYYY-MM-DD strings instead of JS Date objects.
 // PostgreSQL DATE has no timezone; the default parser shifts it through the
@@ -27,16 +39,45 @@ const pool = new Pool({
     // Without this, the pool serves a half-closed socket and the next query
     // throws "Connection terminated unexpectedly", surfacing as random 500s.
     idleTimeoutMillis: 30_000,
-    // Cap how long we wait for a fresh connection before failing the request.
-    connectionTimeoutMillis: 10_000,
+    // Fail fast (5s) instead of letting a request hang for 10s on a dead route.
+    connectionTimeoutMillis: 5_000,
     keepAlive: true,
-});
+    // Activate TCP keepalive after 10s of idle so half-closed sockets are
+    // detected before the next query is dispatched on them.
+    keepAliveInitialDelayMillis: 10_000,
+    // Server-side and client-side query caps so a hung query can't pin a
+    // pool client indefinitely.
+    statement_timeout: 15_000,
+    query_timeout: 20_000,
+} as any);
 
 // Without this handler, an error event from an idle client crashes the worker
 // (Node treats unhandled "error" events on EventEmitters as uncaught).
 pool.on('error', (err) => {
     console.error('Postgres pool idle client error:', err);
 });
+
+// Retry transient connection errors once. Most ETIMEDOUT / ECONNRESET /
+// "Connection terminated unexpectedly" failures we've seen recover on the
+// next attempt because the pool evicts the dead client and reconnects.
+const TRANSIENT_CODES = new Set(['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', '57P01', '57P02', '57P03']);
+const isTransient = (err: any): boolean => {
+    if (!err) return false;
+    if (TRANSIENT_CODES.has(err.code)) return true;
+    if (typeof err.message === 'string' && err.message.includes('Connection terminated')) return true;
+    if (Array.isArray(err.errors) && err.errors.some((e: any) => TRANSIENT_CODES.has(e?.code))) return true;
+    return false;
+};
+
+export const queryWithRetry = async <T = any>(text: string, params?: any[]): Promise<{ rows: T[]; rowCount: number | null }> => {
+    try {
+        return await pool.query(text, params);
+    } catch (err: any) {
+        if (!isTransient(err)) throw err;
+        console.warn('Postgres transient error, retrying once:', err.code || err.message);
+        return await pool.query(text, params);
+    }
+};
 
 // Retry logic for schema creation
 const MAX_RETRIES = 5;

@@ -336,7 +336,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
-      const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
+      const trimmedSearch = searchTerm.trim().toLowerCase();
+      let matchesSearch = true;
+      if (trimmedSearch) {
+        const nameHit = !!r.customer_name && r.customer_name.toLowerCase().includes(trimmedSearch);
+        const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
+        const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
+        matchesSearch = nameHit || tableHit;
+      }
       return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
     })
     .sort((a, b) => {
@@ -889,7 +896,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const isOccupied = !!reservation;
       const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
       const trimmedSearch = searchTerm.trim().toLowerCase();
-      const isSearchMatch = !!(trimmedSearch && reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch));
+      const isSearchMatch = !!(trimmedSearch && (
+        (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+        table.name.toLowerCase().includes(trimmedSearch)
+      ));
 
       // Responsive table sizes - smaller on mobile and tablets
       const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
@@ -1012,11 +1022,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
                 <input
                     type="text"
-                    placeholder="Cerca prenotazione..."
-                    className="w-full h-full pl-10 pr-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
+                    placeholder="Cerca per nome o tavolo..."
+                    className="w-full h-full pl-10 pr-10 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                {searchTerm && (
+                    <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
+                        title="Cancella ricerca"
+                        aria-label="Cancella ricerca"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                )}
             </div>
 
             <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 px-1 h-11 w-full sm:w-auto">
@@ -1604,7 +1625,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                           const isOccupied = !!reservation;
                                           const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
                                           const trimmedSearch = searchTerm.trim().toLowerCase();
-                                          const isSearchMatch = !!(trimmedSearch && reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch));
+                                          const isSearchMatch = !!(trimmedSearch && (
+                                            (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+                                            table.name.toLowerCase().includes(trimmedSearch)
+                                          ));
                                           const mergedNames = (table.merged_with && table.merged_with.length > 0)
                                               ? table.merged_with
                                                   .map(id => tables.find(t => Number(t.id) === Number(id))?.name)

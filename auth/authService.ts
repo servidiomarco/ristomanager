@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import pool from '../db.js';
+import pool, { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
@@ -115,7 +115,7 @@ export class AuthService {
     }
 
     // Verify refresh token is still valid in database
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT id, email, role, is_active, refresh_token_hash FROM users WHERE id = $1',
       [payload.userId]
     );
@@ -154,7 +154,7 @@ export class AuthService {
 
   // Get user by ID
   static async getUserById(userId: number): Promise<User | null> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login FROM users WHERE id = $1',
       [userId]
     );
