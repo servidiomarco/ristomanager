@@ -182,11 +182,18 @@ Break-even vs personale telefonico: ovviamente sì.
 
 ## Deliverables (in ordine di PR consigliato)
 
+**Track A — Operativo (parallelo al codice)**
+- A1. Avvia porting numero ristorante → Twilio (LOA + bolletta)
+- A2. Acquisire numero Twilio italiano temporaneo per dev/test (~$1/mese)
+- A3. Creare account/agent ElevenLabs, configurare voce standard italiana
+
+**Track B — Codice**
 1. **PR #1 — Schema + service** (`db.ts`, `types.ts`, `services/elevenlabsService.ts`)
    con HMAC verify + helpers, senza endpoint vivi.
-2. **PR #2 — `check_availability` endpoint** (Phase 1, read-only).
-3. **PR #3 — `create_reservation` + post-call webhook** (Phase 2, con `requires_review`).
-4. **PR #4 — UI badge "VOICE" + filtro nel CRM** (lift `requires_review` quando metriche OK).
+2. **PR #2 — `check_availability` endpoint** (Phase 1, read-only). Test con numero Twilio temporaneo.
+3. **PR #3 — `create_reservation` + post-call webhook + WhatsApp recap** (Phase 2, con `requires_review`).
+4. **PR #4 — Twilio Function routing orario di servizio** (deploy su Twilio Functions, non in questo repo).
+5. **PR #5 — UI badge "VOICE" + filtro nel CRM** (lift `requires_review` quando metriche OK).
 
 ## File da creare/modificare
 
@@ -199,10 +206,46 @@ Break-even vs personale telefonico: ovviamente sì.
 | `.env` | 2 nuove vars |
 | `docs/voice-agent-setup.md` | **NUOVO** — istruzioni operative (Twilio + ElevenLabs dashboard) |
 
-## Domande aperte (mi servono prima di procedere)
+## Decisioni prese
 
-1. Numero da usare: numero Twilio nuovo o portare il numero esistente del ristorante?
-2. Voce: voice-cloning dal proprietario, o voce standard ElevenLabs italiana?
-3. Solo prenotazioni o anche FAQ ("siete aperti la domenica?", "avete piatti senza glutine?") → richiede knowledge base con menu/orari.
-4. Si vuole conferma WhatsApp post-call automatica, o solo se cliente conferma a voce "sì voglio conferma scritta"?
-5. Range orari accettati: tutto il giorno, o solo fuori orario di servizio (per non distrarre la sala)?
+1. **Numero**: porting del numero esistente del ristorante verso Twilio. Lead time 2-4 settimane in Italia, va avviato per primo.
+2. **Voce**: standard italiana ElevenLabs (no voice-cloning).
+3. **Scope**: solo prenotazioni. Niente FAQ/knowledge base nella v1.
+4. **Conferma**: WhatsApp automatica post-call (riutilizza `sendVonageWhatsApp`).
+5. **Orari attivi**: solo **fuori orario di servizio**. Durante il servizio le chiamate vanno alla sala come oggi.
+
+### Implicazioni delle decisioni
+
+**Routing orari di servizio (decisione 5)**
+
+Il routing orario va fatto a livello Twilio (TwiML), non ElevenLabs. Logica:
+
+```
+Chiamata in entrata su numero portato
+  │
+  ├── ora corrente in [12:00-15:00] OR [19:00-23:00] (Europe/Rome)?
+  │   ├── SÌ → forward al cellulare/fisso del ristorante (come oggi)
+  │   └── NO → forward all'agent ElevenLabs
+```
+
+Implementazione: Twilio Function (Node) o TwiML Bin che valuta `Date()` con timezone
+Europe/Rome e fa `<Dial>` al numero corretto. Gli orari restano configurabili come
+costante nella Function — eventualmente li leggiamo da una tabella `restaurant_hours`
+in futuro.
+
+**Porting (decisione 1)**
+
+Va avviato **prima del coding**: serve il numero attivo su Twilio per testare end-to-end.
+Step paralleli al lavoro tecnico:
+- Aprire ticket porting con Twilio (LOA firmata, ultima bolletta operatore attuale)
+- Verificare che l'operatore attuale non abbia clausole anti-porting
+- Durante il porting, tenere temporaneamente un numero Twilio italiano nuovo per dev/test
+
+**WhatsApp post-call (decisione 4)**
+
+Nel post-call webhook handler, se la chiamata ha prodotto una `reservation_id`,
+fire-and-forget:
+```ts
+sendVonageWhatsApp(phone, formatItalianRecap(reservation))
+```
+Niente conferma vocale richiesta dal cliente — è automatica per tutti.
