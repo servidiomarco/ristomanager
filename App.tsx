@@ -627,6 +627,7 @@ const App: React.FC = () => {
   const getRoleDisplayName = (role: UserRole): string => {
     const roleNames: Record<UserRole, string> = {
       [UserRole.OWNER]: 'Proprietario',
+      [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'

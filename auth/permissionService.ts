@@ -20,13 +20,14 @@ export type Permission =
   | 'reports:view'
   | 'reports:full'
   | 'logs:view'
-  | 'logs:full';
+  | 'logs:full'
+  | 'banquet:view_price';
 
 // All available permissions grouped by feature
 export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] = [
   { feature: 'Dashboard', permissions: ['dashboard:view', 'dashboard:full'] },
   { feature: 'Sale e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
-  { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full'] },
+  { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full', 'banquet:view_price'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
@@ -58,6 +59,7 @@ export class RolePermissionService {
 
     const permissions: Record<string, Permission[]> = {
       OWNER: [],
+      GENERAL_MANAGER: [],
       MANAGER: [],
       WAITER: [],
       KITCHEN: []

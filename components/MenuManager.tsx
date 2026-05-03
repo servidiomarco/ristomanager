@@ -2,9 +2,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { BanquetCompositionModal } from './BanquetCompositionModal';
+import { useAuth } from '../contexts/AuthContext';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -43,6 +45,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     canEdit = true,
     initialTab = 'DISHES'
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
@@ -54,6 +58,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [editingBanquetId, setEditingBanquetId] = useState<number | null>(null);
   const [deleteDishConfirm, setDeleteDishConfirm] = useState<Dish | null>(null);
   const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
+  const [viewBanquet, setViewBanquet] = useState<BanquetMenu | null>(null);
 
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
@@ -433,7 +438,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
                       <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                              onClick={() => printBanquet(menu, dishes)}
+                              onClick={() => setViewBanquet(menu)}
+                              className="text-slate-300 hover:text-indigo-500 transition-colors"
+                              title="Visualizza piatti"
+                          >
+                              <Eye className="h-5 w-5" />
+                          </button>
+                          <button
+                              onClick={() => printBanquet(menu, dishes, { showPrice: canViewBanquetPrice })}
                               className="text-slate-300 hover:text-emerald-500 transition-colors"
                               title="Stampa / Salva PDF / Condividi"
                           >
@@ -468,6 +480,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
                         </div>
                       )}
+                      {canViewBanquetPrice && (
                       <div className="mb-4 flex items-baseline gap-4 flex-wrap">
                           <div>
                               <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
@@ -480,6 +493,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               </div>
                           )}
                       </div>
+                      )}
                       <div className="space-y-3">
                           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Composizione:</p>
                           {menu.courses && menu.courses.length > 0 ? (
@@ -520,6 +534,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <BanquetCalendar
               banquetMenus={banquetMenus}
               onSelectBanquet={handleEditBanquet}
+              onViewBanquet={setViewBanquet}
               canEdit={canEdit}
             />
           )}
@@ -705,6 +720,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         </button>
                     </div>
                 </div>
+                {canViewBanquetPrice && (
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Prezzo per Persona (€)</label>
                     <input
@@ -715,6 +731,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={e => setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)})}
                     />
                 </div>
+                )}
+                {canViewBanquetPrice && (
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Acconto (€) <span className="text-slate-400 font-normal">— opzionale</span></label>
                     <input
@@ -727,6 +745,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                     />
                 </div>
+                )}
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Numero Ospiti <span className="text-slate-400 font-normal">— opzionale</span></label>
                     <input
@@ -975,6 +994,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           setDeleteBanquetConfirm(null);
         }}
       />
+
+      {viewBanquet && (
+        <BanquetCompositionModal
+          banquet={viewBanquet}
+          dishes={dishes}
+          onClose={() => setViewBanquet(null)}
+        />
+      )}
     </div>
   );
 };
@@ -982,10 +1009,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 interface BanquetCalendarProps {
   banquetMenus: BanquetMenu[];
   onSelectBanquet: (menu: BanquetMenu) => void;
+  onViewBanquet: (menu: BanquetMenu) => void;
   canEdit: boolean;
 }
 
-const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, canEdit }) => {
+const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, onViewBanquet, canEdit }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -1126,7 +1156,19 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         )}
                       </div>
                     </div>
-                    <span className="text-sm font-bold text-indigo-600 whitespace-nowrap">€{menu.price_per_person}/pax</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {canViewBanquetPrice && (
+                        <span className="text-sm font-bold text-indigo-600 whitespace-nowrap">€{menu.price_per_person}/pax</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); onViewBanquet(menu); }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        title="Visualizza piatti"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

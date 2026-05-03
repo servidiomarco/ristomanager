@@ -39,6 +39,7 @@ const PRIORITY_COLORS: Record<TodoPriority, string> = {
 
 const TEAM_LABELS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'Proprietario',
+  [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
   [UserRole.WAITER]: 'Camerieri',
   [UserRole.KITCHEN]: 'Cucina',
@@ -46,6 +47,7 @@ const TEAM_LABELS: Record<UserRole, string> = {
 
 const TEAM_COLORS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'bg-purple-100 text-purple-700',
+  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 text-indigo-700',
   [UserRole.MANAGER]: 'bg-blue-100 text-blue-700',
   [UserRole.WAITER]: 'bg-emerald-100 text-emerald-700',
   [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',

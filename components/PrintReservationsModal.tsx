@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
 import { Printer, X } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
   isOpen: boolean;
@@ -33,6 +34,8 @@ export const PrintReservationsModal: React.FC<Props> = ({
   initialDate,
   initialShift,
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [printDate, setPrintDate] = useState(initialDate);
   const [printShift, setPrintShift] = useState<Shift | 'ALL'>(initialShift);
   const [printRoomId, setPrintRoomId] = useState<number | 'ALL'>('ALL');
@@ -270,7 +273,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                     <li key={b.id} style={{ marginBottom: '0.25rem' }}>
                       <strong>{b.name}</strong>
                       {b.description && <span style={{ color: '#475569' }}> — {b.description}</span>}
-                      <span style={{ color: '#475569' }}> · €{b.price_per_person}/persona</span>
+                      {canViewBanquetPrice && <span style={{ color: '#475569' }}> · €{b.price_per_person}/persona</span>}
                     </li>
                   ))}
                 </ul>

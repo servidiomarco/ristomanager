@@ -20,7 +20,8 @@ export type Permission =
   | 'reports:view'
   | 'reports:full'
   | 'logs:view'
-  | 'logs:full';
+  | 'logs:full'
+  | 'banquet:view_price';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -43,7 +44,25 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reports:view',
     'reports:full',
     'logs:view',
-    'logs:full'
+    'logs:full',
+    'banquet:view_price'
+  ],
+  [UserRole.GENERAL_MANAGER]: [
+    'dashboard:view',
+    'dashboard:full',
+    'floorplan:view',
+    'floorplan:update_status',
+    'floorplan:full',
+    'menu:view',
+    'menu:full',
+    'reservations:view',
+    'reservations:full',
+    'staff:view',
+    'staff:full',
+    'reports:view',
+    'reports:full',
+    'logs:view',
+    'banquet:view_price'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',

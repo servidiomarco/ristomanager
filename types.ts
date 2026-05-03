@@ -162,6 +162,7 @@ export enum ViewState {
 
 export enum UserRole {
   OWNER = 'OWNER',
+  GENERAL_MANAGER = 'GENERAL_MANAGER',
   MANAGER = 'MANAGER',
   WAITER = 'WAITER',
   KITCHEN = 'KITCHEN'
