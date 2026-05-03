@@ -69,14 +69,35 @@ const isTransient = (err: any): boolean => {
     return false;
 };
 
+// Errors that mean Postgres itself is unavailable (restart / failover).
+// For these the immediate retry is pointless — we need to wait for the DB
+// to come up. Up to 3 attempts with linear backoff.
+const RESTART_CODES = new Set(['ECONNREFUSED', '57P01', '57P02', '57P03']);
+const isRestartError = (err: any): boolean => {
+    if (!err) return false;
+    if (RESTART_CODES.has(err.code)) return true;
+    if (Array.isArray(err.errors) && err.errors.some((e: any) => RESTART_CODES.has(e?.code))) return true;
+    return false;
+};
+
+const sleepMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const queryWithRetry = async (text: string, params?: any[]): Promise<{ rows: any[]; rowCount: number | null }> => {
-    try {
-        return await pool.query(text, params);
-    } catch (err: any) {
-        if (!isTransient(err)) throw err;
-        console.warn('Postgres transient error, retrying once:', err.code || err.message);
-        return await pool.query(text, params);
+    const maxAttempts = 3;
+    let lastErr: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await pool.query(text, params);
+        } catch (err: any) {
+            lastErr = err;
+            if (!isTransient(err) || attempt === maxAttempts) throw err;
+            // Postgres restart needs a real wait; other transients can retry quickly.
+            const delay = isRestartError(err) ? 1500 * attempt : 100;
+            console.warn(`Postgres transient error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, err.code || err.message);
+            await sleepMs(delay);
+        }
     }
+    throw lastErr;
 };
 
 // Retry logic for schema creation

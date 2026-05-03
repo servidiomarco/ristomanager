@@ -8,7 +8,7 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
-import pool, { createSchema, queryWithRetry } from './db.js';
+import { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
@@ -270,7 +270,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
         const { id } = req.params;
 
         // Get reservation details
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'SELECT customer_name, reservation_time, guests, phone FROM reservations WHERE id = $1',
             [id]
         );
@@ -315,7 +315,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
 // Tables - require authentication
 app.get('/tables', authenticate, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM tables ORDER BY name');
+        const result = await queryWithRetry('SELECT * FROM tables ORDER BY name');
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -326,7 +326,7 @@ app.get('/tables', authenticate, async (req, res) => {
 app.post('/tables', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { name, shape, seats, x, y, room_id, status, rotation } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'INSERT INTO tables (name, shape, seats, x, y, room_id, status, rotation) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [name, shape, seats, x, y, room_id, status, rotation || 0]
         );
@@ -397,7 +397,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         console.log('SQL Query:', query);
         console.log('Values:', values);
 
-        const result = await pool.query(query, values);
+        const result = await queryWithRetry(query, values);
         const updatedTable = result.rows[0];
 
         console.log('Updated table merged_with:', updatedTable.merged_with);
@@ -432,10 +432,10 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
         const { id } = req.params;
 
         // Get table name before deleting
-        const existing = await pool.query('SELECT name FROM tables WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM tables WHERE id = $1', [id]);
         const resourceName = existing.rows[0]?.name;
 
-        await pool.query('DELETE FROM tables WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM tables WHERE id = $1', [id]);
 
         // Log activity
         if (req.user) {
@@ -475,7 +475,7 @@ app.get('/table-merges', authenticate, async (req, res) => {
         if (shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'SELECT id, date, shift, primary_id, merged_ids FROM table_merges WHERE date = $1 AND shift = $2',
             [date, shift]
         );
@@ -497,7 +497,7 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
         if (shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `INSERT INTO table_merges (date, shift, primary_id, merged_ids)
              VALUES ($1, $2, $3, $4)
              ON CONFLICT (date, shift, primary_id)
@@ -539,7 +539,7 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
         if (!date || !shift || primary_id == null) {
             return res.status(400).json({ error: 'date, shift and primary_id are required' });
         }
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `DELETE FROM table_merges
              WHERE date = $1 AND shift = $2 AND primary_id = $3
              RETURNING id, date, shift, primary_id, merged_ids`,
@@ -718,7 +718,7 @@ app.get('/rooms', authenticate, async (req, res) => {
     try {
         // Custom display order: Veranda, Macine, Fiume, Fuori, Tettoia, Pergolato.
         // Names not in the list fall to the end, alphabetically.
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             SELECT * FROM rooms
             ORDER BY
                 CASE LOWER(TRIM(name))
@@ -742,7 +742,7 @@ app.get('/rooms', authenticate, async (req, res) => {
 app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { name, width, height } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'INSERT INTO rooms (name, width, height) VALUES ($1, $2, $3) RETURNING *',
             [name, width, height]
         );
@@ -777,10 +777,10 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
         const { id } = req.params;
 
         // Get room name before deleting
-        const existing = await pool.query('SELECT name FROM rooms WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM rooms WHERE id = $1', [id]);
         const resourceName = existing.rows[0]?.name;
 
-        await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM rooms WHERE id = $1', [id]);
 
         // Log activity
         if (req.user) {
@@ -809,7 +809,7 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 // Dishes - require authentication
 app.get('/dishes', authenticate, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM dishes ORDER BY category, name');
+        const result = await queryWithRetry('SELECT * FROM dishes ORDER BY category, name');
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -820,7 +820,7 @@ app.get('/dishes', authenticate, async (req, res) => {
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'INSERT INTO dishes (name, description, price, category, allergens, photo_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
             [name, description, price, category, allergens, photo_url || null]
         );
@@ -854,7 +854,7 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
     try {
         const { id } = req.params;
         const { name, description, price, category, allergens, photo_url } = req.body;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 RETURNING *',
             [name, description, price, category, allergens, photo_url || null, id]
         );
@@ -889,10 +889,10 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
         const { id } = req.params;
 
         // Get dish name before deleting
-        const existing = await pool.query('SELECT name FROM dishes WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM dishes WHERE id = $1', [id]);
         const resourceName = existing.rows[0]?.name;
 
-        await pool.query('DELETE FROM dishes WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM dishes WHERE id = $1', [id]);
 
         // Log activity
         if (req.user) {
@@ -921,7 +921,7 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
-        const result = await pool.query(
+        const result = await queryWithRetry(
             "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount FROM banquet_menus ORDER BY event_date NULLS LAST, name"
         );
         res.json(result.rows);
@@ -942,7 +942,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, deposit_amount) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
             [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null]
         );
@@ -983,7 +983,7 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
-        const result = await pool.query(
+        const result = await queryWithRetry(
             "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, deposit_amount = $7 WHERE id = $8 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
             [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null, id]
         );
@@ -1018,10 +1018,10 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         const { id } = req.params;
 
         // Get menu name before deleting
-        const existing = await pool.query('SELECT name FROM banquet_menus WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM banquet_menus WHERE id = $1', [id]);
         const resourceName = existing.rows[0]?.name;
 
-        await pool.query('DELETE FROM banquet_menus WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM banquet_menus WHERE id = $1', [id]);
 
         // Log activity
         if (req.user) {
@@ -1080,7 +1080,7 @@ app.get('/todos', authenticate, async (req, res) => {
 
         query += ' ORDER BY created_at DESC';
 
-        const result = await pool.query(query, params);
+        const result = await queryWithRetry(query, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -1093,7 +1093,7 @@ app.get('/todos/my', authenticate, async (req, res) => {
         const userId = req.user?.userId;
         const userRole = req.user?.role;
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             SELECT
                 id,
                 title,
@@ -1144,7 +1144,7 @@ app.post('/todos', authenticate, async (req, res) => {
             linkedReservationId
         } = req.body;
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             INSERT INTO todos (
                 title, description, priority, category, due_date,
                 assigned_to_user_id, assigned_to_user_name, assigned_to_team,
@@ -1274,7 +1274,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 created_by_user_name as "createdByUserName"
         `;
 
-        const result = await pool.query(query, values);
+        const result = await queryWithRetry(query, values);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -1297,7 +1297,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             UPDATE todos
             SET
                 completed = NOT completed,
@@ -1345,7 +1345,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query('DELETE FROM todos WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM todos WHERE id = $1 RETURNING id', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -1373,7 +1373,7 @@ app.get('/shopping', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'Date parameter is required' });
         }
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             SELECT
                 id,
                 name,
@@ -1414,7 +1414,7 @@ app.post('/shopping', authenticate, async (req, res) => {
         const creatorEmail = req.user?.email || null;
         console.log('🛒 Creator email:', creatorEmail);
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING
@@ -1453,7 +1453,7 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query(`
+        const result = await queryWithRetry(`
             UPDATE shopping_items
             SET checked = NOT checked
             WHERE id = $1
@@ -1489,7 +1489,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query('DELETE FROM shopping_items WHERE id = $1 RETURNING id, TO_CHAR(date, \'YYYY-MM-DD\') as date', [id]);
+        const result = await queryWithRetry('DELETE FROM shopping_items WHERE id = $1 RETURNING id, TO_CHAR(date, \'YYYY-MM-DD\') as date', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
@@ -1514,7 +1514,7 @@ app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'Date parameter is required' });
         }
 
-        await pool.query('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+        await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
@@ -1545,7 +1545,7 @@ app.get('/staff', authenticate, async (req, res) => {
 
         query += ' ORDER BY surname, name';
 
-        const result = await pool.query(query, params);
+        const result = await queryWithRetry(query, params);
 
         const staff = result.rows.map(row => ({
             id: row.id,
@@ -1581,7 +1581,7 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
 
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `INSERT INTO staff_members (name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING *`,
@@ -1655,7 +1655,7 @@ app.get('/staff/shifts', authenticate, async (req, res) => {
 
         query += ' ORDER BY date, shift';
 
-        const result = await pool.query(query, params);
+        const result = await queryWithRetry(query, params);
 
         const shifts = result.rows.map(row => ({
             id: row.id,
@@ -1683,7 +1683,7 @@ app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (
             return res.status(400).json({ error: 'staffId, date, and shift are required' });
         }
 
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
@@ -1724,7 +1724,7 @@ app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), as
 
         const createdShifts = [];
         for (const shift of shifts) {
-            const result = await pool.query(
+            const result = await queryWithRetry(
                 `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
                  VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
@@ -1756,7 +1756,7 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
         const { id } = req.params;
         const { present, notes } = req.body;
 
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `UPDATE staff_shifts SET
                 present = COALESCE($1, present),
                 notes = COALESCE($2, notes)
@@ -1795,7 +1795,7 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
 app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('DELETE FROM staff_shifts WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_shifts WHERE id = $1 RETURNING id', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Shift not found' });
@@ -1841,7 +1841,7 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
 
         query += ' ORDER BY start_date DESC';
 
-        const result = await pool.query(query, params);
+        const result = await queryWithRetry(query, params);
 
         const timeOffs = result.rows.map(row => ({
             id: row.id,
@@ -1870,7 +1870,7 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             return res.status(400).json({ error: 'staffId, startDate, endDate, and type are required' });
         }
 
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, notes, approved)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING *`,
@@ -1906,7 +1906,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
         const { id } = req.params;
         const { startDate, endDate, type, notes, approved } = req.body;
 
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `UPDATE staff_time_off SET
                 start_date = COALESCE($1, start_date),
                 end_date = COALESCE($2, end_date),
@@ -1949,7 +1949,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
 app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('DELETE FROM staff_time_off WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_time_off WHERE id = $1 RETURNING id', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Time off record not found' });
@@ -1980,9 +1980,9 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const dateStr = String(date);
 
         const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
-            pool.query('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
-            pool.query('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
-            pool.query('SELECT staff_id FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
+            queryWithRetry('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
+            queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
+            queryWithRetry('SELECT staff_id FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
         ]);
 
         const onTimeOff = new Set(timeOffResult.rows.map(r => r.staff_id));
@@ -2051,7 +2051,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
 app.get('/staff/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('SELECT * FROM staff_members WHERE id = $1', [id]);
+        const result = await queryWithRetry('SELECT * FROM staff_members WHERE id = $1', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
@@ -2088,7 +2088,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive } = req.body;
 
         // weeklyRestDay needs explicit handling so the client can clear it (null clears, undefined keeps)
-        const result = await pool.query(
+        const result = await queryWithRetry(
             `UPDATE staff_members SET
                 name = COALESCE($1, name),
                 surname = COALESCE($2, surname),
@@ -2151,7 +2151,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
 app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
@@ -2220,7 +2220,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         const shift = determineShift(time);
 
         // Create reservation in database
-        const result = await pool.query(
+        const result = await queryWithRetry(
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [
                 name,

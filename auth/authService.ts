@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import pool, { queryWithRetry } from '../db.js';
+import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
@@ -58,7 +58,7 @@ export class AuthService {
 
   // Login user
   static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | null> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, last_login FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
@@ -79,7 +79,7 @@ export class AuthService {
     }
 
     // Update last login
-    await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [userRow.id]);
+    await queryWithRetry('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [userRow.id]);
 
     const payload: TokenPayload = {
       userId: userRow.id,
@@ -91,7 +91,7 @@ export class AuthService {
 
     // Store refresh token hash
     const refreshTokenHash = await this.hashPassword(tokens.refreshToken);
-    await pool.query('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
+    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
 
     const user: User = {
       id: userRow.id,
@@ -142,14 +142,14 @@ export class AuthService {
 
     // Update refresh token hash
     const newRefreshTokenHash = await this.hashPassword(tokens.refreshToken);
-    await pool.query('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
+    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
 
     return tokens;
   }
 
   // Logout user (invalidate refresh token)
   static async logout(userId: number): Promise<void> {
-    await pool.query('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
+    await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
   }
 
   // Get user by ID
@@ -178,7 +178,7 @@ export class AuthService {
 
   // Get all users
   static async getAllUsers(): Promise<User[]> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login FROM users ORDER BY created_at DESC'
     );
 
@@ -203,7 +203,7 @@ export class AuthService {
   ): Promise<User> {
     const passwordHash = await this.hashPassword(password);
 
-    const result = await pool.query(
+    const result = await queryWithRetry(
       `INSERT INTO users (email, password_hash, full_name, role)
        VALUES ($1, $2, $3, $4)
        RETURNING id, email, full_name, role, is_active, created_at, updated_at`,
@@ -262,7 +262,7 @@ export class AuthService {
 
     const query = `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login`;
 
-    const result = await pool.query(query, values);
+    const result = await queryWithRetry(query, values);
 
     if (result.rows.length === 0) {
       return null;
@@ -283,7 +283,7 @@ export class AuthService {
 
   // Delete user
   static async deleteUser(userId: number): Promise<boolean> {
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [userId]);
+    const result = await queryWithRetry('DELETE FROM users WHERE id = $1 RETURNING id', [userId]);
     return result.rows.length > 0;
   }
 }
