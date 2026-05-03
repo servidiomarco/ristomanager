@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen } from 'lucide-react';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -32,6 +32,7 @@ interface FloorPlanProps {
   onSplitTable: (tableId: number, date: string, shift: Shift) => Promise<void> | void;
   onAddRoom: (roomName: string) => void;
   onDeleteRoom: (room_id: number) => void;
+  onToggleRoomClosed: (room_id: number, is_closed: boolean) => void;
   canEdit?: boolean;
 }
 
@@ -46,6 +47,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onSplitTable,
   onAddRoom,
   onDeleteRoom,
+  onToggleRoomClosed,
   canEdit = true
 }) => {
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
@@ -844,10 +846,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }}
               className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
+                  ? room.is_closed
+                    ? 'bg-slate-600 text-white border-slate-600 shadow-md shadow-slate-200'
+                    : 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
+                  : room.is_closed
+                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300 line-through'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
               }`}
+              title={room.is_closed ? `${room.name} (Chiusa)` : room.name}
             >
+              {room.is_closed && <DoorClosed size={12} />}
               {room.name}
             </button>
           ))}
@@ -929,6 +937,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </button>
 
           <div className="h-8 w-px bg-slate-200 mx-1"></div>
+
+          {/* Toggle Room Closed Button */}
+          {(() => {
+            const activeRoom = rooms.find(r => r.id === activeRoomId);
+            if (!activeRoom) return null;
+            const isClosed = activeRoom.is_closed === true;
+            return (
+              <button
+                onClick={() => onToggleRoomClosed(activeRoom.id, !isClosed)}
+                className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
+                  isClosed
+                    ? 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                    : 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                }`}
+                title={isClosed ? `Riapri Sala: ${activeRoom.name}` : `Chiudi Sala: ${activeRoom.name}`}
+              >
+                {isClosed ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />}
+                <span className="hidden lg:inline">{isClosed ? 'Riapri' : 'Chiudi'}</span>
+              </button>
+            );
+          })()}
 
           {/* Delete Room Button (Safe location) */}
           <button
@@ -1136,6 +1165,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isSelectionMode && (
               <div className="absolute top-4 left-4 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg pointer-events-none flex items-center gap-2">
                   <CheckSquare size={12} /> MODALITÀ SELEZIONE ATTIVA
+              </div>
+          )}
+
+          {rooms.find(r => r.id === activeRoomId)?.is_closed && (
+              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 uppercase tracking-wide">
+                  <DoorClosed size={12} /> Sala Chiusa
               </div>
           )}
 

@@ -126,9 +126,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 width INTEGER NOT NULL DEFAULT 800,
-                height INTEGER NOT NULL DEFAULT 600
+                height INTEGER NOT NULL DEFAULT 600,
+                is_closed BOOLEAN DEFAULT false
             );
         `);
+
+        await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT false;`);
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS tables (

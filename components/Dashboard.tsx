@@ -695,8 +695,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return table ? table.room_id : null;
     };
 
-    // Room-based affluence with time slots
-    const roomTimeSlots = rooms.map(room => {
+    // Room-based affluence with time slots (skip closed rooms)
+    const roomTimeSlots = rooms.filter(r => !r.is_closed).map(room => {
       const roomTables = tables.filter(t => t.room_id === room.id);
       const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
 
@@ -734,8 +734,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       };
     });
 
-    // Total capacity for percentage calculation
-    const totalCapacity = rooms.reduce((acc, room) => {
+    // Total capacity for percentage calculation (skip closed rooms)
+    const totalCapacity = rooms.filter(r => !r.is_closed).reduce((acc, room) => {
       const roomTables = tables.filter(t => t.room_id === room.id);
       return acc + roomTables.reduce((sum, t) => sum + t.seats, 0);
     }, 0);
@@ -1040,9 +1040,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           </div>
 
-          {/* Room by Room Status */}
+          {/* Room by Room Status (skip closed rooms) */}
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-2">
-            {rooms.map(room => {
+            {rooms.filter(r => !r.is_closed).map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
               const roomTableIds = new Set(roomTables.map(t => t.id));
               const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;

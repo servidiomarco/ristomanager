@@ -36,6 +36,7 @@ export interface Room {
   name: string;
   width: number;
   height: number;
+  is_closed?: boolean;
 }
 
 export interface Dish {

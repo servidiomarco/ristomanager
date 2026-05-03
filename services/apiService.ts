@@ -226,6 +226,14 @@ export const createRoom = async (room: Omit<Room, 'id'>): Promise<Room> => {
   });
 };
 
+export const setRoomClosed = async (id: number, is_closed: boolean): Promise<Room> => {
+  return apiRequest<Room>(`${API_URL}/rooms/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ is_closed }),
+  });
+};
+
 export const deleteRoom = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/rooms/${id}`, {
     method: 'DELETE',
