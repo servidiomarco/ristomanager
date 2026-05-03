@@ -238,9 +238,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 dish_ids INTEGER[],
                 event_date DATE,
                 deposit_amount DECIMAL(10, 2),
-                courses JSONB
+                courses JSONB,
+                shift VARCHAR(10),
+                guests INTEGER,
+                notes_courses TEXT,
+                notes_service TEXT,
+                notes_mise_en_place TEXT
             );
         `);
+
+        // Add operational fields to existing banquet_menus tables
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS shift VARCHAR(10);`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS guests INTEGER;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_courses TEXT;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_service TEXT;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_mise_en_place TEXT;`);
 
         // Add event_date column to existing banquet_menus if missing
         await client.query(`

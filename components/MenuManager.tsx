@@ -1,7 +1,7 @@
 
 
 import React, { useState, useMemo } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, COMMON_ALLERGENS } from '../types';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS } from '../types';
 import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -73,7 +73,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       dish_ids: [],
       courses: [],
       event_date: '',
-      deposit_amount: undefined
+      shift: undefined,
+      deposit_amount: undefined,
+      guests: undefined,
+      notes_courses: '',
+      notes_service: '',
+      notes_mise_en_place: ''
   });
 
   const handleAddDishSubmit = (e: React.FormEvent) => {
@@ -134,9 +139,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           dish_ids: flatDishIds,
           courses,
           event_date: newBanquet.event_date!,
+          shift: newBanquet.shift,
           deposit_amount: newBanquet.deposit_amount != null && newBanquet.deposit_amount !== ('' as any)
               ? Number(newBanquet.deposit_amount)
-              : undefined
+              : undefined,
+          guests: newBanquet.guests != null && newBanquet.guests !== ('' as any)
+              ? Number(newBanquet.guests)
+              : undefined,
+          notes_courses: newBanquet.notes_courses?.trim() || undefined,
+          notes_service: newBanquet.notes_service?.trim() || undefined,
+          notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined
       };
 
       if (isEditingBanquet && editingBanquetId !== null) {
@@ -148,7 +160,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', deposit_amount: undefined });
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -165,7 +177,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       dish_ids: menu.dish_ids,
       courses,
       event_date: menu.event_date || '',
-      deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined
+      shift: menu.shift,
+      deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined,
+      guests: menu.guests != null ? Number(menu.guests) : undefined,
+      notes_courses: menu.notes_courses || '',
+      notes_service: menu.notes_service || '',
+      notes_mise_en_place: menu.notes_mise_en_place || ''
     });
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
@@ -179,7 +196,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       name: '', description: '', price_per_person: 0,
       dish_ids: [],
       courses: [{ name: '1ª Uscita', dish_ids: [] }],
-      event_date: '', deposit_amount: undefined
+      event_date: '', shift: undefined, deposit_amount: undefined,
+      guests: undefined,
+      notes_courses: '', notes_service: '', notes_mise_en_place: ''
     });
     setIsBanquetFormOpen(true);
   };
@@ -660,6 +679,33 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                 </div>
                 <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Turno</label>
+                    <div className="flex gap-1 p-1 bg-slate-100 rounded-lg">
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
+                            className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.LUNCH
+                                    ? 'bg-white text-amber-600 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Pranzo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
+                            className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.DINNER
+                                    ? 'bg-white text-indigo-600 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Cena
+                        </button>
+                    </div>
+                </div>
+                <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Prezzo per Persona (€)</label>
                     <input
                         type="number"
@@ -681,6 +727,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                     />
                 </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Numero Ospiti <span className="text-slate-400 font-normal">— opzionale</span></label>
+                    <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="es. 80"
+                        className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={newBanquet.guests ?? ''}
+                        onChange={e => setNewBanquet({...newBanquet, guests: e.target.value === '' ? undefined : parseInt(e.target.value, 10)})}
+                    />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Descrizione Commerciale</label>
@@ -689,6 +747,36 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   value={newBanquet.description}
                   onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Portate <span className="text-slate-400 font-normal">— cucina</span></label>
+                  <textarea
+                    placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_courses || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Servizio <span className="text-slate-400 font-normal">— sala</span></label>
+                  <textarea
+                    placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_service || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Mise en Place</label>
+                  <textarea
+                    placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_mise_en_place || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
+                  />
+                </div>
               </div>
 
               <div>
