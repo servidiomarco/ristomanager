@@ -109,6 +109,12 @@ export enum ArrivalStatus {
   DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
 }
 
+export enum ReservationSource {
+  MANUAL = 'MANUAL',        // Created via CRM UI
+  WHATSAPP = 'WHATSAPP',    // Created from Vonage WhatsApp inbound
+  VOICE = 'VOICE'           // Created from ElevenLabs voice agent
+}
+
 export interface Reservation {
   id: number;
   customer_name: string;
@@ -126,6 +132,8 @@ export interface Reservation {
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
+  source?: ReservationSource;
+  requires_review?: boolean;
 }
 
 export interface Notification {

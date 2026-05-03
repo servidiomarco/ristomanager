@@ -336,6 +336,28 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             END $$;
         `);
 
+        // Track origin of each reservation: MANUAL (CRM), WHATSAPP (Vonage), VOICE (ElevenLabs).
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'MANUAL';`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS requires_review BOOLEAN DEFAULT false;`);
+
+        // Audit table for ElevenLabs voice calls. Stores transcript + summary so
+        // staff can review what the agent agreed to. Linked to a reservation
+        // when one is created during the call.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS voice_calls (
+                id SERIAL PRIMARY KEY,
+                conversation_id VARCHAR(100) UNIQUE NOT NULL,
+                phone VARCHAR(50),
+                duration_seconds INTEGER,
+                transcript TEXT,
+                summary TEXT,
+                reservation_id INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_phone ON voice_calls(phone);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_reservation ON voice_calls(reservation_id) WHERE reservation_id IS NOT NULL;`);
+
         // ============================================
         // ACTIVITY LOGS TABLE
         // ============================================
