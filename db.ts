@@ -69,7 +69,7 @@ const isTransient = (err: any): boolean => {
     return false;
 };
 
-export const queryWithRetry = async <T = any>(text: string, params?: any[]): Promise<{ rows: T[]; rowCount: number | null }> => {
+export const queryWithRetry = async (text: string, params?: any[]): Promise<{ rows: any[]; rowCount: number | null }> => {
     try {
         return await pool.query(text, params);
     } catch (err: any) {
