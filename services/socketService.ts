@@ -168,6 +168,11 @@ export class SocketService {
     console.log(`Broadcasting room:created for ${room.name}`);
   }
 
+  broadcastRoomUpdated(room: Room) {
+    this.io.emit('room:updated', room);
+    console.log(`Broadcasting room:updated for ${room.name}`);
+  }
+
   broadcastRoomDeleted(id: number) {
     this.io.emit('room:deleted', id);
     console.log(`Broadcasting room:deleted for ID ${id}`);

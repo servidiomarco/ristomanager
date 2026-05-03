@@ -29,6 +29,7 @@ import {
   getRooms,
   createRoom,
   deleteRoom,
+  setRoomClosed,
   getDishes,
   createDish,
   updateDish,
@@ -230,6 +231,10 @@ const App: React.FC = () => {
       });
     });
 
+    socket.on('room:updated', (room: Room) => {
+      setRooms(prev => prev.map(r => r.id === room.id ? room : r));
+    });
+
     socket.on('room:deleted', (id: number) => {
       setRooms(prev => prev.filter(r => r.id !== id));
     });
@@ -309,6 +314,7 @@ const App: React.FC = () => {
       socket.off('table:updated');
       socket.off('table:deleted');
       socket.off('room:created');
+      socket.off('room:updated');
       socket.off('room:deleted');
       socket.off('dish:created');
       socket.off('dish:updated');
@@ -430,6 +436,17 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error deleting room:", error);
       addToast('Error deleting room', 'error');
+    }
+  };
+
+  const handleToggleRoomClosed = async (roomId: number, isClosed: boolean) => {
+    try {
+      const updated = await setRoomClosed(roomId, isClosed);
+      setRooms(prev => prev.map(r => r.id === roomId ? updated : r));
+      addToast(isClosed ? `Sala "${updated.name}" chiusa` : `Sala "${updated.name}" riaperta`, 'success');
+    } catch (error: any) {
+      console.error("Error toggling room closed:", error);
+      addToast(error?.message || 'Errore aggiornamento sala', 'error');
     }
   };
 
@@ -862,6 +879,7 @@ const App: React.FC = () => {
             onSplitTable={handleSplitTable}
             onAddRoom={handleAddRoom}
             onDeleteRoom={handleDeleteRoom}
+            onToggleRoomClosed={handleToggleRoomClosed}
             canEdit={hasPermission('floorplan:full')}
           />
         )}

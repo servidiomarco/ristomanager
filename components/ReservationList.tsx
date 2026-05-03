@@ -134,8 +134,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }, [currentTime, selectedDate]);
 
   useEffect(() => {
-    if (rooms.length > 0 && activeMapRoomId === 'ALL') {
-      setActiveMapRoomId(rooms[0].id);
+    const openRoomsList = rooms.filter(r => !r.is_closed);
+    if (openRoomsList.length === 0) return;
+    const currentIsClosed = activeMapRoomId !== 'ALL' && rooms.find(r => r.id === activeMapRoomId)?.is_closed;
+    if (activeMapRoomId === 'ALL' || currentIsClosed) {
+      setActiveMapRoomId(openRoomsList[0].id);
     }
   }, [rooms, activeMapRoomId]);
 
@@ -921,7 +924,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  const displayedRooms = modalRoomFilter === 'ALL' ? rooms : rooms.filter(r => r.id === modalRoomFilter);
+  const openRooms = rooms.filter(r => !r.is_closed);
+  const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
 
   // Calculate Free Tables for the form header
@@ -1596,7 +1600,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   {/* Combined room selector + stats row */}
                   <div className="flex items-center gap-3 mb-3 border-b border-slate-100 pb-2">
                       <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-                          {rooms.map(room => (
+                          {rooms.filter(r => !r.is_closed).map(room => (
                               <button
                                   key={room.id}
                                   onClick={() => setActiveMapRoomId(room.id)}
@@ -2408,7 +2412,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                      >
                                          Tutte le sale
                                      </button>
-                                     {rooms.map(room => (
+                                     {openRooms.map(room => (
                                          <button
                                             key={room.id}
                                             type="button"

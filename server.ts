@@ -115,6 +115,16 @@ app.post('/webhook/vonage-status', (req, res) => {
 // PROTECTED ENDPOINTS
 // ============================================
 
+// Returns true if the table belongs to a closed room.
+async function isTableInClosedRoom(tableId: number | null | undefined): Promise<boolean> {
+    if (tableId == null) return false;
+    const result = await queryWithRetry(
+        'SELECT r.is_closed FROM tables t JOIN rooms r ON t.room_id = r.id WHERE t.id = $1',
+        [tableId]
+    );
+    return result.rows[0]?.is_closed === true;
+}
+
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
@@ -129,6 +139,9 @@ app.get('/reservations', authenticate, async (req, res) => {
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        if (await isTableInClosedRoom(table_id)) {
+            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
         const result = await queryWithRetry(
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
             [
@@ -181,6 +194,9 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
     try {
         const { id } = req.params;
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        if (await isTableInClosedRoom(table_id)) {
+            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
         const result = await queryWithRetry(
             'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
             [
@@ -766,6 +782,44 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
         if (socketService) socketService.broadcastRoomCreated(newRoom);
 
         res.status(201).json(newRoom);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { is_closed } = req.body;
+        if (typeof is_closed !== 'boolean') {
+            return res.status(400).json({ error: 'is_closed must be boolean' });
+        }
+        const result = await queryWithRetry(
+            'UPDATE rooms SET is_closed = $1 WHERE id = $2 RETURNING *',
+            [is_closed, id]
+        );
+        const updatedRoom = result.rows[0];
+        if (!updatedRoom) {
+            return res.status(404).json({ error: 'Room not found' });
+        }
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.ROOM,
+                parseInt(id, 10),
+                updatedRoom.name,
+                { is_closed }
+            );
+        }
+
+        if (socketService) socketService.broadcastRoomUpdated(updatedRoom);
+
+        res.json(updatedRoom);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
