@@ -1,4 +1,4 @@
-import { BanquetMenu, Dish } from '../types';
+import { BanquetMenu, Dish, Shift } from '../types';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -47,10 +47,34 @@ const groupDishesByCategory = (
   return [...ordered, ...extras];
 };
 
+const shiftLabel = (s?: Shift): string => {
+  if (s === Shift.LUNCH) return 'Pranzo';
+  if (s === Shift.DINNER) return 'Cena';
+  return '';
+};
+
+const renderNoteBlock = (title: string, content?: string): string => {
+  const trimmed = content?.trim();
+  if (!trimmed) return '';
+  return `
+    <section class="note-block">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="note-content">${escapeHtml(trimmed).replace(/\n/g, '<br/>')}</div>
+    </section>
+  `;
+};
+
 export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
   const eventDate = formatDate(menu.event_date);
   const price = formatEuro(menu.price_per_person);
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
+  const shift = shiftLabel(menu.shift);
+  const guests = menu.guests != null && menu.guests > 0 ? menu.guests : null;
+  const notesHtml = [
+    renderNoteBlock('Note Portate (Cucina)', menu.notes_courses),
+    renderNoteBlock('Note Servizio (Sala)', menu.notes_service),
+    renderNoteBlock('Note Mise en Place', menu.notes_mise_en_place),
+  ].join('');
 
   let dishesHtml = '';
   if (menu.courses && menu.courses.length > 0) {
@@ -128,12 +152,46 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
     color: #1e1b4b;
   }
   .pricing .item .unit { font-size: 12px; color: #64748b; font-weight: 400; }
+  .badge {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    vertical-align: middle;
+  }
+  .badge.lunch { background: #fef3c7; color: #b45309; }
+  .badge.dinner { background: #e0e7ff; color: #4338ca; }
   h2 {
     font-size: 16px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #64748b;
     margin: 0 0 12px;
+  }
+  .notes-section { margin-top: 28px; }
+  .note-block {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    page-break-inside: avoid;
+  }
+  .note-block h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #b45309;
+  }
+  .note-block .note-content {
+    font-size: 13px;
+    color: #1e293b;
+    white-space: pre-wrap;
   }
   .category { margin-bottom: 18px; page-break-inside: avoid; }
   .category h3 {
@@ -161,8 +219,12 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
 </head>
 <body>
   <header>
-    <h1>${escapeHtml(menu.name)}</h1>
-    ${eventDate ? `<div class="date">${escapeHtml(eventDate)}</div>` : ''}
+    <h1>
+      ${escapeHtml(menu.name)}
+      ${menu.shift === Shift.LUNCH ? '<span class="badge lunch">Pranzo</span>' : ''}
+      ${menu.shift === Shift.DINNER ? '<span class="badge dinner">Cena</span>' : ''}
+    </h1>
+    ${eventDate ? `<div class="date">${escapeHtml(eventDate)}${shift ? ` &middot; ${escapeHtml(shift)}` : ''}</div>` : ''}
     ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
   </header>
 
@@ -171,6 +233,11 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
       <div class="label">Prezzo per persona</div>
       <div class="value">${price}<span class="unit"> / persona</span></div>
     </div>
+    ${guests != null ? `
+    <div class="item">
+      <div class="label">Coperti</div>
+      <div class="value">${guests}<span class="unit"> ospiti</span></div>
+    </div>` : ''}
     ${deposit ? `
     <div class="item">
       <div class="label">Acconto</div>
@@ -180,6 +247,12 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
 
   <h2>Composizione del menù</h2>
   ${dishesHtml || '<p style="color:#94a3b8;font-size:14px;">Nessun piatto selezionato.</p>'}
+
+  ${notesHtml ? `
+  <div class="notes-section">
+    <h2>Note operative</h2>
+    ${notesHtml}
+  </div>` : ''}
 
   <footer>Documento generato il ${escapeHtml(new Date().toLocaleDateString('it-IT'))}</footer>
 
