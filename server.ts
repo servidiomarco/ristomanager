@@ -936,6 +936,7 @@ const TODO_FULL_SELECT = `
     linked_reservation_id as "linkedReservationId",
     linked_banquet_ids as "linkedBanquetIds",
     banquet_reminder_hours as "banquetReminderHours",
+    auto_kind as "autoKind",
     assigned_to_user_id as "assignedToUserId",
     assigned_to_user_name as "assignedToUserName",
     assigned_to_team as "assignedToTeam",
@@ -1046,6 +1047,110 @@ async function syncBanquetReminders(banquetId: number, newEventDate: string): Pr
     await removeBanquetFromReminders(banquetId);
     await addBanquetToReminders(banquetId, newEventDate);
 }
+
+// ============================================
+// DAILY BREAD REMINDER (OWNER team, fires at 20:00 Europe/Rome)
+// ============================================
+const BREAD_AUTO_KIND = 'BREAD_DAILY';
+const BREAD_TARGET_TZ = 'Europe/Rome';
+const BREAD_TRIGGER_HOUR = 20;
+
+const getItalianDateParts = (date: Date): { year: string; month: string; day: string; hour: string } => {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: BREAD_TARGET_TZ,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', hour12: false,
+    });
+    const parts = fmt.formatToParts(date);
+    const get = (t: string) => parts.find(p => p.type === t)?.value || '00';
+    return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour') };
+};
+
+const getItalianTodayIso = (date: Date = new Date()): string => {
+    const { year, month, day } = getItalianDateParts(date);
+    return `${year}-${month}-${day}`;
+};
+
+const addDaysIso = (iso: string, days: number): string => {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().substring(0, 10);
+};
+
+async function runDailyBreadReminder(): Promise<void> {
+    const todayIso = getItalianTodayIso();
+    const tomorrowIso = addDaysIso(todayIso, 1);
+
+    // Sum guests for tomorrow's reservations (banquet bookings already counted via reservation rows)
+    const result = await queryWithRetry(
+        "SELECT COALESCE(SUM(guests), 0)::int AS total FROM reservations WHERE DATE(reservation_time) = $1",
+        [tomorrowIso]
+    );
+    const totalGuests: number = result.rows[0]?.total ?? 0;
+    const kg = Math.max(1, Math.ceil(totalGuests / 10));
+
+    const tomorrowPretty = formatItalianDateLong(tomorrowIso);
+    const title = totalGuests > 0
+        ? `Ordinare ${kg} kg di pane per domani (${totalGuests} coperti)`
+        : `Ordinare pane per domani (nessuna prenotazione)`;
+    const description = totalGuests > 0
+        ? `Pane previsto per ${tomorrowPretty}: ${kg} kg (1 kg ogni 10 coperti, ${totalGuests} coperti previsti).`
+        : `Nessuna prenotazione registrata per ${tomorrowPretty}. Valutare se ordinare comunque una scorta minima.`;
+
+    // Upsert: one OWNER bread reminder per due_date
+    const existing = await queryWithRetry(`
+        SELECT ${TODO_FULL_SELECT}
+        FROM todos
+        WHERE auto_kind = $1
+          AND due_date = $2
+          AND assigned_to_team = 'OWNER'
+        LIMIT 1
+    `, [BREAD_AUTO_KIND, tomorrowIso]);
+
+    if (existing.rows.length > 0) {
+        const todo = existing.rows[0];
+        // Don't overwrite a completed reminder — owner already acted on it
+        if (todo.completed) return;
+        const updated = await queryWithRetry(`
+            UPDATE todos
+            SET title = $1, description = $2
+            WHERE id = $3
+            RETURNING ${TODO_FULL_SELECT}
+        `, [title, description, todo.id]);
+        if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+    } else {
+        const created = await queryWithRetry(`
+            INSERT INTO todos (
+                title, description, priority, category, due_date,
+                assigned_to_team, auto_kind
+            ) VALUES ($1, $2, 'HIGH', 'INVENTORY', $3, 'OWNER', $4)
+            RETURNING ${TODO_FULL_SELECT}
+        `, [title, description, tomorrowIso, BREAD_AUTO_KIND]);
+        if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+    }
+    console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
+}
+
+let lastBreadRunIso: string | null = null;
+const startBreadReminderScheduler = () => {
+    const tick = async () => {
+        try {
+            const { year, month, day, hour } = getItalianDateParts(new Date());
+            const todayItalian = `${year}-${month}-${day}`;
+            const hourNum = parseInt(hour, 10);
+            if (hourNum >= BREAD_TRIGGER_HOUR && lastBreadRunIso !== todayItalian) {
+                await runDailyBreadReminder();
+                lastBreadRunIso = todayItalian;
+            }
+        } catch (err) {
+            console.error('Bread reminder scheduler error:', err);
+        }
+    };
+    // First check immediately (in case server started past 20:00 Italian time today)
+    tick();
+    // Then poll every 5 minutes
+    setInterval(tick, 5 * 60 * 1000);
+};
 
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
@@ -1210,6 +1315,7 @@ app.get('/todos', authenticate, async (req, res) => {
                 linked_reservation_id as "linkedReservationId",
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
+                auto_kind as "autoKind",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1253,6 +1359,7 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 linked_reservation_id as "linkedReservationId",
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
+                auto_kind as "autoKind",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1314,6 +1421,7 @@ app.post('/todos', authenticate, async (req, res) => {
                 linked_reservation_id as "linkedReservationId",
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
+                auto_kind as "autoKind",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1431,6 +1539,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 linked_reservation_id as "linkedReservationId",
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
+                auto_kind as "autoKind",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1483,6 +1592,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                 linked_reservation_id as "linkedReservationId",
                 linked_banquet_ids as "linkedBanquetIds",
                 banquet_reminder_hours as "banquetReminderHours",
+                auto_kind as "autoKind",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -2550,6 +2660,12 @@ const startServer = async () => {
                         }
                     } catch (backfillErr) {
                         console.error('Banquet reminder backfill failed:', backfillErr);
+                    }
+                    try {
+                        startBreadReminderScheduler();
+                        console.log('✅ Daily bread reminder scheduler started (20:00 Europe/Rome)');
+                    } catch (schedErr) {
+                        console.error('Bread reminder scheduler failed to start:', schedErr);
                     }
                 })
                 .catch((dbError) => {
