@@ -373,7 +373,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -388,7 +388,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id SERIAL PRIMARY KEY,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 permission VARCHAR(100) NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(role, permission)
@@ -424,6 +424,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
                 ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
                 ['OWNER', 'staff:view'], ['OWNER', 'staff:full'],
+                ['OWNER', 'banquet:view_price'],
+                // GENERAL_MANAGER
+                ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+                ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+                ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+                ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+                ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+                ['GENERAL_MANAGER', 'logs:view'],
+                ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+                ['GENERAL_MANAGER', 'banquet:view_price'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
@@ -477,6 +487,42 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
         console.log('Staff permissions migration completed');
+
+        // Add GENERAL_MANAGER role to existing databases (CHECK constraint migration)
+        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check`);
+        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+
+        // Seed GENERAL_MANAGER default permissions if missing
+        const generalManagerPermissions = [
+            ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+            ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+            ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+            ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+            ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+            ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+            ['GENERAL_MANAGER', 'logs:view']
+        ];
+        for (const [role, permission] of generalManagerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // Add banquet:view_price for OWNER + GENERAL_MANAGER
+        const banquetPricePermissions = [
+            ['OWNER', 'banquet:view_price'],
+            ['GENERAL_MANAGER', 'banquet:view_price']
+        ];
+        for (const [role, permission] of banquetPricePermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('GENERAL_MANAGER role and banquet:view_price migration completed');
 
         // ============================================
         // TODOS TABLE

@@ -10,6 +10,7 @@ import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { useAuth } from '../contexts/AuthContext';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -85,6 +86,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   showToast,
   canEdit = true
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
   const [selectedDate, setSelectedDate] = useState<string>(formatLocalDateTime(new Date()));
@@ -1458,7 +1461,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                                 {menu && (
                                     <div className="mt-2 text-sm bg-slate-50 inline-block px-3 py-1 rounded border border-slate-200 text-slate-700">
-                                        🍽️ Menu Banchetto: <b>{menu.name}</b> (€{menu.price_per_person}/pax)
+                                        🍽️ Menu Banchetto: <b>{menu.name}</b>{canViewBanquetPrice && ` (€${menu.price_per_person}/pax)`}
                                     </div>
                                 )}
                                 {res.notes && <p className="text-xs text-slate-400 mt-2 italic">{res.notes}</p>}
@@ -2107,7 +2110,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 <option value="">Nessuno</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
-                                                        {m.name} — €{Number(m.price_per_person).toFixed(2)}/persona
+                                                        {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
                                                     </option>
                                                 ))}
                                             </select>

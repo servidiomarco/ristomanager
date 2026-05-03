@@ -1,7 +1,8 @@
 import React from 'react';
 import { BanquetMenu, Dish, Shift } from '../types';
-import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote } from 'lucide-react';
+import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote, ImageIcon } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
   banquet: BanquetMenu;
@@ -20,6 +21,8 @@ const formatItalianDate = (iso?: string): string => {
 };
 
 export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onClose }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const courses = Array.isArray(banquet.courses) && banquet.courses.length > 0
     ? banquet.courses
     : null;
@@ -61,9 +64,11 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                   <span className="font-semibold">{banquet.guests}</span> coperti
                 </span>
               )}
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600">
-                €{banquet.price_per_person}/pax
-              </span>
+              {canViewBanquetPrice && (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600">
+                  €{banquet.price_per_person}/pax
+                </span>
+              )}
             </div>
             {banquet.description && (
               <p className="text-sm text-slate-500 mt-2 line-clamp-2">{banquet.description}</p>
@@ -72,7 +77,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
           <div className="flex items-center gap-1 flex-shrink-0 ml-3">
             <button
               type="button"
-              onClick={() => printBanquet(banquet, dishes)}
+              onClick={() => printBanquet(banquet, dishes, { showPrice: canViewBanquetPrice })}
               className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
               title="Stampa"
             >
@@ -105,17 +110,29 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                   if (items.length === 0) return null;
                   return (
                     <div key={`${course.name}-${idx}`} className="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
-                      <h4 className="text-sm font-semibold text-indigo-600 mb-1.5">{course.name}</h4>
-                      <ul className="space-y-1">
+                      <h4 className="text-sm font-semibold text-indigo-600 mb-2">{course.name}</h4>
+                      <ul className="space-y-2">
                         {items.map(d => (
-                          <li key={d.id} className="text-sm text-slate-700 flex items-baseline gap-2">
-                            <span className="text-indigo-300">•</span>
-                            <span>{d.name}</span>
-                            {d.allergens && d.allergens.length > 0 && (
-                              <span className="text-[10px] text-rose-600 font-medium">
-                                {d.allergens.join(', ')}
-                              </span>
+                          <li key={d.id} className="flex items-center gap-3">
+                            {d.photo_url ? (
+                              <img
+                                src={d.photo_url}
+                                alt={d.name}
+                                className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                              />
+                            ) : (
+                              <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">
+                                <ImageIcon className="h-5 w-5 text-slate-300" />
+                              </div>
                             )}
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-slate-700 font-medium truncate">{d.name}</div>
+                              {d.allergens && d.allergens.length > 0 && (
+                                <div className="text-[10px] text-rose-600 font-medium mt-0.5">
+                                  {d.allergens.join(', ')}
+                                </div>
+                              )}
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -124,12 +141,24 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 })}
               </div>
             ) : fallbackDishes.length > 0 ? (
-              <ul className="space-y-1">
+              <ul className="space-y-2">
                 {fallbackDishes.map(d => (
-                  <li key={d.id} className="text-sm text-slate-700 flex items-baseline gap-2">
-                    <span className="text-indigo-300">•</span>
-                    <span>{d.name}</span>
-                    {d.category && <span className="text-[10px] text-slate-400">({d.category})</span>}
+                  <li key={d.id} className="flex items-center gap-3">
+                    {d.photo_url ? (
+                      <img
+                        src={d.photo_url}
+                        alt={d.name}
+                        className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">
+                        <ImageIcon className="h-5 w-5 text-slate-300" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-slate-700 font-medium truncate">{d.name}</div>
+                      {d.category && <div className="text-[10px] text-slate-400">{d.category}</div>}
+                    </div>
                   </li>
                 ))}
               </ul>

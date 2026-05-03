@@ -64,7 +64,12 @@ const renderNoteBlock = (title: string, content?: string): string => {
   `;
 };
 
-export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
+export interface PrintBanquetOptions {
+  showPrice?: boolean;
+}
+
+export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBanquetOptions = {}): void => {
+  const showPrice = options.showPrice !== false;
   const eventDate = formatDate(menu.event_date);
   const price = formatEuro(menu.price_per_person);
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
@@ -228,6 +233,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
     ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
   </header>
 
+  ${showPrice ? `
   <div class="pricing">
     <div class="item">
       <div class="label">Prezzo per persona</div>
@@ -243,7 +249,13 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
       <div class="label">Acconto</div>
       <div class="value">${deposit}</div>
     </div>` : ''}
-  </div>
+  </div>` : (guests != null ? `
+  <div class="pricing">
+    <div class="item">
+      <div class="label">Coperti</div>
+      <div class="value">${guests}<span class="unit"> ospiti</span></div>
+    </div>
+  </div>` : '')}
 
   <h2>Composizione del menù</h2>
   ${dishesHtml || '<p style="color:#94a3b8;font-size:14px;">Nessun piatto selezionato.</p>'}
