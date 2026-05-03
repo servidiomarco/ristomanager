@@ -918,6 +918,135 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 });
 
 
+// ============================================
+// BANQUET KITCHEN REMINDER TODOS
+// ============================================
+const BANQUET_REMINDER_WINDOWS = [72, 48, 24] as const;
+
+const TODO_FULL_SELECT = `
+    id,
+    title,
+    description,
+    completed,
+    priority,
+    category,
+    TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
+    created_at as "createdAt",
+    completed_at as "completedAt",
+    linked_reservation_id as "linkedReservationId",
+    linked_banquet_ids as "linkedBanquetIds",
+    banquet_reminder_hours as "banquetReminderHours",
+    assigned_to_user_id as "assignedToUserId",
+    assigned_to_user_name as "assignedToUserName",
+    assigned_to_team as "assignedToTeam",
+    created_by_user_id as "createdByUserId",
+    created_by_user_name as "createdByUserName"
+`;
+
+const computeReminderDueDate = (eventDateIso: string, hoursBefore: number): string => {
+    const event = new Date(eventDateIso + 'T00:00:00Z');
+    event.setUTCDate(event.getUTCDate() - hoursBefore / 24);
+    return event.toISOString().substring(0, 10);
+};
+
+const formatItalianDateLong = (iso: string): string => {
+    try {
+        const d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+    } catch { return iso; }
+};
+
+const buildReminderTitle = (eventDate: string, hoursBefore: number): string =>
+    `Ordinare merce — banchetti del ${formatItalianDateLong(eventDate)} (${hoursBefore}h prima)`;
+
+const buildReminderDescription = (eventDate: string): string =>
+    `Ricorda di ordinare la merce necessaria per i banchetti programmati il ${formatItalianDateLong(eventDate)}.`;
+
+const reminderPriority = (hoursBefore: number): 'LOW' | 'MEDIUM' | 'HIGH' => {
+    if (hoursBefore <= 24) return 'HIGH';
+    if (hoursBefore <= 48) return 'MEDIUM';
+    return 'LOW';
+};
+
+async function addBanquetToReminders(banquetId: number, eventDate: string): Promise<void> {
+    for (const hours of BANQUET_REMINDER_WINDOWS) {
+        const dueDate = computeReminderDueDate(eventDate, hours);
+
+        const existing = await queryWithRetry(`
+            SELECT ${TODO_FULL_SELECT}
+            FROM todos
+            WHERE banquet_reminder_hours = $1
+              AND due_date = $2
+              AND assigned_to_team = 'KITCHEN'
+              AND completed = false
+            LIMIT 1
+        `, [hours, dueDate]);
+
+        if (existing.rows.length > 0) {
+            const todo = existing.rows[0];
+            const ids: number[] = Array.isArray(todo.linkedBanquetIds) ? todo.linkedBanquetIds : [];
+            if (ids.includes(banquetId)) continue;
+            const newIds = [...ids, banquetId];
+            const updated = await queryWithRetry(`
+                UPDATE todos
+                SET linked_banquet_ids = $1, title = $2, description = $3
+                WHERE id = $4
+                RETURNING ${TODO_FULL_SELECT}
+            `, [newIds, buildReminderTitle(eventDate, hours), buildReminderDescription(eventDate), todo.id]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+        } else {
+            const created = await queryWithRetry(`
+                INSERT INTO todos (
+                    title, description, priority, category, due_date,
+                    assigned_to_team, linked_banquet_ids, banquet_reminder_hours
+                ) VALUES ($1, $2, $3, $4, $5, 'KITCHEN', $6, $7)
+                RETURNING ${TODO_FULL_SELECT}
+            `, [
+                buildReminderTitle(eventDate, hours),
+                buildReminderDescription(eventDate),
+                reminderPriority(hours),
+                'INVENTORY',
+                dueDate,
+                [banquetId],
+                hours,
+            ]);
+            if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+        }
+    }
+}
+
+async function removeBanquetFromReminders(banquetId: number): Promise<void> {
+    const todos = await queryWithRetry(`
+        SELECT ${TODO_FULL_SELECT}
+        FROM todos
+        WHERE banquet_reminder_hours IS NOT NULL
+          AND $1 = ANY(linked_banquet_ids)
+    `, [banquetId]);
+
+    for (const todo of todos.rows) {
+        const ids: number[] = Array.isArray(todo.linkedBanquetIds) ? todo.linkedBanquetIds : [];
+        const newIds = ids.filter((id: number) => id !== banquetId);
+
+        if (newIds.length === 0) {
+            await queryWithRetry('DELETE FROM todos WHERE id = $1', [todo.id]);
+            if (socketService) socketService.broadcastToAll('todo:deleted', { id: todo.id });
+        } else {
+            const updated = await queryWithRetry(`
+                UPDATE todos
+                SET linked_banquet_ids = $1
+                WHERE id = $2
+                RETURNING ${TODO_FULL_SELECT}
+            `, [newIds, todo.id]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+        }
+    }
+}
+
+async function syncBanquetReminders(banquetId: number, newEventDate: string): Promise<void> {
+    await removeBanquetFromReminders(banquetId);
+    await addBanquetToReminders(banquetId, newEventDate);
+}
+
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
@@ -965,6 +1094,11 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetCreated(newMenu);
 
+        // Generate kitchen reminder todos (72h/48h/24h before event_date)
+        addBanquetToReminders(newMenu.id, newMenu.event_date).catch(err => {
+            console.error('Failed to create banquet reminder todos:', err);
+        });
+
         res.status(201).json(newMenu);
     } catch (err) {
         console.error(err);
@@ -1006,6 +1140,11 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetUpdated(updatedMenu);
 
+        // Re-sync kitchen reminder todos (handles event_date changes)
+        syncBanquetReminders(parseInt(id, 10), updatedMenu.event_date).catch(err => {
+            console.error('Failed to sync banquet reminder todos:', err);
+        });
+
         res.json(updatedMenu);
     } catch (err) {
         console.error(err);
@@ -1039,6 +1178,11 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         // Broadcast to all connected clients
         if (socketService) socketService.broadcastBanquetDeleted(Number(id));
 
+        // Remove banquet from kitchen reminder todos
+        removeBanquetFromReminders(Number(id)).catch(err => {
+            console.error('Failed to remove banquet from reminder todos:', err);
+        });
+
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -1064,6 +1208,8 @@ app.get('/todos', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
+                linked_banquet_ids as "linkedBanquetIds",
+                banquet_reminder_hours as "banquetReminderHours",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1105,6 +1251,8 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
+                linked_banquet_ids as "linkedBanquetIds",
+                banquet_reminder_hours as "banquetReminderHours",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1141,15 +1289,18 @@ app.post('/todos', authenticate, async (req, res) => {
             assignedToUserId,
             assignedToUserName,
             assignedToTeam,
-            linkedReservationId
+            linkedReservationId,
+            linkedBanquetIds,
+            banquetReminderHours
         } = req.body;
 
         const result = await queryWithRetry(`
             INSERT INTO todos (
                 title, description, priority, category, due_date,
                 assigned_to_user_id, assigned_to_user_name, assigned_to_team,
-                linked_reservation_id, created_by_user_id, created_by_user_name
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                linked_reservation_id, linked_banquet_ids, banquet_reminder_hours,
+                created_by_user_id, created_by_user_name
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING
                 id,
                 title,
@@ -1161,6 +1312,8 @@ app.post('/todos', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
+                linked_banquet_ids as "linkedBanquetIds",
+                banquet_reminder_hours as "banquetReminderHours",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1176,6 +1329,8 @@ app.post('/todos', authenticate, async (req, res) => {
             assignedToUserName || null,
             assignedToTeam || null,
             linkedReservationId || null,
+            Array.isArray(linkedBanquetIds) && linkedBanquetIds.length > 0 ? linkedBanquetIds : null,
+            banquetReminderHours ?? null,
             req.user?.userId || null,
             req.user?.email || null
         ]);
@@ -1228,6 +1383,13 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             assignedToUserId: { dbField: 'assigned_to_user_id', value: assignedToUserId },
             assignedToUserName: { dbField: 'assigned_to_user_name', value: assignedToUserName },
             assignedToTeam: { dbField: 'assigned_to_team', value: assignedToTeam },
+            linkedBanquetIds: {
+                dbField: 'linked_banquet_ids',
+                value: Array.isArray(req.body.linkedBanquetIds) && req.body.linkedBanquetIds.length > 0
+                    ? req.body.linkedBanquetIds
+                    : null,
+            },
+            banquetReminderHours: { dbField: 'banquet_reminder_hours', value: req.body.banquetReminderHours },
         };
 
         for (const [key, mapping] of Object.entries(fieldMappings)) {
@@ -1267,6 +1429,8 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
+                linked_banquet_ids as "linkedBanquetIds",
+                banquet_reminder_hours as "banquetReminderHours",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -1317,6 +1481,8 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                 created_at as "createdAt",
                 completed_at as "completedAt",
                 linked_reservation_id as "linkedReservationId",
+                linked_banquet_ids as "linkedBanquetIds",
+                banquet_reminder_hours as "banquetReminderHours",
                 assigned_to_user_id as "assignedToUserId",
                 assigned_to_user_name as "assignedToUserName",
                 assigned_to_team as "assignedToTeam",
@@ -2366,9 +2532,26 @@ const startServer = async () => {
                 console.error('Socket.IO initialization failed:', socketError);
             }
 
-            // Initialize database schema in background
+            // Initialize database schema in background, then backfill banquet reminders
             createSchema()
-                .then(() => console.log('✅ Database schema initialized'))
+                .then(async () => {
+                    console.log('✅ Database schema initialized');
+                    try {
+                        const today = new Date().toISOString().substring(0, 10);
+                        const upcoming = await queryWithRetry(
+                            "SELECT id, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus WHERE event_date >= $1",
+                            [today]
+                        );
+                        for (const row of upcoming.rows) {
+                            await addBanquetToReminders(row.id, row.event_date);
+                        }
+                        if (upcoming.rows.length > 0) {
+                            console.log(`✅ Backfilled kitchen reminder todos for ${upcoming.rows.length} upcoming banquet(s)`);
+                        }
+                    } catch (backfillErr) {
+                        console.error('Banquet reminder backfill failed:', backfillErr);
+                    }
+                })
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);
                     console.error('Server will continue running, but database operations may fail');

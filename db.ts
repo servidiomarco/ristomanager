@@ -501,9 +501,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // Migrations: linked banquet ids + auto-reminder marker
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS linked_banquet_ids INTEGER[];
+        `);
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS banquet_reminder_hours INTEGER;
+        `);
+
         // Create indexes for todos
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_user ON todos(assigned_to_user_id);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_banquet_reminder ON todos(banquet_reminder_hours, due_date) WHERE banquet_reminder_hours IS NOT NULL;
         `);
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_team ON todos(assigned_to_team);

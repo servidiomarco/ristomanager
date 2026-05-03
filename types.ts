@@ -282,6 +282,8 @@ export interface TodoItem {
   createdAt: string;
   completedAt?: string;
   linkedReservationId?: number;
+  linkedBanquetIds?: number[];
+  banquetReminderHours?: number;
   // Assignment fields
   assignedToUserId?: number;
   assignedToUserName?: string;
