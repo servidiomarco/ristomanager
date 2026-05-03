@@ -86,6 +86,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+  const [notesShift, setNotesShift] = useState<Shift>(() => new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -660,10 +661,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
-  // Reservations with notes/allergens for selected day (for dashboard card)
+  // Reservations with notes/allergens for selected day, filtered by shift (for dashboard card)
   const reservationNotes = useMemo(() => {
     const items = selectedDayReservations
-      .filter(r => r.notes && r.notes.trim().length > 0)
+      .filter(r => r.shift === notesShift && r.notes && r.notes.trim().length > 0)
       .map(r => {
         const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
         const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
@@ -671,14 +672,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const allergens = COMMON_ALLERGENS.filter(a => noteLower.includes(a.toLowerCase()));
         return { reservation: r, table, room, allergens };
       });
-    items.sort((a, b) => {
-      if (a.reservation.shift !== b.reservation.shift) {
-        return a.reservation.shift === Shift.LUNCH ? -1 : 1;
-      }
-      return a.reservation.reservation_time.localeCompare(b.reservation.reservation_time);
-    });
+    items.sort((a, b) => a.reservation.reservation_time.localeCompare(b.reservation.reservation_time));
     return items;
-  }, [selectedDayReservations, tables, rooms]);
+  }, [selectedDayReservations, tables, rooms, notesShift]);
 
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
@@ -1078,18 +1074,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
         {/* Note & Allergeni */}
         <div className="lg:col-span-1 bg-white p-4 lg:p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 gap-2">
             <h2 className="text-base lg:text-lg font-semibold text-slate-800 flex items-center gap-2">
               <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
               Note &amp; Allergeni
             </h2>
-            <span className="text-[11px] text-slate-400 whitespace-nowrap">{reservationNotes.length}</span>
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+              <button
+                onClick={() => setNotesShift(Shift.LUNCH)}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                  notesShift === Shift.LUNCH
+                    ? 'bg-amber-100 text-amber-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Sun className="h-3 w-3" />
+                Pranzo
+              </button>
+              <button
+                onClick={() => setNotesShift(Shift.DINNER)}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                  notesShift === Shift.DINNER
+                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Moon className="h-3 w-3" />
+                Cena
+              </button>
+            </div>
           </div>
           {reservationNotes.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-center py-8">
               <div>
                 <StickyNote className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">Nessuna nota per questa data</p>
+                <p className="text-xs text-slate-400">
+                  Nessuna nota per il {notesShift === Shift.LUNCH ? 'pranzo' : 'la cena'}
+                </p>
               </div>
             </div>
           ) : (
@@ -1097,35 +1118,54 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {reservationNotes.map(({ reservation, table, room, allergens }) => {
                 const isLunch = reservation.shift === Shift.LUNCH;
                 const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
+                const accentBorder = isLunch ? 'border-l-amber-400' : 'border-l-indigo-400';
                 return (
-                  <div key={reservation.id} className="border border-slate-100 rounded-lg p-2.5 bg-slate-50/40 hover:bg-white hover:border-slate-200 transition-colors">
-                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                      <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${isLunch ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                        {isLunch ? <Sun className="h-2.5 w-2.5" /> : <Moon className="h-2.5 w-2.5" />}
-                        {time || (isLunch ? 'Pranzo' : 'Cena')}
-                      </span>
-                      {table ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
-                          <Armchair className="h-2.5 w-2.5 text-slate-400" />
-                          {table.name}
-                          {room && <span className="text-slate-400">· {room.name}</span>}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-slate-400 italic">Tavolo non assegnato</span>
-                      )}
-                    </div>
-                    <p className="text-xs font-medium text-slate-700 truncate">{reservation.customer_name}</p>
-                    <p className="text-[11px] text-slate-600 mt-1 leading-snug whitespace-pre-wrap break-words">{reservation.notes}</p>
-                    {allergens.length > 0 && (
-                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                        <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
-                        {allergens.map(a => (
-                          <span key={a} className="inline-block bg-rose-100 text-rose-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                            {a}
-                          </span>
-                        ))}
+                  <div key={reservation.id} className={`border border-slate-100 border-l-4 ${accentBorder} rounded-lg p-2.5 bg-slate-50/40 hover:bg-white hover:border-slate-200 transition-colors`}>
+                    <div className="flex items-stretch justify-between gap-3">
+                      {/* Left: prominent table + room + customer */}
+                      <div className="flex-shrink-0 min-w-0 max-w-[40%]">
+                        {table ? (
+                          <>
+                            <div className="flex items-center gap-1 text-sm font-bold text-slate-800 leading-tight">
+                              <Armchair className="h-3.5 w-3.5 text-slate-500 flex-shrink-0" />
+                              <span className="truncate">{table.name}</span>
+                            </div>
+                            {room && (
+                              <div className="text-[11px] font-medium text-indigo-600 truncate mt-0.5">
+                                {room.name}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-xs text-slate-400 italic">Tavolo non assegnato</div>
+                        )}
+                        <div className="text-[10px] text-slate-500 truncate mt-1">
+                          {reservation.customer_name}
+                        </div>
+                        {time && (
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {time}
+                          </div>
+                        )}
                       </div>
-                    )}
+
+                      {/* Right: notes + allergens */}
+                      <div className="flex-1 min-w-0 text-right">
+                        <p className="text-[11px] text-slate-700 leading-snug whitespace-pre-wrap break-words">
+                          {reservation.notes}
+                        </p>
+                        {allergens.length > 0 && (
+                          <div className="flex items-center justify-end gap-1 mt-1.5 flex-wrap">
+                            <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
+                            {allergens.map(a => (
+                              <span key={a} className="inline-block bg-rose-100 text-rose-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                                {a}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
