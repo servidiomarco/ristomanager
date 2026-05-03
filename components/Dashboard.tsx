@@ -268,7 +268,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       );
       if (explicitShift) return explicitShift.present !== false;
 
-      if (staff.staffType !== StaffType.FISSO) return false;
+      if (staff.staffType !== StaffType.FISSO && staff.staffType !== StaffType.STAGIONALE) return false;
       if (staff.weeklyRestDay != null && staff.weeklyRestDay === dayOfWeek) return false;
       if (staff.hireDate && selectedDateStr < toDateOnly(staff.hireDate)) return false;
       if (staff.contractEndDate && selectedDateStr > toDateOnly(staff.contractEndDate)) return false;

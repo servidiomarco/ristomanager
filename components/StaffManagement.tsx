@@ -200,6 +200,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   const salaStaff = filteredStaff.filter(s => s.category === StaffCategory.SALA);
   const cucinaStaff = filteredStaff.filter(s => s.category === StaffCategory.CUCINA);
 
+  const STAFF_TYPE_ORDER: StaffType[] = [StaffType.FISSO, StaffType.STAGIONALE, StaffType.EXTRA];
+  const groupByType = (list: StaffMember[]): { type: StaffType; members: StaffMember[] }[] =>
+    STAFF_TYPE_ORDER
+      .map(type => ({ type, members: list.filter(s => s.staffType === type) }))
+      .filter(g => g.members.length > 0);
+
   // ============================================
   // CALENDAR HELPERS
   // ============================================
@@ -249,15 +255,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     );
   };
 
-  // FISSO staff are implicitly present on both shifts during their contract
-  // period unless there's a time-off entry or an explicit absent shift.
-  // If hireDate or contractEndDate are missing, that boundary is treated
-  // as open (a FISSO with no dates is assumed currently active).
+  // FISSO and STAGIONALE staff are implicitly present on both shifts during
+  // their contract period unless there's a time-off entry or an explicit
+  // absent shift. If hireDate or contractEndDate are missing, that boundary
+  // is treated as open (no date = currently active).
   const isWithinHirePeriod = (staff: StaffMember, dateStr: string): boolean => {
     if (staff.hireDate && dateStr < toDateOnly(staff.hireDate)) return false;
     if (staff.contractEndDate && dateStr > toDateOnly(staff.contractEndDate)) return false;
     return true;
   };
+
+  const hasAutoShifts = (staff: StaffMember): boolean =>
+    staff.staffType === StaffType.FISSO || staff.staffType === StaffType.STAGIONALE;
 
   // ============================================
   // HANDLERS
@@ -577,32 +586,40 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 <span className="ml-auto text-sm text-emerald-600 font-medium">{salaStaff.length}</span>
               </div>
             </div>
-            <div className="p-2 max-h-[300px] overflow-y-auto">
+            <div className="p-2 max-h-[400px] overflow-y-auto">
               {salaStaff.length === 0 ? (
                 <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
               ) : (
-                salaStaff.map(staff => (
-                  <div
-                    key={staff.id}
-                    onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
-                      selectedStaff?.id === staff.id
-                        ? 'bg-emerald-100 border border-emerald-200'
-                        : 'hover:bg-slate-50 border border-transparent'
-                    } ${!staff.isActive ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
-                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cameriere'}</p>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
-                        {STAFF_TYPE_LABELS[staff.staffType]}
+                groupByType(salaStaff).map(group => (
+                  <div key={group.type} className="mb-3 last:mb-0">
+                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${STAFF_TYPE_COLORS[group.type]}`}>
+                        {STAFF_TYPE_LABELS[group.type]}
                       </span>
+                      <span className="text-[11px] text-slate-400">{group.members.length}</span>
+                      <div className="flex-1 h-px bg-slate-100" />
                     </div>
+                    {group.members.map(staff => (
+                      <div
+                        key={staff.id}
+                        onClick={() => setSelectedStaff(staff)}
+                        className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
+                          selectedStaff?.id === staff.id
+                            ? 'bg-emerald-100 border border-emerald-200'
+                            : 'hover:bg-slate-50 border border-transparent'
+                        } ${!staff.isActive ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
+                            {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                            <p className="text-xs text-slate-500">{staff.role || 'Cameriere'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))
               )}
@@ -618,32 +635,40 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 <span className="ml-auto text-sm text-orange-600 font-medium">{cucinaStaff.length}</span>
               </div>
             </div>
-            <div className="p-2 max-h-[300px] overflow-y-auto">
+            <div className="p-2 max-h-[400px] overflow-y-auto">
               {cucinaStaff.length === 0 ? (
                 <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
               ) : (
-                cucinaStaff.map(staff => (
-                  <div
-                    key={staff.id}
-                    onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
-                      selectedStaff?.id === staff.id
-                        ? 'bg-orange-100 border border-orange-200'
-                        : 'hover:bg-slate-50 border border-transparent'
-                    } ${!staff.isActive ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-semibold">
-                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cuoco'}</p>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
-                        {STAFF_TYPE_LABELS[staff.staffType]}
+                groupByType(cucinaStaff).map(group => (
+                  <div key={group.type} className="mb-3 last:mb-0">
+                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${STAFF_TYPE_COLORS[group.type]}`}>
+                        {STAFF_TYPE_LABELS[group.type]}
                       </span>
+                      <span className="text-[11px] text-slate-400">{group.members.length}</span>
+                      <div className="flex-1 h-px bg-slate-100" />
                     </div>
+                    {group.members.map(staff => (
+                      <div
+                        key={staff.id}
+                        onClick={() => setSelectedStaff(staff)}
+                        className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
+                          selectedStaff?.id === staff.id
+                            ? 'bg-orange-100 border border-orange-200'
+                            : 'hover:bg-slate-50 border border-transparent'
+                        } ${!staff.isActive ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-semibold">
+                            {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                            <p className="text-xs text-slate-500">{staff.role || 'Cuoco'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))
               )}
@@ -788,7 +813,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                       && selectedStaff.weeklyRestDay !== null
                       && day.getDay() === selectedStaff.weeklyRestDay;
 
-                    const inHirePeriod = selectedStaff.staffType === StaffType.FISSO
+                    const inHirePeriod = hasAutoShifts(selectedStaff)
                       && !isWeeklyRest
                       && isWithinHirePeriod(selectedStaff, dateStr);
 
@@ -841,7 +866,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                                     : 'bg-slate-100 text-slate-400 line-through'
                                 }`}
                                 title={
-                                  lunchImplicit ? 'Presenza automatica (Fisso) — Pranzo'
+                                  lunchImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Pranzo`
                                   : lunchPresent ? 'Presente a Pranzo'
                                   : 'Assente a Pranzo'
                                 }
@@ -860,7 +885,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                                     : 'bg-slate-100 text-slate-400 line-through'
                                 }`}
                                 title={
-                                  dinnerImplicit ? 'Presenza automatica (Fisso) — Cena'
+                                  dinnerImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Cena`
                                   : dinnerPresent ? 'Presente a Cena'
                                   : 'Assente a Cena'
                                 }
@@ -890,10 +915,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     </div>
                     Presente Cena
                   </div>
-                  {selectedStaff.staffType === StaffType.FISSO && (
+                  {hasAutoShifts(selectedStaff) && (
                     <div className="flex items-center gap-1.5">
                       <div className="w-3 h-3 bg-amber-100 rounded-sm border border-dashed border-amber-300" />
-                      Auto (Fisso)
+                      Auto ({STAFF_TYPE_LABELS[selectedStaff.staffType]})
                     </div>
                   )}
                   <div className="flex items-center gap-1.5">
