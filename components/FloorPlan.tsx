@@ -438,9 +438,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Translation is in unscaled coords; the scaled wrapper maps it to screen.
     // Translate must come first so the matrix's tx/ty entries match the
     // unrotated drag delta (rotation last preserves values[4]/values[5]).
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = e.clientX;
@@ -557,9 +555,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const deltaX = (touch.clientX - dragState.startX) / s;
     const deltaY = (touch.clientY - dragState.startY) / s;
 
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = touch.clientX;
@@ -693,7 +689,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       [TableStatus.DIRTY]: 'bg-gray-200 border-gray-400 text-gray-600'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
+    const shapeClasses = `flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -701,26 +697,41 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const baseWidth = isMobile ? 60 : 100;
     const seatMultiplier = isMobile ? 8 : 15;
 
-    let shapeStyles = {};
+    let widthPx: number;
+    let heightPx: number;
+    let borderRadius: string;
 
     if (table.shape === TableShape.CIRCLE) {
-      shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '50%';
     } else if (table.shape === TableShape.SQUARE) {
-      shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '8px';
     } else {
-      const width = Math.max(baseWidth, table.seats * seatMultiplier);
-      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+      widthPx = Math.max(baseWidth, table.seats * seatMultiplier);
+      heightPx = baseSize;
+      borderRadius = '8px';
     }
+
+    const shapeStyles = { width: `${widthPx}px`, height: `${heightPx}px`, borderRadius };
+
+    // Distance from wrapper top to the bottom of the rotated bounding box —
+    // used to anchor the reservation pill below the visual table at any angle.
+    const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+    const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+    const pillTopPx = heightPx / 2 + rotatedHalfH + 4;
 
     return (
       <div
         key={table.id}
-        className={baseClasses}
+        className="absolute"
         style={{
           left: table.x,
           top: table.y,
-          ...shapeStyles,
-          transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          width: shapeStyles.width,
+          height: shapeStyles.height,
           zIndex: isSelected ? 10 : 1
         }}
         onMouseDown={(e) => {
@@ -732,45 +743,56 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           handleTouchStart(e, table.id, element);
         }}
       >
-        <span className="font-bold text-sm flex items-center gap-1">
-            {table.is_locked && <Lock size={10} className="text-slate-400" />}
-            {table.name}
-        </span>
-        
-        {/* Show Reservation Name */}
+        <div
+          className={shapeClasses}
+          style={{
+            ...shapeStyles,
+            transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          }}
+        >
+          <span className="font-bold text-sm flex items-center gap-1">
+              {table.is_locked && <Lock size={10} className="text-slate-400" />}
+              {table.name}
+          </span>
+
+          <span className="text-xs flex items-center gap-1 opacity-80">
+             <Armchair size={10} /> {table.seats}
+          </span>
+
+          {dynamicStatus === TableStatus.OCCUPIED && (
+               <div className="absolute -top-2 -right-2 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
+          )}
+
+          {/* Timer Badge */}
+          {timerDisplay && (
+              <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                  <Timer size={8} /> {timerDisplay}
+              </div>
+          )}
+
+          {/* Merged Table Badge */}
+          {isMerged && !timerDisplay && (
+              <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                  <Combine size={8} />
+              </div>
+          )}
+
+          {/* Hidden-for-shift Badge */}
+          {isHidden && (
+              <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                  <EyeOff size={8} />
+              </div>
+          )}
+        </div>
+
+        {/* Reservation Name — outside rotation, always anchored to bottom of rotated bounding box */}
         {reservation && !timerDisplay && (
-            <span className="text-[10px] font-bold truncate max-w-[90%] bg-white/50 px-1 rounded">
-                {reservation.customer_name}
-            </span>
-        )}
-
-        <span className="text-xs flex items-center gap-1 opacity-80">
-           <Armchair size={10} /> {table.seats}
-        </span>
-        
-        {dynamicStatus === TableStatus.OCCUPIED && (
-             <div className="absolute -top-2 -right-2 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
-        )}
-
-        {/* Timer Badge */}
-        {timerDisplay && (
-            <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <Timer size={8} /> {timerDisplay}
-            </div>
-        )}
-
-        {/* Merged Table Badge */}
-        {isMerged && !timerDisplay && (
-            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <Combine size={8} />
-            </div>
-        )}
-
-        {/* Hidden-for-shift Badge */}
-        {isHidden && (
-            <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <EyeOff size={8} />
-            </div>
+          <div
+            style={{ top: pillTopPx }}
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-white/95 border border-slate-200 shadow-sm rounded text-[10px] font-bold text-slate-700 whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+          >
+            {reservation.customer_name}
+          </div>
         )}
       </div>
     );
