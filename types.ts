@@ -67,7 +67,12 @@ export interface BanquetMenu {
   dish_ids: number[];          // flat list, derived from courses for backward compat
   courses?: BanquetCourse[];   // new structured composition
   event_date: string;          // YYYY-MM-DD
+  shift?: Shift;
   deposit_amount?: number;
+  guests?: number;
+  notes_courses?: string;
+  notes_service?: string;
+  notes_mise_en_place?: string;
 }
 
 export enum PaymentStatus {

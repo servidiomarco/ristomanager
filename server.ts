@@ -922,7 +922,7 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place FROM banquet_menus ORDER BY event_date NULLS LAST, name"
         );
         res.json(result.rows);
     } catch (err) {
@@ -933,7 +933,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, deposit_amount } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -943,8 +943,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, deposit_amount) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null]
         );
         const newMenu = result.rows[0];
 
@@ -975,7 +975,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, deposit_amount } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -984,8 +984,8 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, deposit_amount = $7 WHERE id = $8 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, deposit_amount",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, deposit_amount ?? null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12 WHERE id = $13 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, id]
         );
         const updatedMenu = result.rows[0];
 
