@@ -508,6 +508,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             ALTER TABLE todos ADD COLUMN IF NOT EXISTS banquet_reminder_hours INTEGER;
         `);
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS auto_kind VARCHAR(50);
+        `);
 
         // Create indexes for todos
         await client.query(`
@@ -515,6 +518,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_banquet_reminder ON todos(banquet_reminder_hours, due_date) WHERE banquet_reminder_hours IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_auto_kind ON todos(auto_kind, due_date) WHERE auto_kind IS NOT NULL;
         `);
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_team ON todos(assigned_to_team);
