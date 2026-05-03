@@ -635,20 +635,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       : [];
   }, [reservations, selectedDateStr]);
 
-  // Calculate stats for selected day
-  const totalTables = Array.isArray(tables) ? tables.length : 0;
+  // Calculate stats for selected day (skip tables in closed rooms)
+  const openRoomIds = useMemo(
+    () => new Set((Array.isArray(rooms) ? rooms : []).filter(r => !r.is_closed).map(r => r.id)),
+    [rooms]
+  );
+  const openTables = useMemo(
+    () => (Array.isArray(tables) ? tables.filter(t => openRoomIds.has(t.room_id)) : []),
+    [tables, openRoomIds]
+  );
+  const openTableIds = useMemo(() => new Set(openTables.map(t => t.id)), [openTables]);
+  const totalTables = openTables.length;
 
   // Banchetti scheduled for the selected day
   const banquetsToday = Array.isArray(banquetMenus)
     ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
     : 0;
 
-  // Reservations by shift for selected day
+  // Reservations by shift for selected day (only those on open-room tables for KPI math)
   const lunchReservations = selectedDayReservations.filter(r => r.shift === Shift.LUNCH);
   const dinnerReservations = selectedDayReservations.filter(r => r.shift === Shift.DINNER);
 
-  const lunchTableIds = new Set(lunchReservations.map(r => r.table_id).filter(Boolean));
-  const dinnerTableIds = new Set(dinnerReservations.map(r => r.table_id).filter(Boolean));
+  // Subset that excludes reservations on tables in closed rooms (unassigned reservations are kept).
+  const isOnOpenRoom = (tableId: number | null | undefined): boolean =>
+    tableId == null || openTableIds.has(tableId);
+  const lunchReservationsOpen = lunchReservations.filter(r => isOnOpenRoom(r.table_id));
+  const dinnerReservationsOpen = dinnerReservations.filter(r => isOnOpenRoom(r.table_id));
+
+  const lunchTableIds = new Set(
+    lunchReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+  );
+  const dinnerTableIds = new Set(
+    dinnerReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+  );
 
   // Per-shift KPI stats (guests + tables, expected vs arrived)
   const lunchExpectedGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -1021,7 +1040,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
               </div>
-              <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+              <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservationsOpen.length} prenotazioni · {lunchReservationsOpen.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
 
             <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
@@ -1036,7 +1055,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
                 <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
               </div>
-              <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+              <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservationsOpen.length} prenotazioni · {dinnerReservationsOpen.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
           </div>
 
