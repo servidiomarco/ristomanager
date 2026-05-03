@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
@@ -8,7 +8,7 @@ import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair, StickyNote } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -660,6 +660,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
+  // Reservations with notes/allergens for selected day (for dashboard card)
+  const reservationNotes = useMemo(() => {
+    const items = selectedDayReservations
+      .filter(r => r.notes && r.notes.trim().length > 0)
+      .map(r => {
+        const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
+        const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
+        const noteLower = (r.notes || '').toLowerCase();
+        const allergens = COMMON_ALLERGENS.filter(a => noteLower.includes(a.toLowerCase()));
+        return { reservation: r, table, room, allergens };
+      });
+    items.sort((a, b) => {
+      if (a.reservation.shift !== b.reservation.shift) {
+        return a.reservation.shift === Shift.LUNCH ? -1 : 1;
+      }
+      return a.reservation.reservation_time.localeCompare(b.reservation.reservation_time);
+    });
+    return items;
+  }, [selectedDayReservations, tables, rooms]);
+
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
     const LUNCH_SLOTS = ['13:00', '13:30', '14:00'];
@@ -984,74 +1004,133 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </button>
       </div>
 
-      {/* Row 1: Stato Tavoli (full width) */}
-      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
+      {/* Row 1: Stato Tavoli + Note & Allergeni */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+        <div className="lg:col-span-2 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
 
-        {/* Shift Occupancy Summary */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-3 sm:p-4 border border-amber-100">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-sm font-medium text-amber-800">Pranzo</span>
-              <span className="text-[11px] sm:text-xs text-amber-600 whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
+          {/* Shift Occupancy Summary */}
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-3 sm:p-4 border border-amber-100">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
+                <span className="text-sm font-medium text-amber-800">Pranzo</span>
+                <span className="text-[11px] sm:text-xs text-amber-600 whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
+              </div>
+              <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
+                <span className="text-2xl sm:text-3xl font-bold text-amber-700 leading-none">{lunchOccupancy}%</span>
+                <span className="text-xs sm:text-sm text-amber-600 mb-0.5 sm:mb-1">occupazione</span>
+              </div>
+              <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
+              </div>
+              <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
-            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="text-2xl sm:text-3xl font-bold text-amber-700 leading-none">{lunchOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-amber-600 mb-0.5 sm:mb-1">occupazione</span>
+
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
+                <span className="text-sm font-medium text-indigo-800">Cena</span>
+                <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
+              </div>
+              <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
+                <span className="text-2xl sm:text-3xl font-bold text-indigo-700 leading-none">{dinnerOccupancy}%</span>
+                <span className="text-xs sm:text-sm text-indigo-600 mb-0.5 sm:mb-1">occupazione</span>
+              </div>
+              <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
+              </div>
+              <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
             </div>
-            <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
-            </div>
-            <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-sm font-medium text-indigo-800">Cena</span>
-              <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
-            </div>
-            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="text-2xl sm:text-3xl font-bold text-indigo-700 leading-none">{dinnerOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-indigo-600 mb-0.5 sm:mb-1">occupazione</span>
-            </div>
-            <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
-            </div>
-            <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
+          {/* Room by Room Status */}
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-2">
+            {rooms.map(room => {
+              const roomTables = tables.filter(t => t.room_id === room.id);
+              const roomTableIds = new Set(roomTables.map(t => t.id));
+              const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
+              const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
+              const roomLunchAvailable = roomTables.length - roomLunchReserved;
+              const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
+
+              return (
+                <div key={room.id} className="border border-slate-100 rounded-lg p-2 hover:border-slate-200 transition-colors bg-slate-50/50">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-medium text-slate-700 text-xs truncate">{room.name}</h3>
+                    <span className="text-[10px] text-slate-400">{roomTables.length}</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <div className="flex-1 bg-amber-50 rounded px-1 py-0.5 border border-amber-100 text-center">
+                      <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {roomLunchAvailable}
+                      </span>
+                    </div>
+                    <div className="flex-1 bg-indigo-50 rounded px-1 py-0.5 border border-indigo-100 text-center">
+                      <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {roomDinnerAvailable}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Room by Room Status */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {rooms.map(room => {
-            const roomTables = tables.filter(t => t.room_id === room.id);
-            const roomTableIds = new Set(roomTables.map(t => t.id));
-            const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
-            const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
-            const roomLunchAvailable = roomTables.length - roomLunchReserved;
-            const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
-
-            return (
-              <div key={room.id} className="border border-slate-100 rounded-lg p-2 hover:border-slate-200 transition-colors bg-slate-50/50">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-medium text-slate-700 text-xs truncate">{room.name}</h3>
-                  <span className="text-[10px] text-slate-400">{roomTables.length}</span>
-                </div>
-                <div className="flex gap-1">
-                  <div className="flex-1 bg-amber-50 rounded px-1 py-0.5 border border-amber-100 text-center">
-                    <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {roomLunchAvailable}
-                    </span>
-                  </div>
-                  <div className="flex-1 bg-indigo-50 rounded px-1 py-0.5 border border-indigo-100 text-center">
-                    <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {roomDinnerAvailable}
-                    </span>
-                  </div>
-                </div>
+        {/* Note & Allergeni */}
+        <div className="lg:col-span-1 bg-white p-4 lg:p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base lg:text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
+              Note &amp; Allergeni
+            </h2>
+            <span className="text-[11px] text-slate-400 whitespace-nowrap">{reservationNotes.length}</span>
+          </div>
+          {reservationNotes.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-center py-8">
+              <div>
+                <StickyNote className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">Nessuna nota per questa data</p>
               </div>
-            );
-          })}
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+              {reservationNotes.map(({ reservation, table, room, allergens }) => {
+                const isLunch = reservation.shift === Shift.LUNCH;
+                const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
+                return (
+                  <div key={reservation.id} className="border border-slate-100 rounded-lg p-2.5 bg-slate-50/40 hover:bg-white hover:border-slate-200 transition-colors">
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${isLunch ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                        {isLunch ? <Sun className="h-2.5 w-2.5" /> : <Moon className="h-2.5 w-2.5" />}
+                        {time || (isLunch ? 'Pranzo' : 'Cena')}
+                      </span>
+                      {table ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                          <Armchair className="h-2.5 w-2.5 text-slate-400" />
+                          {table.name}
+                          {room && <span className="text-slate-400">· {room.name}</span>}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">Tavolo non assegnato</span>
+                      )}
+                    </div>
+                    <p className="text-xs font-medium text-slate-700 truncate">{reservation.customer_name}</p>
+                    <p className="text-[11px] text-slate-600 mt-1 leading-snug whitespace-pre-wrap break-words">{reservation.notes}</p>
+                    {allergens.length > 0 && (
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
+                        {allergens.map(a => (
+                          <span key={a} className="inline-block bg-rose-100 text-rose-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                            {a}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
