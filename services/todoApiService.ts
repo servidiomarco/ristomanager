@@ -81,6 +81,8 @@ export interface CreateTodoInput {
   assignedToUserName?: string;
   assignedToTeam?: UserRole;
   linkedReservationId?: number;
+  linkedBanquetIds?: number[];
+  banquetReminderHours?: number;
 }
 
 export interface UpdateTodoInput {
@@ -93,6 +95,8 @@ export interface UpdateTodoInput {
   assignedToUserId?: number;
   assignedToUserName?: string;
   assignedToTeam?: UserRole;
+  linkedBanquetIds?: number[];
+  banquetReminderHours?: number;
 }
 
 class TodoApiService {

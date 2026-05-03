@@ -7,6 +7,7 @@ import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair, StickyNote } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -87,6 +88,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [notesShift, setNotesShift] = useState<Shift>(() => new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+  const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -1524,7 +1526,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
                           )}
+                          {todo.banquetReminderHours != null && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+                              {todo.banquetReminderHours}h prima
+                            </span>
+                          )}
                         </div>
+                        {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
+                          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              Banchetti:
+                            </span>
+                            {todo.linkedBanquetIds.map(bid => {
+                              const banquet = banquetMenus.find(b => b.id === bid);
+                              if (!banquet) return null;
+                              return (
+                                <button
+                                  key={bid}
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setBanquetModal(banquet); }}
+                                  className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-100 transition-colors"
+                                  title="Visualizza composizione"
+                                >
+                                  <Utensils className="h-2.5 w-2.5" />
+                                  <span className="truncate max-w-[140px]">{banquet.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1994,6 +2024,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           setDeleteTodoConfirm(null);
         }}
       />
+
+      {banquetModal && (
+        <BanquetCompositionModal
+          banquet={banquetModal}
+          dishes={dishes}
+          onClose={() => setBanquetModal(null)}
+        />
+      )}
     </div>
   );
 };
