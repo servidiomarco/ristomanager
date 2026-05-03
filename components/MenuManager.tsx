@@ -435,18 +435,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           {banquetView === 'LIST' && (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
-                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative group">
-                      <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative">
+                      <div className="absolute top-4 right-4 flex items-center gap-1.5">
                           <button
                               onClick={() => setViewBanquet(menu)}
-                              className="text-slate-300 hover:text-indigo-500 transition-colors"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                               title="Visualizza piatti"
                           >
                               <Eye className="h-5 w-5" />
                           </button>
                           <button
                               onClick={() => printBanquet(menu, dishes, { showPrice: canViewBanquetPrice })}
-                              className="text-slate-300 hover:text-emerald-500 transition-colors"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                               title="Stampa / Salva PDF / Condividi"
                           >
                               <Printer className="h-5 w-5" />
@@ -455,20 +455,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <>
                           <button
                               onClick={() => handleEditBanquet(menu)}
-                              className="text-slate-300 hover:text-indigo-500 transition-colors"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              title="Modifica"
                           >
                               <Edit2 className="h-5 w-5" />
                           </button>
                           <button
                               onClick={() => setDeleteBanquetConfirm(menu)}
-                              className="text-slate-300 hover:text-rose-500 transition-colors"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                              title="Elimina"
                           >
                               <Trash2 className="h-5 w-5" />
                           </button>
                           </>
                           )}
                       </div>
-                      <div className="flex justify-between items-start mb-4">
+                      <div className="flex justify-between items-start mb-4 pr-32">
                           <div>
                               <h3 className="font-bold text-lg text-slate-800">{menu.name}</h3>
                               <p className="text-sm text-slate-500 line-clamp-2">{menu.description}</p>
