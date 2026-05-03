@@ -979,34 +979,44 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
       const baseWidth = window.innerWidth < 768 ? 60 : 100; // For rectangles
 
-      let shapeStyles = {};
+      let widthPx: number;
+      let heightPx: number;
+      let borderRadius: string;
       if (table.shape === TableShape.CIRCLE) {
-          shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '50%';
       } else if (table.shape === TableShape.SQUARE) {
-          shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       } else {
-          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
-          shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+          widthPx = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
+          heightPx = baseSize; borderRadius = '8px';
       }
+
+      // Anchor the reservation pill below the rotated bounding box so it
+      // always sits horizontally below the visible table at any rotation.
+      const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+      const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+      const pillTopPx = heightPx / 2 + rotatedHalfH + 6;
+
+      const shapeClasses = `flex flex-col items-center justify-center border-2 shadow-sm transition-all select-none
+          ${isArrived
+              ? 'bg-orange-100 border-orange-500 text-orange-900 shadow-orange-200 ring-2 ring-orange-200'
+              : isOccupied
+                  ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 ring-2 ring-red-200'
+                  : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md'
+          }
+          ${isSearchMatch ? 'animate-glow-pulse' : ''}
+          ${isHidden ? 'opacity-40 grayscale' : ''}
+      `;
 
       return (
         <div
             key={table.id}
-            className={`absolute flex flex-col items-center justify-center border-2 shadow-sm transition-all select-none
-                ${isArrived
-                    ? 'bg-orange-100 border-orange-500 text-orange-900 shadow-orange-200 z-10 ring-2 ring-orange-200'
-                    : isOccupied
-                        ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 z-10 ring-2 ring-red-200'
-                        : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
-                }
-                ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}
-                ${isHidden ? 'opacity-40 grayscale' : ''}
-            `}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${isSearchMatch ? 'z-20' : ''}`}
             style={{
                 left: table.x,
                 top: table.y,
-                ...shapeStyles,
-                transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
+                width: `${widthPx}px`,
+                height: `${heightPx}px`,
             }}
             title={isHidden
                 ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
@@ -1019,23 +1029,36 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 }
             }}
         >
-            {isHidden && (
-                <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                    <EyeOff size={8} />
-                </div>
-            )}
-            <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
-            {isOccupied ? (
-                <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
-                    <Users size={16} /> {reservation.guests}
-                </span>
-            ) : (
-                <span className="text-[10px] flex items-center gap-1 opacity-80">
-                    <Armchair size={10} /> {table.seats}
-                </span>
-            )}
+            <div
+                className={shapeClasses}
+                style={{
+                    width: `${widthPx}px`,
+                    height: `${heightPx}px`,
+                    borderRadius,
+                    transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+                }}
+            >
+                {isHidden && (
+                    <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                        <EyeOff size={8} />
+                    </div>
+                )}
+                <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
+                {isOccupied ? (
+                    <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
+                        <Users size={16} /> {reservation.guests}
+                    </span>
+                ) : (
+                    <span className="text-[10px] flex items-center gap-1 opacity-80">
+                        <Armchair size={10} /> {table.seats}
+                    </span>
+                )}
+            </div>
             {isOccupied && (
-                <div className={`absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white ${isArrived ? 'bg-orange-600' : 'bg-red-600'}`}>
+                <div
+                    style={{ top: pillTopPx }}
+                    className={`absolute left-1/2 -translate-x-1/2 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white ${isArrived ? 'bg-orange-600' : 'bg-red-600'}`}
+                >
                     {toTitleCase(reservation.customer_name)}
                 </div>
             )}
