@@ -6,6 +6,7 @@ import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Cale
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
+import { DishDetailModal } from './DishDetailModal';
 import { useAuth } from '../contexts/AuthContext';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
@@ -59,6 +60,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [deleteDishConfirm, setDeleteDishConfirm] = useState<Dish | null>(null);
   const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
   const [viewBanquet, setViewBanquet] = useState<BanquetMenu | null>(null);
+  const [viewDish, setViewDish] = useState<Dish | null>(null);
 
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
@@ -345,7 +347,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Categoria</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Prezzo</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Allergeni</th>
-                    {canEdit && <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Azioni</th>}
+                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Azioni</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -386,24 +388,35 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             )) : <span className="text-xs text-slate-400">-</span>}
                         </div>
                         </td>
-                        {canEdit && (
                         <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                             <button
+                                onClick={() => setViewDish(dish)}
+                                className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-full hover:bg-indigo-50"
+                                title="Visualizza piatto"
+                            >
+                                <Eye className="h-5 w-5" />
+                            </button>
+                            {canEdit && (
+                            <>
+                            <button
                                 onClick={() => handleEditDish(dish)}
                                 className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-full hover:bg-indigo-50"
+                                title="Modifica"
                             >
                                 <Edit2 className="h-5 w-5" />
                             </button>
                             <button
                                 onClick={() => setDeleteDishConfirm(dish)}
                                 className="text-slate-400 hover:text-rose-600 transition-colors p-1 rounded-full hover:bg-rose-50"
+                                title="Elimina"
                             >
                                 <Trash2 className="h-5 w-5" />
                             </button>
+                            </>
+                            )}
                         </div>
                         </td>
-                        )}
                     </tr>
                     ))}
                 </tbody>
@@ -435,91 +448,105 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           {banquetView === 'LIST' && (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {banquetMenus.map(menu => (
-                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative">
-                      <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+                      <div className="p-6 pb-4 flex-1">
+                          <div className="mb-3">
+                              <h3 className="font-bold text-lg text-slate-800 leading-tight">{menu.name}</h3>
+                              {menu.description && (
+                                <p className="text-sm text-slate-500 line-clamp-2 mt-1">{menu.description}</p>
+                              )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap mb-4">
+                              {menu.event_date && (
+                                <div className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">
+                                  <Calendar className="h-3.5 w-3.5" />
+                                  {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                                </div>
+                              )}
+                              {menu.shift === Shift.LUNCH && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-2 py-1 rounded-lg">
+                                  <Sun className="h-3 w-3" /> Pranzo
+                                </span>
+                              )}
+                              {menu.shift === Shift.DINNER && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg">
+                                  <Moon className="h-3 w-3" /> Cena
+                                </span>
+                              )}
+                          </div>
+                          {canViewBanquetPrice && (
+                          <div className="mb-4 flex items-baseline gap-4 flex-wrap">
+                              <div>
+                                  <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
+                                  <span className="text-slate-400 text-sm"> / persona</span>
+                              </div>
+                              {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
+                                  <div className="text-sm">
+                                      <span className="text-slate-400">Acconto: </span>
+                                      <span className="font-semibold text-slate-700">€{Number(menu.deposit_amount).toFixed(2)}</span>
+                                  </div>
+                              )}
+                          </div>
+                          )}
+                          <div className="space-y-3">
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Composizione:</p>
+                              {menu.courses && menu.courses.length > 0 ? (
+                                <div className="space-y-2.5">
+                                  {menu.courses.map((course, idx) => (
+                                    <div key={idx}>
+                                      <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-1">{course.name}</div>
+                                      <ul className="text-sm text-slate-700 space-y-1">
+                                        {course.dish_ids.map(id => {
+                                          const dish = dishes.find(d => d.id === id);
+                                          return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
+                                        })}
+                                        {course.dish_ids.length === 0 && <li className="text-xs text-slate-400 italic">Nessun piatto</li>}
+                                      </ul>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <ul className="text-sm text-slate-700 space-y-1">
+                                    {menu.dish_ids.map(id => {
+                                        const dish = dishes.find(d => d.id === id);
+                                        return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
+                                    })}
+                                </ul>
+                              )}
+                          </div>
+                      </div>
+                      <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-1">
                           <button
                               onClick={() => setViewBanquet(menu)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                               title="Visualizza piatti"
                           >
-                              <Eye className="h-5 w-5" />
+                              <Eye className="h-4 w-4" />
                           </button>
                           <button
                               onClick={() => printBanquet(menu, dishes, { showPrice: canViewBanquetPrice })}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              className="p-2 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                               title="Stampa / Salva PDF / Condividi"
                           >
-                              <Printer className="h-5 w-5" />
+                              <Printer className="h-4 w-4" />
                           </button>
                           {canEdit && (
                           <>
                           <button
                               onClick={() => handleEditBanquet(menu)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                               title="Modifica"
                           >
-                              <Edit2 className="h-5 w-5" />
+                              <Edit2 className="h-4 w-4" />
                           </button>
                           <button
                               onClick={() => setDeleteBanquetConfirm(menu)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                              className="p-2 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
                               title="Elimina"
                           >
-                              <Trash2 className="h-5 w-5" />
+                              <Trash2 className="h-4 w-4" />
                           </button>
                           </>
-                          )}
-                      </div>
-                      <div className="flex justify-between items-start mb-4 pr-32">
-                          <div>
-                              <h3 className="font-bold text-lg text-slate-800">{menu.name}</h3>
-                              <p className="text-sm text-slate-500 line-clamp-2">{menu.description}</p>
-                          </div>
-                      </div>
-                      {menu.event_date && (
-                        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg mb-3">
-                          <Calendar className="h-3.5 w-3.5" />
-                          {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
-                        </div>
-                      )}
-                      {canViewBanquetPrice && (
-                      <div className="mb-4 flex items-baseline gap-4 flex-wrap">
-                          <div>
-                              <span className="text-2xl font-bold text-indigo-600">€{menu.price_per_person}</span>
-                              <span className="text-slate-400 text-sm"> / persona</span>
-                          </div>
-                          {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
-                              <div className="text-sm">
-                                  <span className="text-slate-400">Acconto: </span>
-                                  <span className="font-semibold text-slate-700">€{Number(menu.deposit_amount).toFixed(2)}</span>
-                              </div>
-                          )}
-                      </div>
-                      )}
-                      <div className="space-y-3">
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Composizione:</p>
-                          {menu.courses && menu.courses.length > 0 ? (
-                            <div className="space-y-2.5">
-                              {menu.courses.map((course, idx) => (
-                                <div key={idx}>
-                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-1">{course.name}</div>
-                                  <ul className="text-sm text-slate-700 space-y-1">
-                                    {course.dish_ids.map(id => {
-                                      const dish = dishes.find(d => d.id === id);
-                                      return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
-                                    })}
-                                    {course.dish_ids.length === 0 && <li className="text-xs text-slate-400 italic">Nessun piatto</li>}
-                                  </ul>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <ul className="text-sm text-slate-700 space-y-1">
-                                {menu.dish_ids.map(id => {
-                                    const dish = dishes.find(d => d.id === id);
-                                    return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"/> {dish.name}</li> : null;
-                                })}
-                            </ul>
                           )}
                       </div>
                   </div>
@@ -1002,6 +1029,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           banquet={viewBanquet}
           dishes={dishes}
           onClose={() => setViewBanquet(null)}
+        />
+      )}
+
+      {viewDish && (
+        <DishDetailModal
+          dish={viewDish}
+          onClose={() => setViewDish(null)}
         />
       )}
     </div>
