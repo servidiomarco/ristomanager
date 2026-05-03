@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
@@ -1086,19 +1086,51 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
             {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
           </h4>
           <div className="space-y-2">
-            {selectedBanquets.map(menu => (
-              <div
-                key={menu.id}
-                onClick={() => canEdit && onSelectBanquet(menu)}
-                className={`p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-200 transition-colors flex items-center justify-between gap-3 ${canEdit ? 'cursor-pointer' : ''}`}
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-slate-800 truncate">{menu.name}</p>
-                  {menu.description && <p className="text-xs text-slate-500 truncate">{menu.description}</p>}
+            {selectedBanquets.map(menu => {
+              const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
+              return (
+                <div
+                  key={menu.id}
+                  onClick={() => canEdit && onSelectBanquet(menu)}
+                  className={`p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-200 transition-colors ${canEdit ? 'cursor-pointer' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-slate-800 truncate">{menu.name}</p>
+                        {menu.shift === Shift.LUNCH && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                            <Sun className="h-3 w-3" /> Pranzo
+                          </span>
+                        )}
+                        {menu.shift === Shift.DINNER && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                            <Moon className="h-3 w-3" /> Cena
+                          </span>
+                        )}
+                      </div>
+                      {menu.description && <p className="text-xs text-slate-500 truncate mt-0.5">{menu.description}</p>}
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-600 flex-wrap">
+                        {menu.guests != null && menu.guests > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="h-3.5 w-3.5 text-indigo-500" />
+                            <span className="font-semibold text-slate-700">{menu.guests}</span>
+                            <span className="text-slate-500">coperti</span>
+                          </span>
+                        )}
+                        {hasNotes && (
+                          <span className="inline-flex items-center gap-1 text-amber-700">
+                            <StickyNote className="h-3.5 w-3.5" />
+                            <span>Con note</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-indigo-600 whitespace-nowrap">€{menu.price_per_person}/pax</span>
+                  </div>
                 </div>
-                <span className="text-sm font-bold text-indigo-600 whitespace-nowrap">€{menu.price_per_person}/pax</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
