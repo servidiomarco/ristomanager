@@ -13,6 +13,7 @@ interface RolePermissionsProps {
 
 const ROLE_LABELS: Record<string, string> = {
   OWNER: 'Proprietario',
+  GENERAL_MANAGER: 'General Manager',
   MANAGER: 'Manager',
   WAITER: 'Cameriere',
   KITCHEN: 'Cucina'
@@ -26,6 +27,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   'floorplan:full': 'Modifica completa',
   'menu:view': 'Visualizza',
   'menu:full': 'Modifica',
+  'banquet:view_price': 'Visualizza prezzo banchetti',
   'reservations:view': 'Visualizza',
   'reservations:full': 'Modifica',
   'settings:view': 'Visualizza',
@@ -40,7 +42,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-produ
 
 export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClose }) => {
   const [features, setFeatures] = useState<FeaturePermissions[]>([]);
-  const [roles] = useState<string[]>(['OWNER', 'MANAGER', 'WAITER', 'KITCHEN']);
+  const [roles] = useState<string[]>(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN']);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   const [selectedRole, setSelectedRole] = useState<string>('MANAGER');
   const [loading, setLoading] = useState(true);

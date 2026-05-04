@@ -136,6 +136,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     switch (role) {
       case UserRole.OWNER:
         return <Shield className="h-4 w-4" />;
+      case UserRole.GENERAL_MANAGER:
+        return <Shield className="h-4 w-4" />;
       case UserRole.MANAGER:
         return <UserIcon className="h-4 w-4" />;
       case UserRole.WAITER:
@@ -148,6 +150,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   const getRoleName = (role: UserRole): string => {
     const names: Record<UserRole, string> = {
       [UserRole.OWNER]: 'Proprietario',
+      [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'
@@ -159,6 +162,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     switch (role) {
       case UserRole.OWNER:
         return 'bg-violet-50 text-violet-700 border border-violet-100';
+      case UserRole.GENERAL_MANAGER:
+        return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
       case UserRole.MANAGER:
         return 'bg-blue-50 text-blue-700 border border-blue-100';
       case UserRole.WAITER:
@@ -247,6 +252,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                       className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     >
                       <option value={UserRole.OWNER}>Proprietario</option>
+                      <option value={UserRole.GENERAL_MANAGER}>General Manager</option>
                       <option value={UserRole.MANAGER}>Manager</option>
                       <option value={UserRole.WAITER}>Cameriere</option>
                       <option value={UserRole.KITCHEN}>Cucina</option>

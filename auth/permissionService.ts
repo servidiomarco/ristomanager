@@ -1,4 +1,4 @@
-import pool from '../db.js';
+import pool, { queryWithRetry } from '../db.js';
 import { UserRole } from '../types.js';
 
 export type Permission =
@@ -20,13 +20,14 @@ export type Permission =
   | 'reports:view'
   | 'reports:full'
   | 'logs:view'
-  | 'logs:full';
+  | 'logs:full'
+  | 'banquet:view_price';
 
 // All available permissions grouped by feature
 export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] = [
   { feature: 'Dashboard', permissions: ['dashboard:view', 'dashboard:full'] },
   { feature: 'Sale e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
-  { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full'] },
+  { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full', 'banquet:view_price'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
@@ -43,7 +44,7 @@ const CACHE_TTL = 60000; // 1 minute
 export class RolePermissionService {
   // Get all permissions for a role from database
   static async getPermissionsForRole(role: UserRole): Promise<Permission[]> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT permission FROM role_permissions WHERE role = $1',
       [role]
     );
@@ -52,12 +53,13 @@ export class RolePermissionService {
 
   // Get all role permissions (for admin UI)
   static async getAllRolePermissions(): Promise<Record<string, Permission[]>> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       'SELECT role, permission FROM role_permissions ORDER BY role, permission'
     );
 
     const permissions: Record<string, Permission[]> = {
       OWNER: [],
+      GENERAL_MANAGER: [],
       MANAGER: [],
       WAITER: [],
       KITCHEN: []
@@ -103,7 +105,7 @@ export class RolePermissionService {
 
   // Add a single permission to a role
   static async addPermission(role: UserRole, permission: Permission): Promise<void> {
-    await pool.query(
+    await queryWithRetry(
       'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [role, permission]
     );
@@ -112,7 +114,7 @@ export class RolePermissionService {
 
   // Remove a single permission from a role
   static async removePermission(role: UserRole, permission: Permission): Promise<void> {
-    await pool.query(
+    await queryWithRetry(
       'DELETE FROM role_permissions WHERE role = $1 AND permission = $2',
       [role, permission]
     );

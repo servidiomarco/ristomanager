@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -10,7 +10,9 @@ import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
+import { CustomerList } from './components/CustomerList';
 import { useSocket } from './hooks/useSocket';
+import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { useAuth } from './contexts/AuthContext';
@@ -28,6 +30,7 @@ import {
   getRooms,
   createRoom,
   deleteRoom,
+  setRoomClosed,
   getDishes,
   createDish,
   updateDish,
@@ -158,16 +161,26 @@ const App: React.FC = () => {
   const addToast = (
     message: string,
     type: 'success' | 'error' | 'info' = 'info',
-    options?: { title?: string; details?: string[]; duration?: number }
+    options?: { title?: string; details?: string[]; duration?: number; action?: { label: string; onClick: () => void } }
   ) => {
       const id = Math.random().toString(36).substr(2, 9);
       const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
-      setToasts(prev => [...prev, { id, message, type, title: options?.title, details: options?.details, duration }]);
+      setToasts(prev => [...prev, {
+          id,
+          message,
+          type,
+          title: options?.title,
+          details: options?.details,
+          duration,
+          action: options?.action,
+      }]);
 
       setTimeout(() => {
           setToasts(prev => prev.filter(t => t.id !== id));
       }, duration);
   };
+
+  useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {
@@ -237,6 +250,10 @@ const App: React.FC = () => {
         }
         return sortRooms([...prev, room]);
       });
+    });
+
+    socket.on('room:updated', (room: Room) => {
+      setRooms(prev => prev.map(r => r.id === room.id ? room : r));
     });
 
     socket.on('room:deleted', (id: number) => {
@@ -318,6 +335,7 @@ const App: React.FC = () => {
       socket.off('table:updated');
       socket.off('table:deleted');
       socket.off('room:created');
+      socket.off('room:updated');
       socket.off('room:deleted');
       socket.off('dish:created');
       socket.off('dish:updated');
@@ -439,6 +457,17 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error deleting room:", error);
       addToast('Error deleting room', 'error');
+    }
+  };
+
+  const handleToggleRoomClosed = async (roomId: number, isClosed: boolean) => {
+    try {
+      const updated = await setRoomClosed(roomId, isClosed);
+      setRooms(prev => prev.map(r => r.id === roomId ? updated : r));
+      addToast(isClosed ? `Sala "${updated.name}" chiusa` : `Sala "${updated.name}" riaperta`, 'success');
+    } catch (error: any) {
+      console.error("Error toggling room closed:", error);
+      addToast(error?.message || 'Errore aggiornamento sala', 'error');
     }
   };
 
@@ -619,6 +648,7 @@ const App: React.FC = () => {
   const getRoleDisplayName = (role: UserRole): string => {
     const roleNames: Record<UserRole, string> = {
       [UserRole.OWNER]: 'Proprietario',
+      [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'
@@ -745,6 +775,15 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.CLIENTI) && (
+            <SidebarItem
+              icon={<BookUser size={20} />}
+              label="Clienti"
+              active={view === ViewState.CLIENTI}
+              onClick={() => setView(ViewState.CLIENTI)}
+              collapsed={sidebarCollapsed}
+            />
+          )}
           {canManageUsers() && (
             <SidebarItem
               icon={<Users size={20} />}
@@ -853,8 +892,10 @@ const App: React.FC = () => {
               </div>
               <span className="font-semibold text-[15px] tracking-tight text-[var(--color-fg)]">RistoCRM</span>
            </div>
-           {/* Global search — visual only for now */}
-           <div className="hidden md:flex flex-1 max-w-md mx-4">
+           {/* Page header slot — used by views (e.g. Reservations) to portal in sticky controls */}
+           <div id="page-header-slot" className="hidden md:flex flex-1 min-w-0 items-center gap-3 mx-4 empty:hidden" />
+           {/* Global search — visual only for now (hidden when page-header-slot has content) */}
+           <div className="hidden md:flex flex-1 max-w-md mx-4 has-[+#page-header-slot:not(:empty)]:hidden">
               <label className="relative w-full">
                 <span className="sr-only">Cerca</span>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
@@ -928,6 +969,7 @@ const App: React.FC = () => {
               >
                 <Search className="h-4 w-4" />
               </button>
+
 
                <div className="relative">
                    <button
@@ -1036,6 +1078,7 @@ const App: React.FC = () => {
             onSplitTable={handleSplitTable}
             onAddRoom={handleAddRoom}
             onDeleteRoom={handleDeleteRoom}
+            onToggleRoomClosed={handleToggleRoomClosed}
             canEdit={hasPermission('floorplan:full')}
           />
         )}
@@ -1057,6 +1100,14 @@ const App: React.FC = () => {
 
         {view === ViewState.STAFF && (
           <StaffManagement showToast={addToast} />
+        )}
+
+        {view === ViewState.CLIENTI && (
+          <CustomerList
+            reservations={reservations}
+            banquetMenus={banquetMenus}
+            showToast={addToast}
+          />
         )}
 
         {view === ViewState.SETTINGS && (
@@ -1187,11 +1238,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.SETTINGS)) && (
+            {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.SETTINGS)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.STAFF || view === ViewState.SETTINGS}
+                active={showMoreMenu || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.SETTINGS}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1245,6 +1296,16 @@ const App: React.FC = () => {
                   >
                     <UsersRound className="h-5 w-5 text-[var(--color-fg-muted)]" />
                     <span className="text-sm font-medium text-[var(--color-fg)]">Personale</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canAccessView(ViewState.CLIENTI) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.CLIENTI); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.CLIENTI ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <BookUser className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Clienti</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}
@@ -1311,6 +1372,18 @@ const App: React.FC = () => {
                                             <li key={i} className="text-[13px] text-[var(--color-fg-muted)] leading-snug">{d}</li>
                                         ))}
                                     </ul>
+                                    {toast.action && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                toast.action!.onClick();
+                                                setToasts(prev => prev.filter(t => t.id !== toast.id));
+                                            }}
+                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80`}
+                                        >
+                                            {toast.action.label}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -1318,7 +1391,19 @@ const App: React.FC = () => {
                                 {toast.type === 'success' && <CheckCircle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'error' && <AlertTriangle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'info' && <Info className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                <span className="text-[13px] font-medium text-[var(--color-fg)]">{toast.message}</span>
+                                <span className="text-[13px] font-medium text-[var(--color-fg)] flex-1">{toast.message}</span>
+                                {toast.action && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            toast.action!.onClick();
+                                            setToasts(prev => prev.filter(t => t.id !== toast.id));
+                                        }}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
+                                    >
+                                        {toast.action.label}
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>

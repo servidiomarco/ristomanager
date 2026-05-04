@@ -1,8 +1,20 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import dns from 'dns';
+import net from 'net';
 import { Pool, types } from 'pg';
 import bcrypt from 'bcryptjs';
+
+// Railway's internal DNS returns both AAAA (IPv6) and A (IPv4) for the
+// postgres host. In production we observed the IPv6 endpoint returning
+// ECONNREFUSED while IPv4 timed out after 10s, surfacing as AggregateError
+// [ETIMEDOUT] on PUT /reservations and /auth/me. Pin DNS to IPv4 first and
+// disable Node's "happy eyeballs" so we don't burn time racing both families.
+dns.setDefaultResultOrder('ipv4first');
+if (typeof (net as any).setDefaultAutoSelectFamily === 'function') {
+    (net as any).setDefaultAutoSelectFamily(false);
+}
 
 // Return DATE columns as plain YYYY-MM-DD strings instead of JS Date objects.
 // PostgreSQL DATE has no timezone; the default parser shifts it through the
@@ -27,16 +39,66 @@ const pool = new Pool({
     // Without this, the pool serves a half-closed socket and the next query
     // throws "Connection terminated unexpectedly", surfacing as random 500s.
     idleTimeoutMillis: 30_000,
-    // Cap how long we wait for a fresh connection before failing the request.
-    connectionTimeoutMillis: 10_000,
+    // Fail fast (5s) instead of letting a request hang for 10s on a dead route.
+    connectionTimeoutMillis: 5_000,
     keepAlive: true,
-});
+    // Activate TCP keepalive after 10s of idle so half-closed sockets are
+    // detected before the next query is dispatched on them.
+    keepAliveInitialDelayMillis: 10_000,
+    // Server-side and client-side query caps so a hung query can't pin a
+    // pool client indefinitely.
+    statement_timeout: 15_000,
+    query_timeout: 20_000,
+} as any);
 
 // Without this handler, an error event from an idle client crashes the worker
 // (Node treats unhandled "error" events on EventEmitters as uncaught).
 pool.on('error', (err) => {
     console.error('Postgres pool idle client error:', err);
 });
+
+// Retry transient connection errors once. Most ETIMEDOUT / ECONNRESET /
+// "Connection terminated unexpectedly" failures we've seen recover on the
+// next attempt because the pool evicts the dead client and reconnects.
+const TRANSIENT_CODES = new Set(['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', '57P01', '57P02', '57P03']);
+const isTransient = (err: any): boolean => {
+    if (!err) return false;
+    if (TRANSIENT_CODES.has(err.code)) return true;
+    if (typeof err.message === 'string' && err.message.includes('Connection terminated')) return true;
+    if (Array.isArray(err.errors) && err.errors.some((e: any) => TRANSIENT_CODES.has(e?.code))) return true;
+    return false;
+};
+
+// Errors that mean Postgres itself is unavailable (restart / failover).
+// For these the immediate retry is pointless — we need to wait for the DB
+// to come up. Up to 3 attempts with linear backoff.
+const RESTART_CODES = new Set(['ECONNREFUSED', '57P01', '57P02', '57P03']);
+const isRestartError = (err: any): boolean => {
+    if (!err) return false;
+    if (RESTART_CODES.has(err.code)) return true;
+    if (Array.isArray(err.errors) && err.errors.some((e: any) => RESTART_CODES.has(e?.code))) return true;
+    return false;
+};
+
+const sleepMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export const queryWithRetry = async (text: string, params?: any[]): Promise<{ rows: any[]; rowCount: number | null }> => {
+    const maxAttempts = 3;
+    let lastErr: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await pool.query(text, params);
+        } catch (err: any) {
+            lastErr = err;
+            if (!isTransient(err) || attempt === maxAttempts) throw err;
+            // Postgres restart needs a real wait; other transients can retry quickly.
+            const delay = isRestartError(err) ? 1500 * attempt : 100;
+            console.warn(`Postgres transient error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms:`, err.code || err.message);
+            await sleepMs(delay);
+        }
+    }
+    throw lastErr;
+};
 
 // Retry logic for schema creation
 const MAX_RETRIES = 5;
@@ -64,9 +126,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 width INTEGER NOT NULL DEFAULT 800,
-                height INTEGER NOT NULL DEFAULT 600
+                height INTEGER NOT NULL DEFAULT 600,
+                is_closed BOOLEAN DEFAULT false
             );
         `);
+
+        await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT false;`);
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS tables (
@@ -83,7 +148,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 is_locked BOOLEAN DEFAULT false,
                 merged_with INTEGER[],
                 temp_lock_expires_at TIMESTAMPTZ,
-                rotation INTEGER DEFAULT 0
+                rotation INTEGER DEFAULT 0,
+                width_cm INTEGER,
+                length_cm INTEGER,
+                notes TEXT
             );
         `);
 
@@ -91,6 +159,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS min_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS max_seats INTEGER;`);
         await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS rotation INTEGER DEFAULT 0;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS width_cm INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS length_cm INTEGER;`);
+        await client.query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS notes TEXT;`);
 
         // Per-shift table merges. Replaces the global tables.merged_with column,
         // which was a single state shared across all shifts and dates.
@@ -106,6 +177,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_merges_date_shift ON table_merges(date, shift);`);
+
+        // Per-shift table hiding. Lets the floor crew temporarily exclude a
+        // table from the active map for a given service without deleting it
+        // from the global layout (e.g. a corner table not opened tonight).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS table_hidden_overrides (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                shift VARCHAR(10) NOT NULL CHECK (shift IN ('LUNCH', 'DINNER')),
+                table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, shift, table_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_hidden_date_shift ON table_hidden_overrides(date, shift);`);
 
         // One-time migration: copy any pre-existing global merges into today's
         // LUNCH and DINNER so the user's current setup remains visible after
@@ -155,9 +241,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 dish_ids INTEGER[],
                 event_date DATE,
                 deposit_amount DECIMAL(10, 2),
-                courses JSONB
+                courses JSONB,
+                shift VARCHAR(10),
+                guests INTEGER,
+                notes_courses TEXT,
+                notes_service TEXT,
+                notes_mise_en_place TEXT
             );
         `);
+
+        // Add operational fields to existing banquet_menus tables
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS shift VARCHAR(10);`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS guests INTEGER;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_courses TEXT;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_service TEXT;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_mise_en_place TEXT;`);
 
         // Add event_date column to existing banquet_menus if missing
         await client.query(`
@@ -278,7 +376,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -293,7 +391,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id SERIAL PRIMARY KEY,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 permission VARCHAR(100) NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(role, permission)
@@ -329,6 +427,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
                 ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
                 ['OWNER', 'staff:view'], ['OWNER', 'staff:full'],
+                ['OWNER', 'banquet:view_price'],
+                // GENERAL_MANAGER
+                ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+                ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+                ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+                ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+                ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+                ['GENERAL_MANAGER', 'logs:view'],
+                ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+                ['GENERAL_MANAGER', 'banquet:view_price'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
@@ -383,6 +491,42 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
         console.log('Staff permissions migration completed');
 
+        // Add GENERAL_MANAGER role to existing databases (CHECK constraint migration)
+        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check`);
+        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+
+        // Seed GENERAL_MANAGER default permissions if missing
+        const generalManagerPermissions = [
+            ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+            ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+            ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+            ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+            ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+            ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+            ['GENERAL_MANAGER', 'logs:view']
+        ];
+        for (const [role, permission] of generalManagerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // Add banquet:view_price for OWNER + GENERAL_MANAGER
+        const banquetPricePermissions = [
+            ['OWNER', 'banquet:view_price'],
+            ['GENERAL_MANAGER', 'banquet:view_price']
+        ];
+        for (const [role, permission] of banquetPricePermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('GENERAL_MANAGER role and banquet:view_price migration completed');
+
         // ============================================
         // TODOS TABLE
         // ============================================
@@ -406,9 +550,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // Migrations: linked banquet ids + auto-reminder marker
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS linked_banquet_ids INTEGER[];
+        `);
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS banquet_reminder_hours INTEGER;
+        `);
+        await client.query(`
+            ALTER TABLE todos ADD COLUMN IF NOT EXISTS auto_kind VARCHAR(50);
+        `);
+
         // Create indexes for todos
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_user ON todos(assigned_to_user_id);
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_banquet_reminder ON todos(banquet_reminder_hours, due_date) WHERE banquet_reminder_hours IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_todos_auto_kind ON todos(auto_kind, due_date) WHERE auto_kind IS NOT NULL;
         `);
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_todos_assigned_to_team ON todos(assigned_to_team);
@@ -529,6 +690,116 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_staff_time_off_dates ON staff_time_off(start_date, end_date);
         `);
+
+        // ============================================
+        // CUSTOMERS TABLE (rubrica)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS customers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                email VARCHAR(255),
+                address TEXT,
+                city VARCHAR(100),
+                postal_code VARCHAR(20),
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(LOWER(name));`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);`);
+
+        // Track whether a customer was created by the backfill so we can prune
+        // legacy auto-imported entries that don't meet the current rules
+        // (phone or email required) without touching customers added manually.
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS auto_imported BOOLEAN NOT NULL DEFAULT FALSE;`);
+
+        // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
+        // because deleting a customer should not destroy the banquet history.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
+
+        // Customer permissions for roles
+        const customerPermissions = [
+            ['OWNER', 'customers:view'], ['OWNER', 'customers:full'],
+            ['GENERAL_MANAGER', 'customers:view'], ['GENERAL_MANAGER', 'customers:full'],
+            ['MANAGER', 'customers:view'], ['MANAGER', 'customers:full'],
+            ['WAITER', 'customers:view'],
+        ];
+        for (const [role, permission] of customerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // Drop auto-imported customers without a phone number — the rubrica
+        // only stores entries we can call back. Manually-created customers
+        // (auto_imported = FALSE) are left alone.
+        await client.query(`
+            DELETE FROM customers
+             WHERE auto_imported = TRUE
+               AND phone IS NULL;
+        `);
+
+        // Normalise existing names to Title Case. INITCAP treats apostrophes,
+        // hyphens and spaces as word separators — so "MARIO ROSSI",
+        // "mario rossi" and "d'angelo" all land on "Mario Rossi" / "D'Angelo".
+        // Idempotent: only rows that aren't already title-cased get touched.
+        await client.query(`
+            UPDATE customers
+               SET name = INITCAP(name)
+             WHERE name <> INITCAP(name);
+        `);
+
+        // One-time backfill: seed the rubrica from reservations the first time
+        // this migration runs. Restricted to reservations that carry a phone
+        // — that's the only identifier we use in the rubrica. Deduplicated
+        // on phone.
+        const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
+        if (customerCount.rows[0].c === 0) {
+            await client.query(`
+                INSERT INTO customers (name, phone, email, auto_imported)
+                SELECT name, phone, email, TRUE
+                FROM (
+                    SELECT
+                        INITCAP(TRIM(customer_name)) AS name,
+                        NULLIF(TRIM(phone), '') AS phone,
+                        NULLIF(TRIM(email), '') AS email,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY NULLIF(TRIM(phone), '')
+                            ORDER BY id DESC
+                        ) AS rn
+                    FROM reservations
+                    WHERE customer_name IS NOT NULL
+                      AND TRIM(customer_name) <> ''
+                      AND NULLIF(TRIM(phone), '') IS NOT NULL
+                ) deduped
+                WHERE rn = 1;
+            `);
+
+            // Link existing banquet_menus.customer_id by matching the banquet's
+            // most recent reservation to the customer we just inserted.
+            await client.query(`
+                UPDATE banquet_menus bm
+                SET customer_id = sub.customer_id
+                FROM (
+                    SELECT DISTINCT ON (r.banquet_menu_id)
+                        r.banquet_menu_id,
+                        c.id AS customer_id
+                    FROM reservations r
+                    JOIN customers c
+                      ON c.phone IS NOT DISTINCT FROM NULLIF(TRIM(r.phone), '')
+                     AND LOWER(c.name) = LOWER(INITCAP(TRIM(r.customer_name)))
+                    WHERE r.banquet_menu_id IS NOT NULL
+                    ORDER BY r.banquet_menu_id, r.id DESC
+                ) sub
+                WHERE bm.id = sub.banquet_menu_id AND bm.customer_id IS NULL;
+            `);
+            console.log('Customers rubrica backfilled from reservations');
+        }
 
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');

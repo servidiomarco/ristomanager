@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges } from '../services/apiService';
+import { createPortal } from 'react-dom';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser } from 'lucide-react';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
+import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
+import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { useAuth } from '../contexts/AuthContext';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -91,6 +95,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   modalOnly = false,
   onModalClose
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
   const [selectedDate, setSelectedDate] = useState<string>(formatLocalDateTime(new Date()));
@@ -140,8 +146,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }, [currentTime, selectedDate]);
 
   useEffect(() => {
-    if (rooms.length > 0 && activeMapRoomId === 'ALL') {
-      setActiveMapRoomId(rooms[0].id);
+    const openRoomsList = rooms.filter(r => !r.is_closed);
+    if (openRoomsList.length === 0) return;
+    const currentIsClosed = activeMapRoomId !== 'ALL' && rooms.find(r => r.id === activeMapRoomId)?.is_closed;
+    if (activeMapRoomId === 'ALL' || currentIsClosed) {
+      setActiveMapRoomId(openRoomsList[0].id);
     }
   }, [rooms, activeMapRoomId]);
 
@@ -168,20 +177,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
-  // Map view canvas size tracking for responsive scaling
-  const mapCanvasRef = useRef<HTMLDivElement>(null);
+  // Draft restore banner — only shown while creating a new reservation
+  const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
+
+  // Map-view: assign a free table to an unassigned reservation
+  const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
+  // Map-view: list of reservations without an assigned table for the selected date+shift
+  const [showUnassignedModal, setShowUnassignedModal] = useState(false);
+
+  // Map view canvas size tracking for responsive scaling.
+  // Use a state-based callback ref so the measurement re-runs whenever the
+  // canvas element mounts/unmounts (e.g. when viewMode or isPhone changes).
+  const [mapCanvasNode, setMapCanvasNode] = useState<HTMLDivElement | null>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
-    const el = mapCanvasRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!mapCanvasNode) {
+      setMapCanvasSize({ width: 0, height: 0 });
+      return;
+    }
+    const rect = mapCanvasNode.getBoundingClientRect();
+    setMapCanvasSize({ width: rect.width, height: rect.height });
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
         setMapCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
       }
     });
-    observer.observe(el);
+    observer.observe(mapCanvasNode);
     return () => observer.disconnect();
-  }, [viewMode]);
+  }, [mapCanvasNode]);
+
+  // Phone breakpoint detection (< 640px = Tailwind's sm) for list-style Map view on smartphones
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+  useEffect(() => {
+    const onResize = () => setIsPhone(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Portal target for the page-level title/actions inside the global sticky header
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHeaderSlot(document.getElementById('page-header-slot'));
+  }, []);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -193,6 +231,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onCancel: () => void;
     onSelectSuggestion?: (table: Table) => void;
   } | null>(null);
+
+  // Customer picker (rubrica) modal
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
 
   // Time slot options
   const LUNCH_TIMES = ['13:00', '13:30', '14:00'];
@@ -216,6 +257,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
+  const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   const focalDate = isFormOpen && formData.reservation_time
     ? formData.reservation_time.split('T')[0]
@@ -235,6 +278,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
+  const handleToggleTableHidden = async (table: Table) => {
+    const isCurrentlyHidden = hiddenTableIds.has(table.id);
+    try {
+      if (isCurrentlyHidden) {
+        await deleteTableHidden(focalDate, focalShift, table.id);
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          next.delete(table.id);
+          return next;
+        });
+        showToast(`Tavolo ${table.name} riattivato`, 'success');
+      } else {
+        await createTableHidden(focalDate, focalShift, table.id);
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          next.add(table.id);
+          return next;
+        });
+        showToast(`Tavolo ${table.name} nascosto per questo turno`, 'success');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Operazione non riuscita', 'error');
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     setIsLoadingMerges(true);
@@ -248,7 +316,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
-  const { socket } = useSocket();
+  useEffect(() => {
+    let cancelled = false;
+    getTableHidden(focalDate, focalShift)
+      .then(rows => { if (!cancelled) setHiddenTableIds(new Set(rows.map(r => r.table_id))); })
+      .catch(err => {
+        console.error('Error fetching hidden tables:', err);
+        if (!cancelled) setHiddenTableIds(new Set());
+      });
+    return () => { cancelled = true; };
+  }, [focalDate, focalShift]);
+
+  const { socket, isConnected } = useSocket();
 
   useEffect(() => {
     if (!socket) return;
@@ -274,6 +353,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => {
       socket.off('tableMerge:created', onCreated);
       socket.off('tableMerge:deleted', onDeleted);
+    };
+  }, [socket, focalDate, focalShift]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const matches = (h: TableHiddenOverride) => h.date === focalDate && h.shift === focalShift;
+    const onCreated = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.add(h.table_id);
+        return next;
+      });
+    };
+    const onDeleted = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.delete(h.table_id);
+        return next;
+      });
+    };
+    socket.on('tableHidden:created', onCreated);
+    socket.on('tableHidden:deleted', onDeleted);
+    return () => {
+      socket.off('tableHidden:created', onCreated);
+      socket.off('tableHidden:deleted', onDeleted);
     };
   }, [socket, focalDate, focalShift]);
 
@@ -313,7 +419,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
-      const matchesSearch = r.customer_name ? r.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) : true;
+      const trimmedSearch = searchTerm.trim().toLowerCase();
+      let matchesSearch = true;
+      if (trimmedSearch) {
+        const nameHit = !!r.customer_name && r.customer_name.toLowerCase().includes(trimmedSearch);
+        const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
+        const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
+        matchesSearch = nameHit || tableHit;
+      }
       return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
     })
     .sort((a, b) => {
@@ -600,6 +713,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setModalRoomFilter('ALL');
       setIsEditing(false);
       setIsFormOpen(true);
+
+      const existing = loadDraft<{
+        formData: Partial<Reservation>;
+        selectedAllergens: string[];
+        selectedQuickNotes: string[];
+      }>(DRAFT_KEYS.RESERVATION_NEW);
+      setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
   };
 
   // Auto-open new reservation form when triggered from outside (e.g. Dashboard CTA)
@@ -619,6 +739,57 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
     wasFormOpenRef.current = isFormOpen;
   }, [isFormOpen, modalOnly, onModalClose]);
+
+  const handleRestoreDraft = () => {
+      const existing = loadDraft<{
+        formData: Partial<Reservation>;
+        selectedAllergens: string[];
+        selectedQuickNotes: string[];
+      }>(DRAFT_KEYS.RESERVATION_NEW);
+      if (!existing) {
+        setDraftBanner(null);
+        return;
+      }
+      setFormData(existing.data.formData);
+      setSelectedAllergens(existing.data.selectedAllergens || []);
+      setSelectedQuickNotes(existing.data.selectedQuickNotes || []);
+      setShowAllergensSection((existing.data.selectedAllergens || []).length > 0);
+      setShowNotesSection(
+        (existing.data.selectedQuickNotes || []).length > 0 ||
+        !!existing.data.formData?.notes
+      );
+      setDraftBanner(null);
+      showToast('Bozza ripristinata', 'success');
+  };
+
+  const handleDiscardDraft = () => {
+      clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+      setDraftBanner(null);
+  };
+
+  // Persist a draft of the new-reservation form (debounced).
+  // Only while creating (not editing) and only if the user has typed something meaningful.
+  useEffect(() => {
+    if (!isFormOpen || isEditing) return;
+
+    const hasContent =
+      (formData.customer_name && formData.customer_name.trim() !== '') ||
+      (formData.phone && formData.phone.trim() !== '') ||
+      (formData.email && formData.email.trim() !== '') ||
+      (formData.notes && formData.notes.trim() !== '') ||
+      selectedAllergens.length > 0 ||
+      selectedQuickNotes.length > 0;
+    if (!hasContent) return;
+
+    const timer = setTimeout(() => {
+      saveDraft(DRAFT_KEYS.RESERVATION_NEW, {
+        formData,
+        selectedAllergens,
+        selectedQuickNotes,
+      });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [isFormOpen, isEditing, formData, selectedAllergens, selectedQuickNotes]);
 
   // --- Helper Logic ---
 
@@ -735,6 +906,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             other.merged_with && other.merged_with.length > 0 &&
             other.merged_with.map(id => Number(id)).includes(Number(t.id))
         ))
+        .filter(t => !hiddenTableIds.has(t.id))
         .sort((a, b) => a.seats - b.seats);
 
       if (availableTables.length > 0) {
@@ -768,8 +940,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           onUpdateReservation(dataToSave as Reservation);
       } else {
           onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+          clearDraft(DRAFT_KEYS.RESERVATION_NEW);
       }
 
+      setDraftBanner(null);
       setIsFormOpen(false);
   };
 
@@ -783,7 +957,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  const displayedRooms = modalRoomFilter === 'ALL' ? rooms : rooms.filter(r => r.id === modalRoomFilter);
+  const openRooms = rooms.filter(r => !r.is_closed);
+  const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
 
   // Calculate Free Tables for the form header
@@ -823,56 +998,96 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const reservation = getReservationForTable(table.id);
       const isOccupied = !!reservation;
       const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+      const isHidden = hiddenTableIds.has(table.id);
       const trimmedSearch = searchTerm.trim().toLowerCase();
-      const isSearchMatch = !!(trimmedSearch && reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch));
+      const isSearchMatch = !!(trimmedSearch && (
+        (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+        table.name.toLowerCase().includes(trimmedSearch)
+      ));
 
       // Responsive table sizes - smaller on mobile and tablets
       const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
       const baseWidth = window.innerWidth < 768 ? 60 : 100; // For rectangles
 
-      let shapeStyles = {};
+      let widthPx: number;
+      let heightPx: number;
+      let borderRadius: string;
       if (table.shape === TableShape.CIRCLE) {
-          shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '50%';
       } else if (table.shape === TableShape.SQUARE) {
-          shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       } else {
-          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
-          shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+          widthPx = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
+          heightPx = baseSize; borderRadius = '8px';
       }
+
+      // Anchor the reservation pill below the rotated bounding box so it
+      // always sits horizontally below the visible table at any rotation.
+      const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+      const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+      const pillTopPx = heightPx / 2 + rotatedHalfH + 6;
+
+      const shapeClasses = `flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
+          ${isArrived
+              ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200'
+              : isOccupied
+                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200'
+                  : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+          }
+          ${isHidden ? 'opacity-40 grayscale' : ''}
+      `;
 
       return (
         <div
             key={table.id}
-            className={`absolute flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
-                ${isArrived
-                    ? 'bg-orange-50 border-orange-300 text-orange-700 z-10 ring-1 ring-orange-200'
-                    : isOccupied
-                        ? 'bg-rose-50 border-rose-300 text-rose-700 z-10 ring-1 ring-rose-200'
-                        : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                }
-                ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}
-            `}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}`}
             style={{
                 left: table.x,
                 top: table.y,
-                ...shapeStyles,
-                transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
+                width: `${widthPx}px`,
+                height: `${heightPx}px`,
             }}
-            title={isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero'}
-            onClick={() => isOccupied && handleEditClick(reservation)}
+            title={isHidden
+                ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
+                : (isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione')}
+            onClick={() => {
+                if (isOccupied) {
+                    handleEditClick(reservation);
+                } else if (canEdit) {
+                    setAssignTableModal(table);
+                }
+            }}
         >
-            <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
-            {isOccupied ? (
-                <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
-                    <Users size={16} /> {reservation.guests}
-                </span>
-            ) : (
-                <span className="text-[10px] flex items-center gap-1 opacity-80">
-                    <Armchair size={10} /> {table.seats}
-                </span>
-            )}
+            <div
+                className={shapeClasses}
+                style={{
+                    width: `${widthPx}px`,
+                    height: `${heightPx}px`,
+                    borderRadius,
+                    transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+                }}
+            >
+                {isHidden && (
+                    <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                        <EyeOff size={8} />
+                    </div>
+                )}
+                <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
+                {isOccupied ? (
+                    <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
+                        <Users size={16} /> {reservation.guests}
+                    </span>
+                ) : (
+                    <span className="text-[10px] flex items-center gap-1 opacity-80">
+                        <Armchair size={10} /> {table.seats}
+                    </span>
+                )}
+            </div>
             {isOccupied && (
-                <div className={`absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}>
+                <div
+                    style={{ top: pillTopPx }}
+                    className={`absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
+                >
                     {toTitleCase(reservation.customer_name)}
                 </div>
             )}
@@ -884,40 +1099,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     <div className={modalOnly ? 'contents' : `${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-4 sm:p-6 lg:p-8'} space-y-6`}>
       {!modalOnly && (
       <React.Fragment>
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-[20px] sm:text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">Gestione Prenotazioni</h1>
-          <p className="text-sm text-[var(--color-fg-muted)]">Gestisci turni, tavoli e pagamenti.</p>
-        </div>
-
-        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+      {headerSlot && createPortal(
+        <>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <h1 className="text-[15px] sm:text-base font-semibold tracking-tight text-[var(--color-fg)] truncate">Gestione Prenotazioni</h1>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             {canEdit && (
-            <button
+              <button
                 onClick={handleOpenNew}
-                className="inline-flex items-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
-            >
+                className="hidden md:inline-flex items-center gap-1.5 rounded-full px-4 h-9 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
+              >
                 <Plus className="h-4 w-4" /> Nuova
-            </button>
+              </button>
             )}
-
             <div className="inline-flex items-center p-0.5 bg-[var(--color-surface-3)] rounded-full">
-                <button
-                   onClick={() => setViewMode('LIST')}
-                   className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                   title="Vista Elenco"
-                >
-                    <List className="h-4 w-4" />
-                </button>
-                <button
-                   onClick={() => setViewMode('MAP')}
-                   className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'MAP' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                   title="Vista Mappa Sala"
-                >
-                    <MapIcon className="h-4 w-4" />
-                </button>
+              <button
+                onClick={() => setViewMode('LIST')}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                title="Vista Elenco"
+              >
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('MAP')}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'MAP' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                title="Vista Mappa Sala"
+              >
+                <MapIcon className="h-4 w-4" />
+              </button>
             </div>
-        </div>
-      </div>
+          </div>
+        </>,
+        headerSlot
+      )}
 
       {/* Search & Filters Bar */}
       <div className="flex flex-wrap items-stretch gap-3 bg-[var(--color-surface)] p-3 sm:p-4 rounded-lg shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
@@ -925,11 +1140,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--color-fg-subtle)] h-4 w-4" />
                 <input
                     type="text"
-                    placeholder="Cerca prenotazione..."
-                    className="w-full h-full pl-10 pr-4 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
+                    placeholder="Cerca per nome o tavolo..."
+                    className="w-full h-full pl-10 pr-10 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                {searchTerm && (
+                    <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
+                        title="Cancella ricerca"
+                        aria-label="Cancella ricerca"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                )}
             </div>
 
             <div className="flex items-center justify-between sm:justify-start gap-1 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] px-1 h-11 w-full sm:w-auto">
@@ -1277,7 +1503,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                                 {menu && (
                                     <div className="mt-2 text-sm bg-[var(--color-surface-3)] inline-block px-3 py-1 rounded-md border border-[var(--color-line)] text-[var(--color-fg)]">
-                                        Menu Banchetto: <b>{menu.name}</b> (€{menu.price_per_person}/pax)
+                                        Menu Banchetto: <b>{menu.name}</b>{canViewBanquetPrice && ` (€${menu.price_per_person}/pax)`}
                                     </div>
                                 )}
                                 {res.notes && <p className="text-xs text-[var(--color-fg-subtle)] mt-2 italic">{res.notes}</p>}
@@ -1366,7 +1592,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               .filter(t => !displayTables.some(other =>
                   other.merged_with && other.merged_with.length > 0 &&
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
-              ));
+              ))
+              // Hide per-shift unless user toggled "show hidden".
+              .filter(t => showHidden || !hiddenTableIds.has(t.id));
           const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
@@ -1379,6 +1607,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           });
           const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
           const reservationCountForDayShift = reservationsForDayShift.length;
+          const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
 
           // Compute the natural bounding box of the room and a scale factor
           // so the room fits the available canvas width/height on tablet+desktop.
@@ -1409,104 +1638,272 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           return (
               <div className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-line)] shadow-[var(--shadow-xs)] flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-220px)] animate-in fade-in duration-300">
-                  {/* Room Selector for Map */}
-                  <div className="flex gap-2 mb-4 border-b border-[var(--color-line)] pb-2 overflow-x-auto scrollbar-hide">
-                      {rooms.map(room => (
+                  {/* Combined room selector + stats row */}
+                  <div className="flex items-center gap-3 mb-3 border-b border-[var(--color-line)] pb-2">
+                      <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+                          {rooms.filter(r => !r.is_closed).map(room => (
+                              <button
+                                  key={room.id}
+                                  onClick={() => setActiveMapRoomId(room.id)}
+                                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
+                                      activeMapRoomId === room.id
+                                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                                  }`}
+                              >
+                                  {room.name}
+                              </button>
+                          ))}
+                      </div>
+                      {hiddenTableIds.size > 0 && (
                           <button
-                              key={room.id}
-                              onClick={() => setActiveMapRoomId(room.id)}
-                              className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
-                                  activeMapRoomId === room.id
-                                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                              type="button"
+                              onClick={() => setShowHidden(v => !v)}
+                              className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                                  showHidden
+                                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                               }`}
+                              title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}
                           >
-                              {room.name}
+                              {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                              <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
                           </button>
-                      ))}
+                      )}
+                      <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
+                          <div className="flex items-center gap-1.5">
+                              <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+                              <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+                              <span className="text-[var(--color-fg-muted)]">coperti</span>
+                          </div>
+                          <span className="text-[var(--color-fg-subtle)]">·</span>
+                          <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+                              <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+                          </div>
+                          {unassignedCountForDayShift > 0 && (
+                              <button
+                                  type="button"
+                                  onClick={() => setShowUnassignedModal(true)}
+                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors"
+                                  title="Tocca per vedere le prenotazioni senza tavolo"
+                              >
+                                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                                  <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+                                  <span className="text-xs">senza tavolo</span>
+                                  <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+                              </button>
+                          )}
+                          <span className="text-[var(--color-fg-subtle)]">·</span>
+                          <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                              <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+                              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+                          </div>
+                      </div>
                   </div>
 
-                  {/* Map Canvas */}
-                  <div
-                    ref={mapCanvasRef}
-                    className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden"
-                    style={{
-                        backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                        backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
-                    }}
-                  >
-                       {isLoadingMerges && (
-                           <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                               <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                                   <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                                   <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
-                               </div>
-                           </div>
-                       )}
+                  {/* Mobile/tablet stats bar (shown below room tabs when md breakpoint is too narrow) */}
+                  <div className="md:hidden mb-3 px-3 py-2 bg-[var(--color-surface-3)] rounded-md border border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                          <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+                          <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+                          <span className="text-[var(--color-fg-muted)]">coperti</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+                          <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+                      </div>
+                      {unassignedCountForDayShift > 0 && (
+                          <button
+                              type="button"
+                              onClick={() => setShowUnassignedModal(true)}
+                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors w-fit"
+                              title="Tocca per vedere le prenotazioni senza tavolo"
+                          >
+                              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                              <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+                              <span className="text-xs">senza tavolo</span>
+                              <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+                          </button>
+                      )}
+                      <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
+                          <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+                          <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+                      </div>
+                  </div>
 
-                       {/* Coperti badge */}
-                       <div className="absolute top-4 right-4 z-10 bg-[var(--color-surface)]/95 backdrop-blur px-3 py-2 rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] flex items-center gap-2 text-xs">
-                           <Users size={14} className="text-[var(--color-fg-muted)]" />
-                           <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
-                           <span className="text-[var(--color-fg-muted)]">coperti</span>
-                           <span className="text-[var(--color-fg-subtle)]">·</span>
-                           <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
-                           <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                       </div>
-                       <div
-                           style={{
-                               width: extentWidth,
-                               height: extentHeight,
-                               transform: `scale(${scale})`,
-                               transformOrigin: 'top left',
-                               position: 'relative'
-                           }}
-                       >
-                           {tablesInRoom.map(renderMapTable)}
-                       </div>
-
-                       {/* Legend - collapsible */}
-                       <div className="absolute bottom-4 right-4 z-10 select-none">
-                           <button
-                               type="button"
-                               onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                               className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
-                               aria-expanded={isLegendOpen}
-                           >
-                               <Info size={14} className="text-[var(--color-fg-muted)]" />
-                               Legenda
-                           </button>
-                           {isLegendOpen && (
-                               <div
-                                   className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
-                                   onClick={(e) => e.stopPropagation()}
-                               >
-                                   <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
-                                   <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                       <div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero
-                                   </div>
-                                   <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                       <div className="w-3 h-3 bg-rose-50 border border-rose-300 rounded-sm"></div> Occupato
-                                   </div>
-                                   <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                       <div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato
-                                   </div>
-                                   <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                                       <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Occupazione</div>
-                                       <div className="text-sm text-[var(--color-fg)]">
-                                           <span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)
-                                       </div>
-                                   </div>
-                                   <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                                       <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Coperti</div>
-                                       <div className="text-sm text-[var(--color-fg)]">
-                                           <span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
-                                       </div>
+                  {isPhone ? (
+                      /* Mobile (smartphone) list view */
+                      <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative">
+                          {isLoadingMerges && (
+                              <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                                      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                                      <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                                  </div>
+                              </div>
+                          )}
+                          {tablesInRoom.length === 0 ? (
+                              <div className="text-center py-10 px-4 text-sm text-[var(--color-fg-muted)]">
+                                  Nessun tavolo in questa sala.
+                              </div>
+                          ) : (
+                              <ul className="divide-y divide-[var(--color-line)]">
+                                  {[...tablesInRoom]
+                                      .sort((a, b) => {
+                                          const ra = getReservationForTable(a.id);
+                                          const rb = getReservationForTable(b.id);
+                                          if (!!ra !== !!rb) return ra ? -1 : 1;
+                                          if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
+                                          return a.name.localeCompare(b.name, 'it', { numeric: true });
+                                      })
+                                      .map(table => {
+                                          const reservation = getReservationForTable(table.id);
+                                          const isOccupied = !!reservation;
+                                          const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                                          const trimmedSearch = searchTerm.trim().toLowerCase();
+                                          const isSearchMatch = !!(trimmedSearch && (
+                                            (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+                                            table.name.toLowerCase().includes(trimmedSearch)
+                                          ));
+                                          const mergedNames = (table.merged_with && table.merged_with.length > 0)
+                                              ? table.merged_with
+                                                  .map(id => tables.find(t => Number(t.id) === Number(id))?.name)
+                                                  .filter((n): n is string => !!n)
+                                              : [];
+                                          const displayName = mergedNames.length > 0
+                                              ? `${table.name}+${mergedNames.join('+')}`
+                                              : table.name;
+                                          const isMerged = mergedNames.length > 0;
+                                          return (
+                                              <li key={table.id}>
+                                                  <button
+                                                      onClick={() => {
+                                                          if (isOccupied) {
+                                                              handleEditClick(reservation);
+                                                          } else if (canEdit) {
+                                                              setAssignTableModal(table);
+                                                          }
+                                                      }}
+                                                      className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
+                                                          isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
+                                                      }`}
+                                                  >
+                                                      <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
+                                                          isArrived
+                                                              ? 'bg-orange-50 border-orange-300 text-orange-700'
+                                                              : isOccupied
+                                                                  ? 'bg-rose-50 border-rose-300 text-rose-700'
+                                                                  : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
+                                                      }`}>
+                                                          <span className="text-center leading-tight break-all">{displayName}</span>
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                          {isOccupied ? (
+                                                              <>
+                                                                  <div className="flex items-center gap-2">
+                                                                      <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
+                                                                      {isArrived && (
+                                                                          <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>
+                                                                      )}
+                                                                  </div>
+                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
+                                                                      <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                                                      <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                                                  </div>
+                                                              </>
+                                                          ) : (
+                                                              <>
+                                                                  <div className="font-medium text-emerald-700">Libero</div>
+                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                                                      <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
+                                                                      {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
+                                                                  </div>
+                                                              </>
+                                                          )}
+                                                      </div>
+                                                      <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                                                  </button>
+                                              </li>
+                                          );
+                                      })}
+                              </ul>
+                          )}
+                      </div>
+                  ) : (
+                      /* Desktop / tablet positioned canvas view */
+                      <div
+                        ref={setMapCanvasNode}
+                        className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden"
+                        style={{
+                            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+                            backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
+                        }}
+                      >
+                           {isLoadingMerges && (
+                               <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                                   <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                                       <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                                       <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                                    </div>
                                </div>
                            )}
-                       </div>
-                  </div>
+                           <div
+                               style={{
+                                   width: extentWidth,
+                                   height: extentHeight,
+                                   transform: `scale(${scale})`,
+                                   transformOrigin: 'top left',
+                                   position: 'relative'
+                               }}
+                           >
+                               {tablesInRoom.map(renderMapTable)}
+                           </div>
+
+                           {/* Legend - collapsible */}
+                           <div className="absolute bottom-4 right-4 z-10 select-none">
+                               <button
+                                   type="button"
+                                   onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                                   className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
+                                   aria-expanded={isLegendOpen}
+                               >
+                                   <Info size={14} className="text-[var(--color-fg-muted)]" />
+                                   Legenda
+                               </button>
+                               {isLegendOpen && (
+                                   <div
+                                       className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                                       onClick={(e) => e.stopPropagation()}
+                                   >
+                                       <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
+                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                                           <div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero
+                                       </div>
+                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                                           <div className="w-3 h-3 bg-rose-50 border border-rose-300 rounded-sm"></div> Occupato
+                                       </div>
+                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                                           <div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato
+                                       </div>
+                                       <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                                           <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Occupazione</div>
+                                           <div className="text-sm text-[var(--color-fg)]">
+                                               <span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)
+                                           </div>
+                                       </div>
+                                       <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                                           <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Coperti</div>
+                                           <div className="text-sm text-[var(--color-fg)]">
+                                               <span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
+                                           </div>
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+                      </div>
+                  )}
               </div>
           );
       })()}
@@ -1525,6 +1922,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
+                    {!isEditing && draftBanner && (
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-amber-900">Bozza non salvata trovata</p>
+                                <p className="text-xs text-amber-700 mt-0.5">
+                                    Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                                </p>
+                            </div>
+                            <div className="flex gap-2 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={handleRestoreDraft}
+                                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700"
+                                >
+                                    Riprendi
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDiscardDraft}
+                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100"
+                                >
+                                    Scarta
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
                         {/* Left Column: Details (5 cols) */}
                         <div className="lg:col-span-5 space-y-5 sm:space-y-6">
@@ -1547,6 +1971,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         onChange={e => setFormData({...formData, customer_name: e.target.value})}
                                         placeholder="Mario Rossi"
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCustomerPickerOpen(true)}
+                                        className="p-3 sm:p-4 rounded-xl bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-all flex items-center justify-center"
+                                        title="Rubrica clienti"
+                                    >
+                                        <BookUser className="h-5 w-5" />
+                                    </button>
                                     {isVoiceSupported() && (
                                         <button
                                             type="button"
@@ -1728,7 +2160,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 <option value="">Nessuno</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
-                                                        {m.name} — €{Number(m.price_per_person).toFixed(2)}/persona
+                                                        {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
                                                     </option>
                                                 ))}
                                             </select>
@@ -2020,7 +2452,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                      >
                                          Tutte le sale
                                      </button>
-                                     {rooms.map(room => (
+                                     {openRooms.map(room => (
                                          <button
                                             key={room.id}
                                             type="button"
@@ -2270,6 +2702,238 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         tables={tables}
         initialDate={selectedDate.split('T')[0]}
         initialShift={selectedShift}
+      />
+
+      {/* Unassigned-reservations modal: opened from the map header badge */}
+      {showUnassignedModal && (() => {
+          const dateOnly = selectedDate.split('T')[0];
+          const effectiveShift: Shift = selectedShift !== 'ALL'
+            ? selectedShift
+            : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+          const unassigned = reservations
+            .filter(r => r.reservation_time.split('T')[0] === dateOnly)
+            .filter(r => r.shift === effectiveShift)
+            .filter(r => !r.table_id)
+            .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800">Prenotazioni senza tavolo</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowUnassignedModal(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3">
+                  {unassigned.length === 0 ? (
+                    <div className="text-center py-10 px-4">
+                      <div className="mx-auto w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mb-3">
+                        <Check className="h-6 w-6 text-emerald-600" />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-700">Tutte le prenotazioni hanno un tavolo</p>
+                      <p className="text-xs text-slate-500 mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {unassigned.map(r => (
+                        <li key={r.id}>
+                          <button
+                            onClick={() => {
+                                setShowUnassignedModal(false);
+                                handleEditClick(r);
+                            }}
+                            className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="font-semibold text-slate-800 truncate block">{toTitleCase(r.customer_name)}</span>
+                              <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
+                                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
+                                {r.phone && <span className="truncate">{r.phone}</span>}
+                              </div>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                  <button
+                    onClick={() => setShowUnassignedModal(false)}
+                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                  >
+                    Chiudi
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+      })()}
+
+      {/* Assign-to-free-table modal: click on a free table in Map view */}
+      {assignTableModal && (() => {
+          const table = assignTableModal;
+          const dateOnly = selectedDate.split('T')[0];
+          const effectiveShift: Shift = selectedShift !== 'ALL'
+            ? selectedShift
+            : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+          const unassigned = reservations
+            .filter(r => r.reservation_time.split('T')[0] === dateOnly)
+            .filter(r => r.shift === effectiveShift)
+            .filter(r => !r.table_id)
+            .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+
+          const assign = (r: Reservation) => {
+              onUpdateReservation({ ...r, table_id: table.id });
+              showToast(`Tavolo ${table.name} assegnato a ${toTitleCase(r.customer_name)}`, 'success');
+              setAssignTableModal(null);
+          };
+
+          const isHidden = hiddenTableIds.has(table.id);
+
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <span className="truncate">Assegna Tavolo {table.name}</span>
+                      {isHidden && (
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                          <EyeOff size={10} /> Nascosto
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                      <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {canEdit && (
+                      <button
+                        onClick={async () => {
+                          await handleToggleTableHidden(table);
+                          setAssignTableModal(null);
+                        }}
+                        className={`p-2 rounded-lg transition-colors ${
+                          isHidden
+                            ? 'text-emerald-600 hover:bg-emerald-50'
+                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                        }`}
+                        title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
+                      >
+                        {isHidden ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setAssignTableModal(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3">
+                  <button
+                    onClick={() => {
+                        setAssignTableModal(null);
+                        handleOpenNew();
+                        setFormData(prev => ({ ...prev, table_id: table.id }));
+                    }}
+                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex items-center gap-3"
+                  >
+                    <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Plus className="h-5 w-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-indigo-900">Nuova prenotazione</div>
+                      <div className="text-xs text-indigo-700 mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                  </button>
+
+                  {unassigned.length === 0 ? (
+                    <div className="text-center py-6 px-4">
+                      <p className="text-xs text-slate-500">Nessuna prenotazione senza tavolo per questo turno.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Oppure assegna a una prenotazione esistente
+                      </div>
+                      <ul className="divide-y divide-slate-100">
+                        {unassigned.map(r => {
+                          const insufficient = (r.guests || 0) > table.seats;
+                          return (
+                            <li key={r.id}>
+                              <button
+                                onClick={() => assign(r)}
+                                className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                    {insufficient && (
+                                      <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                                        Capienza insufficiente
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
+                                    <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
+                                    {r.phone && <span className="truncate">{r.phone}</span>}
+                                  </div>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </>
+                  )}
+                </div>
+
+                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                  <button
+                    onClick={() => setAssignTableModal(null)}
+                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+      })()}
+
+      <CustomerPickerModal
+        isOpen={isCustomerPickerOpen}
+        initialQuery={formData.customer_name || ''}
+        onClose={() => setIsCustomerPickerOpen(false)}
+        onSelect={(c: Customer) => {
+          setFormData(prev => ({
+            ...prev,
+            customer_name: c.name,
+            phone: c.phone || prev.phone || '',
+            email: c.email || prev.email || '',
+          }));
+        }}
       />
     </div>
   );

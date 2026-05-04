@@ -1,14 +1,16 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { printShoppingList, shareShoppingListWhatsApp } from '../utils/printShoppingList';
 import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -47,6 +49,7 @@ const PRIORITY_COLORS: Record<TodoPriority, string> = {
 
 const TEAM_LABELS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'Proprietario',
+  [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
   [UserRole.WAITER]: 'Camerieri',
   [UserRole.KITCHEN]: 'Cucina',
@@ -54,6 +57,7 @@ const TEAM_LABELS: Record<UserRole, string> = {
 
 const TEAM_COLORS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'bg-purple-100 text-purple-700',
+  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 text-indigo-700',
   [UserRole.MANAGER]: 'bg-blue-100 text-blue-700',
   [UserRole.WAITER]: 'bg-emerald-100 text-emerald-700',
   [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',
@@ -139,6 +143,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
+  const [notesShift, setNotesShift] = useState<Shift>(() => new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+  const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -316,7 +322,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       );
       if (explicitShift) return explicitShift.present !== false;
 
-      if (staff.staffType !== StaffType.FISSO) return false;
+      if (staff.staffType !== StaffType.FISSO && staff.staffType !== StaffType.STAGIONALE) return false;
       if (staff.weeklyRestDay != null && staff.weeklyRestDay === dayOfWeek) return false;
       if (staff.hireDate && selectedDateStr < toDateOnly(staff.hireDate)) return false;
       if (staff.contractEndDate && selectedDateStr > toDateOnly(staff.contractEndDate)) return false;
@@ -706,20 +712,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       : [];
   }, [reservations, selectedDateStr]);
 
-  // Calculate stats for selected day
-  const totalTables = Array.isArray(tables) ? tables.length : 0;
+  // Calculate stats for selected day (skip tables in closed rooms)
+  const openRoomIds = useMemo(
+    () => new Set((Array.isArray(rooms) ? rooms : []).filter(r => !r.is_closed).map(r => r.id)),
+    [rooms]
+  );
+  const openTables = useMemo(
+    () => (Array.isArray(tables) ? tables.filter(t => openRoomIds.has(t.room_id)) : []),
+    [tables, openRoomIds]
+  );
+  const openTableIds = useMemo(() => new Set(openTables.map(t => t.id)), [openTables]);
+  const totalTables = openTables.length;
 
   // Banchetti scheduled for the selected day
   const banquetsToday = Array.isArray(banquetMenus)
     ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
     : 0;
 
-  // Reservations by shift for selected day
+  // Reservations by shift for selected day (only those on open-room tables for KPI math)
   const lunchReservations = selectedDayReservations.filter(r => r.shift === Shift.LUNCH);
   const dinnerReservations = selectedDayReservations.filter(r => r.shift === Shift.DINNER);
 
-  const lunchTableIds = new Set(lunchReservations.map(r => r.table_id).filter(Boolean));
-  const dinnerTableIds = new Set(dinnerReservations.map(r => r.table_id).filter(Boolean));
+  // Subset that excludes reservations on tables in closed rooms (unassigned reservations are kept).
+  const isOnOpenRoom = (tableId: number | null | undefined): boolean =>
+    tableId == null || openTableIds.has(tableId);
+  const lunchReservationsOpen = lunchReservations.filter(r => isOnOpenRoom(r.table_id));
+  const dinnerReservationsOpen = dinnerReservations.filter(r => isOnOpenRoom(r.table_id));
+
+  const lunchTableIds = new Set(
+    lunchReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+  );
+  const dinnerTableIds = new Set(
+    dinnerReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+  );
 
   // Per-shift KPI stats (guests + tables, expected vs arrived)
   const lunchExpectedGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -733,6 +758,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
+
+  // Reservations with notes/allergens for selected day, filtered by shift (for dashboard card)
+  const reservationNotes = useMemo(() => {
+    const items = selectedDayReservations
+      .filter(r => r.shift === notesShift && r.notes && r.notes.trim().length > 0)
+      .map(r => {
+        const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
+        const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
+        const noteLower = (r.notes || '').toLowerCase();
+        const allergens = COMMON_ALLERGENS.filter(a => noteLower.includes(a.toLowerCase()));
+        return { reservation: r, table, room, allergens };
+      });
+    items.sort((a, b) => a.reservation.reservation_time.localeCompare(b.reservation.reservation_time));
+    return items;
+  }, [selectedDayReservations, tables, rooms, notesShift]);
 
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
@@ -751,8 +791,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return table ? table.room_id : null;
     };
 
-    // Room-based affluence with time slots
-    const roomTimeSlots = rooms.map(room => {
+    // Room-based affluence with time slots (skip closed rooms)
+    const roomTimeSlots = rooms.filter(r => !r.is_closed).map(room => {
       const roomTables = tables.filter(t => t.room_id === room.id);
       const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
 
@@ -790,8 +830,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       };
     });
 
-    // Total capacity for percentage calculation
-    const totalCapacity = rooms.reduce((acc, room) => {
+    // Total capacity for percentage calculation (skip closed rooms)
+    const totalCapacity = rooms.filter(r => !r.is_closed).reduce((acc, room) => {
       const roomTables = tables.filter(t => t.room_id === room.id);
       return acc + roomTables.reduce((sum, t) => sum + t.seats, 0);
     }, 0);
@@ -1032,8 +1072,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </button>
       </div>
 
-      {/* Row 1: Stato Tavoli — Pranzo / Cena side by side */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+      {/* Row 1: Stato Tavoli + Note & Allergeni */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+      {/* Stato Tavoli — Pranzo / Cena side by side */}
+      <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
@@ -1138,6 +1180,108 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Note & Allergeni */}
+      <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)] flex items-center gap-2">
+              <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
+              Note &amp; Allergeni
+            </h2>
+            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
+              <button
+                onClick={() => setNotesShift(Shift.LUNCH)}
+                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  notesShift === Shift.LUNCH
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                <Sun className="h-3 w-3" />
+                Pranzo
+              </button>
+              <button
+                onClick={() => setNotesShift(Shift.DINNER)}
+                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  notesShift === Shift.DINNER
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                <Moon className="h-3 w-3" />
+                Cena
+              </button>
+            </div>
+          </div>
+          {reservationNotes.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-center py-8">
+              <div>
+                <StickyNote className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-xs text-[var(--color-fg-subtle)]">
+                  Nessuna nota per il {notesShift === Shift.LUNCH ? 'pranzo' : 'la cena'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+              {reservationNotes.map(({ reservation, table, room, allergens }) => {
+                const isLunch = reservation.shift === Shift.LUNCH;
+                const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
+                const accentBorder = isLunch ? 'border-l-amber-400' : 'border-l-indigo-400';
+                return (
+                  <div key={reservation.id} className={`border border-[var(--color-line)] border-l-4 ${accentBorder} rounded-md p-2.5 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors`}>
+                    <div className="flex items-stretch justify-between gap-3">
+                      {/* Left: prominent table + room + customer */}
+                      <div className="flex-shrink-0 min-w-0 max-w-[40%]">
+                        {table ? (
+                          <>
+                            <div className="flex items-center gap-1 text-sm font-semibold text-[var(--color-fg)] leading-tight">
+                              <Armchair className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                              <span className="truncate">{table.name}</span>
+                            </div>
+                            {room && (
+                              <div className="text-[11px] font-medium text-[var(--color-fg-muted)] truncate mt-0.5">
+                                {room.name}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-xs text-[var(--color-fg-subtle)] italic">Tavolo non assegnato</div>
+                        )}
+                        <div className="text-[10px] text-[var(--color-fg-muted)] truncate mt-1">
+                          {reservation.customer_name}
+                        </div>
+                        {time && (
+                          <div className="text-[10px] text-[var(--color-fg-subtle)] mt-0.5">
+                            {time}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: notes + allergens */}
+                      <div className="flex-1 min-w-0 text-right">
+                        <p className="text-[11px] text-[var(--color-fg)] leading-snug whitespace-pre-wrap break-words">
+                          {reservation.notes}
+                        </p>
+                        {allergens.length > 0 && (
+                          <div className="flex items-center justify-end gap-1 mt-1.5 flex-wrap">
+                            <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
+                            {allergens.map(a => (
+                              <span key={a} className="inline-block bg-rose-50 text-rose-700 border border-rose-100 text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                {a}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1515,7 +1659,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
                           )}
+                          {todo.banquetReminderHours != null && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+                              {todo.banquetReminderHours}h prima
+                            </span>
+                          )}
                         </div>
+                        {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
+                          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              Banchetti:
+                            </span>
+                            {todo.linkedBanquetIds.map(bid => {
+                              const banquet = banquetMenus.find(b => b.id === bid);
+                              if (!banquet) return null;
+                              return (
+                                <button
+                                  key={bid}
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setBanquetModal(banquet); }}
+                                  className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-100 transition-colors"
+                                  title="Visualizza composizione"
+                                >
+                                  <Utensils className="h-2.5 w-2.5" />
+                                  <span className="truncate max-w-[140px]">{banquet.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1591,8 +1763,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 if (items.length === 0) return null;
                 return (
                   <div key={category}>
-                    <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
-                      {SHOPPING_CATEGORY_LABELS[category]} <span className="tabular text-[var(--color-fg-subtle)]">({items.length})</span>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[11px] font-medium text-[var(--color-fg-muted)]">
+                        {SHOPPING_CATEGORY_LABELS[category]} <span className="tabular text-[var(--color-fg-subtle)]">({items.length})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => shareShoppingListWhatsApp(items, category, selectedDateStr)}
+                        className="ml-auto p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                        title={`Condividi su WhatsApp ${SHOPPING_CATEGORY_LABELS[category]}`}
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printShoppingList(items, category, selectedDateStr)}
+                        className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                        title={`Stampa PDF ${SHOPPING_CATEGORY_LABELS[category]}`}
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                     <div className="space-y-1.5">
                       {items.map(item => {
@@ -1955,6 +2145,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           setDeleteTodoConfirm(null);
         }}
       />
+
+      {banquetModal && (
+        <BanquetCompositionModal
+          banquet={banquetModal}
+          dishes={dishes}
+          onClose={() => setBanquetModal(null)}
+        />
+      )}
     </div>
   );
 };

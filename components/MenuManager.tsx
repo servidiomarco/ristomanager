@@ -1,10 +1,15 @@
 
 
-import React, { useState, useMemo } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer } from '../types';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { BanquetCompositionModal } from './BanquetCompositionModal';
+import { DishDetailModal } from './DishDetailModal';
+import { CustomerPickerModal } from './CustomerPickerModal';
+import { getCustomers } from '../services/apiService';
+import { useAuth } from '../contexts/AuthContext';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -43,6 +48,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     canEdit = true,
     initialTab = 'DISHES'
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
@@ -54,6 +61,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [editingBanquetId, setEditingBanquetId] = useState<number | null>(null);
   const [deleteDishConfirm, setDeleteDishConfirm] = useState<Dish | null>(null);
   const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
+  const [viewBanquet, setViewBanquet] = useState<BanquetMenu | null>(null);
+  const [viewDish, setViewDish] = useState<Dish | null>(null);
 
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
@@ -73,8 +82,38 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       dish_ids: [],
       courses: [],
       event_date: '',
-      deposit_amount: undefined
+      shift: undefined,
+      deposit_amount: undefined,
+      guests: undefined,
+      customer_id: null,
+      notes_courses: '',
+      notes_service: '',
+      notes_mise_en_place: ''
   });
+
+  // Customer picker (rubrica) state for banquet form
+  const [isBanquetCustomerPickerOpen, setIsBanquetCustomerPickerOpen] = useState(false);
+  const [selectedBanquetCustomer, setSelectedBanquetCustomer] = useState<Customer | null>(null);
+
+  // Load the selected customer when editing a banquet that has customer_id
+  useEffect(() => {
+    if (!isBanquetFormOpen) return;
+    const id = newBanquet.customer_id;
+    if (!id) {
+      setSelectedBanquetCustomer(null);
+      return;
+    }
+    if (selectedBanquetCustomer?.id === id) return;
+    let cancelled = false;
+    getCustomers()
+      .then(list => {
+        if (cancelled) return;
+        const found = list.find(c => c.id === id) || null;
+        setSelectedBanquetCustomer(found);
+      })
+      .catch(() => { if (!cancelled) setSelectedBanquetCustomer(null); });
+    return () => { cancelled = true; };
+  }, [isBanquetFormOpen, newBanquet.customer_id, selectedBanquetCustomer?.id]);
 
   const handleAddDishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,9 +173,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           dish_ids: flatDishIds,
           courses,
           event_date: newBanquet.event_date!,
+          shift: newBanquet.shift,
           deposit_amount: newBanquet.deposit_amount != null && newBanquet.deposit_amount !== ('' as any)
               ? Number(newBanquet.deposit_amount)
-              : undefined
+              : undefined,
+          guests: newBanquet.guests != null && newBanquet.guests !== ('' as any)
+              ? Number(newBanquet.guests)
+              : undefined,
+          customer_id: newBanquet.customer_id ?? null,
+          notes_courses: newBanquet.notes_courses?.trim() || undefined,
+          notes_service: newBanquet.notes_service?.trim() || undefined,
+          notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined
       };
 
       if (isEditingBanquet && editingBanquetId !== null) {
@@ -148,7 +195,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', deposit_amount: undefined });
+      setSelectedBanquetCustomer(null);
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -165,8 +213,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       dish_ids: menu.dish_ids,
       courses,
       event_date: menu.event_date || '',
-      deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined
+      shift: menu.shift,
+      deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined,
+      guests: menu.guests != null ? Number(menu.guests) : undefined,
+      customer_id: menu.customer_id ?? null,
+      notes_courses: menu.notes_courses || '',
+      notes_service: menu.notes_service || '',
+      notes_mise_en_place: menu.notes_mise_en_place || ''
     });
+    setSelectedBanquetCustomer(null);
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setIsBanquetFormOpen(true);
@@ -175,11 +230,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewBanquet = () => {
     setIsEditingBanquet(false);
     setEditingBanquetId(null);
+    setSelectedBanquetCustomer(null);
     setNewBanquet({
       name: '', description: '', price_per_person: 0,
       dish_ids: [],
       courses: [{ name: '1ª Uscita', dish_ids: [] }],
-      event_date: '', deposit_amount: undefined
+      event_date: '', shift: undefined, deposit_amount: undefined,
+      guests: undefined,
+      customer_id: null,
+      notes_courses: '', notes_service: '', notes_mise_en_place: ''
     });
     setIsBanquetFormOpen(true);
   };
@@ -322,7 +381,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Categoria</th>
                     <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Prezzo</th>
                     <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Allergeni</th>
-                    {canEdit && <th className="px-6 py-3 text-right text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Azioni</th>}
+                    <th className="px-6 py-3 text-right text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Azioni</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -363,24 +422,35 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             )) : <span className="text-xs text-[var(--color-fg-subtle)]">-</span>}
                         </div>
                         </td>
-                        {canEdit && (
                         <td className="px-6 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                             <button
+                                onClick={() => setViewDish(dish)}
+                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                                title="Visualizza piatto"
+                            >
+                                <Eye className="h-4 w-4" />
+                            </button>
+                            {canEdit && (
+                            <>
+                            <button
                                 onClick={() => handleEditDish(dish)}
                                 className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                                title="Modifica"
                             >
                                 <Edit2 className="h-4 w-4" />
                             </button>
                             <button
                                 onClick={() => setDeleteDishConfirm(dish)}
                                 className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                                title="Elimina"
                             >
                                 <Trash2 className="h-4 w-4" />
                             </button>
+                            </>
+                            )}
                         </div>
                         </td>
-                        )}
                     </tr>
                     ))}
                 </tbody>
@@ -413,10 +483,83 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           {banquetView === 'LIST' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {banquetMenus.map(menu => (
-                  <div key={menu.id} className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-5 relative group">
-                      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div key={menu.id} className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow">
+                      <div className="p-5 flex-1">
+                          <div className="mb-3">
+                              <h3 className="font-semibold text-[15px] text-[var(--color-fg)] leading-tight">{menu.name}</h3>
+                              {menu.description && (
+                                <p className="text-sm text-[var(--color-fg-muted)] line-clamp-2 mt-1">{menu.description}</p>
+                              )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap mb-4">
+                              {menu.event_date && (
+                                <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full">
+                                  <Calendar className="h-3 w-3" />
+                                  {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                                </div>
+                              )}
+                              {menu.shift === Shift.LUNCH && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full">
+                                  <Sun className="h-3 w-3" /> Pranzo
+                                </span>
+                              )}
+                              {menu.shift === Shift.DINNER && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                  <Moon className="h-3 w-3" /> Cena
+                                </span>
+                              )}
+                          </div>
+                          {canViewBanquetPrice && (
+                          <div className="mb-4 flex items-baseline gap-4 flex-wrap">
+                              <div>
+                                  <span className="text-2xl font-semibold text-[var(--color-fg)]">€{menu.price_per_person}</span>
+                                  <span className="text-[var(--color-fg-subtle)] text-sm"> / persona</span>
+                              </div>
+                              {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
+                                  <div className="text-sm">
+                                      <span className="text-[var(--color-fg-subtle)]">Acconto: </span>
+                                      <span className="font-medium text-[var(--color-fg)]">€{Number(menu.deposit_amount).toFixed(2)}</span>
+                                  </div>
+                              )}
+                          </div>
+                          )}
+                          <div className="space-y-3">
+                              <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Composizione</p>
+                              {menu.courses && menu.courses.length > 0 ? (
+                                <div className="space-y-2.5">
+                                  {menu.courses.map((course, idx) => (
+                                    <div key={idx}>
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-subtle)] mb-1">{course.name}</div>
+                                      <ul className="text-sm text-[var(--color-fg)] space-y-1">
+                                        {course.dish_ids.map(id => {
+                                          const dish = dishes.find(d => d.id === id);
+                                          return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
+                                        })}
+                                        {course.dish_ids.length === 0 && <li className="text-xs text-[var(--color-fg-subtle)] italic">Nessun piatto</li>}
+                                      </ul>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <ul className="text-sm text-[var(--color-fg)] space-y-1">
+                                    {menu.dish_ids.map(id => {
+                                        const dish = dishes.find(d => d.id === id);
+                                        return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
+                                    })}
+                                </ul>
+                              )}
+                          </div>
+                      </div>
+                      <div className="px-3 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-end gap-1">
                           <button
-                              onClick={() => printBanquet(menu, dishes)}
+                              onClick={() => setViewBanquet(menu)}
+                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                              title="Visualizza piatti"
+                          >
+                              <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                              onClick={() => printBanquet(menu, dishes, { showPrice: canViewBanquetPrice })}
                               className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
                               title="Stampa / Salva PDF / Condividi"
                           >
@@ -427,66 +570,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <button
                               onClick={() => handleEditBanquet(menu)}
                               className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                              title="Modifica"
                           >
                               <Edit2 className="h-4 w-4" />
                           </button>
                           <button
                               onClick={() => setDeleteBanquetConfirm(menu)}
                               className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                              title="Elimina"
                           >
                               <Trash2 className="h-4 w-4" />
                           </button>
                           </>
-                          )}
-                      </div>
-                      <div className="flex justify-between items-start mb-3">
-                          <div>
-                              <h3 className="font-semibold text-[15px] text-[var(--color-fg)]">{menu.name}</h3>
-                              <p className="text-sm text-[var(--color-fg-muted)] line-clamp-2">{menu.description}</p>
-                          </div>
-                      </div>
-                      {menu.event_date && (
-                        <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full mb-3">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
-                        </div>
-                      )}
-                      <div className="mb-4 flex items-baseline gap-4 flex-wrap">
-                          <div>
-                              <span className="text-2xl font-semibold text-[var(--color-fg)]">€{menu.price_per_person}</span>
-                              <span className="text-[var(--color-fg-subtle)] text-sm"> / persona</span>
-                          </div>
-                          {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
-                              <div className="text-sm">
-                                  <span className="text-[var(--color-fg-subtle)]">Acconto: </span>
-                                  <span className="font-medium text-[var(--color-fg)]">€{Number(menu.deposit_amount).toFixed(2)}</span>
-                              </div>
-                          )}
-                      </div>
-                      <div className="space-y-3">
-                          <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Composizione</p>
-                          {menu.courses && menu.courses.length > 0 ? (
-                            <div className="space-y-2.5">
-                              {menu.courses.map((course, idx) => (
-                                <div key={idx}>
-                                  <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-subtle)] mb-1">{course.name}</div>
-                                  <ul className="text-sm text-[var(--color-fg)] space-y-1">
-                                    {course.dish_ids.map(id => {
-                                      const dish = dishes.find(d => d.id === id);
-                                      return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
-                                    })}
-                                    {course.dish_ids.length === 0 && <li className="text-xs text-[var(--color-fg-subtle)] italic">Nessun piatto</li>}
-                                  </ul>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <ul className="text-sm text-[var(--color-fg)] space-y-1">
-                                {menu.dish_ids.map(id => {
-                                    const dish = dishes.find(d => d.id === id);
-                                    return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
-                                })}
-                            </ul>
                           )}
                       </div>
                   </div>
@@ -503,6 +598,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <BanquetCalendar
               banquetMenus={banquetMenus}
               onSelectBanquet={handleEditBanquet}
+              onViewBanquet={setViewBanquet}
               canEdit={canEdit}
             />
           )}
@@ -662,6 +758,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                 </div>
                 <div>
+                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                    <div className="flex gap-1 p-0.5 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md">
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
+                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.LUNCH
+                                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                            }`}
+                        >
+                            <Sun className="h-3.5 w-3.5" /> Pranzo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
+                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.DINNER
+                                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                            }`}
+                        >
+                            <Moon className="h-3.5 w-3.5" /> Cena
+                        </button>
+                    </div>
+                </div>
+                {canViewBanquetPrice && (
+                <div>
                     <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€)</label>
                     <input
                         type="number"
@@ -671,6 +795,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={e => setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)})}
                     />
                 </div>
+                )}
+                {canViewBanquetPrice && (
                 <div>
                     <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-slate-400 font-normal">— opzionale</span></label>
                     <input
@@ -683,6 +809,66 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                     />
                 </div>
+                )}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Numero Ospiti <span className="text-slate-400 font-normal">— opzionale</span></label>
+                    <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="es. 80"
+                        className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={newBanquet.guests ?? ''}
+                        onChange={e => setNewBanquet({...newBanquet, guests: e.target.value === '' ? undefined : parseInt(e.target.value, 10)})}
+                    />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Cliente <span className="text-slate-400 font-normal">— opzionale</span></label>
+                {selectedBanquetCustomer ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 truncate">{selectedBanquetCustomer.name}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-slate-600">
+                        {selectedBanquetCustomer.phone && (
+                          <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {selectedBanquetCustomer.phone}</span>
+                        )}
+                        {selectedBanquetCustomer.email && (
+                          <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {selectedBanquetCustomer.email}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsBanquetCustomerPickerOpen(true)}
+                        className="px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 rounded-md"
+                      >
+                        Cambia
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBanquetCustomer(null);
+                          setNewBanquet(prev => ({ ...prev, customer_id: null }));
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"
+                        title="Rimuovi cliente"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsBanquetCustomerPickerOpen(true)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100"
+                  >
+                    <BookUser className="h-4 w-4" />
+                    Seleziona dalla rubrica
+                  </button>
+                )}
               </div>
               <div>
                 <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale</label>
@@ -691,6 +877,36 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   value={newBanquet.description}
                   onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Portate <span className="text-slate-400 font-normal">— cucina</span></label>
+                  <textarea
+                    placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_courses || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Servizio <span className="text-slate-400 font-normal">— sala</span></label>
+                  <textarea
+                    placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_service || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Mise en Place</label>
+                  <textarea
+                    placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
+                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    value={newBanquet.notes_mise_en_place || ''}
+                    onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
+                  />
+                </div>
               </div>
 
               <div>
@@ -889,6 +1105,31 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           setDeleteBanquetConfirm(null);
         }}
       />
+
+      {viewBanquet && (
+        <BanquetCompositionModal
+          banquet={viewBanquet}
+          dishes={dishes}
+          onClose={() => setViewBanquet(null)}
+        />
+      )}
+
+      {viewDish && (
+        <DishDetailModal
+          dish={viewDish}
+          onClose={() => setViewDish(null)}
+        />
+      )}
+
+      <CustomerPickerModal
+        isOpen={isBanquetCustomerPickerOpen}
+        initialQuery={selectedBanquetCustomer?.name || newBanquet.name || ''}
+        onClose={() => setIsBanquetCustomerPickerOpen(false)}
+        onSelect={(c: Customer) => {
+          setSelectedBanquetCustomer(c);
+          setNewBanquet(prev => ({ ...prev, customer_id: c.id }));
+        }}
+      />
     </div>
   );
 };
@@ -896,10 +1137,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 interface BanquetCalendarProps {
   banquetMenus: BanquetMenu[];
   onSelectBanquet: (menu: BanquetMenu) => void;
+  onViewBanquet: (menu: BanquetMenu) => void;
   canEdit: boolean;
 }
 
-const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, canEdit }) => {
+const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, onViewBanquet, canEdit }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -999,20 +1243,64 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
           <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-3 capitalize">
             {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
           </h4>
-          <div className="space-y-1.5">
-            {selectedBanquets.map(menu => (
-              <div
-                key={menu.id}
-                onClick={() => canEdit && onSelectBanquet(menu)}
-                className={`p-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition flex items-center justify-between gap-3 ${canEdit ? 'cursor-pointer' : ''}`}
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-[var(--color-fg)] truncate">{menu.name}</p>
-                  {menu.description && <p className="text-xs text-[var(--color-fg-muted)] truncate">{menu.description}</p>}
+          <div className="space-y-2">
+            {selectedBanquets.map(menu => {
+              const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
+              return (
+                <div
+                  key={menu.id}
+                  onClick={() => canEdit && onSelectBanquet(menu)}
+                  className={`p-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition ${canEdit ? 'cursor-pointer' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-[var(--color-fg)] truncate">{menu.name}</p>
+                        {menu.shift === Shift.LUNCH && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                            <Sun className="h-3 w-3" /> Pranzo
+                          </span>
+                        )}
+                        {menu.shift === Shift.DINNER && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full">
+                            <Moon className="h-3 w-3" /> Cena
+                          </span>
+                        )}
+                      </div>
+                      {menu.description && <p className="text-xs text-[var(--color-fg-muted)] truncate mt-0.5">{menu.description}</p>}
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-[var(--color-fg-muted)] flex-wrap">
+                        {menu.guests != null && menu.guests > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                            <span className="font-medium text-[var(--color-fg)]">{menu.guests}</span>
+                            <span>coperti</span>
+                          </span>
+                        )}
+                        {hasNotes && (
+                          <span className="inline-flex items-center gap-1 text-amber-700">
+                            <StickyNote className="h-3.5 w-3.5" />
+                            <span>Con note</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {canViewBanquetPrice && (
+                        <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">€{menu.price_per_person}/pax</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); onViewBanquet(menu); }}
+                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                        title="Visualizza piatti"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">€{menu.price_per_person}/pax</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

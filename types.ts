@@ -26,6 +26,9 @@ export interface Table {
   merged_with?: number[];
   temp_lock_expires_at?: number;
   rotation?: number;
+  width_cm?: number | null;
+  length_cm?: number | null;
+  notes?: string | null;
 }
 
 export interface Room {
@@ -33,6 +36,7 @@ export interface Room {
   name: string;
   width: number;
   height: number;
+  is_closed?: boolean;
 }
 
 export interface Dish {
@@ -64,7 +68,13 @@ export interface BanquetMenu {
   dish_ids: number[];          // flat list, derived from courses for backward compat
   courses?: BanquetCourse[];   // new structured composition
   event_date: string;          // YYYY-MM-DD
+  shift?: Shift;
   deposit_amount?: number;
+  guests?: number;
+  notes_courses?: string;
+  notes_service?: string;
+  notes_mise_en_place?: string;
+  customer_id?: number | null;
 }
 
 export enum PaymentStatus {
@@ -85,6 +95,13 @@ export interface TableMerge {
   shift: Shift;
   primary_id: number;
   merged_ids: number[];
+}
+
+export interface TableHiddenOverride {
+  id: number;
+  date: string; // YYYY-MM-DD
+  shift: Shift;
+  table_id: number;
 }
 
 export enum ArrivalStatus {
@@ -128,6 +145,7 @@ export interface Toast {
     title?: string;
     details?: string[];
     duration?: number;
+    action?: { label: string; onClick: () => void };
 }
 
 export enum ViewState {
@@ -136,7 +154,21 @@ export enum ViewState {
   MENU = 'MENU',
   RESERVATIONS = 'RESERVATIONS',
   STAFF = 'STAFF',
+  CLIENTI = 'CLIENTI',
   SETTINGS = 'SETTINGS'
+}
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ============================================
@@ -145,6 +177,7 @@ export enum ViewState {
 
 export enum UserRole {
   OWNER = 'OWNER',
+  GENERAL_MANAGER = 'GENERAL_MANAGER',
   MANAGER = 'MANAGER',
   WAITER = 'WAITER',
   KITCHEN = 'KITCHEN'
@@ -201,7 +234,8 @@ export enum ResourceType {
   AUTH = 'AUTH',
   STAFF = 'STAFF',
   STAFF_SHIFT = 'STAFF_SHIFT',
-  STAFF_TIME_OFF = 'STAFF_TIME_OFF'
+  STAFF_TIME_OFF = 'STAFF_TIME_OFF',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export interface ActivityLog {
@@ -266,6 +300,9 @@ export interface TodoItem {
   createdAt: string;
   completedAt?: string;
   linkedReservationId?: number;
+  linkedBanquetIds?: number[];
+  banquetReminderHours?: number;
+  autoKind?: string;
   // Assignment fields
   assignedToUserId?: number;
   assignedToUserName?: string;

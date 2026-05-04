@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, Shift } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift, Customer } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -66,7 +66,9 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
+    const message = errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage;
+    throw new Error(message);
   }
 
   if (expectJson) {
@@ -175,6 +177,41 @@ export const deleteTableMerge = async (
   }, false);
 };
 
+// ============================================
+// PER-SHIFT HIDDEN TABLES
+// ============================================
+
+export const getTableHidden = async (date: string, shift: Shift): Promise<TableHiddenOverride[]> => {
+  const params = new URLSearchParams({ date, shift });
+  return apiRequest<TableHiddenOverride[]>(`${API_URL}/table-hidden?${params.toString()}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createTableHidden = async (
+  date: string,
+  shift: Shift,
+  table_id: number
+): Promise<TableHiddenOverride> => {
+  return apiRequest<TableHiddenOverride>(`${API_URL}/table-hidden`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, table_id }),
+  });
+};
+
+export const deleteTableHidden = async (
+  date: string,
+  shift: Shift,
+  table_id: number
+): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/table-hidden`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, table_id }),
+  }, false);
+};
+
 export const getRooms = async (): Promise<Room[]> => {
   return apiRequest<Room[]>(`${API_URL}/rooms`, {
     headers: getHeaders(false)
@@ -186,6 +223,14 @@ export const createRoom = async (room: Omit<Room, 'id'>): Promise<Room> => {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(room),
+  });
+};
+
+export const setRoomClosed = async (id: number, is_closed: boolean): Promise<Room> => {
+  return apiRequest<Room>(`${API_URL}/rooms/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ is_closed }),
   });
 };
 
@@ -249,6 +294,42 @@ export const updateBanquetMenu = async (id: number, menu: Partial<BanquetMenu>):
 
 export const deleteBanquetMenu = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/banquet-menus/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// CUSTOMERS (rubrica)
+// ============================================
+
+export const getCustomers = async (search?: string): Promise<Customer[]> => {
+  const url = search && search.trim()
+    ? `${API_URL}/customers?q=${encodeURIComponent(search.trim())}`
+    : `${API_URL}/customers`;
+  return apiRequest<Customer[]>(url, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createCustomer = async (customer: Omit<Customer, 'id'>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const updateCustomer = async (id: number, customer: Partial<Customer>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const deleteCustomer = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/customers/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);

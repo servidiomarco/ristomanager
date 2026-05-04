@@ -1,4 +1,4 @@
-import pool from '../db.js';
+import { queryWithRetry } from '../db.js';
 
 export enum ActivityAction {
   CREATE = 'CREATE',
@@ -15,7 +15,8 @@ export enum ResourceType {
   DISH = 'DISH',
   BANQUET_MENU = 'BANQUET_MENU',
   USER = 'USER',
-  AUTH = 'AUTH'
+  AUTH = 'AUTH',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export interface ActivityLog {
@@ -67,7 +68,7 @@ export class LogService {
     errorMessage?: string
   ): Promise<ActivityLog | null> {
     try {
-      const result = await pool.query(
+      const result = await queryWithRetry(
         `INSERT INTO activity_logs
          (user_id, user_email, user_name, action, resource_type, resource_id, resource_name, details, status, error_message)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -138,14 +139,14 @@ export class LogService {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count
-    const countResult = await pool.query(
+    const countResult = await queryWithRetry(
       `SELECT COUNT(*) FROM activity_logs ${whereClause}`,
       params
     );
     const total = parseInt(countResult.rows[0].count, 10);
 
     // Get paginated logs
-    const logsResult = await pool.query(
+    const logsResult = await queryWithRetry(
       `SELECT * FROM activity_logs ${whereClause}
        ORDER BY created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
@@ -163,11 +164,11 @@ export class LogService {
    */
   static async getActivityStats(): Promise<ActivityStats> {
     // Total logs
-    const totalResult = await pool.query('SELECT COUNT(*) FROM activity_logs');
+    const totalResult = await queryWithRetry('SELECT COUNT(*) FROM activity_logs');
     const total_logs = parseInt(totalResult.rows[0].count, 10);
 
     // Logs by action
-    const actionResult = await pool.query(
+    const actionResult = await queryWithRetry(
       `SELECT action, COUNT(*) as count FROM activity_logs GROUP BY action`
     );
     const logs_by_action: Record<string, number> = {};
@@ -176,7 +177,7 @@ export class LogService {
     }
 
     // Logs by resource type
-    const resourceResult = await pool.query(
+    const resourceResult = await queryWithRetry(
       `SELECT resource_type, COUNT(*) as count FROM activity_logs GROUP BY resource_type`
     );
     const logs_by_resource: Record<string, number> = {};
@@ -185,7 +186,7 @@ export class LogService {
     }
 
     // Recent active users (top 5)
-    const usersResult = await pool.query(
+    const usersResult = await queryWithRetry(
       `SELECT user_id, user_name, COUNT(*) as count
        FROM activity_logs
        WHERE user_id IS NOT NULL
@@ -211,7 +212,7 @@ export class LogService {
    * Get list of users who have activity logs (for filter dropdown)
    */
   static async getLogUsers(): Promise<{ id: number; name: string; email: string }[]> {
-    const result = await pool.query(
+    const result = await queryWithRetry(
       `SELECT DISTINCT user_id as id, user_name as name, user_email as email
        FROM activity_logs
        WHERE user_id IS NOT NULL

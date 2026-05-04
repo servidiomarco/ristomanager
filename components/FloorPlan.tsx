@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw } from 'lucide-react';
-import { getTableMerges } from '../services/apiService';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen } from 'lucide-react';
+import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -32,6 +32,7 @@ interface FloorPlanProps {
   onSplitTable: (tableId: number, date: string, shift: Shift) => Promise<void> | void;
   onAddRoom: (roomName: string) => void;
   onDeleteRoom: (room_id: number) => void;
+  onToggleRoomClosed: (room_id: number, is_closed: boolean) => void;
   canEdit?: boolean;
 }
 
@@ -46,6 +47,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onSplitTable,
   onAddRoom,
   onDeleteRoom,
+  onToggleRoomClosed,
   canEdit = true
 }) => {
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
@@ -64,6 +66,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
+  const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   // Refresh merges from the server for the current date+shift. Used after
   // local merge/split actions so the originating client updates immediately
@@ -74,6 +78,32 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setTableMerges(merges);
     } catch (err) {
       console.error('Error fetching table merges:', err);
+    }
+  };
+
+  const handleToggleHide = async (ids: number[]) => {
+    const allHidden = ids.every(id => hiddenTableIds.has(id));
+    try {
+      if (allHidden) {
+        await Promise.all(ids.map(id => deleteTableHidden(selectedDate, selectedShift, id)));
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          ids.forEach(id => next.delete(id));
+          return next;
+        });
+      } else {
+        const targets = ids.filter(id => !hiddenTableIds.has(id));
+        for (const id of targets) {
+          await createTableHidden(selectedDate, selectedShift, id);
+        }
+        setHiddenTableIds(prev => {
+          const next = new Set(prev);
+          targets.forEach(id => next.add(id));
+          return next;
+        });
+      }
+    } catch (err: any) {
+      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
     }
   };
 
@@ -90,6 +120,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         if (!cancelled) setTableMerges([]);
       })
       .finally(() => { if (!cancelled) setIsLoadingMerges(false); });
+    return () => { cancelled = true; };
+  }, [selectedDate, selectedShift]);
+
+  // Fetch hidden tables for the current date/shift
+  useEffect(() => {
+    let cancelled = false;
+    getTableHidden(selectedDate, selectedShift)
+      .then(rows => {
+        if (!cancelled) setHiddenTableIds(new Set(rows.map(r => r.table_id)));
+      })
+      .catch(err => {
+        console.error('Error fetching hidden tables:', err);
+        if (!cancelled) setHiddenTableIds(new Set());
+      });
     return () => { cancelled = true; };
   }, [selectedDate, selectedShift]);
 
@@ -124,6 +168,38 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return () => {
       socket.off('tableMerge:created', handleCreated);
       socket.off('tableMerge:deleted', handleDeleted);
+    };
+  }, [socket, selectedDate, selectedShift]);
+
+  // Listen for hidden-table socket events filtered by current date+shift
+  useEffect(() => {
+    if (!socket) return;
+
+    const matches = (h: TableHiddenOverride) => h.date === selectedDate && h.shift === selectedShift;
+
+    const handleHiddenCreated = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.add(h.table_id);
+        return next;
+      });
+    };
+
+    const handleHiddenDeleted = (h: TableHiddenOverride) => {
+      if (!matches(h)) return;
+      setHiddenTableIds(prev => {
+        const next = new Set(prev);
+        next.delete(h.table_id);
+        return next;
+      });
+    };
+
+    socket.on('tableHidden:created', handleHiddenCreated);
+    socket.on('tableHidden:deleted', handleHiddenDeleted);
+    return () => {
+      socket.off('tableHidden:created', handleHiddenCreated);
+      socket.off('tableHidden:deleted', handleHiddenDeleted);
     };
   }, [socket, selectedDate, selectedShift]);
 
@@ -164,6 +240,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Modal state for alerts
   const [alertModal, setAlertModal] = useState<{ message: string; type: 'error' | 'warning' } | null>(null);
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
+  const [detailsModal, setDetailsModal] = useState<{ table: Table; widthCm: string; lengthCm: string; notes: string } | null>(null);
   const [deleteTablesConfirm, setDeleteTablesConfirm] = useState<number[] | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -189,7 +266,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     .filter((t, index, self) => self.findIndex(t2 => t2.id === t.id) === index)
     .filter(t => !displayTables.some(other =>
       other.merged_with && other.merged_with.map(id => Number(id)).includes(Number(t.id))
-    ));
+    ))
+    // Apply per-shift hide override unless the user toggled "show hidden".
+    .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
   // Compute the natural bounding box of the room from current tables, then
   // a scale factor that shrinks the room to fit the available canvas size.
@@ -359,9 +438,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Translation is in unscaled coords; the scaled wrapper maps it to screen.
     // Translate must come first so the matrix's tx/ty entries match the
     // unrotated drag delta (rotation last preserves values[4]/values[5]).
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = e.clientX;
@@ -478,9 +555,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const deltaX = (touch.clientX - dragState.startX) / s;
     const deltaY = (touch.clientY - dragState.startY) / s;
 
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = touch.clientX;
@@ -596,6 +671,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dynamicStatus = getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
     const isMerged = table.merged_with && table.merged_with.length > 0;
+    const isHidden = hiddenTableIds.has(table.id);
 
     // Calculate remaining time if temp locked
     let timerDisplay = null;
@@ -613,7 +689,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       [TableStatus.DIRTY]: 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg-muted)]'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-[var(--shadow-xs)]'}`;
+    const shapeClasses = `flex flex-col items-center justify-center border transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-[var(--shadow-xs)]'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -621,26 +697,41 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const baseWidth = isMobile ? 60 : 100;
     const seatMultiplier = isMobile ? 8 : 15;
 
-    let shapeStyles = {};
+    let widthPx: number;
+    let heightPx: number;
+    let borderRadius: string;
 
     if (table.shape === TableShape.CIRCLE) {
-      shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '50%';
     } else if (table.shape === TableShape.SQUARE) {
-      shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '8px';
     } else {
-      const width = Math.max(baseWidth, table.seats * seatMultiplier);
-      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+      widthPx = Math.max(baseWidth, table.seats * seatMultiplier);
+      heightPx = baseSize;
+      borderRadius = '8px';
     }
+
+    const shapeStyles = { width: `${widthPx}px`, height: `${heightPx}px`, borderRadius };
+
+    // Distance from wrapper top to the bottom of the rotated bounding box —
+    // used to anchor the reservation pill below the visual table at any angle.
+    const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+    const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+    const pillTopPx = heightPx / 2 + rotatedHalfH + 4;
 
     return (
       <div
         key={table.id}
-        className={baseClasses}
+        className="absolute"
         style={{
           left: table.x,
           top: table.y,
-          ...shapeStyles,
-          transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          width: shapeStyles.width,
+          height: shapeStyles.height,
           zIndex: isSelected ? 10 : 1
         }}
         onMouseDown={(e) => {
@@ -652,38 +743,56 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           handleTouchStart(e, table.id, element);
         }}
       >
-        <span className="font-semibold text-sm flex items-center gap-1">
-            {table.is_locked && <Lock size={10} className="opacity-60" />}
-            {table.name}
-        </span>
+        <div
+          className={shapeClasses}
+          style={{
+            ...shapeStyles,
+            transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          }}
+        >
+          <span className="font-semibold text-sm flex items-center gap-1">
+              {table.is_locked && <Lock size={10} className="opacity-60" />}
+              {table.name}
+          </span>
 
-        {/* Show Reservation Name */}
+          <span className="text-xs flex items-center gap-1 opacity-80">
+             <Armchair size={10} /> {table.seats}
+          </span>
+
+          {dynamicStatus === TableStatus.OCCUPIED && (
+               <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-[var(--color-surface)] animate-pulse"></div>
+          )}
+
+          {/* Timer Badge */}
+          {timerDisplay && (
+              <div className="absolute -top-2.5 -right-2 bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <Timer size={8} /> {timerDisplay}
+              </div>
+          )}
+
+          {/* Merged Table Badge */}
+          {isMerged && !timerDisplay && (
+              <div className="absolute -top-2 -left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <Combine size={8} />
+              </div>
+          )}
+
+          {/* Hidden-for-shift Badge */}
+          {isHidden && (
+              <div className="absolute -top-2 -left-2 bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <EyeOff size={8} />
+              </div>
+          )}
+        </div>
+
+        {/* Reservation Name — outside rotation, always anchored to bottom of rotated bounding box */}
         {reservation && !timerDisplay && (
-            <span className="text-[10px] font-semibold truncate max-w-[90%] bg-[var(--color-surface)]/70 px-1 rounded">
-                {reservation.customer_name}
-            </span>
-        )}
-
-        <span className="text-xs flex items-center gap-1 opacity-80">
-           <Armchair size={10} /> {table.seats}
-        </span>
-
-        {dynamicStatus === TableStatus.OCCUPIED && (
-             <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-[var(--color-surface)] animate-pulse"></div>
-        )}
-
-        {/* Timer Badge */}
-        {timerDisplay && (
-            <div className="absolute -top-2.5 -right-2 bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
-                <Timer size={8} /> {timerDisplay}
-            </div>
-        )}
-
-        {/* Merged Table Badge */}
-        {isMerged && !timerDisplay && (
-            <div className="absolute -top-2 -left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
-                <Combine size={8} />
-            </div>
+          <div
+            style={{ top: pillTopPx }}
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[var(--color-surface)]/95 border border-[var(--color-line)] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+          >
+            {reservation.customer_name}
+          </div>
         )}
       </div>
     );
@@ -731,6 +840,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <span className="text-xs text-[var(--color-fg-subtle)] hidden sm:inline">
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
+        {hiddenTableIds.size > 0 && (
+            <button
+                onClick={() => setShowHidden(s => !s)}
+                className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                    showHidden
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+                title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+            >
+                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
+            </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -745,10 +868,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }}
               className={`rounded-full px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium transition whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
+                  ? room.is_closed
+                    ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
+                    : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                  : room.is_closed
+                    ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)] line-through'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
               }`}
+              title={room.is_closed ? `${room.name} (Chiusa)` : room.name}
             >
+              {room.is_closed && <DoorClosed size={12} />}
               {room.name}
             </button>
           ))}
@@ -831,6 +960,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
+          {/* Toggle Room Closed Button */}
+          {(() => {
+            const activeRoom = rooms.find(r => r.id === activeRoomId);
+            if (!activeRoom) return null;
+            const isClosed = activeRoom.is_closed === true;
+            return (
+              <button
+                onClick={() => onToggleRoomClosed(activeRoom.id, !isClosed)}
+                className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
+                  isClosed
+                    ? 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                    : 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                }`}
+                title={isClosed ? `Riapri Sala: ${activeRoom.name}` : `Chiudi Sala: ${activeRoom.name}`}
+              >
+                {isClosed ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />}
+                <span className="hidden lg:inline">{isClosed ? 'Riapri' : 'Chiudi'}</span>
+              </button>
+            );
+          })()}
+
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
@@ -898,6 +1048,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </div>
             )}
 
+            {/* Table Details (dimensions + notes) */}
+            {singleSelectedTable && !singleSelectedTable.is_locked && (
+                <button
+                    onClick={() => setDetailsModal({
+                        table: singleSelectedTable,
+                        widthCm: singleSelectedTable.width_cm != null ? String(singleSelectedTable.width_cm) : '',
+                        lengthCm: singleSelectedTable.length_cm != null ? String(singleSelectedTable.length_cm) : '',
+                        notes: singleSelectedTable.notes || ''
+                    })}
+                    className={`flex items-center gap-1 px-2 py-2 rounded-lg border transition-colors ${
+                        (singleSelectedTable.notes || singleSelectedTable.width_cm || singleSelectedTable.length_cm)
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                    }`}
+                    title="Dettagli tavolo (dimensioni, note)"
+                >
+                    <Info size={16} />
+                    <span className="text-xs font-semibold hidden sm:inline">Dettagli</span>
+                </button>
+            )}
+
             {/* Rotate Table */}
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                 <button
@@ -939,6 +1110,29 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <Scissors size={16} /> Dividi
                 </button>
             )}
+
+            {/* Hide / Unhide for the current shift */}
+            {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (() => {
+                const allHidden = selectedTables.every(id => hiddenTableIds.has(id));
+                return (
+                    <button
+                        onClick={async () => {
+                            await handleToggleHide([...selectedTables]);
+                            setSelectedTables([]);
+                        }}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm ${
+                            allHidden
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                        title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
+                    >
+                        {allHidden
+                            ? <><Eye size={16} /> Mostra</>
+                            : <><EyeOff size={16} /> Nascondi</>}
+                    </button>
+                );
+            })()}
 
             {/* Delete only if not locked */}
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
@@ -993,6 +1187,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isSelectionMode && (
               <div className="absolute top-4 left-4 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-3 py-1 rounded-full text-xs font-medium pointer-events-none flex items-center gap-2">
                   <CheckSquare size={12} /> MODALITÀ SELEZIONE ATTIVA
+              </div>
+          )}
+
+          {rooms.find(r => r.id === activeRoomId)?.is_closed && (
+              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 uppercase tracking-wide">
+                  <DoorClosed size={12} /> Sala Chiusa
               </div>
           )}
 
@@ -1094,6 +1294,95 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           setDeleteTablesConfirm(null);
         }}
       />
+
+      {/* Table Details Modal (dimensions + notes) */}
+      {detailsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Info className="h-5 w-5 text-indigo-600" />
+                <h3 className="text-lg font-semibold text-slate-800">Dettagli Tavolo {detailsModal.table.name}</h3>
+              </div>
+              <button
+                onClick={() => setDetailsModal(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                  <Ruler className="h-3.5 w-3.5 text-slate-400" /> Dimensioni (cm)
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[11px] text-slate-500 block mb-1">Larghezza</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="es. 80"
+                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={detailsModal.widthCm}
+                      onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
+                    />
+                  </div>
+                  <span className="text-slate-400 mt-5">×</span>
+                  <div className="flex-1">
+                    <label className="text-[11px] text-slate-500 block mb-1">Lunghezza</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="es. 120"
+                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={detailsModal.lengthCm}
+                      onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-slate-400" /> Note
+                </label>
+                <textarea
+                  className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
+                  placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
+                  value={detailsModal.notes}
+                  onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
+              <button
+                onClick={() => setDetailsModal(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-white font-medium"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={() => {
+                  const widthRaw = detailsModal.widthCm.trim();
+                  const lengthRaw = detailsModal.lengthCm.trim();
+                  const widthNum = widthRaw === '' ? null : Number(widthRaw);
+                  const lengthNum = lengthRaw === '' ? null : Number(lengthRaw);
+                  onUpdateTable({
+                    ...detailsModal.table,
+                    width_cm: widthNum != null && Number.isFinite(widthNum) ? widthNum : null,
+                    length_cm: lengthNum != null && Number.isFinite(lengthNum) ? lengthNum : null,
+                    notes: detailsModal.notes.trim() === '' ? null : detailsModal.notes.trim(),
+                  });
+                  setDetailsModal(null);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+              >
+                Salva
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
