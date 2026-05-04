@@ -53,8 +53,11 @@ const pool = new Pool({
 
 // Without this handler, an error event from an idle client crashes the worker
 // (Node treats unhandled "error" events on EventEmitters as uncaught).
+// Log only the error message to keep noise down during DB outages —
+// dumping the full pg client object burns through Railway's log
+// rate limit and drops real signal.
 pool.on('error', (err) => {
-    console.error('Postgres pool idle client error:', err);
+    console.error('Postgres pool idle client error:', err?.message || err);
 });
 
 // Retry transient connection errors once. Most ETIMEDOUT / ECONNRESET /

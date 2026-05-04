@@ -14,6 +14,7 @@ import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { RolePermissionService } from './auth/permissionService.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 
 const app = express();
@@ -2876,6 +2877,12 @@ const startServer = async () => {
             createSchema()
                 .then(async () => {
                     console.log('✅ Database schema initialized');
+                    try {
+                        await RolePermissionService.warmUp();
+                        console.log('✅ Role permission cache warmed up');
+                    } catch (permErr) {
+                        console.warn('Permission cache warm-up skipped:', permErr);
+                    }
                     try {
                         const today = new Date().toISOString().substring(0, 10);
                         const upcoming = await queryWithRetry(
