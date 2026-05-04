@@ -937,9 +937,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </span>
               <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchExpectedGuests}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
               <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                   <Moon className="h-3.5 w-3.5" />
                 </span>
                 Cena
@@ -965,9 +965,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </span>
               <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedGuests}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
               <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                   <Moon className="h-3.5 w-3.5" />
                 </span>
                 Cena
@@ -993,9 +993,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </span>
               <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchTableIds.size}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
               <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                   <Moon className="h-3.5 w-3.5" />
                 </span>
                 Cena
@@ -1021,9 +1021,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </span>
               <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedTableIds.size}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
               <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                   <Moon className="h-3.5 w-3.5" />
                 </span>
                 Cena
@@ -1053,9 +1053,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </span>
               <span className="tabular text-[24px] leading-none font-semibold text-[var(--color-fg)]">{lunchReservations.length}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
               <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                   <Moon className="h-3.5 w-3.5" />
                 </span>
                 Cena
