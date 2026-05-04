@@ -1228,7 +1228,8 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
                  FROM customers
-                 WHERE LOWER(name) LIKE $1 OR LOWER(COALESCE(phone, '')) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1
+                 WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+                   AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
                  ORDER BY name
                  LIMIT $2`,
                 [term, cap]
@@ -1238,6 +1239,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
              FROM customers
+             WHERE phone IS NOT NULL AND TRIM(phone) <> ''
              ORDER BY name
              LIMIT $1`,
             [cap]
@@ -1254,6 +1256,9 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         const { name, phone, email, address, city, postal_code, notes } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
+        }
+        if (!phone || !String(phone).trim()) {
+            return res.status(400).json({ error: 'phone is required' });
         }
         const result = await queryWithRetry(
             `INSERT INTO customers (name, phone, email, address, city, postal_code, notes)
@@ -1296,6 +1301,9 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         const { name, phone, email, address, city, postal_code, notes } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
+        }
+        if (!phone || !String(phone).trim()) {
+            return res.status(400).json({ error: 'phone is required' });
         }
         const result = await queryWithRetry(
             `UPDATE customers SET

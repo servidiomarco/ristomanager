@@ -66,13 +66,13 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draft.name.trim()) return;
+    if (!draft.name.trim() || !draft.phone.trim()) return;
     setIsSaving(true);
     setError(null);
     try {
       const created = await createCustomer({
         name: draft.name.trim(),
-        phone: draft.phone.trim() || null,
+        phone: draft.phone.trim(),
         email: draft.email.trim() || null,
       });
       onCreated?.(created);
@@ -202,9 +202,10 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Telefono</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Telefono *</label>
                 <input
                   type="tel"
+                  required
                   value={draft.phone}
                   onChange={e => setDraft({ ...draft, phone: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
@@ -231,7 +232,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
               </button>
               <button
                 type="submit"
-                disabled={isSaving || !draft.name.trim()}
+                disabled={isSaving || !draft.name.trim() || !draft.phone.trim()}
                 className="flex-1 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSaving ? 'Salvataggio...' : 'Salva e seleziona'}

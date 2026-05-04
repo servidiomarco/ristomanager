@@ -735,14 +735,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
-        // Drop auto-imported customers that don't have a phone or email — the
-        // rubrica only stores reachable contacts. Manually-created entries
-        // (auto_imported = FALSE) are left alone even if they have no contact.
+        // Drop auto-imported customers without a phone number — the rubrica
+        // only stores entries we can call back. Manually-created customers
+        // (auto_imported = FALSE) are left alone.
         await client.query(`
             DELETE FROM customers
              WHERE auto_imported = TRUE
-               AND phone IS NULL
-               AND email IS NULL;
+               AND phone IS NULL;
         `);
 
         // Normalise existing names to Title Case. INITCAP treats apostrophes,
@@ -757,8 +756,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
 
         // One-time backfill: seed the rubrica from reservations the first time
         // this migration runs. Restricted to reservations that carry a phone
-        // or email — names alone aren't a reliable identifier. Deduplicated on
-        // phone when available, otherwise on lower-cased title-cased name.
+        // — that's the only identifier we use in the rubrica. Deduplicated
+        // on phone.
         const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
         if (customerCount.rows[0].c === 0) {
             await client.query(`
@@ -770,20 +769,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                         NULLIF(TRIM(phone), '') AS phone,
                         NULLIF(TRIM(email), '') AS email,
                         ROW_NUMBER() OVER (
-                            PARTITION BY COALESCE(
-                                NULLIF(TRIM(phone), ''),
-                                NULLIF(TRIM(email), ''),
-                                LOWER(TRIM(customer_name))
-                            )
+                            PARTITION BY NULLIF(TRIM(phone), '')
                             ORDER BY id DESC
                         ) AS rn
                     FROM reservations
                     WHERE customer_name IS NOT NULL
                       AND TRIM(customer_name) <> ''
-                      AND (
-                            NULLIF(TRIM(phone), '') IS NOT NULL
-                         OR NULLIF(TRIM(email), '') IS NOT NULL
-                      )
+                      AND NULLIF(TRIM(phone), '') IS NOT NULL
                 ) deduped
                 WHERE rn = 1;
             `);
