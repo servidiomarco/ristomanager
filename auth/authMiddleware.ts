@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService, TokenPayload } from './authService.js';
-import { PermissionService, Permission } from './permissions.js';
+import { Permission } from './permissions.js';
+import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
 
 // Extend Express Request to include user info
@@ -46,18 +47,25 @@ export const authorize = (...allowedRoles: UserRole[]) => {
   };
 };
 
-// Permission-based authorization middleware factory
+// Permission-based authorization middleware factory.
+// Reads from the DB-backed `role_permissions` table (with 1-minute cache)
+// so that changes made via the role permissions UI take effect on the API.
 export const requirePermission = (permission: Permission) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    if (!PermissionService.hasPermission(req.user.role, permission)) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
+    try {
+      const allowed = await RolePermissionService.hasPermission(req.user.role, permission);
+      if (!allowed) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    } catch (err) {
+      console.error('Permission check failed:', err);
+      return res.status(500).json({ error: 'Permission check failed' });
     }
-
-    next();
   };
 };
 

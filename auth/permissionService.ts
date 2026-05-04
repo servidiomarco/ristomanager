@@ -1,27 +1,8 @@
 import pool, { queryWithRetry } from '../db.js';
 import { UserRole } from '../types.js';
+import type { Permission } from './permissions.js';
 
-export type Permission =
-  | 'dashboard:view'
-  | 'dashboard:full'
-  | 'floorplan:view'
-  | 'floorplan:update_status'
-  | 'floorplan:full'
-  | 'menu:view'
-  | 'menu:full'
-  | 'reservations:view'
-  | 'reservations:full'
-  | 'staff:view'
-  | 'staff:full'
-  | 'settings:view'
-  | 'settings:full'
-  | 'users:view'
-  | 'users:full'
-  | 'reports:view'
-  | 'reports:full'
-  | 'logs:view'
-  | 'logs:full'
-  | 'banquet:view_price';
+export type { Permission };
 
 // All available permissions grouped by feature
 export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] = [
@@ -30,6 +11,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full', 'banquet:view_price'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
+  { feature: 'Clienti', permissions: ['customers:view', 'customers:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },
   { feature: 'Report', permissions: ['reports:view', 'reports:full'] },
