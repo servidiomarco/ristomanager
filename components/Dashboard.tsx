@@ -1111,7 +1111,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               guestCount: dinnerReservations.reduce((acc, r) => acc + r.guests, 0),
             },
           ] as const).map(meal => {
-            const roomStats = rooms.map(room => {
+            const roomStats = rooms.filter(room => !room.is_closed).map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
               const roomTableIds = new Set(roomTables.map(t => t.id));
               const occupied = meal.reservations.filter(r => r.table_id && roomTableIds.has(r.table_id))
