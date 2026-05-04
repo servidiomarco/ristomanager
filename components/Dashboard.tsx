@@ -8,7 +8,7 @@ import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,6 +28,15 @@ const CATEGORY_COLORS: Record<TodoCategory, string> = {
   [TodoCategory.STAFF]: 'bg-emerald-100 text-emerald-600',
   [TodoCategory.MAINTENANCE]: 'bg-orange-100 text-orange-600',
   [TodoCategory.EVENT]: 'bg-purple-100 text-purple-600',
+};
+
+const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
+  [TodoCategory.GENERAL]: 'bg-slate-400',
+  [TodoCategory.RESERVATION]: 'bg-indigo-500',
+  [TodoCategory.INVENTORY]: 'bg-amber-500',
+  [TodoCategory.STAFF]: 'bg-emerald-500',
+  [TodoCategory.MAINTENANCE]: 'bg-orange-500',
+  [TodoCategory.EVENT]: 'bg-purple-500',
 };
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
@@ -57,7 +66,6 @@ interface DashboardProps {
   rooms: Room[];
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
-  onNewReservation?: () => void;
 }
 
 // Shopping List Labels and Colors
@@ -79,14 +87,58 @@ const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
   'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNewReservation }) => {
+// Room name → lucide icon. Scalable: extend the map for new rooms or fall back to MapPin.
+const ROOM_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
+  veranda: Trees,
+  macine: Mountain,
+  fiume: Waves,
+  fuori: TreePine,
+  tettoia: Tent,
+  porticato: Columns3,
+};
+const getRoomIcon = (name: string): React.ComponentType<{ className?: string }> => {
+  const key = name.trim().toLowerCase();
+  return ROOM_ICON_BY_NAME[key] || MapPin;
+};
+
+const KPI_TONES = {
+  amber: {
+    bg: 'bg-amber-50 dark:bg-amber-500/10',
+    chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
+    value: 'text-[var(--color-fg)]',
+  },
+  blue: {
+    bg: 'bg-blue-50 dark:bg-blue-500/10',
+    chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
+    value: 'text-[var(--color-fg)]',
+  },
+  rose: {
+    bg: 'bg-rose-50 dark:bg-rose-500/10',
+    chip: 'bg-rose-100 text-rose-600 dark:bg-rose-500/25 dark:text-rose-300',
+    value: 'text-rose-600 dark:text-rose-300',
+  },
+} as const;
+
+const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; value: number | string }> = ({ tone, icon, value }) => {
+  const t = KPI_TONES[tone];
+  return (
+    <div className={`flex-1 min-w-0 rounded-xl ${t.bg} px-3 py-3 flex flex-col justify-between min-h-[78px] sm:min-h-[88px]`}>
+      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${t.chip}`}>
+        {icon}
+      </span>
+      <span className={`tabular text-[24px] sm:text-[28px] leading-none font-semibold self-end ${t.value}`}>{value}</span>
+    </div>
+  );
+};
+
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
   const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+  const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,6 +337,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       }
     };
   }, [staffMembers, staffShifts, staffTimeOffs, selectedDateStr]);
+
+  // Which shift is currently "live" — drives the pulsing dot. Refreshes every minute.
+  const [nowMinutes, setNowMinutes] = useState(() => {
+    const n = new Date();
+    return n.getHours() * 60 + n.getMinutes();
+  });
+  useEffect(() => {
+    const id = setInterval(() => {
+      const n = new Date();
+      setNowMinutes(n.getHours() * 60 + n.getMinutes());
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const liveShift: 'lunch' | 'dinner' | null = !isToday
+    ? null
+    : nowMinutes >= 11 * 60 + 30 && nowMinutes < 15 * 60 + 30
+      ? 'lunch'
+      : nowMinutes >= 18 * 60 + 30 && nowMinutes < 23 * 60 + 30
+        ? 'dinner'
+        : null;
+
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
   // Fetch todos from API (filtered by selected date)
@@ -748,8 +821,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         : [];
 
       // Filter by shift if not ALL
-      if (chartShiftFilter !== 'ALL') {
-        dayReservations = dayReservations.filter(r => r.shift === chartShiftFilter);
+      if (affluenceShiftFilter !== 'ALL') {
+        dayReservations = dayReservations.filter(r => r.shift === affluenceShiftFilter);
       }
 
       const dayGuests = dayReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -762,7 +835,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
 
     return data;
-  }, [reservations, chartShiftFilter, selectedDate]);
+  }, [reservations, affluenceShiftFilter, selectedDate]);
 
   // Get week range for display (based on selected date's week)
   const weekRange = useMemo(() => {
@@ -778,6 +851,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
+      {/* Alerts — placed first, above the greeting */}
+      {myTodos.length > 0 && (
+        <div className="flex items-start gap-3 bg-violet-100 border border-violet-200 dark:bg-violet-500/15 dark:border-violet-500/30 rounded-xl p-3 sm:p-4">
+          <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-200 text-violet-700 dark:bg-violet-500/30 dark:text-violet-200">
+            <UserCircle className="h-4 w-4" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-sm text-violet-900 dark:text-violet-100">
+              Hai <span className="tabular">{myTodos.length}</span> {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}
+            </h3>
+            <p className="text-xs text-violet-700 dark:text-violet-300 mt-0.5">
+              {myTodos.filter(isAssignedToMe).length > 0 && (
+                <span><span className="tabular">{myTodos.filter(isAssignedToMe).length}</span> personali</span>
+              )}
+              {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
+              {myTodos.filter(isAssignedToMyTeam).length > 0 && (
+                <span><span className="tabular">{myTodos.filter(isAssignedToMyTeam).length}</span> del team {user?.role && TEAM_LABELS[user.role]}</span>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={() => setShowMyTasksModal(true)}
+            className="text-xs font-medium text-violet-900 hover:text-violet-700 dark:text-violet-100 dark:hover:text-violet-300 underline underline-offset-4 whitespace-nowrap self-center"
+          >
+            Visualizza
+          </button>
+        </div>
+      )}
+
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
@@ -872,164 +974,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </span>
               </div>
 
-              {/* Nuova prenotazione — primary CTA (desktop only; mobile uses floating FAB) */}
-              {onNewReservation && (
-                <button
-                  type="button"
-                  onClick={onNewReservation}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
-                >
-                  <Plus className="h-4 w-4" />
-                  Nuova prenotazione
-                </button>
-              )}
             </div>
           </div>
         );
       })()}
 
-      {/* My Tasks Alert Banner */}
-      {myTodos.length > 0 && (
-        <div className="bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] p-4 rounded-xl shadow-[var(--shadow-sm)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/10 rounded-md">
-                <UserCircle className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm">Hai <span className="tabular">{myTodos.length}</span> {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
-                <p className="text-xs text-white/70">
-                  {myTodos.filter(isAssignedToMe).length > 0 && (
-                    <span><span className="tabular">{myTodos.filter(isAssignedToMe).length}</span> personali</span>
-                  )}
-                  {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
-                  {myTodos.filter(isAssignedToMyTeam).length > 0 && (
-                    <span><span className="tabular">{myTodos.filter(isAssignedToMyTeam).length}</span> del team {user?.role && TEAM_LABELS[user.role]}</span>
-                  )}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowMyTasksModal(true)}
-              className="rounded-full px-4 py-2 bg-white/10 hover:bg-white/20 text-xs font-medium transition-colors"
-            >
-              Visualizza
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* KPI Cards — per shift (Pranzo / Cena), tinted meal-blocks */}
+      {/* KPI Cards — per shift (Pranzo / Cena / Banchetti), tinted meal-blocks */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
         {/* Ospiti attesi */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti attesi</h3>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Users className="h-4 w-4" /></span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                  <Sun className="h-3.5 w-3.5" />
-                </span>
-                Pranzo
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchExpectedGuests}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <Moon className="h-3.5 w-3.5" />
-                </span>
-                Cena
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerExpectedGuests}</span>
-            </div>
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti attesi</h3>
+          <div className="flex gap-2">
+            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchExpectedGuests} />
+            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerExpectedGuests} />
           </div>
         </div>
 
         {/* Ospiti arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti arrivati</h3>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Users className="h-4 w-4" /></span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                  <Sun className="h-3.5 w-3.5" />
-                </span>
-                Pranzo
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedGuests}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <Moon className="h-3.5 w-3.5" />
-                </span>
-                Cena
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedGuests}</span>
-            </div>
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti arrivati</h3>
+          <div className="flex gap-2">
+            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchArrivedGuests} />
+            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerArrivedGuests} />
           </div>
         </div>
 
         {/* Tavoli attesi */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli attesi</h3>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Armchair className="h-4 w-4" /></span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                  <Sun className="h-3.5 w-3.5" />
-                </span>
-                Pranzo
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchTableIds.size}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <Moon className="h-3.5 w-3.5" />
-                </span>
-                Cena
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerTableIds.size}</span>
-            </div>
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli attesi</h3>
+          <div className="flex gap-2">
+            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchTableIds.size} />
+            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerTableIds.size} />
           </div>
         </div>
 
         {/* Tavoli arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli arrivati</h3>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"><Armchair className="h-4 w-4" /></span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                  <Sun className="h-3.5 w-3.5" />
-                </span>
-                Pranzo
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{lunchArrivedTableIds.size}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <Moon className="h-3.5 w-3.5" />
-                </span>
-                Cena
-              </span>
-              <span className="tabular text-[28px] leading-none font-semibold text-[var(--color-fg)]">{dinnerArrivedTableIds.size}</span>
-            </div>
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli arrivati</h3>
+          <div className="flex gap-2">
+            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchArrivedTableIds.size} />
+            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerArrivedTableIds.size} />
           </div>
         </div>
 
@@ -1037,108 +1021,119 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <button
           type="button"
           onClick={onNavigateToBanquets}
-          className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-5 flex flex-col gap-4 text-left hover:bg-[var(--color-surface-hover)] transition-colors group"
+          className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
         >
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0 group-hover:text-[var(--color-fg)] group-hover:translate-x-0.5 transition-all"><ChevronRight className="h-4 w-4" /></span>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                  <Sun className="h-3.5 w-3.5" />
-                </span>
-                Pranzo
-              </span>
-              <span className="tabular text-[24px] leading-none font-semibold text-[var(--color-fg)]">{lunchReservations.length}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-blue-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <Moon className="h-3.5 w-3.5" />
-                </span>
-                Cena
-              </span>
-              <span className="tabular text-[24px] leading-none font-semibold text-[var(--color-fg)]">{dinnerReservations.length}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-rose-50 px-3 py-2.5">
-              <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-rose-100 text-rose-600">
-                  <Calendar className="h-3.5 w-3.5" />
-                </span>
-                Banchetti
-              </span>
-              <span className="tabular text-[24px] leading-none font-semibold text-rose-600">{banquetsToday}</span>
-            </div>
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
+          <div className="flex gap-2">
+            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
+            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
+            <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
           </div>
         </button>
       </div>
 
-      {/* Row 1: Stato Tavoli (full width) */}
+      {/* Row 1: Stato Tavoli — Pranzo / Cena side by side */}
       <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
-        {/* Shift Occupancy Summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-          <div className="bg-[var(--color-surface-3)] rounded-lg p-3 sm:p-4 border border-[var(--color-line)]">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Pranzo</span>
-              <span className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
-            </div>
-            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none">{lunchOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-[var(--color-fg-muted)] mb-0.5 sm:mb-1">occupazione</span>
-            </div>
-            <div className="mt-2 h-1.5 bg-[var(--color-surface-hover)] rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
-            </div>
-            <p className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] mt-2">{lunchReservations.length} prenotazioni · {lunchReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
-          </div>
-
-          <div className="bg-[var(--color-surface-3)] rounded-lg p-3 sm:p-4 border border-[var(--color-line)]">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-              <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cena</span>
-              <span className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
-            </div>
-            <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-              <span className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none">{dinnerOccupancy}%</span>
-              <span className="text-xs sm:text-sm text-[var(--color-fg-muted)] mb-0.5 sm:mb-1">occupazione</span>
-            </div>
-            <div className="mt-2 h-1.5 bg-[var(--color-surface-hover)] rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
-            </div>
-            <p className="tabular text-[11px] sm:text-xs text-[var(--color-fg-muted)] mt-2">{dinnerReservations.length} prenotazioni · {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
-          </div>
-        </div>
-
-        {/* Room by Room Status */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {rooms.map(room => {
-            const roomTables = tables.filter(t => t.room_id === room.id);
-            const roomTableIds = new Set(roomTables.map(t => t.id));
-            const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
-            const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
-            const roomLunchAvailable = roomTables.length - roomLunchReserved;
-            const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
+          {([
+            {
+              key: 'lunch',
+              label: 'Pranzo',
+              icon: <Sun className="h-4 w-4" />,
+              chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
+              barFill: 'bg-amber-500',
+              roomBar: 'bg-amber-400',
+              cardBg: 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-500/[0.06] dark:border-amber-500/20',
+              divider: 'border-amber-200/60 dark:border-amber-500/20',
+              occupancy: lunchOccupancy,
+              occupiedTables: lunchTableIds.size,
+              reservations: lunchReservations,
+              reservationCount: lunchReservations.length,
+              guestCount: lunchReservations.reduce((acc, r) => acc + r.guests, 0),
+            },
+            {
+              key: 'dinner',
+              label: 'Cena',
+              icon: <Sunset className="h-4 w-4" />,
+              chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
+              barFill: 'bg-blue-500',
+              roomBar: 'bg-blue-400',
+              cardBg: 'bg-blue-50/40 border-blue-200/60 dark:bg-blue-500/[0.06] dark:border-blue-500/20',
+              divider: 'border-blue-200/60 dark:border-blue-500/20',
+              occupancy: dinnerOccupancy,
+              occupiedTables: dinnerTableIds.size,
+              reservations: dinnerReservations,
+              reservationCount: dinnerReservations.length,
+              guestCount: dinnerReservations.reduce((acc, r) => acc + r.guests, 0),
+            },
+          ] as const).map(meal => {
+            const roomStats = rooms.map(room => {
+              const roomTables = tables.filter(t => t.room_id === room.id);
+              const roomTableIds = new Set(roomTables.map(t => t.id));
+              const occupied = meal.reservations.filter(r => r.table_id && roomTableIds.has(r.table_id))
+                .reduce((set, r) => { set.add(r.table_id!); return set; }, new Set<number>()).size;
+              const total = roomTables.length;
+              const pct = total > 0 ? Math.round((occupied / total) * 100) : 0;
+              return { id: room.id, name: room.name, occupied, total, pct };
+            }).sort((a, b) => b.pct - a.pct);
 
             return (
-              <div key={room.id} className="border border-[var(--color-line)] rounded-md p-2 hover:bg-[var(--color-surface-hover)] transition-colors bg-[var(--color-surface)]">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-medium text-[var(--color-fg)] text-xs truncate">{room.name}</h3>
-                  <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{roomTables.length}</span>
+              <div
+                key={meal.key}
+                className={`rounded-xl border ${meal.cardBg} p-4 sm:p-5 flex flex-col gap-4`}
+              >
+                {/* Header: meal chip + label + total tavoli */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${meal.chip}`}>
+                      {meal.icon}
+                    </span>
+                    <span className="text-[15px] font-semibold text-[var(--color-fg)] tracking-tight">{meal.label}</span>
+                  </div>
+                  <span className="tabular text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{meal.occupiedTables}/{totalTables} tavoli</span>
                 </div>
-                <div className="flex gap-1">
-                  <div className="flex-1 bg-[var(--color-surface-3)] rounded px-1 py-0.5 border border-[var(--color-line)] text-center">
-                    <span className={`tabular text-[10px] font-semibold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {roomLunchAvailable}
-                    </span>
+
+                {/* Big % + bar with threshold ticks + annotations */}
+                <div>
+                  <div className="flex items-end gap-2">
+                    <span className="tabular text-3xl font-semibold leading-none text-[var(--color-fg)]">{meal.occupancy}%</span>
+                    <span className="text-sm text-[var(--color-fg-muted)] mb-0.5">occupazione</span>
                   </div>
-                  <div className="flex-1 bg-[var(--color-surface-3)] rounded px-1 py-0.5 border border-[var(--color-line)] text-center">
-                    <span className={`tabular text-[10px] font-semibold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {roomDinnerAvailable}
-                    </span>
+                  <div className="relative mt-2 h-2 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                    <div className={`absolute inset-y-0 left-0 ${meal.barFill} rounded-full transition-all duration-500`} style={{ width: `${meal.occupancy}%` }} />
+                    {/* threshold ticks */}
+                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '40%' }} aria-hidden />
+                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '80%' }} aria-hidden />
                   </div>
+                  <div className="relative mt-1.5 h-3 text-[10px] text-[var(--color-fg-subtle)]">
+                    <span className="absolute left-0">Calmo</span>
+                    <span className="absolute" style={{ left: '40%', transform: 'translateX(-50%)' }}>Pieno</span>
+                    <span className="absolute right-0">Sold out</span>
+                  </div>
+                  <p className="tabular text-xs text-[var(--color-fg-muted)] mt-2">
+                    {meal.reservationCount} prenotazioni · {meal.guestCount} ospiti
+                  </p>
+                </div>
+
+                {/* Per-room rows */}
+                <div className={`border-t ${meal.divider} pt-3 space-y-1.5`}>
+                  {roomStats.map(room => {
+                    const Icon = getRoomIcon(room.name);
+                    return (
+                      <div key={room.id} className="flex items-center gap-3">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="text-sm text-[var(--color-fg)] flex-shrink-0 w-20 truncate">{room.name}</span>
+                        <div className="flex-1 h-1.5 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                          <div className={`h-full ${meal.roomBar} rounded-full transition-all duration-500`} style={{ width: `${room.pct}%` }} />
+                        </div>
+                        <span className="tabular text-xs text-[var(--color-fg-muted)] w-12 text-right flex-shrink-0">{room.occupied}/{room.total}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -1146,235 +1141,255 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
-        {/* Affluenza per Sala con orari - 75% */}
-        <div className="lg:col-span-3 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza per Orario</h2>
+      {/* Row 2: Affluenza — merged Orario + Settimana with shared shift filter */}
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+        {/* Header: title, view tabs, shift filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
-              <button
-                onClick={() => setAffluenceShiftFilter('ALL')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                  affluenceShiftFilter === 'ALL'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Tutti
-              </button>
-              <button
-                onClick={() => setAffluenceShiftFilter('LUNCH')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                  affluenceShiftFilter === 'LUNCH'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Pranzo
-              </button>
-              <button
-                onClick={() => setAffluenceShiftFilter('DINNER')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                  affluenceShiftFilter === 'DINNER'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Cena
-              </button>
+              {([
+                { key: 'ORARIO', label: 'Orario' },
+                { key: 'SETTIMANA', label: 'Settimana' },
+              ] as const).map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setAffluenceTab(t.key)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    affluenceTab === t.key
+                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
+              {([
+                { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
+                { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+              ] as const).map(s => (
+                <button
+                  key={s.key}
+                  onClick={() => setAffluenceShiftFilter(s.key)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    affluenceShiftFilter === s.key
+                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                  }`}
+                >
+                  {s.icon}
+                  {s.label}
+                </button>
+              ))}
             </div>
           </div>
+        </div>
 
-          <div className="space-y-4 max-h-[400px] overflow-y-auto">
-            {timeSlotAffluence.roomTimeSlots.map(room => (
-              <div key={room.roomId} className="border border-[var(--color-line)] rounded-md p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-medium text-sm text-[var(--color-fg)]">{room.roomName}</h3>
-                  <span className="tabular text-xs text-[var(--color-fg-subtle)]">Max {room.maxCapacity} coperti</span>
-                </div>
+        {affluenceTab === 'ORARIO' && (() => {
+          const showLunch = affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH';
+          const showDinner = affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER';
+          const cellColor = (p: number, isLunch: boolean) => {
+            if (p === 0) return 'bg-[var(--color-surface-3)]';
+            if (isLunch) {
+              if (p < 25) return 'bg-amber-200 dark:bg-amber-500/30';
+              if (p < 50) return 'bg-amber-300 dark:bg-amber-500/45';
+              if (p < 75) return 'bg-amber-400 dark:bg-amber-500/65';
+              return 'bg-amber-500 dark:bg-amber-500/85';
+            }
+            if (p < 25) return 'bg-blue-200 dark:bg-blue-500/30';
+            if (p < 50) return 'bg-blue-300 dark:bg-blue-500/45';
+            if (p < 75) return 'bg-blue-400 dark:bg-blue-500/65';
+            return 'bg-blue-500 dark:bg-blue-500/85';
+          };
 
-                {/* Lunch Time Slots */}
-                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
-                  <div className={affluenceShiftFilter === 'ALL' ? 'mb-2' : ''}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] w-16">Pranzo</span>
-                      <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
+          const renderShift = (
+            shift: 'lunch' | 'dinner',
+            slots: { time: string; guests: number; percentage: number }[],
+            total: number,
+            pct: number,
+            roomMax: number,
+          ) => {
+            const isLunch = shift === 'lunch';
+            const tone = isLunch
+              ? { chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300', icon: <Sun className="h-3 w-3" />, label: 'Pranzo', text: 'text-amber-900 dark:text-amber-100' }
+              : { chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300', icon: <Sunset className="h-3 w-3" />, label: 'Cena', text: 'text-blue-900 dark:text-blue-100' };
+
+            return (
+              <div className="flex items-center gap-2">
+                {/* Fixed left chip */}
+                <span className={`inline-flex h-5 w-5 items-center justify-center rounded ${tone.chip} flex-shrink-0 self-end mb-[6px]`} aria-label={tone.label}>
+                  {tone.icon}
+                </span>
+                {/* Scrollable middle: labels + cells */}
+                <div className="flex-1 min-w-0 overflow-x-auto">
+                  <div className="flex flex-col gap-1" style={{ minWidth: `${slots.length * 44}px` }}>
+                    <div className="flex gap-1">
+                      {slots.map(s => (
+                        <span key={s.time} className="tabular text-[10px] text-[var(--color-fg-subtle)] text-center flex-1 min-w-[40px]">{s.time}</span>
+                      ))}
                     </div>
-                    <div className={`flex ${affluenceShiftFilter === 'LUNCH' ? 'gap-2' : 'gap-1'}`}>
-                      {room.lunchSlots.map(slot => (
-                        <div key={slot.time} className="flex-1 text-center">
-                          <div className={`tabular text-[var(--color-fg-subtle)] mb-0.5 ${affluenceShiftFilter === 'LUNCH' ? 'text-xs' : 'text-[9px]'}`}>{slot.time}</div>
-                          <div className={`relative overflow-hidden rounded bg-[var(--color-surface-3)] ${affluenceShiftFilter === 'LUNCH' ? 'h-12' : ''}`}>
-                            <div
-                              className="absolute inset-y-0 left-0 bg-amber-200 transition-all duration-300"
-                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                            />
-                            <div className={`tabular relative font-semibold z-10 flex items-center justify-center ${affluenceShiftFilter === 'LUNCH' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-amber-800' : 'text-[var(--color-fg-subtle)]'}`}>
-                              {slot.guests}
-                            </div>
-                          </div>
-                          {affluenceShiftFilter === 'LUNCH' && (
-                            <div className="tabular text-[10px] text-[var(--color-fg-subtle)] mt-0.5">{slot.percentage}%</div>
-                          )}
+                    <div className="flex gap-1">
+                      {slots.map(slot => (
+                        <div
+                          key={slot.time}
+                          className={`relative flex-1 min-w-[40px] ${cellColor(slot.percentage, isLunch)} rounded h-7 sm:h-8 flex items-center justify-center transition-colors`}
+                          title={`${slot.time} · ${slot.guests} ospiti (${slot.percentage}%)`}
+                        >
+                          <span className={`tabular text-[11px] font-semibold ${slot.guests > 0 ? tone.text : 'text-[var(--color-fg-subtle)]'}`}>
+                            {slot.guests}
+                          </span>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                </div>
+                {/* Fixed right total */}
+                <span className="tabular text-[11px] text-[var(--color-fg-muted)] w-20 text-right flex-shrink-0 self-end mb-[6px]">{total}/{roomMax} · {pct}%</span>
+              </div>
+            );
+          };
 
-                {/* Dinner Time Slots */}
-                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] w-16">Cena</span>
-                      <span className="tabular text-[10px] text-[var(--color-fg-subtle)]">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
-                    </div>
-                    <div className={`flex overflow-x-auto ${affluenceShiftFilter === 'DINNER' ? 'gap-1.5' : 'gap-0.5'}`}>
-                      {room.dinnerSlots.map(slot => (
-                        <div key={slot.time} className={`flex-1 text-center ${affluenceShiftFilter === 'DINNER' ? 'min-w-[50px]' : 'min-w-[32px]'}`}>
-                          <div className={`tabular text-[var(--color-fg-subtle)] mb-0.5 ${affluenceShiftFilter === 'DINNER' ? 'text-[10px]' : 'text-[8px]'}`}>{slot.time.substring(0, 5)}</div>
-                          <div className={`relative overflow-hidden rounded bg-[var(--color-surface-3)] ${affluenceShiftFilter === 'DINNER' ? 'h-12' : ''}`}>
-                            <div
-                              className="absolute inset-y-0 left-0 bg-indigo-200 transition-all duration-300"
-                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                            />
-                            <div className={`tabular relative font-semibold z-10 flex items-center justify-center ${affluenceShiftFilter === 'DINNER' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-indigo-800' : 'text-[var(--color-fg-subtle)]'}`}>
-                              {slot.guests}
-                            </div>
-                          </div>
-                          {affluenceShiftFilter === 'DINNER' && (
-                            <div className="tabular text-[10px] text-[var(--color-fg-subtle)] mt-0.5">{slot.percentage}%</div>
-                          )}
+          return (
+            <>
+              <div className="space-y-3 max-h-[460px] overflow-y-auto">
+                {timeSlotAffluence.roomTimeSlots.map(room => {
+                  const Icon = getRoomIcon(room.roomName);
+                  return (
+                    <div key={room.roomId} className="border border-[var(--color-line)] rounded-md p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                          <h3 className="font-medium text-sm text-[var(--color-fg)] truncate">{room.roomName}</h3>
                         </div>
-                      ))}
+                        <span className="tabular text-xs text-[var(--color-fg-subtle)] flex-shrink-0">Max {room.maxCapacity} coperti</span>
+                      </div>
+                      {showLunch && renderShift('lunch', room.lunchSlots, room.totalLunchGuests, room.lunchPercentage, room.maxCapacity)}
+                      {showDinner && renderShift('dinner', room.dinnerSlots, room.totalDinnerGuests, room.dinnerPercentage, room.maxCapacity)}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Totals */}
+              <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                {showLunch && (
+                  <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
+                          <Sun className="h-3 w-3" />
+                        </span>
+                        Totale Pranzo
+                      </span>
+                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                        {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {showDinner && (
+                  <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
+                          <Sunset className="h-3 w-3" />
+                        </span>
+                        Totale Cena
+                      </span>
+                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                        {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                      </span>
                     </div>
                   </div>
                 )}
               </div>
-            ))}
-          </div>
+            </>
+          );
+        })()}
 
-          {/* Total Summary */}
-          <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
-              <div className="bg-[var(--color-surface-3)] rounded-md p-2.5 border border-[var(--color-line)]">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Totale Pranzo</span>
-                  <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                    {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                  </span>
-                </div>
-              </div>
-            )}
-            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
-              <div className="bg-[var(--color-surface-3)] rounded-md p-2.5 border border-[var(--color-line)]">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Totale Cena</span>
-                  <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                    {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        {affluenceTab === 'SETTIMANA' && (
+          <>
+            <p className="tabular text-xs text-[var(--color-fg-muted)] mb-3">{weekRange}</p>
+            <div className="h-64 sm:h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} />
+                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
+                  <Tooltip
+                    cursor={{ fill: 'var(--color-surface-hover)' }}
+                    contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)', borderRadius: '8px', fontSize: '12px' }}
+                    labelStyle={{ color: 'var(--color-fg-muted)' }}
+                    formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload[0]) {
+                        return `${label} (${payload[0].payload.date})`;
+                      }
+                      return label;
+                    }}
+                  />
+                  <Bar
+                    dataKey="guests"
+                    fill={affluenceShiftFilter === 'LUNCH' ? '#f59e0b' : affluenceShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
-        {/* Affluenza Settimanale - 25% */}
-        <div className="lg:col-span-1 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-          <div className="flex flex-col gap-3 mb-4">
-            <div>
-              <h2 className="text-base font-semibold text-[var(--color-fg)]">Affluenza Settimanale</h2>
-              <p className="tabular text-xs text-[var(--color-fg-muted)]">{weekRange}</p>
+            {/* Totals — same pattern as Orario */}
+            <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
+                <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
+                        <Sun className="h-3 w-3" />
+                      </span>
+                      Totale Pranzo (settimana)
+                    </span>
+                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
+                    </span>
+                  </div>
+                </div>
+              )}
+              {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
+                <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
+                        <Sunset className="h-3 w-3" />
+                      </span>
+                      Totale Cena (settimana)
+                    </span>
+                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
-              <button
-                onClick={() => setChartShiftFilter('ALL')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                  chartShiftFilter === 'ALL'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Tutti
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('LUNCH')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                  chartShiftFilter === 'LUNCH'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Pranzo
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('DINNER')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                  chartShiftFilter === 'DINNER'
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                Cena
-              </button>
-            </div>
-          </div>
-          <div className="h-48 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  stroke="var(--color-chart-axis)"
-                  tick={{fill: 'var(--color-chart-axis)', fontSize: 9}}
-                />
-                <YAxis
-                  domain={[0, 'auto']}
-                  axisLine={false}
-                  tickLine={false}
-                  stroke="var(--color-chart-axis)"
-                  tick={{fill: 'var(--color-chart-axis)', fontSize: 9}}
-                  width={25}
-                />
-                <Tooltip
-                  cursor={{fill: 'var(--color-surface-hover)'}}
-                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)', borderRadius: '8px', fontSize: '12px' }}
-                  labelStyle={{ color: 'var(--color-fg-muted)' }}
-                  formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
-                  labelFormatter={(label, payload) => {
-                    if (payload && payload[0]) {
-                      return `${label} (${payload[0].payload.date})`;
-                    }
-                    return label;
-                  }}
-                />
-                <Bar
-                  dataKey="guests"
-                  fill={chartShiftFilter === 'LUNCH' ? 'var(--color-chart-2)' : chartShiftFilter === 'DINNER' ? 'var(--color-chart-1)' : 'var(--color-chart-1)'}
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          </>
+        )}
       </div>
+
 
       {/* Row 3: Attività + Spesa del giorno */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
         <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-                <ListTodo className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
-                <p className="tabular text-xs text-[var(--color-fg-muted)]">{pendingCount} da completare</p>
-              </div>
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">
+                {isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {todos.filter(t => t.completed).length}/{todos.length} completate
+              </p>
             </div>
             <button
               onClick={handleOpenAddTodo}
@@ -1388,21 +1403,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           {/* Filter Tabs */}
           <div className="flex gap-1 mb-4 p-0.5 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md">
             {[
-              { key: 'mine', label: 'Mie', icon: UserCircle },
-              { key: 'all', label: 'Tutte', icon: ListTodo },
-              { key: 'pending', label: 'Da fare', icon: Circle },
-              { key: 'completed', label: 'Fatte', icon: CheckCircle2 },
-            ].map(({ key, label, icon: Icon }) => (
+              { key: 'mine', label: 'Mie' },
+              { key: 'all', label: 'Tutte' },
+              { key: 'pending', label: 'Da fare' },
+              { key: 'completed', label: 'Fatte' },
+            ].map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setTodoFilter(key as typeof todoFilter)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                   todoFilter === key
                     ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
                     : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
                 {label}
               </button>
             ))}
@@ -1479,24 +1493,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[todo.category]}`}>
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
+                            <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]}`} />
                             {CATEGORY_LABELS[todo.category]}
                           </span>
-                          <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
+                          {todo.priority !== TodoPriority.LOW && (
+                            <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
+                          )}
                           {todo.assignedToUserName && (
-                            <span className="text-[11px] text-[var(--color-fg-muted)] flex items-center gap-1">
-                              <UserCircle className="h-3 w-3" />
+                            <span className="text-[11px] text-[var(--color-fg-muted)]">
                               {todo.assignedToUserName}
                             </span>
                           )}
                           {todo.assignedToTeam && !todo.assignedToUserId && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${TEAM_COLORS[todo.assignedToTeam]}`}>
+                            <span className="text-[11px] text-[var(--color-fg-muted)]">
                               {TEAM_LABELS[todo.assignedToTeam]}
                             </span>
                           )}
                           {todo.dueDate && (
-                            <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
-                              <Clock className="h-3 w-3" />
+                            <span className={`tabular text-[11px] ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
                           )}
@@ -1513,23 +1528,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         {/* Spesa del Giorno (Shopping List) */}
         <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-                <ShoppingCart className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa del Giorno</h2>
-                <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
-              </div>
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa del Giorno</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
             </div>
-            {checkedItems > 0 && (
+            <div className="flex items-center gap-3">
+              {checkedItems > 0 && (
+                <button
+                  onClick={clearCheckedItems}
+                  className="text-xs text-[var(--color-fg-muted)] hover:text-rose-600 transition-colors"
+                >
+                  Rimuovi completati
+                </button>
+              )}
               <button
-                onClick={clearCheckedItems}
-                className="text-xs text-[var(--color-fg-muted)] hover:text-rose-600 transition-colors"
+                onClick={addShoppingItem}
+                disabled={!newItemName.trim()}
+                className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Aggiungi prodotto"
               >
-                Rimuovi completati
+                <Plus className="h-4 w-4" />
               </button>
-            )}
+            </div>
           </div>
 
           {/* Add Item Form */}
@@ -1551,14 +1571,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <option value="BAR">Bar</option>
               <option value="ALTRO">Altro</option>
             </select>
-            <button
-              onClick={addShoppingItem}
-              disabled={!newItemName.trim()}
-              className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Aggiungi prodotto"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
           </div>
 
           {/* Shopping List by Category */}
@@ -1579,18 +1591,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 if (items.length === 0) return null;
                 return (
                   <div key={category}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-[var(--color-fg-muted)]">{SHOPPING_CATEGORY_ICONS[category]}</span>
-                      <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">{SHOPPING_CATEGORY_LABELS[category]}</span>
-                      <span className="tabular text-[11px] text-[var(--color-fg-subtle)]">({items.length})</span>
+                    <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
+                      {SHOPPING_CATEGORY_LABELS[category]} <span className="tabular text-[var(--color-fg-subtle)]">({items.length})</span>
                     </div>
-                    <div className="space-y-2 pl-1">
-                      {items.map(item => (
-                        <div key={item.id} className="group">
-                          <div className="flex items-center gap-2">
+                    <div className="space-y-1.5">
+                      {items.map(item => {
+                        const meta = `${item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}${
+                          item.createdAt
+                            ? ` · ${new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} ${new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+                            : ''
+                        }`;
+                        return (
+                          <div key={item.id} className="group flex items-center gap-2" title={meta}>
                             <button
                               onClick={() => toggleShoppingItem(item.id)}
-                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
                                 item.checked
                                   ? 'bg-emerald-500 border-emerald-500 text-white'
                                   : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
@@ -1608,14 +1623,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                          <div className="tabular ml-6 text-[11px] text-[var(--color-fg-subtle)]">
-                            {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
-                            {item.createdAt && (
-                              <> • {new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} {new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -1627,14 +1636,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Row 4: Staff Presence */}
       <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] rounded-md">
-            <UsersRound className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
-            <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
-          </div>
+        <div className="mb-4">
+          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
+          <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
         </div>
 
         {staffLoading ? (
@@ -1642,125 +1646,105 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-subtle)]" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Pranzo */}
-            <div className="bg-[var(--color-surface-3)] rounded-lg p-4 border border-[var(--color-line)]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
-                  <Sun className="h-4 w-4 text-amber-700" />
-                </div>
-                <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Pranzo</span>
-                <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">
-                  {staffPresence.lunch.sala.length + staffPresence.lunch.cucina.length} persone
-                </span>
+          (() => {
+            const renderChip = (s: StaffMember, isLive: boolean) => (
+              <div
+                key={s.id}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
+                title={s.role ? `${s.name} ${s.surname} · ${s.role}` : `${s.name} ${s.surname}`}
+              >
+                <span className="truncate max-w-[8rem]">{s.name}</span>
+                {isLive && (
+                  <span className="relative flex h-1.5 w-1.5" aria-label="In servizio adesso">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  </span>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Sala */}
-                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</span>
-                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.lunch.sala.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.lunch.sala.length === 0 ? (
-                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                    ) : (
-                      staffPresence.lunch.sala.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-                {/* Cucina */}
-                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</span>
-                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.lunch.cucina.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.lunch.cucina.length === 0 ? (
-                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                    ) : (
-                      staffPresence.lunch.cucina.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            );
 
-            {/* Cena */}
-            <div className="bg-[var(--color-surface-3)] rounded-lg p-4 border border-[var(--color-line)]">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-md bg-indigo-100 flex items-center justify-center">
-                  <Moon className="h-4 w-4 text-indigo-700" />
-                </div>
-                <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cena</span>
-                <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">
-                  {staffPresence.dinner.sala.length + staffPresence.dinner.cucina.length} persone
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Sala */}
-                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</span>
-                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.dinner.sala.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.dinner.sala.length === 0 ? (
-                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                    ) : (
-                      staffPresence.dinner.sala.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
-                        </div>
-                      ))
+            const renderShiftCard = (
+              shiftKey: 'lunch' | 'dinner',
+              label: string,
+              icon: React.ReactNode,
+              iconWrap: string,
+              cardWash: string,
+              liveAccent: string,
+            ) => {
+              const data = staffPresence[shiftKey];
+              const total = data.sala.length + data.cucina.length;
+              const isLive = liveShift === shiftKey;
+              return (
+                <div
+                  className={`relative rounded-lg p-4 border transition ${cardWash} ${
+                    isLive ? `${liveAccent} shadow-[var(--shadow-sm)]` : 'border-[var(--color-line)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconWrap}`}>{icon}</div>
+                    <span className="text-sm font-semibold text-[var(--color-fg)]">{label}</span>
+                    <span className="tabular text-xs text-[var(--color-fg-muted)]">({total})</span>
+                    {isLive && (
+                      <span className="inline-flex items-center gap-1 ml-auto text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        </span>
+                        In corso
+                      </span>
                     )}
                   </div>
-                </div>
-                {/* Cucina */}
-                <div className="bg-[var(--color-surface)] rounded-md p-2.5 border border-[var(--color-line)]">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                    <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</span>
-                    <span className="tabular ml-auto text-xs text-[var(--color-fg-muted)]">{staffPresence.dinner.cucina.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.dinner.cucina.length === 0 ? (
-                      <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                    ) : (
-                      staffPresence.dinner.cucina.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center text-[10px] font-medium text-[var(--color-fg)]">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-[var(--color-fg)] truncate">{s.name}</span>
+                  <div className="space-y-2.5">
+                    <div>
+                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
+                        Sala <span className="tabular text-[var(--color-fg-subtle)]">({data.sala.length})</span>
+                      </div>
+                      {data.sala.length === 0 ? (
+                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {data.sala.map(s => renderChip(s, isLive))}
                         </div>
-                      ))
-                    )}
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
+                        Cucina <span className="tabular text-[var(--color-fg-subtle)]">({data.cucina.length})</span>
+                      </div>
+                      {data.cucina.length === 0 ? (
+                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {data.cucina.map(s => renderChip(s, isLive))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
+              );
+            };
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {renderShiftCard(
+                  'lunch',
+                  'Pranzo',
+                  <Sun className="h-4 w-4 text-amber-700" />,
+                  'bg-amber-100',
+                  'bg-gradient-to-br from-amber-50 to-orange-50/60 dark:from-amber-500/10 dark:to-orange-500/5',
+                  'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
+                )}
+                {renderShiftCard(
+                  'dinner',
+                  'Cena',
+                  <Sunset className="h-4 w-4 text-indigo-600" />,
+                  'bg-indigo-100',
+                  'bg-gradient-to-br from-indigo-50 to-blue-50/60 dark:from-indigo-500/10 dark:to-blue-500/5',
+                  'border-indigo-300/70 ring-1 ring-indigo-200/60 dark:ring-indigo-400/20',
+                )}
               </div>
-            </div>
-          </div>
+            );
+          })()
         )}
       </div>
 
