@@ -731,7 +731,7 @@ const App: React.FC = () => {
             />
           )}
 
-          {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.SETTINGS)) && !sidebarCollapsed && (
+          {(canAccessView(ViewState.STAFF) || canManageUsers()) && !sidebarCollapsed && (
             <div className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
               Gestione
             </div>
@@ -745,6 +745,21 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canManageUsers() && (
+            <SidebarItem
+              icon={<Users size={20} />}
+              label="Utenti"
+              active={false}
+              onClick={() => setShowUserManagement(true)}
+              collapsed={sidebarCollapsed}
+            />
+          )}
+
+          {canAccessView(ViewState.SETTINGS) && !sidebarCollapsed && (
+            <div className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+              Sistema
+            </div>
+          )}
           {canAccessView(ViewState.SETTINGS) && (
             <SidebarItem
               icon={<Settings size={20} />}
@@ -754,21 +769,43 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {sidebarCollapsed ? (
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+              aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
+              className="group w-full flex items-center justify-center px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors"
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
+              aria-pressed={theme === 'dark'}
+              className="group w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors text-sm"
+            >
+              <span className="flex items-center gap-3">
+                <span className="text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]">
+                  {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                </span>
+                <span className="font-medium">Modalità scura</span>
+              </span>
+              <span
+                aria-hidden
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-sidebar-fg-strong)]' : 'bg-[var(--color-sidebar-line)]'}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-sidebar-bg)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
+                />
+              </span>
+            </button>
+          )}
         </nav>
 
         <div className={`p-3 space-y-1 ${sidebarCollapsed ? 'px-2' : ''}`}>
-          {/* User Management Button (Owner only) */}
-          {canManageUsers() && (
-            <button
-              onClick={() => setShowUserManagement(true)}
-              className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] rounded-md transition-colors text-sm`}
-              title={sidebarCollapsed ? 'Gestione Utenti' : undefined}
-            >
-              <Users size={18} />
-              {!sidebarCollapsed && <span className="font-medium">Gestione Utenti</span>}
-            </button>
-          )}
-
           {/* User Info */}
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-2 pt-2">
@@ -829,6 +866,18 @@ const App: React.FC = () => {
               </label>
            </div>
            <div className="ml-auto flex items-center gap-2">
+              {/* Nuova prenotazione — primary CTA, first on the right side */}
+              {hasPermission('reservations:full') && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewReservation(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 h-9 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuova prenotazione
+                </button>
+              )}
+
               {/* Connection state — full pill on md+, status dot only on mobile */}
               <div
                 className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
@@ -880,16 +929,6 @@ const App: React.FC = () => {
                 <Search className="h-4 w-4" />
               </button>
 
-              {/* Theme toggle */}
-              <button
-                onClick={toggleTheme}
-                className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-                title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
-              >
-                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
-
                <div className="relative">
                    <button
                       onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
@@ -933,37 +972,37 @@ const App: React.FC = () => {
         </header>
 
         {view === ViewState.DASHBOARD && (
-          <>
-            <Dashboard
-              reservations={reservations}
-              tables={tables}
-              dishes={dishes}
-              rooms={rooms}
-              banquetMenus={banquetMenus}
-              onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
-              onNewReservation={() => setAutoOpenNewReservation(true)}
-            />
-            {autoOpenNewReservation && (
-              <ReservationList
-                reservations={reservations}
-                banquetMenus={banquetMenus}
-                tables={tables}
-                rooms={rooms}
-                onUpdateReservation={handleUpdateReservation}
-                onAddReservation={handleAddReservation}
-                onDeleteReservation={handleDeleteReservation}
-                onMergeTables={handleMergeTables}
-                onSplitTable={handleSplitTable}
-                onUpdateTable={handleUpdateTable}
-                showToast={addToast}
-                canEdit={hasPermission('reservations:full')}
-                modalOnly
-                autoOpenNew
-                onAutoOpenNewHandled={() => { /* noop — keep flag until modal closes */ }}
-                onModalClose={() => setAutoOpenNewReservation(false)}
-              />
-            )}
-          </>
+          <Dashboard
+            reservations={reservations}
+            tables={tables}
+            dishes={dishes}
+            rooms={rooms}
+            banquetMenus={banquetMenus}
+            onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+          />
+        )}
+
+        {/* Global "Nuova prenotazione" modal — opens on whichever page the user is on
+            (skip on RESERVATIONS view, which handles its own inline modal) */}
+        {autoOpenNewReservation && view !== ViewState.RESERVATIONS && (
+          <ReservationList
+            reservations={reservations}
+            banquetMenus={banquetMenus}
+            tables={tables}
+            rooms={rooms}
+            onUpdateReservation={handleUpdateReservation}
+            onAddReservation={handleAddReservation}
+            onDeleteReservation={handleDeleteReservation}
+            onMergeTables={handleMergeTables}
+            onSplitTable={handleSplitTable}
+            onUpdateTable={handleUpdateTable}
+            showToast={addToast}
+            canEdit={hasPermission('reservations:full')}
+            modalOnly
+            autoOpenNew
+            onAutoOpenNewHandled={() => { /* keep flag until modal closes */ }}
+            onModalClose={() => setAutoOpenNewReservation(false)}
+          />
         )}
 
         {view === ViewState.RESERVATIONS && (
