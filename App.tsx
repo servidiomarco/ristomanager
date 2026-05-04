@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Grid, Menu as MenuIcon, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, BookUser } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -10,6 +10,7 @@ import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
+import { CustomerList } from './components/CustomerList';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -735,6 +736,15 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.CLIENTI) && (
+            <SidebarItem
+              icon={<BookUser size={20} />}
+              label="Clienti"
+              active={view === ViewState.CLIENTI}
+              onClick={() => setView(ViewState.CLIENTI)}
+              collapsed={sidebarCollapsed}
+            />
+          )}
           {canAccessView(ViewState.SETTINGS) && (
             <SidebarItem
               icon={<Settings size={20} />}
@@ -904,6 +914,14 @@ const App: React.FC = () => {
           <StaffManagement showToast={addToast} />
         )}
 
+        {view === ViewState.CLIENTI && (
+          <CustomerList
+            reservations={reservations}
+            banquetMenus={banquetMenus}
+            showToast={addToast}
+          />
+        )}
+
         {view === ViewState.SETTINGS && (
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold text-slate-800 mb-6">Impostazioni</h2>
@@ -1035,6 +1053,14 @@ const App: React.FC = () => {
                 label="Personale"
                 active={view === ViewState.STAFF}
                 onClick={() => setView(ViewState.STAFF)}
+              />
+            )}
+            {canAccessView(ViewState.CLIENTI) && (
+              <BottomNavItem
+                icon={<BookUser size={24} />}
+                label="Clienti"
+                active={view === ViewState.CLIENTI}
+                onClick={() => setView(ViewState.CLIENTI)}
               />
             )}
             {canAccessView(ViewState.SETTINGS) && (

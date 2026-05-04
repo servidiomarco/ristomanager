@@ -1206,11 +1206,169 @@ const startBreadReminderScheduler = () => {
     setInterval(tick, 5 * 60 * 1000);
 };
 
+// ============================================
+// CUSTOMERS (rubrica) - require authentication
+// ============================================
+app.get('/customers', authenticate, requirePermission('customers:view'), async (req, res) => {
+    try {
+        const { q, limit } = req.query as { q?: string; limit?: string };
+        const cap = Math.min(Math.max(parseInt(limit || '500', 10) || 500, 1), 1000);
+        if (q && q.trim()) {
+            const term = `%${q.trim().toLowerCase()}%`;
+            const result = await queryWithRetry(
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
+                 FROM customers
+                 WHERE LOWER(name) LIKE $1 OR LOWER(COALESCE(phone, '')) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1
+                 ORDER BY name
+                 LIMIT $2`,
+                [term, cap]
+            );
+            return res.json(result.rows);
+        }
+        const result = await queryWithRetry(
+            `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
+             FROM customers
+             ORDER BY name
+             LIMIT $1`,
+            [cap]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /customers error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO customers (name, phone, email, address, city, postal_code, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+            [
+                String(name).trim(),
+                phone ? String(phone).trim() : null,
+                email ? String(email).trim() : null,
+                address ?? null,
+                city ?? null,
+                postal_code ?? null,
+                notes ?? null,
+            ]
+        );
+        const newCustomer = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.CUSTOMER,
+                newCustomer.id,
+                newCustomer.name
+            );
+        }
+
+        res.status(201).json(newCustomer);
+    } catch (err: any) {
+        console.error('POST /customers error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE customers SET
+                name = $1,
+                phone = $2,
+                email = $3,
+                address = $4,
+                city = $5,
+                postal_code = $6,
+                notes = $7,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = $8
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+            [
+                String(name).trim(),
+                phone ? String(phone).trim() : null,
+                email ? String(email).trim() : null,
+                address ?? null,
+                city ?? null,
+                postal_code ?? null,
+                notes ?? null,
+                id,
+            ]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+        const updated = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.CUSTOMER,
+                updated.id,
+                updated.name
+            );
+        }
+
+        res.json(updated);
+    } catch (err: any) {
+        console.error('PUT /customers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+        const resourceName = existing.rows[0].name;
+
+        await queryWithRetry('DELETE FROM customers WHERE id = $1', [id]);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.CUSTOMER,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
+
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /customers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id FROM banquet_menus ORDER BY event_date NULLS LAST, name"
         );
         res.json(result.rows);
     } catch (err) {
@@ -1221,7 +1379,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1231,8 +1389,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null]
         );
         const newMenu = result.rows[0];
 
@@ -1268,7 +1426,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1277,8 +1435,8 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12 WHERE id = $13 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12, customer_id = $13 WHERE id = $14 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, id]
         );
         const updatedMenu = result.rows[0];
 

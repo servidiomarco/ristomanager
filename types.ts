@@ -74,6 +74,7 @@ export interface BanquetMenu {
   notes_courses?: string;
   notes_service?: string;
   notes_mise_en_place?: string;
+  customer_id?: number | null;
 }
 
 export enum PaymentStatus {
@@ -153,7 +154,21 @@ export enum ViewState {
   MENU = 'MENU',
   RESERVATIONS = 'RESERVATIONS',
   STAFF = 'STAFF',
+  CLIENTI = 'CLIENTI',
   SETTINGS = 'SETTINGS'
+}
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ============================================
@@ -219,7 +234,8 @@ export enum ResourceType {
   AUTH = 'AUTH',
   STAFF = 'STAFF',
   STAFF_SHIFT = 'STAFF_SHIFT',
-  STAFF_TIME_OFF = 'STAFF_TIME_OFF'
+  STAFF_TIME_OFF = 'STAFF_TIME_OFF',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export interface ActivityLog {

@@ -1,12 +1,14 @@
 
 
-import React, { useState, useMemo } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer } from '../types';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { DishDetailModal } from './DishDetailModal';
+import { CustomerPickerModal } from './CustomerPickerModal';
+import { getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
@@ -83,10 +85,35 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       shift: undefined,
       deposit_amount: undefined,
       guests: undefined,
+      customer_id: null,
       notes_courses: '',
       notes_service: '',
       notes_mise_en_place: ''
   });
+
+  // Customer picker (rubrica) state for banquet form
+  const [isBanquetCustomerPickerOpen, setIsBanquetCustomerPickerOpen] = useState(false);
+  const [selectedBanquetCustomer, setSelectedBanquetCustomer] = useState<Customer | null>(null);
+
+  // Load the selected customer when editing a banquet that has customer_id
+  useEffect(() => {
+    if (!isBanquetFormOpen) return;
+    const id = newBanquet.customer_id;
+    if (!id) {
+      setSelectedBanquetCustomer(null);
+      return;
+    }
+    if (selectedBanquetCustomer?.id === id) return;
+    let cancelled = false;
+    getCustomers()
+      .then(list => {
+        if (cancelled) return;
+        const found = list.find(c => c.id === id) || null;
+        setSelectedBanquetCustomer(found);
+      })
+      .catch(() => { if (!cancelled) setSelectedBanquetCustomer(null); });
+    return () => { cancelled = true; };
+  }, [isBanquetFormOpen, newBanquet.customer_id, selectedBanquetCustomer?.id]);
 
   const handleAddDishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,6 +180,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           guests: newBanquet.guests != null && newBanquet.guests !== ('' as any)
               ? Number(newBanquet.guests)
               : undefined,
+          customer_id: newBanquet.customer_id ?? null,
           notes_courses: newBanquet.notes_courses?.trim() || undefined,
           notes_service: newBanquet.notes_service?.trim() || undefined,
           notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined
@@ -167,7 +195,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setIsBanquetFormOpen(false);
       setIsEditingBanquet(false);
       setEditingBanquetId(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
+      setSelectedBanquetCustomer(null);
+      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -187,10 +216,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       shift: menu.shift,
       deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined,
       guests: menu.guests != null ? Number(menu.guests) : undefined,
+      customer_id: menu.customer_id ?? null,
       notes_courses: menu.notes_courses || '',
       notes_service: menu.notes_service || '',
       notes_mise_en_place: menu.notes_mise_en_place || ''
     });
+    setSelectedBanquetCustomer(null);
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setIsBanquetFormOpen(true);
@@ -199,12 +230,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewBanquet = () => {
     setIsEditingBanquet(false);
     setEditingBanquetId(null);
+    setSelectedBanquetCustomer(null);
     setNewBanquet({
       name: '', description: '', price_per_person: 0,
       dish_ids: [],
       courses: [{ name: '1ª Uscita', dish_ids: [] }],
       event_date: '', shift: undefined, deposit_amount: undefined,
       guests: undefined,
+      customer_id: null,
       notes_courses: '', notes_service: '', notes_mise_en_place: ''
     });
     setIsBanquetFormOpen(true);
@@ -789,6 +822,53 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
               </div>
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Cliente <span className="text-slate-400 font-normal">— opzionale</span></label>
+                {selectedBanquetCustomer ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 truncate">{selectedBanquetCustomer.name}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-slate-600">
+                        {selectedBanquetCustomer.phone && (
+                          <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {selectedBanquetCustomer.phone}</span>
+                        )}
+                        {selectedBanquetCustomer.email && (
+                          <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {selectedBanquetCustomer.email}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsBanquetCustomerPickerOpen(true)}
+                        className="px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 rounded-md"
+                      >
+                        Cambia
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBanquetCustomer(null);
+                          setNewBanquet(prev => ({ ...prev, customer_id: null }));
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"
+                        title="Rimuovi cliente"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsBanquetCustomerPickerOpen(true)}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100"
+                  >
+                    <BookUser className="h-4 w-4" />
+                    Seleziona dalla rubrica
+                  </button>
+                )}
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Descrizione Commerciale</label>
                 <textarea
                   className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-20"
@@ -1038,6 +1118,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           onClose={() => setViewDish(null)}
         />
       )}
+
+      <CustomerPickerModal
+        isOpen={isBanquetCustomerPickerOpen}
+        initialQuery={selectedBanquetCustomer?.name || newBanquet.name || ''}
+        onClose={() => setIsBanquetCustomerPickerOpen(false)}
+        onSelect={(c: Customer) => {
+          setSelectedBanquetCustomer(c);
+          setNewBanquet(prev => ({ ...prev, customer_id: c.id }));
+        }}
+      />
     </div>
   );
 };

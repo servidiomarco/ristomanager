@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift, Customer } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -294,6 +294,42 @@ export const updateBanquetMenu = async (id: number, menu: Partial<BanquetMenu>):
 
 export const deleteBanquetMenu = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/banquet-menus/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// CUSTOMERS (rubrica)
+// ============================================
+
+export const getCustomers = async (search?: string): Promise<Customer[]> => {
+  const url = search && search.trim()
+    ? `${API_URL}/customers?q=${encodeURIComponent(search.trim())}`
+    : `${API_URL}/customers`;
+  return apiRequest<Customer[]>(url, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createCustomer = async (customer: Omit<Customer, 'id'>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const updateCustomer = async (id: number, customer: Partial<Customer>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const deleteCustomer = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/customers/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);

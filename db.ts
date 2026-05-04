@@ -691,6 +691,90 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_staff_time_off_dates ON staff_time_off(start_date, end_date);
         `);
 
+        // ============================================
+        // CUSTOMERS TABLE (rubrica)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS customers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                email VARCHAR(255),
+                address TEXT,
+                city VARCHAR(100),
+                postal_code VARCHAR(20),
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(LOWER(name));`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);`);
+
+        // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
+        // because deleting a customer should not destroy the banquet history.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
+
+        // Customer permissions for roles
+        const customerPermissions = [
+            ['OWNER', 'customers:view'], ['OWNER', 'customers:full'],
+            ['GENERAL_MANAGER', 'customers:view'], ['GENERAL_MANAGER', 'customers:full'],
+            ['MANAGER', 'customers:view'], ['MANAGER', 'customers:full'],
+            ['WAITER', 'customers:view'],
+        ];
+        for (const [role, permission] of customerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // One-time backfill: seed the rubrica from reservations the first time
+        // this migration runs. We deduplicate on a normalised key — phone if
+        // present, otherwise lowercased name — so the same customer doesn't
+        // produce multiple rows when they have several past reservations.
+        const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
+        if (customerCount.rows[0].c === 0) {
+            await client.query(`
+                INSERT INTO customers (name, phone, email)
+                SELECT name, phone, email
+                FROM (
+                    SELECT
+                        TRIM(customer_name) AS name,
+                        NULLIF(TRIM(phone), '') AS phone,
+                        NULLIF(TRIM(email), '') AS email,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(NULLIF(TRIM(phone), ''), LOWER(TRIM(customer_name)))
+                            ORDER BY id DESC
+                        ) AS rn
+                    FROM reservations
+                    WHERE customer_name IS NOT NULL AND TRIM(customer_name) <> ''
+                ) deduped
+                WHERE rn = 1;
+            `);
+
+            // Link existing banquet_menus.customer_id by matching the banquet's
+            // most recent reservation to the customer we just inserted.
+            await client.query(`
+                UPDATE banquet_menus bm
+                SET customer_id = sub.customer_id
+                FROM (
+                    SELECT DISTINCT ON (r.banquet_menu_id)
+                        r.banquet_menu_id,
+                        c.id AS customer_id
+                    FROM reservations r
+                    JOIN customers c
+                      ON c.phone IS NOT DISTINCT FROM NULLIF(TRIM(r.phone), '')
+                     AND LOWER(c.name) = LOWER(TRIM(r.customer_name))
+                    WHERE r.banquet_menu_id IS NOT NULL
+                    ORDER BY r.banquet_menu_id, r.id DESC
+                ) sub
+                WHERE bm.id = sub.banquet_menu_id AND bm.customer_id IS NULL;
+            `);
+            console.log('Customers rubrica backfilled from reservations');
+        }
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

@@ -15,7 +15,8 @@ export enum ResourceType {
   DISH = 'DISH',
   BANQUET_MENU = 'BANQUET_MENU',
   USER = 'USER',
-  AUTH = 'AUTH'
+  AUTH = 'AUTH',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export interface ActivityLog {

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
+import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
@@ -222,6 +223,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onCancel: () => void;
     onSelectSuggestion?: (table: Table) => void;
   } | null>(null);
+
+  // Customer picker (rubrica) modal
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
 
   // Time slot options
   const LUNCH_TIMES = ['13:00', '13:30', '14:00'];
@@ -1956,6 +1960,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         onChange={e => setFormData({...formData, customer_name: e.target.value})}
                                         placeholder="Mario Rossi"
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCustomerPickerOpen(true)}
+                                        className="p-3 sm:p-4 rounded-xl bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-all flex items-center justify-center"
+                                        title="Rubrica clienti"
+                                    >
+                                        <BookUser className="h-5 w-5" />
+                                    </button>
                                     {isVoiceSupported() && (
                                         <button
                                             type="button"
@@ -2907,6 +2919,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
           );
       })()}
+
+      <CustomerPickerModal
+        isOpen={isCustomerPickerOpen}
+        initialQuery={formData.customer_name || ''}
+        onClose={() => setIsCustomerPickerOpen(false)}
+        onSelect={(c: Customer) => {
+          setFormData(prev => ({
+            ...prev,
+            customer_name: c.name,
+            phone: c.phone || prev.phone || '',
+            email: c.email || prev.email || '',
+          }));
+        }}
+      />
     </div>
   );
 };
