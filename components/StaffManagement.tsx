@@ -438,8 +438,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       setTimeOffs(prev => [...prev, created]);
       setShowTimeOffModal(false);
       showToast('Assenza registrata', 'success');
-    } catch (error) {
-      showToast('Errore nel salvataggio', 'error');
+    } catch (error: any) {
+      console.error('createTimeOff failed', error);
+      showToast(`Errore nel salvataggio: ${error?.message || 'sconosciuto'}`, 'error');
     }
   };
 
