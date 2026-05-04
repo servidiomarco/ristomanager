@@ -174,3 +174,47 @@ export const printShoppingList = (
   win.document.write(html);
   win.document.close();
 };
+
+const buildShareText = (
+  items: ShoppingItem[],
+  category: ShoppingCategory,
+  date: string
+): string => {
+  const label = CATEGORY_LABELS[category];
+  const dateLabel = formatDate(date);
+  const lines: string[] = [];
+  lines.push(`*Lista della spesa — ${label}*`);
+  if (dateLabel) lines.push(dateLabel);
+  lines.push('');
+  if (items.length === 0) {
+    lines.push('_Nessun prodotto in questa sezione._');
+  } else {
+    for (const item of items) {
+      const mark = item.checked ? '☑' : '☐';
+      lines.push(`${mark} ${item.name}`);
+    }
+  }
+  return lines.join('\n');
+};
+
+export const shareShoppingListWhatsApp = async (
+  items: ShoppingItem[],
+  category: ShoppingCategory,
+  date: string
+): Promise<void> => {
+  const text = buildShareText(items, category, date);
+  const title = `Lista della spesa — ${CATEGORY_LABELS[category]}`;
+
+  const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
+  if (typeof nav.share === 'function') {
+    try {
+      await nav.share({ title, text });
+      return;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+    }
+  }
+
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+};
