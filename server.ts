@@ -1209,6 +1209,16 @@ const startBreadReminderScheduler = () => {
 // ============================================
 // CUSTOMERS (rubrica) - require authentication
 // ============================================
+
+// Title-case Italian names: "MARIO ROSSI" / "mario rossi" / "d'angelo"
+// → "Mario Rossi" / "Mario Rossi" / "D'Angelo". Splits on whitespace,
+// apostrophes (' and ’) and hyphens, preserving the separators.
+const normalizeCustomerName = (raw: string): string => {
+    return raw
+        .toLowerCase()
+        .replace(/(^|[\s'’\-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
+};
+
 app.get('/customers', authenticate, requirePermission('customers:view'), async (req, res) => {
     try {
         const { q, limit } = req.query as { q?: string; limit?: string };
@@ -1250,7 +1260,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
             [
-                String(name).trim(),
+                normalizeCustomerName(String(name).trim()),
                 phone ? String(phone).trim() : null,
                 email ? String(email).trim() : null,
                 address ?? null,
@@ -1300,7 +1310,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
              WHERE id = $8
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
             [
-                String(name).trim(),
+                normalizeCustomerName(String(name).trim()),
                 phone ? String(phone).trim() : null,
                 email ? String(email).trim() : null,
                 address ?? null,

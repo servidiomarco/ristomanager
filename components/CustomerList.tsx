@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Customer, Reservation, BanquetMenu } from '../types';
+import { Customer, Reservation, BanquetMenu, Shift } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon } from 'lucide-react';
 
 interface Props {
   reservations: Reservation[];
@@ -49,6 +49,15 @@ const formatLastVisit = (date: string | undefined): string => {
   return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+// Format an ISO reservation_time without timezone shifts (the backend stores
+// the local wall clock; passing it through Date would interpret it as UTC).
+const formatReservationDateTime = (isoString: string): { date: string; time: string } => {
+  const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return { date: '', time: '' };
+  const [, y, m, d, h, min] = match;
+  return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
+};
+
 export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, showToast }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
@@ -75,22 +84,27 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
     return () => { cancelled = true; };
   }, []);
 
-  // Aggregate reservation/banquet stats per customer for the detail panel.
+  // Aggregate reservations/banquets per customer for the detail panel.
   // Customers are matched on phone (when available) or normalised name to
   // mirror the way the picker re-attaches them to existing reservations.
+  interface CustomerStats {
+    reservations: Reservation[];
+    banquets: BanquetMenu[];
+    lastVisit?: string;
+  }
+
   const stats = useMemo(() => {
-    const byKey = new Map<string, { reservations: Reservation[]; banquetIds: number[]; lastVisit?: string }>();
+    const byKey = new Map<string, CustomerStats>();
     const customerKey = (c: Customer): string =>
       c.phone ? `p:${c.phone.trim()}` : `n:${c.name.trim().toLowerCase()}`;
     const reservationKey = (r: Reservation): string =>
       r.phone && r.phone.trim() ? `p:${r.phone.trim()}` : `n:${r.customer_name.trim().toLowerCase()}`;
 
     for (const c of customers) {
-      byKey.set(customerKey(c), { reservations: [], banquetIds: [], lastVisit: undefined });
+      byKey.set(customerKey(c), { reservations: [], banquets: [], lastVisit: undefined });
     }
     for (const r of reservations) {
-      const key = reservationKey(r);
-      const entry = byKey.get(key);
+      const entry = byKey.get(reservationKey(r));
       if (!entry) continue;
       entry.reservations.push(r);
       if (!entry.lastVisit || r.reservation_time > entry.lastVisit) {
@@ -102,17 +116,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
       const customer = customers.find(c => c.id === b.customer_id);
       if (!customer) continue;
       const entry = byKey.get(customerKey(customer));
-      if (entry) entry.banquetIds.push(b.id);
+      if (entry) entry.banquets.push(b);
     }
 
-    const result = new Map<number, { reservationCount: number; banquetCount: number; lastVisit?: string }>();
+    const result = new Map<number, CustomerStats>();
     for (const c of customers) {
       const e = byKey.get(customerKey(c));
-      result.set(c.id, {
-        reservationCount: e?.reservations.length || 0,
-        banquetCount: e?.banquetIds.length || 0,
-        lastVisit: e?.lastVisit,
-      });
+      result.set(c.id, e || { reservations: [], banquets: [], lastVisit: undefined });
     }
     return result;
   }, [customers, reservations, banquetMenus]);
@@ -288,19 +298,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                   )}
                 </div>
 
-                {(s?.reservationCount || s?.banquetCount) ? (
+                {(s && (s.reservations.length || s.banquets.length)) ? (
                   <div className="mt-1 pt-2 border-t border-slate-100 flex items-center gap-3 text-xs text-slate-500">
-                    {s?.reservationCount ? (
+                    {s.reservations.length ? (
                       <span className="inline-flex items-center gap-1">
-                        <History className="h-3.5 w-3.5" /> {s.reservationCount} prenot.
+                        <History className="h-3.5 w-3.5" /> {s.reservations.length} prenot.
                       </span>
                     ) : null}
-                    {s?.banquetCount ? (
+                    {s.banquets.length ? (
                       <span className="inline-flex items-center gap-1">
-                        <UtensilsCrossed className="h-3.5 w-3.5" /> {s.banquetCount} banch.
+                        <UtensilsCrossed className="h-3.5 w-3.5" /> {s.banquets.length} banch.
                       </span>
                     ) : null}
-                    {s?.lastVisit && (
+                    {s.lastVisit && (
                       <span className="ml-auto">Ultima: {formatLastVisit(s.lastVisit)}</span>
                     )}
                   </div>
@@ -510,24 +520,93 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
 
               {(() => {
                 const s = stats.get(detailCustomer.id);
-                if (!s || (!s.reservationCount && !s.banquetCount)) {
+                if (!s || (!s.reservations.length && !s.banquets.length)) {
                   return <p className="text-xs text-slate-500 italic">Nessuna prenotazione registrata.</p>;
                 }
+                const sortedReservations = [...s.reservations].sort(
+                  (a, b) => b.reservation_time.localeCompare(a.reservation_time)
+                );
                 return (
-                  <div className="border-t border-slate-100 pt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-indigo-50 rounded-lg py-2">
-                      <div className="text-xl font-bold text-indigo-700">{s.reservationCount}</div>
-                      <div className="text-[11px] uppercase tracking-wide text-indigo-600">Prenot.</div>
+                  <>
+                    <div className="border-t border-slate-100 pt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-indigo-50 rounded-lg py-2">
+                        <div className="text-xl font-bold text-indigo-700">{s.reservations.length}</div>
+                        <div className="text-[11px] uppercase tracking-wide text-indigo-600">Prenot.</div>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg py-2">
+                        <div className="text-xl font-bold text-emerald-700">{s.banquets.length}</div>
+                        <div className="text-[11px] uppercase tracking-wide text-emerald-600">Banch.</div>
+                      </div>
+                      <div className="bg-slate-50 rounded-lg py-2">
+                        <div className="text-xs font-bold text-slate-700 mt-1">{formatLastVisit(s.lastVisit) || '—'}</div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Ultima</div>
+                      </div>
                     </div>
-                    <div className="bg-emerald-50 rounded-lg py-2">
-                      <div className="text-xl font-bold text-emerald-700">{s.banquetCount}</div>
-                      <div className="text-[11px] uppercase tracking-wide text-emerald-600">Banch.</div>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg py-2">
-                      <div className="text-xs font-bold text-slate-700 mt-1">{formatLastVisit(s.lastVisit) || '—'}</div>
-                      <div className="text-[11px] uppercase tracking-wide text-slate-500">Ultima</div>
-                    </div>
-                  </div>
+
+                    {sortedReservations.length > 0 && (
+                      <div className="border-t border-slate-100 pt-3">
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                          <History className="h-3.5 w-3.5" />
+                          Storico prenotazioni
+                        </div>
+                        <ul className="space-y-1.5">
+                          {sortedReservations.map(r => {
+                            const { date, time } = formatReservationDateTime(r.reservation_time);
+                            const isLunch = r.shift === Shift.LUNCH;
+                            return (
+                              <li
+                                key={r.id}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100"
+                              >
+                                {isLunch ? (
+                                  <Sun className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                                ) : (
+                                  <Moon className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
+                                )}
+                                <div className="flex-1 min-w-0 flex items-center gap-2 text-xs">
+                                  <span className="font-semibold text-slate-700 whitespace-nowrap">{date}</span>
+                                  <span className="text-slate-500 whitespace-nowrap">{time}</span>
+                                  <span className="inline-flex items-center gap-0.5 text-slate-500 whitespace-nowrap ml-auto">
+                                    <UsersIcon className="h-3 w-3" />
+                                    {r.guests}
+                                  </span>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {s.banquets.length > 0 && (
+                      <div className="border-t border-slate-100 pt-3">
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                          <UtensilsCrossed className="h-3.5 w-3.5" />
+                          Banchetti
+                        </div>
+                        <ul className="space-y-1.5">
+                          {[...s.banquets]
+                            .sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''))
+                            .map(b => (
+                              <li
+                                key={b.id}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100"
+                              >
+                                <Calendar className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+                                <div className="flex-1 min-w-0 text-xs">
+                                  <span className="font-semibold text-slate-700">{b.name}</span>
+                                  {b.event_date && (
+                                    <span className="text-slate-500 ml-2">
+                                      {b.event_date.split('-').reverse().join('/')}
+                                    </span>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
             </div>

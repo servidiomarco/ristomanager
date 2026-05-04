@@ -712,6 +712,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);`);
 
+        // Track whether a customer was created by the backfill so we can prune
+        // legacy auto-imported entries that don't meet the current rules
+        // (phone or email required) without touching customers added manually.
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS auto_imported BOOLEAN NOT NULL DEFAULT FALSE;`);
+
         // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
         // because deleting a customer should not destroy the banquet history.
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
@@ -730,26 +735,55 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
+        // Drop auto-imported customers that don't have a phone or email — the
+        // rubrica only stores reachable contacts. Manually-created entries
+        // (auto_imported = FALSE) are left alone even if they have no contact.
+        await client.query(`
+            DELETE FROM customers
+             WHERE auto_imported = TRUE
+               AND phone IS NULL
+               AND email IS NULL;
+        `);
+
+        // Normalise existing names to Title Case. INITCAP treats apostrophes,
+        // hyphens and spaces as word separators — so "MARIO ROSSI",
+        // "mario rossi" and "d'angelo" all land on "Mario Rossi" / "D'Angelo".
+        // Idempotent: only rows that aren't already title-cased get touched.
+        await client.query(`
+            UPDATE customers
+               SET name = INITCAP(name)
+             WHERE name <> INITCAP(name);
+        `);
+
         // One-time backfill: seed the rubrica from reservations the first time
-        // this migration runs. We deduplicate on a normalised key — phone if
-        // present, otherwise lowercased name — so the same customer doesn't
-        // produce multiple rows when they have several past reservations.
+        // this migration runs. Restricted to reservations that carry a phone
+        // or email — names alone aren't a reliable identifier. Deduplicated on
+        // phone when available, otherwise on lower-cased title-cased name.
         const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
         if (customerCount.rows[0].c === 0) {
             await client.query(`
-                INSERT INTO customers (name, phone, email)
-                SELECT name, phone, email
+                INSERT INTO customers (name, phone, email, auto_imported)
+                SELECT name, phone, email, TRUE
                 FROM (
                     SELECT
-                        TRIM(customer_name) AS name,
+                        INITCAP(TRIM(customer_name)) AS name,
                         NULLIF(TRIM(phone), '') AS phone,
                         NULLIF(TRIM(email), '') AS email,
                         ROW_NUMBER() OVER (
-                            PARTITION BY COALESCE(NULLIF(TRIM(phone), ''), LOWER(TRIM(customer_name)))
+                            PARTITION BY COALESCE(
+                                NULLIF(TRIM(phone), ''),
+                                NULLIF(TRIM(email), ''),
+                                LOWER(TRIM(customer_name))
+                            )
                             ORDER BY id DESC
                         ) AS rn
                     FROM reservations
-                    WHERE customer_name IS NOT NULL AND TRIM(customer_name) <> ''
+                    WHERE customer_name IS NOT NULL
+                      AND TRIM(customer_name) <> ''
+                      AND (
+                            NULLIF(TRIM(phone), '') IS NOT NULL
+                         OR NULLIF(TRIM(email), '') IS NOT NULL
+                      )
                 ) deduped
                 WHERE rn = 1;
             `);
@@ -766,7 +800,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     FROM reservations r
                     JOIN customers c
                       ON c.phone IS NOT DISTINCT FROM NULLIF(TRIM(r.phone), '')
-                     AND LOWER(c.name) = LOWER(TRIM(r.customer_name))
+                     AND LOWER(c.name) = LOWER(INITCAP(TRIM(r.customer_name)))
                     WHERE r.banquet_menu_id IS NOT NULL
                     ORDER BY r.banquet_menu_id, r.id DESC
                 ) sub
