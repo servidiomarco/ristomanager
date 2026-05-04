@@ -3,13 +3,14 @@ import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPri
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { printShoppingList } from '../utils/printShoppingList';
 import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair, StickyNote } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair, StickyNote, Printer } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -1657,6 +1658,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       {SHOPPING_CATEGORY_ICONS[category]}
                       <span className="text-xs font-medium">{SHOPPING_CATEGORY_LABELS[category]}</span>
                       <span className="text-xs opacity-70">({items.length})</span>
+                      <button
+                        type="button"
+                        onClick={() => printShoppingList(items, category, selectedDateStr)}
+                        className="ml-auto p-1 rounded hover:bg-white/60 transition-colors"
+                        title={`Stampa PDF ${SHOPPING_CATEGORY_LABELS[category]}`}
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                     <div className="space-y-2 pl-2">
                       {items.map(item => (
