@@ -377,15 +377,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <div className="text-2xl font-semibold text-[var(--color-fg)] mt-1">{dishes.length}</div>
                 </div>
                 <div className="md:col-span-3">
-                    <div className="relative h-full">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--color-fg-subtle)] h-4 w-4" />
+                    <div className="relative h-11">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
                         <input
-                            type="text"
+                            type="search"
                             placeholder="Cerca piatto per nome o categoria..."
-                            className="w-full h-full pl-10 pr-4 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md text-sm focus:outline-none focus:border-[var(--color-fg)] text-[var(--color-fg)]"
+                            className="w-full h-full pl-10 pr-10 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
+                        {searchTerm && (
+                            <button
+                                type="button"
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                                aria-label="Cancella ricerca"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

@@ -109,6 +109,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.RESERVATIONS]: ['reservations:view'],
   [ViewState.STAFF]: ['staff:view'],
   [ViewState.CLIENTI]: ['customers:view'],
+  [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view']
 };
 

@@ -155,6 +155,7 @@ export enum ViewState {
   RESERVATIONS = 'RESERVATIONS',
   STAFF = 'STAFF',
   CLIENTI = 'CLIENTI',
+  USERS = 'USERS',
   SETTINGS = 'SETTINGS'
 }
 
