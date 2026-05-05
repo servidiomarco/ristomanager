@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dish } from '../types';
 import { X, ImageIcon, Tag, AlertCircle } from 'lucide-react';
 
@@ -8,23 +8,33 @@ interface Props {
 }
 
 export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
+  const [photoFullscreen, setPhotoFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!photoFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPhotoFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [photoFullscreen]);
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-2xl shadow-xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="relative">
+        <div className="relative bg-slate-100 flex items-center justify-center" style={{ minHeight: '50vh' }}>
           {dish.photo_url ? (
             <img
               src={dish.photo_url}
               alt={dish.name}
-              className="w-full h-56 object-cover"
+              className="w-full max-h-[70vh] object-contain bg-slate-100 cursor-zoom-in"
+              onClick={() => setPhotoFullscreen(true)}
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
           ) : (
-            <div className="w-full h-56 bg-slate-100 flex items-center justify-center">
-              <ImageIcon className="h-16 w-16 text-slate-300" />
+            <div className="w-full h-[50vh] flex items-center justify-center">
+              <ImageIcon className="h-24 w-24 text-slate-300" />
             </div>
           )}
           <button
@@ -76,6 +86,28 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           )}
         </div>
       </div>
+
+      {photoFullscreen && dish.photo_url && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={(e) => { e.stopPropagation(); setPhotoFullscreen(false); }}
+        >
+          <img
+            src={dish.photo_url}
+            alt={dish.name}
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            onClick={() => setPhotoFullscreen(false)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-lg transition-colors"
+            title="Chiudi"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
