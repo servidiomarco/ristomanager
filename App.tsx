@@ -1222,13 +1222,18 @@ const App: React.FC = () => {
                 onClick={() => setView(ViewState.RESERVATIONS)}
               />
             )}
-            {canAccessView(ViewState.FLOOR_PLAN) && (
-              <BottomNavItem
-                icon={<Grid size={20} />}
-                label="Sala"
-                active={view === ViewState.FLOOR_PLAN}
-                onClick={() => setView(ViewState.FLOOR_PLAN)}
-              />
+            {/* Center "Nuova prenotazione" — circular, raised above the nav */}
+            {hasPermission('reservations:full') && (
+              <div className="flex-1 flex justify-center items-end">
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewReservation(true)}
+                  aria-label="Nuova prenotazione"
+                  className="h-14 w-14 -translate-y-3 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all ring-4 ring-[var(--color-surface)]"
+                >
+                  <Plus className="h-6 w-6" />
+                </button>
+              </div>
             )}
             {canAccessView(ViewState.MENU) && (
               <BottomNavItem
@@ -1238,28 +1243,16 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.SETTINGS)) && (
+            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.SETTINGS)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.SETTINGS}
+                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.SETTINGS}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
           </div>
         </nav>
-
-        {/* Floating "Nuova prenotazione" FAB — mobile only, hidden during the new-reservation modal */}
-        {hasPermission('reservations:full') && !autoOpenNewReservation && !showMoreMenu && (
-          <button
-            type="button"
-            onClick={() => setAutoOpenNewReservation(true)}
-            aria-label="Nuova prenotazione"
-            className="fixed bottom-20 right-4 z-40 lg:hidden h-14 w-14 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all"
-          >
-            <Plus className="h-6 w-6" />
-          </button>
-        )}
 
         {/* "Altro" bottom sheet — mobile */}
         {showMoreMenu && (
@@ -1289,6 +1282,16 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="px-2 pb-2">
+                {canAccessView(ViewState.FLOOR_PLAN) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.FLOOR_PLAN); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.FLOOR_PLAN ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <Grid className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Sala</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
                 {canAccessView(ViewState.STAFF) && (
                   <button
                     onClick={() => { setShowMoreMenu(false); setView(ViewState.STAFF); }}
@@ -1319,6 +1322,23 @@ const App: React.FC = () => {
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-pressed={theme === 'dark'}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Moon className="h-5 w-5 text-[var(--color-fg-muted)]" />}
+                  <span className="text-sm font-medium text-[var(--color-fg)]">Modalità scura</span>
+                  <span
+                    aria-hidden
+                    className={`ml-auto relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-fg)]' : 'bg-[var(--color-line-strong)]'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
+                    />
+                  </span>
+                </button>
               </div>
               <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
                 <button
