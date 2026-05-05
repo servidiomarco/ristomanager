@@ -1998,6 +1998,28 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     }
 });
 
+// NOTE: keep this route BEFORE the /shopping/:id route — Express matches in
+// declaration order, otherwise "clear-checked" is captured as :id.
+app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        if (date) {
+            await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+        } else {
+            await queryWithRetry('DELETE FROM shopping_items WHERE checked = true');
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:cleared', { date: date || null }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.delete('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
@@ -2011,26 +2033,6 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('shopping:deleted', { id, date: result.rows[0].date }, socketId);
-
-        res.status(204).send();
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
-    try {
-        const { date } = req.query;
-
-        if (date) {
-            await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
-        } else {
-            await queryWithRetry('DELETE FROM shopping_items WHERE checked = true');
-        }
-
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:cleared', { date: date || null }, socketId);
 
         res.status(204).send();
     } catch (err) {
