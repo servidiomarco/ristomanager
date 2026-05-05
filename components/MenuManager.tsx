@@ -1,8 +1,9 @@
 
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2 } from 'lucide-react';
+import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
@@ -63,6 +64,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
   const [viewBanquet, setViewBanquet] = useState<BanquetMenu | null>(null);
   const [viewDish, setViewDish] = useState<Dish | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
 
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
@@ -157,6 +161,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setEditingDishId(dish.id);
     setIsEditingDish(true);
     setIsDishFormOpen(true);
+  };
+
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploadError(null);
+    setPhotoUploading(true);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 800, 0.8);
+      setNewDish(prev => ({ ...prev, photo_url: dataUrl }));
+    } catch (err: any) {
+      setPhotoUploadError(err?.message || 'Caricamento fallito');
+    } finally {
+      setPhotoUploading(false);
+      if (photoFileInputRef.current) photoFileInputRef.current.value = '';
+    }
   };
 
   const handleAddBanquetSubmit = (e: React.FormEvent) => {
@@ -660,25 +680,61 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
 
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">URL Foto <span className="text-slate-400 font-normal">— opzionale</span></label>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Foto <span className="text-slate-400 font-normal">— opzionale</span></label>
                 <div className="flex gap-3 items-start">
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    className="flex-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                    value={newDish.photo_url || ''}
-                    onChange={e => setNewDish({...newDish, photo_url: e.target.value})}
-                  />
+                  <div className="flex-1 flex flex-col gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://... oppure carica un file"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                      value={newDish.photo_url?.startsWith('data:') ? '' : (newDish.photo_url || '')}
+                      onChange={e => setNewDish({...newDish, photo_url: e.target.value})}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        ref={photoFileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={handlePhotoFileChange}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => photoFileInputRef.current?.click()}
+                        disabled={photoUploading}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-60 disabled:cursor-wait"
+                      >
+                        {photoUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                        {photoUploading ? 'Elaborazione…' : 'Carica foto'}
+                      </button>
+                      {newDish.photo_url && (
+                        <button
+                          type="button"
+                          onClick={() => setNewDish({...newDish, photo_url: ''})}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Rimuovi
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[var(--color-fg-subtle)] leading-snug">
+                      JPG, PNG o WebP — viene ridimensionata automaticamente a max 800×800px (~150–200 KB), ottimizzata per il web.
+                    </p>
+                    {photoUploadError && (
+                      <p className="text-[11px] text-rose-600">{photoUploadError}</p>
+                    )}
+                  </div>
                   {newDish.photo_url ? (
                     <img
                       src={newDish.photo_url}
                       alt="Anteprima"
-                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 flex-shrink-0"
+                      className="w-16 h-16 rounded-lg object-cover border border-[var(--color-line)] flex-shrink-0"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
-                      <ImageIcon className="h-5 w-5 text-slate-300" />
+                    <div className="w-16 h-16 rounded-lg bg-[var(--color-surface-3)] border border-[var(--color-line)] flex items-center justify-center flex-shrink-0">
+                      <ImageIcon className="h-6 w-6 text-[var(--color-fg-subtle)]" />
                     </div>
                   )}
                 </div>

@@ -33,7 +33,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+// 2 MB body limit accommodates inlined dish photos as base64 data URLs
+// (resized client-side to ~200KB). Default 100KB would reject them.
+app.use(express.json({ limit: '2mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
