@@ -6,10 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UserManagementProps {
-  onClose: () => void;
+  // When provided, the component renders as a modal with a close button.
+  // When omitted, it renders as an inline page (no overlay).
+  onClose?: () => void;
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
+  const isModal = typeof onClose === 'function';
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -173,18 +176,41 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     }
   };
 
+  const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    isModal ? (
+      <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+        <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          {children}
+        </div>
+      </div>
+    ) : (
+      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] overflow-hidden flex flex-col">
+          {children}
+        </div>
+      </div>
+    )
+  );
+
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+    <>
+    <Wrapper>
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Gestione Utenti</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div>
+            <h2 className="text-[18px] sm:text-[20px] font-semibold text-[var(--color-fg)] tracking-tight">Gestione Utenti</h2>
+            {!isModal && (
+              <p className="text-xs sm:text-sm text-[var(--color-fg-muted)] mt-0.5">Crea, modifica e gestisci gli utenti del ristorante.</p>
+            )}
+          </div>
+          {isModal && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Content */}
@@ -385,7 +411,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
             </button>
           </div>
         )}
-      </div>
+    </Wrapper>
 
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
@@ -417,6 +443,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };

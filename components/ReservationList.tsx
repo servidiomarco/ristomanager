@@ -75,6 +75,9 @@ interface ReservationListProps {
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
   onModalClose?: () => void;
+  // Pre-fill search term when navigating in from the global header search
+  initialSearchTerm?: string;
+  onInitialSearchTermHandled?: () => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -93,7 +96,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   autoOpenNew = false,
   onAutoOpenNewHandled,
   modalOnly = false,
-  onModalClose
+  onModalClose,
+  initialSearchTerm,
+  onInitialSearchTermHandled,
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -109,7 +114,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterNoTable, setFilterNoTable] = useState(false);
   const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? '');
+  // Apply prefill from global header search, then notify the parent to clear it
+  // so it doesn't re-apply on remount.
+  useEffect(() => {
+    if (initialSearchTerm !== undefined) {
+      setSearchTerm(initialSearchTerm);
+      onInitialSearchTermHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearchTerm]);
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -1099,40 +1113,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     <div className={modalOnly ? 'contents' : `${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'max-w-7xl mx-auto p-4 sm:p-6 lg:p-8'} space-y-6`}>
       {!modalOnly && (
       <React.Fragment>
-      {headerSlot && createPortal(
-        <>
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <h1 className="text-[15px] sm:text-base font-semibold tracking-tight text-[var(--color-fg)] truncate">Gestione Prenotazioni</h1>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            {canEdit && (
-              <button
-                onClick={handleOpenNew}
-                className="hidden md:inline-flex items-center gap-1.5 rounded-full px-4 h-9 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
-              >
-                <Plus className="h-4 w-4" /> Nuova
-              </button>
-            )}
-            <div className="inline-flex items-center p-0.5 bg-[var(--color-surface-3)] rounded-full">
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                title="Vista Elenco"
-              >
-                <List className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('MAP')}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition inline-flex items-center gap-1.5 ${viewMode === 'MAP' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                title="Vista Mappa Sala"
-              >
-                <MapIcon className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </>,
-        headerSlot
-      )}
+      {/* Page title — inline (was previously portaled into the global header) */}
+      <div>
+        <h1 className="text-[20px] sm:text-[22px] lg:text-[24px] font-semibold tracking-tight text-[var(--color-fg)]">Gestione Prenotazioni</h1>
+        <p className="text-sm text-[var(--color-fg-muted)] mt-0.5">Pianifica turni, gestisci tavoli e tieni traccia degli arrivi.</p>
+      </div>
 
       {/* Search & Filters Bar */}
       <div className="flex flex-wrap items-stretch gap-3 bg-[var(--color-surface)] p-3 sm:p-4 rounded-lg shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
@@ -1231,6 +1216,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         className={`flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-sm font-medium transition ${selectedShift === Shift.DINNER ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
                     >
                         <Moon className="h-4 w-4" /> Cena
+                    </button>
+                </div>
+
+                {/* List / Map view-mode toggle (moved from the global header) */}
+                <div className="bg-[var(--color-surface-3)] rounded-full flex items-center p-0.5 h-11">
+                    <button
+                        onClick={() => setViewMode('LIST')}
+                        className={`flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-sm font-medium transition ${viewMode === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                        title="Vista Elenco"
+                    >
+                        <List className="h-4 w-4" />
+                    </button>
+                    <button
+                        onClick={() => setViewMode('MAP')}
+                        className={`flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-sm font-medium transition ${viewMode === 'MAP' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                        title="Vista Mappa Sala"
+                    >
+                        <MapIcon className="h-4 w-4" />
                     </button>
                 </div>
             </div>

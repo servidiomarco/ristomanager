@@ -50,6 +50,11 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
+  // Global header search — only active on Dashboard. Selecting a result navigates
+  // to Prenotazioni and seeds its search term via initialSearchTerm.
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
 
   // Theme (light/dark) — persisted, respects prefers-color-scheme on first visit
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -90,7 +95,6 @@ const App: React.FC = () => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // User management modal state
-  const [showUserManagement, setShowUserManagement] = useState(false);
   const [showRolePermissions, setShowRolePermissions] = useState(false);
   const [showActivityLogs, setShowActivityLogs] = useState(false);
 
@@ -661,11 +665,6 @@ const App: React.FC = () => {
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">Salta al contenuto</a>
 
-      {/* User Management Modal */}
-      {showUserManagement && canManageUsers() && (
-        <UserManagement onClose={() => setShowUserManagement(false)} />
-      )}
-
       {/* Role Permissions Modal */}
       {showRolePermissions && canManageUsers() && (
         <RolePermissions
@@ -788,8 +787,8 @@ const App: React.FC = () => {
             <SidebarItem
               icon={<Users size={20} />}
               label="Utenti"
-              active={false}
-              onClick={() => setShowUserManagement(true)}
+              active={view === ViewState.USERS}
+              onClick={() => setView(ViewState.USERS)}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -886,6 +885,32 @@ const App: React.FC = () => {
       <main id="main" className="flex-1 overflow-y-auto relative pb-20 lg:pb-0 bg-[var(--color-surface-2)]">
         {/* Header */}
         <header className="h-14 bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] sticky top-0 z-10 flex items-center justify-between px-4 lg:px-6">
+           {/* Mobile expanded search — replaces header content when active on mobile */}
+           {mobileSearchOpen && view === ViewState.DASHBOARD ? (
+             <div className="flex items-center gap-2 w-full md:hidden">
+               <label className="relative flex-1">
+                 <span className="sr-only">Cerca</span>
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
+                 <input
+                   type="search"
+                   autoFocus
+                   value={globalSearchTerm}
+                   onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                   placeholder="Cerca cliente o tavolo..."
+                   className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
+                 />
+               </label>
+               <button
+                 type="button"
+                 onClick={() => { setMobileSearchOpen(false); setGlobalSearchTerm(''); }}
+                 className="h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                 aria-label="Chiudi ricerca"
+               >
+                 <X className="h-4 w-4" />
+               </button>
+             </div>
+           ) : (
+           <>
            <div className="flex items-center gap-2 lg:hidden">
               <div className="bg-[var(--color-fg)] p-1.5 rounded-md">
                 <ChefHat className="text-[var(--color-fg-on-brand)] h-4 w-4" />
@@ -894,18 +919,22 @@ const App: React.FC = () => {
            </div>
            {/* Page header slot — used by views (e.g. Reservations) to portal in sticky controls */}
            <div id="page-header-slot" className="hidden md:flex flex-1 min-w-0 items-center gap-3 mx-4 empty:hidden" />
-           {/* Global search — visual only for now (hidden when page-header-slot has content) */}
-           <div className="hidden md:flex flex-1 max-w-md mx-4 has-[+#page-header-slot:not(:empty)]:hidden">
-              <label className="relative w-full">
-                <span className="sr-only">Cerca</span>
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
-                <input
-                  type="search"
-                  placeholder="Cerca..."
-                  className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
-                />
-              </label>
-           </div>
+           {/* Global search — Dashboard only, hidden when page-header-slot has content */}
+           {view === ViewState.DASHBOARD && (
+             <div className="hidden md:flex flex-1 max-w-md mx-4 has-[+#page-header-slot:not(:empty)]:hidden relative">
+                <label className="relative w-full">
+                  <span className="sr-only">Cerca</span>
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
+                  <input
+                    type="search"
+                    value={globalSearchTerm}
+                    onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                    placeholder="Cerca cliente o tavolo..."
+                    className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
+                  />
+                </label>
+             </div>
+           )}
            <div className="ml-auto flex items-center gap-2">
               {/* Nuova prenotazione — primary CTA, first on the right side */}
               {hasPermission('reservations:full') && (
@@ -960,15 +989,18 @@ const App: React.FC = () => {
                 ></span>
               </span>
 
-              {/* Search trigger — mobile only (visual stub) */}
-              <button
-                type="button"
-                className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                aria-label="Cerca"
-                title="Cerca"
-              >
-                <Search className="h-4 w-4" />
-              </button>
+              {/* Search trigger — mobile only, Dashboard only */}
+              {view === ViewState.DASHBOARD && (
+                <button
+                  type="button"
+                  onClick={() => setMobileSearchOpen(true)}
+                  className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                  aria-label="Cerca"
+                  title="Cerca"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+              )}
 
 
                <div className="relative">
@@ -1011,6 +1043,63 @@ const App: React.FC = () => {
                </div>
 
            </div>
+           </>
+           )}
+
+           {/* Global search results dropdown — Dashboard only */}
+           {view === ViewState.DASHBOARD && globalSearchTerm.trim().length > 0 && (() => {
+             const term = globalSearchTerm.trim().toLowerCase();
+             const todayStr = new Date().toISOString().split('T')[0];
+             const matches = reservations
+               .filter(r => {
+                 if (r.reservation_time.split('T')[0] < todayStr) return false;
+                 const name = r.customer_name.toLowerCase();
+                 if (name.includes(term)) return true;
+                 const tbl = r.table_id ? tables.find(t => t.id === r.table_id) : null;
+                 if (tbl && tbl.name.toLowerCase().includes(term)) return true;
+                 return false;
+               })
+               .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time))
+               .slice(0, 8);
+             const onPickResult = (r: Reservation) => {
+               setReservationsSearchPrefill(r.customer_name);
+               setView(ViewState.RESERVATIONS);
+               setGlobalSearchTerm('');
+               setMobileSearchOpen(false);
+             };
+             return (
+               <div className="absolute left-2 right-2 md:left-1/2 md:-translate-x-1/2 md:w-[28rem] mt-1 top-14 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden z-30 animate-in fade-in slide-in-from-top-2">
+                 {matches.length === 0 ? (
+                   <div className="p-4 text-center text-sm text-[var(--color-fg-subtle)]">Nessuna prenotazione trovata</div>
+                 ) : (
+                   <ul className="max-h-80 overflow-y-auto divide-y divide-[var(--color-line)]">
+                     {matches.map(r => {
+                       const tbl = r.table_id ? tables.find(t => t.id === r.table_id) : null;
+                       const time = r.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] ?? '';
+                       const dateLabel = new Date(r.reservation_time.split('T')[0] + 'T00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+                       return (
+                         <li key={r.id}>
+                           <button
+                             type="button"
+                             onClick={() => onPickResult(r)}
+                             className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-[var(--color-surface-hover)] transition-colors"
+                           >
+                             <div className="flex-1 min-w-0">
+                               <p className="text-sm font-medium text-[var(--color-fg)] truncate">{r.customer_name}</p>
+                               <p className="text-xs text-[var(--color-fg-muted)] truncate">
+                                 {dateLabel}{time ? ` · ${time}` : ''} · {r.guests} {r.guests === 1 ? 'ospite' : 'ospiti'}{tbl ? ` · ${tbl.name}` : ''}
+                               </p>
+                             </div>
+                             <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                           </button>
+                         </li>
+                       );
+                     })}
+                   </ul>
+                 )}
+               </div>
+             );
+           })()}
         </header>
 
         {view === ViewState.DASHBOARD && (
@@ -1063,7 +1152,13 @@ const App: React.FC = () => {
                 canEdit={hasPermission('reservations:full')}
                 autoOpenNew={autoOpenNewReservation}
                 onAutoOpenNewHandled={() => setAutoOpenNewReservation(false)}
+                initialSearchTerm={reservationsSearchPrefill}
+                onInitialSearchTermHandled={() => setReservationsSearchPrefill(undefined)}
             />
+        )}
+
+        {view === ViewState.USERS && canManageUsers() && (
+          <UserManagement />
         )}
 
         {view === ViewState.FLOOR_PLAN && (
@@ -1123,7 +1218,7 @@ const App: React.FC = () => {
                 <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Amministrazione</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
-                    onClick={() => setShowUserManagement(true)}
+                    onClick={() => setView(ViewState.USERS)}
                     className="flex items-center gap-3 p-4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] hover:border-[var(--color-fg)] transition-colors text-left"
                   >
                     <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
@@ -1243,11 +1338,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.SETTINGS)) && (
+            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canManageUsers() || canAccessView(ViewState.SETTINGS)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.SETTINGS}
+                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.USERS || view === ViewState.SETTINGS}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1309,6 +1404,16 @@ const App: React.FC = () => {
                   >
                     <BookUser className="h-5 w-5 text-[var(--color-fg-muted)]" />
                     <span className="text-sm font-medium text-[var(--color-fg)]">Clienti</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canManageUsers() && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.USERS); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.USERS ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <Users className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Utenti</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}
