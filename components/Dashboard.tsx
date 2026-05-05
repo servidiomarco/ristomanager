@@ -141,9 +141,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
+  // Global meal filter — drives KPI cards, Stato Tavoli, Note & Allergeni, Affluenza, Personale.
+  // Defaults to the current meal based on time-of-day; user can switch to "Tutti" anytime.
+  const [globalShiftFilter, setGlobalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(() =>
+    new Date().getHours() < 17 ? 'LUNCH' : 'DINNER'
+  );
   const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
-  const [notesShift, setNotesShift] = useState<Shift>(() => new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
   const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -759,10 +762,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
-  // Reservations with notes/allergens for selected day, filtered by shift (for dashboard card)
+  // Reservations with notes/allergens for selected day, follows the global meal filter.
   const reservationNotes = useMemo(() => {
     const items = selectedDayReservations
-      .filter(r => r.shift === notesShift && r.notes && r.notes.trim().length > 0)
+      .filter(r => {
+        if (!r.notes || r.notes.trim().length === 0) return false;
+        if (globalShiftFilter === 'LUNCH') return r.shift === Shift.LUNCH;
+        if (globalShiftFilter === 'DINNER') return r.shift === Shift.DINNER;
+        return true; // ALL
+      })
       .map(r => {
         const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
         const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
@@ -772,7 +780,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       });
     items.sort((a, b) => a.reservation.reservation_time.localeCompare(b.reservation.reservation_time));
     return items;
-  }, [selectedDayReservations, tables, rooms, notesShift]);
+  }, [selectedDayReservations, tables, rooms, globalShiftFilter]);
 
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
@@ -861,8 +869,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         : [];
 
       // Filter by shift if not ALL
-      if (affluenceShiftFilter !== 'ALL') {
-        dayReservations = dayReservations.filter(r => r.shift === affluenceShiftFilter);
+      if (globalShiftFilter !== 'ALL') {
+        dayReservations = dayReservations.filter(r => r.shift === globalShiftFilter);
       }
 
       const dayGuests = dayReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -875,7 +883,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
 
     return data;
-  }, [reservations, affluenceShiftFilter, selectedDate]);
+  }, [reservations, globalShiftFilter, selectedDate]);
 
   // Get week range for display (based on selected date's week)
   const weekRange = useMemo(() => {
@@ -1014,63 +1022,109 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </span>
               </div>
 
+              {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
+              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+                {([
+                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
+                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setGlobalShiftFilter(opt.key)}
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex-1 md:flex-none ${
+                      globalShiftFilter === opt.key
+                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                    }`}
+                    aria-pressed={globalShiftFilter === opt.key}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
             </div>
           </div>
         );
       })()}
 
-      {/* KPI Cards — per shift (Pranzo / Cena / Banchetti), tinted meal-blocks */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 lg:gap-5">
-        {/* Ospiti attesi */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti attesi</h3>
-          <div className="flex gap-2">
-            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchExpectedGuests} />
-            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerExpectedGuests} />
-          </div>
-        </div>
+      {/* KPI Cards — Ospiti / Tavoli / Prenotazioni & Banchetti, follow the global meal filter */}
+      {(() => {
+        const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+        const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+        const cols = (showLunch && showDinner) ? 'grid-cols-2' : 'grid-cols-1';
 
-        {/* Ospiti arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti arrivati</h3>
-          <div className="flex gap-2">
-            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchArrivedGuests} />
-            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerArrivedGuests} />
-          </div>
-        </div>
+        // One tinted block per active meal — matches Prenotazioni & banchetti style.
+        // Shift identity comes from the bg tone + icon (no "Pranzo"/"Cena" label).
+        // Attesi and Arrivati sit side-by-side inside the block.
+        const renderShiftBreakdown = (
+          shift: 'lunch' | 'dinner',
+          attesiValue: number,
+          arrivatiValue: number,
+        ) => {
+          const tone = shift === 'lunch' ? KPI_TONES.amber : KPI_TONES.blue;
+          const icon = shift === 'lunch' ? <Sun className="h-3.5 w-3.5" /> : <Sunset className="h-3.5 w-3.5" />;
+          return (
+            <div key={shift} className={`min-w-0 rounded-xl ${tone.bg} p-3 sm:p-4 flex flex-col gap-3`}>
+              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tone.chip}`}>
+                {icon}
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] text-[var(--color-fg-muted)]">Attesi</div>
+                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{attesiValue}</div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] text-[var(--color-fg-muted)]">Arrivati</div>
+                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{arrivatiValue}</div>
+                </div>
+              </div>
+            </div>
+          );
+        };
 
-        {/* Tavoli attesi */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli attesi</h3>
-          <div className="flex gap-2">
-            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchTableIds.size} />
-            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerTableIds.size} />
-          </div>
-        </div>
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
+            {/* Ospiti */}
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti</h3>
+              <div className={`grid ${cols} gap-4 sm:gap-5`}>
+                {showLunch && renderShiftBreakdown('lunch', lunchExpectedGuests, lunchArrivedGuests)}
+                {showDinner && renderShiftBreakdown('dinner', dinnerExpectedGuests, dinnerArrivedGuests)}
+              </div>
+            </div>
 
-        {/* Tavoli arrivati */}
-        <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli arrivati</h3>
-          <div className="flex gap-2">
-            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchArrivedTableIds.size} />
-            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerArrivedTableIds.size} />
-          </div>
-        </div>
+            {/* Tavoli */}
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli</h3>
+              <div className={`grid ${cols} gap-4 sm:gap-5`}>
+                {showLunch && renderShiftBreakdown('lunch', lunchTableIds.size, lunchArrivedTableIds.size)}
+                {showDinner && renderShiftBreakdown('dinner', dinnerTableIds.size, dinnerArrivedTableIds.size)}
+              </div>
+            </div>
 
-        {/* Prenotazioni & Banchetti */}
-        <button
-          type="button"
-          onClick={onNavigateToBanquets}
-          className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
-        >
-          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
-          <div className="flex gap-2">
-            <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
-            <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
-            <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
+            {/* Prenotazioni & Banchetti */}
+            <button
+              type="button"
+              onClick={onNavigateToBanquets}
+              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
+            >
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
+              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
+                {showLunch && (
+                  <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
+                )}
+                {showDinner && (
+                  <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
+                )}
+                <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
+              </div>
+            </button>
           </div>
-        </button>
-      </div>
+        );
+      })()}
 
       {/* Row 1: Stato Tavoli + Note & Allergeni */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
@@ -1078,7 +1132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
+        <div className={`grid grid-cols-1 ${globalShiftFilter === 'ALL' ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-4 lg:gap-5`}>
           {([
             {
               key: 'lunch',
@@ -1110,7 +1164,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               reservationCount: dinnerReservations.length,
               guestCount: dinnerReservations.reduce((acc, r) => acc + r.guests, 0),
             },
-          ] as const).map(meal => {
+          ] as const)
+            .filter(m => globalShiftFilter === 'ALL' || globalShiftFilter === (m.key === 'lunch' ? 'LUNCH' : 'DINNER'))
+            .map(meal => {
             const roomStats = rooms.filter(room => !room.is_closed).map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
               const roomTableIds = new Set(roomTables.map(t => t.id));
@@ -1185,42 +1241,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Note & Allergeni */}
       <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="flex items-center justify-between mb-3 gap-2">
+          <div className="flex items-center mb-3 gap-2">
             <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)] flex items-center gap-2">
               <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
               Note &amp; Allergeni
             </h2>
-            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
-              <button
-                onClick={() => setNotesShift(Shift.LUNCH)}
-                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-                  notesShift === Shift.LUNCH
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                <Sun className="h-3 w-3" />
-                Pranzo
-              </button>
-              <button
-                onClick={() => setNotesShift(Shift.DINNER)}
-                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-                  notesShift === Shift.DINNER
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                }`}
-              >
-                <Moon className="h-3 w-3" />
-                Cena
-              </button>
-            </div>
           </div>
           {reservationNotes.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-center py-8">
               <div>
                 <StickyNote className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
                 <p className="text-xs text-[var(--color-fg-subtle)]">
-                  Nessuna nota per il {notesShift === Shift.LUNCH ? 'pranzo' : 'la cena'}
+                  Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
                 </p>
               </div>
             </div>
@@ -1309,32 +1341,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </button>
               ))}
             </div>
-            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
-              {([
-                { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
-                { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
-                { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
-              ] as const).map(s => (
-                <button
-                  key={s.key}
-                  onClick={() => setAffluenceShiftFilter(s.key)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                    affluenceShiftFilter === s.key
-                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  {s.icon}
-                  {s.label}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 
         {affluenceTab === 'ORARIO' && (() => {
-          const showLunch = affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH';
-          const showDinner = affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER';
+          const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+          const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
           const cellColor = (p: number, isLunch: boolean) => {
             if (p === 0) return 'bg-[var(--color-surface-3)]';
             if (isLunch) {
@@ -1420,7 +1432,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
 
               {/* Totals */}
-              <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                 {showLunch && (
                   <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
                     <div className="flex items-center justify-between gap-2">
@@ -1479,7 +1491,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   />
                   <Bar
                     dataKey="guests"
-                    fill={affluenceShiftFilter === 'LUNCH' ? '#f59e0b' : affluenceShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
+                    fill={globalShiftFilter === 'LUNCH' ? '#f59e0b' : globalShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
@@ -1487,8 +1499,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Totals — same pattern as Orario */}
-            <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-              {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
+            <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              {(globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH') && (
                 <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
@@ -1503,7 +1515,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 </div>
               )}
-              {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
+              {(globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER') && (
                 <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
@@ -1914,9 +1926,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               );
             };
 
+            const showLunchPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+            const showDinnerPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
             return (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {renderShiftCard(
+              <div className={`grid grid-cols-1 ${(showLunchPersonale && showDinnerPersonale) ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-4`}>
+                {showLunchPersonale && renderShiftCard(
                   'lunch',
                   'Pranzo',
                   <Sun className="h-4 w-4 text-amber-700" />,
@@ -1924,7 +1938,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   'bg-gradient-to-br from-amber-50 to-orange-50/60 dark:from-amber-500/10 dark:to-orange-500/5',
                   'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
                 )}
-                {renderShiftCard(
+                {showDinnerPersonale && renderShiftCard(
                   'dinner',
                   'Cena',
                   <Sunset className="h-4 w-4 text-indigo-600" />,
