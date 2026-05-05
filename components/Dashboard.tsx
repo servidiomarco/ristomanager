@@ -212,11 +212,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Socket connection state - used to re-subscribe when socket reconnects
   const [socketConnected, setSocketConnected] = useState(socketClient.isConnected());
 
-  // Fetch shopping items from API
-  const fetchShopping = useCallback(async (dateStr: string) => {
+  // Fetch all shopping items (decoupled from selected date — they persist until deleted)
+  const fetchShopping = useCallback(async () => {
     try {
       setShoppingLoading(true);
-      const items = await shoppingApiService.getItemsByDate(dateStr);
+      const items = await shoppingApiService.getAllItems();
       setShoppingItems(items);
     } catch (error) {
       console.error('Error fetching shopping items:', error);
@@ -252,7 +252,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       await shoppingApiService.createItem({
         name: newItemName.trim(),
         category: newItemCategory,
-        date: selectedDateStr
+        date: formatLocalDate(new Date())
       });
       setNewItemName('');
     } catch (error) {
@@ -282,7 +282,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const clearCheckedItems = async () => {
     try {
-      await shoppingApiService.clearChecked(selectedDateStr);
+      await shoppingApiService.clearChecked();
       setShoppingItems(prev => prev.filter(item => !item.checked));
     } catch (error) {
       console.error('Error clearing checked items:', error);
@@ -369,11 +369,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
-  // Fetch todos from API (filtered by selected date)
-  const fetchTodos = useCallback(async (dateStr: string) => {
+  // Fetch all todos (decoupled from selected date — they persist until deleted)
+  const fetchTodos = useCallback(async () => {
     try {
       setTodosLoading(true);
-      const fetchedTodos = await todoApiService.getTodosByDate(dateStr);
+      const fetchedTodos = await todoApiService.getTodos();
       setTodos(fetchedTodos);
     } catch (error) {
       console.error('Error fetching todos:', error);
@@ -382,10 +382,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  // Fetch todos when selectedDate changes
   useEffect(() => {
-    fetchTodos(selectedDateStr);
-  }, [selectedDateStr, fetchTodos]);
+    fetchTodos();
+  }, [fetchTodos]);
 
   // Load staff users for assignment (once on mount)
   useEffect(() => {
@@ -421,30 +420,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     if (!socket) return;
 
     const handleTodoCreated = (todo: TodoItem) => {
-      // Only add if it's for the currently selected date
-      if (todo.dueDate === selectedDateStr) {
-        setTodos(prev => {
-          if (prev.some(t => t.id === todo.id)) return prev;
-          return [todo, ...prev];
-        });
-      }
+      setTodos(prev => {
+        if (prev.some(t => t.id === todo.id)) return prev;
+        return [todo, ...prev];
+      });
     };
 
     const handleTodoUpdated = (todo: TodoItem) => {
-      // Update if it exists in current list, or add if it's for today's date
       setTodos(prev => {
         const exists = prev.some(t => t.id === todo.id);
-        if (exists) {
-          // If the date changed and it's no longer for selected date, remove it
-          if (todo.dueDate !== selectedDateStr) {
-            return prev.filter(t => t.id !== todo.id);
-          }
-          return prev.map(t => t.id === todo.id ? todo : t);
-        } else if (todo.dueDate === selectedDateStr) {
-          // New todo for selected date
-          return [todo, ...prev];
-        }
-        return prev;
+        if (exists) return prev.map(t => t.id === todo.id ? todo : t);
+        return [todo, ...prev];
       });
     };
 
@@ -461,12 +447,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('todo:updated', handleTodoUpdated);
       socket.off('todo:deleted', handleTodoDeleted);
     };
-  }, [selectedDateStr, socketConnected]);
+  }, [socketConnected]);
 
-  // Fetch shopping items when selectedDate changes
   useEffect(() => {
-    fetchShopping(selectedDateStr);
-  }, [selectedDateStr, fetchShopping]);
+    fetchShopping();
+  }, [fetchShopping]);
 
   // Fetch staff when selectedDate changes
   useEffect(() => {
@@ -491,31 +476,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     console.log('🛒 Setting up shopping socket listeners...');
 
     const handleShoppingCreated = (item: ShoppingItem) => {
-      console.log('🛒 Socket: shopping:created received', item, 'selectedDate:', selectedDateStr);
-      // Only add if it's for the currently selected date
-      if (item.date === selectedDateStr) {
-        setShoppingItems(prev => {
-          if (prev.some(i => i.id === item.id)) return prev;
-          return [...prev, item];
-        });
-      }
+      setShoppingItems(prev => {
+        if (prev.some(i => i.id === item.id)) return prev;
+        return [...prev, item];
+      });
     };
 
     const handleShoppingUpdated = (item: ShoppingItem) => {
-      console.log('Socket: shopping:updated received', item);
       setShoppingItems(prev => prev.map(i => i.id === item.id ? item : i));
     };
 
     const handleShoppingDeleted = (data: { id: string }) => {
-      console.log('Socket: shopping:deleted received', data);
       setShoppingItems(prev => prev.filter(i => i.id !== data.id));
     };
 
-    const handleShoppingCleared = (data: { date: string }) => {
-      console.log('Socket: shopping:cleared received', data);
-      if (data.date === selectedDateStr) {
-        setShoppingItems(prev => prev.filter(i => !i.checked));
-      }
+    const handleShoppingCleared = () => {
+      setShoppingItems(prev => prev.filter(i => !i.checked));
     };
 
     socket.on('shopping:created', handleShoppingCreated);
@@ -538,7 +514,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('shopping:cleared', handleShoppingCleared);
       socket.offAny(debugHandler);
     };
-  }, [selectedDateStr, socketConnected]);
+  }, [socketConnected]);
 
   const handleGenerateReport = async () => {
     setLoading(true);
@@ -1544,7 +1520,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
               <p className="tabular text-xs text-[var(--color-fg-muted)]">
-                {isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {todos.filter(t => t.completed).length}/{todos.length} completate
+                {todos.filter(t => t.completed).length}/{todos.length} completate
               </p>
             </div>
             <button
@@ -1713,8 +1689,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa del Giorno</h2>
-              <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">{checkedItems}/{totalItems} completati</p>
             </div>
             <div className="flex items-center gap-3">
               {checkedItems > 0 && (

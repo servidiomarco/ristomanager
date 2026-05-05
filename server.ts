@@ -1877,12 +1877,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 app.get('/shopping', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ error: 'Date parameter is required' });
-        }
-
-        const result = await queryWithRetry(`
+        let query = `
             SELECT
                 id,
                 name,
@@ -1893,7 +1888,15 @@ app.get('/shopping', authenticate, async (req, res) => {
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
             FROM shopping_items
-            WHERE date = $1
+        `;
+        const params: string[] = [];
+
+        if (date) {
+            query += ' WHERE date = $1';
+            params.push(date as string);
+        }
+
+        query += `
             ORDER BY
                 CASE category
                     WHEN 'CUCINA' THEN 1
@@ -1901,8 +1904,9 @@ app.get('/shopping', authenticate, async (req, res) => {
                     WHEN 'ALTRO' THEN 3
                 END,
                 created_at ASC
-        `, [date]);
+        `;
 
+        const result = await queryWithRetry(query, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -2019,15 +2023,14 @@ app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
 
-        if (!date) {
-            return res.status(400).json({ error: 'Date parameter is required' });
+        if (date) {
+            await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+        } else {
+            await queryWithRetry('DELETE FROM shopping_items WHERE checked = true');
         }
 
-        await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
-
-        // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:cleared', { date }, socketId);
+        if (socketService) socketService.broadcastToAll('shopping:cleared', { date: date || null }, socketId);
 
         res.status(204).send();
     } catch (err) {
