@@ -2018,12 +2018,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between flex-shrink-0">
               <h3 className="text-base font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
               <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"><X className="h-4 w-4" /></button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Titolo</label>
                 <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" autoFocus />
@@ -2081,7 +2081,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2 flex-shrink-0">
               <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
               <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {editingTodo ? 'Salva' : 'Aggiungi'}
