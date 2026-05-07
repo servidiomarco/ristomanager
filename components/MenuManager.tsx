@@ -68,7 +68,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onUpdateBanquetMenu,
     onDeleteBanquetMenu,
     canEdit = true,
-    initialTab = 'DISHES'
+    initialTab = 'BANQUETS'
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -76,6 +76,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
   const [isEditingDish, setIsEditingDish] = useState(false);
@@ -373,10 +374,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
   };
 
-  const filteredDishes = dishes.filter(d => 
-    d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    d.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const dishCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of dishes) {
+      if (d.category && d.category.trim()) set.add(d.category.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'it'));
+  }, [dishes]);
+
+  const filteredDishes = dishes.filter(d => {
+    const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      d.category.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = !categoryFilter || d.category === categoryFilter;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -471,6 +482,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                 </div>
             </div>
+
+            {dishCategories.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter(null)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                    categoryFilter === null
+                      ? 'bg-[var(--color-fg)] text-[var(--color-bg)] border-[var(--color-fg)]'
+                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                  }`}
+                >
+                  Tutte ({dishes.length})
+                </button>
+                {dishCategories.map(cat => {
+                  const count = dishes.filter(d => d.category === cat).length;
+                  const isActive = categoryFilter === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategoryFilter(isActive ? null : cat)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                        isActive
+                          ? 'bg-[var(--color-fg)] text-[var(--color-bg)] border-[var(--color-fg)]'
+                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                      }`}
+                    >
+                      {cat} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Dish List */}
             <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
@@ -1388,7 +1433,8 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
   const selectedBanquets = selectedDate ? (banquetsByDate.get(selectedDate) || []) : [];
 
   return (
-    <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 sm:p-5">
+    <div className="flex flex-col lg:flex-row gap-4">
+      <div className="lg:w-3/4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 sm:p-5">
       <div className="flex items-center justify-between mb-4">
         <button
           onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
@@ -1424,7 +1470,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
             <button
               key={i}
               onClick={() => setSelectedDate(events.length ? key : null)}
-              className={`aspect-square sm:aspect-auto sm:min-h-[68px] p-1.5 rounded-md border text-left flex flex-col transition ${
+              className={`aspect-square sm:aspect-auto sm:min-h-[68px] p-1.5 rounded-md border text-left flex flex-col transition overflow-hidden ${
                 isSelected
                   ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)]'
                   : events.length
@@ -1436,17 +1482,32 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                 {d.getDate()}
               </span>
               {events.length > 0 && (
-                <span className="mt-auto text-[10px] font-medium text-[var(--color-fg-muted)] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-1.5 py-0.5 self-start">
-                  {events.length} {events.length === 1 ? 'evento' : 'eventi'}
-                </span>
+                <div className="mt-1 w-full flex flex-col gap-0.5 overflow-hidden">
+                  {events.slice(0, 2).map(ev => (
+                    <span
+                      key={ev.id}
+                      className="text-[10px] font-medium text-[var(--color-fg)] bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-1 py-0.5 truncate block"
+                      title={ev.name}
+                    >
+                      {ev.name}
+                    </span>
+                  ))}
+                  {events.length > 2 && (
+                    <span className="text-[10px] font-medium text-[var(--color-fg-muted)] px-1">
+                      +{events.length - 2}
+                    </span>
+                  )}
+                </div>
               )}
             </button>
           );
         })}
       </div>
+      </div>
 
-      {selectedDate && (
-        <div className="mt-6 border-t border-[var(--color-line)] pt-4">
+      <div className="lg:w-1/4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+        {selectedDate ? (
+          <>
           <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-3 capitalize">
             {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
           </h4>
@@ -1531,8 +1592,14 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
               );
             })}
           </div>
-        </div>
-      )}
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center text-center py-10 text-[var(--color-fg-subtle)]">
+            <Calendar className="h-8 w-8 mb-2 opacity-60" />
+            <p className="text-sm">Seleziona un giorno con eventi per vedere i dettagli.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

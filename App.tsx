@@ -48,7 +48,7 @@ const App: React.FC = () => {
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('DISHES');
+  const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   // Global header search — only active on Dashboard. Selecting a result navigates
   // to Prenotazioni and seeds its search term via initialSearchTerm.
