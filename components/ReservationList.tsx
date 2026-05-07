@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser, BookOpen } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -840,6 +840,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }
 
   // Returns either a reservation OR a banquet that occupies this table for the
+  // currently selected date+shift in the map view. Used by Map view to render
+  // banquet-occupied tables with their own visual state.
+  const getOccupierForTable = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
+      const date = selectedDate.split('T')[0];
+      const res = getReservationForTable(table_id);
+      if (res) return { kind: 'reservation', data: res };
+      if (selectedShift === 'ALL') {
+          const banquetLunch = getBanquetForTable(table_id, date, Shift.LUNCH);
+          if (banquetLunch) return { kind: 'banquet', data: banquetLunch };
+          const banquetDinner = getBanquetForTable(table_id, date, Shift.DINNER);
+          if (banquetDinner) return { kind: 'banquet', data: banquetDinner };
+          return null;
+      }
+      const banquet = getBanquetForTable(table_id, date, selectedShift);
+      if (banquet) return { kind: 'banquet', data: banquet };
+      return null;
+  };
+
+  // Returns either a reservation OR a banquet that occupies this table for the
   // form's date+shift. The picker uses the result to mark the table as occupied
   // and to display the occupier's name in the red pill.
   const getOccupierForTableInForm = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
@@ -1042,13 +1061,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Render logic for Map Table
   const renderMapTable = (table: Table) => {
-      const reservation = getReservationForTable(table.id);
-      const isOccupied = !!reservation;
-      const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+      const occupier = getOccupierForTable(table.id);
+      const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
+      const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+      const isOccupied = !!occupier;
+      const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
       const isHidden = hiddenTableIds.has(table.id);
       const trimmedSearch = searchTerm.trim().toLowerCase();
       const isSearchMatch = !!(trimmedSearch && (
         (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+        (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
         table.name.toLowerCase().includes(trimmedSearch)
       ));
 
@@ -1077,12 +1099,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const shapeClasses = `flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
           ${isArrived
               ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200'
-              : isOccupied
+              : reservation
                   ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200'
-                  : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                  : banquet
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200'
+                      : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
           }
           ${isHidden ? 'opacity-40 grayscale' : ''}
       `;
+
+      const tooltipText = isHidden
+          ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
+          : reservation
+              ? `Occupato da: ${toTitleCase(reservation.customer_name)}`
+              : banquet
+                  ? `Banchetto: ${banquet.name}`
+                  : 'Libero — clicca per assegnare una prenotazione';
 
       return (
         <div
@@ -1094,12 +1126,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 width: `${widthPx}px`,
                 height: `${heightPx}px`,
             }}
-            title={isHidden
-                ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
-                : (isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione')}
+            title={tooltipText}
             onClick={() => {
-                if (isOccupied) {
+                if (reservation) {
                     handleEditClick(reservation);
+                } else if (banquet) {
+                    // Banquet-occupied tables are not assignable from this view.
                 } else if (canEdit) {
                     setAssignTableModal(table);
                 }
@@ -1120,9 +1152,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </div>
                 )}
                 <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
-                {isOccupied ? (
+                {reservation ? (
                     <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
                         <Users size={16} /> {reservation.guests}
+                    </span>
+                ) : banquet ? (
+                    <span className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold">
+                        <BookOpen size={12} />
                     </span>
                 ) : (
                     <span className="text-[10px] flex items-center gap-1 opacity-80">
@@ -1130,12 +1166,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </span>
                 )}
             </div>
-            {isOccupied && (
+            {reservation && (
                 <div
                     style={{ top: pillTopPx }}
                     className={`absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
                 >
                     {toTitleCase(reservation.customer_name)}
+                </div>
+            )}
+            {banquet && (
+                <div
+                    style={{ top: pillTopPx }}
+                    className="absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate bg-indigo-600 flex items-center gap-1"
+                >
+                    <BookOpen size={12} className="flex-shrink-0" />
+                    <span className="truncate">{banquet.name}</span>
                 </div>
             )}
         </div>
@@ -1631,7 +1676,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               ))
               // Hide per-shift unless user toggled "show hidden".
               .filter(t => showHidden || !hiddenTableIds.has(t.id));
-          const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
+          const occupiedTablesCount = tablesInRoom.filter(t => getOccupierForTable(t.id)).length;
           const totalTablesInRoom = tablesInRoom.length;
           const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
@@ -1787,19 +1832,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <ul className="divide-y divide-[var(--color-line)]">
                                   {[...tablesInRoom]
                                       .sort((a, b) => {
-                                          const ra = getReservationForTable(a.id);
-                                          const rb = getReservationForTable(b.id);
-                                          if (!!ra !== !!rb) return ra ? -1 : 1;
+                                          const oa = getOccupierForTable(a.id);
+                                          const ob = getOccupierForTable(b.id);
+                                          if (!!oa !== !!ob) return oa ? -1 : 1;
+                                          const ra = oa?.kind === 'reservation' ? oa.data : null;
+                                          const rb = ob?.kind === 'reservation' ? ob.data : null;
                                           if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
+                                          if (ra && !rb) return -1;
+                                          if (!ra && rb) return 1;
                                           return a.name.localeCompare(b.name, 'it', { numeric: true });
                                       })
                                       .map(table => {
-                                          const reservation = getReservationForTable(table.id);
-                                          const isOccupied = !!reservation;
-                                          const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                                          const occupier = getOccupierForTable(table.id);
+                                          const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
+                                          const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+                                          const isOccupied = !!occupier;
+                                          const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
                                           const trimmedSearch = searchTerm.trim().toLowerCase();
                                           const isSearchMatch = !!(trimmedSearch && (
                                             (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+                                            (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
                                             table.name.toLowerCase().includes(trimmedSearch)
                                           ));
                                           const mergedNames = (table.merged_with && table.merged_with.length > 0)
@@ -1815,8 +1867,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                               <li key={table.id}>
                                                   <button
                                                       onClick={() => {
-                                                          if (isOccupied) {
+                                                          if (reservation) {
                                                               handleEditClick(reservation);
+                                                          } else if (banquet) {
+                                                              // Banquet-occupied tables are not assignable from this view.
                                                           } else if (canEdit) {
                                                               setAssignTableModal(table);
                                                           }
@@ -1828,14 +1882,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                       <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
                                                           isArrived
                                                               ? 'bg-orange-50 border-orange-300 text-orange-700'
-                                                              : isOccupied
+                                                              : reservation
                                                                   ? 'bg-rose-50 border-rose-300 text-rose-700'
-                                                                  : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
+                                                                  : banquet
+                                                                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                                      : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
                                                       }`}>
                                                           <span className="text-center leading-tight break-all">{displayName}</span>
                                                       </div>
                                                       <div className="flex-1 min-w-0">
-                                                          {isOccupied ? (
+                                                          {reservation ? (
                                                               <>
                                                                   <div className="flex items-center gap-2">
                                                                       <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
@@ -1846,6 +1902,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                   <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                                                       <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
                                                                       <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                                                      <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                                                  </div>
+                                                              </>
+                                                          ) : banquet ? (
+                                                              <>
+                                                                  <div className="flex items-center gap-2">
+                                                                      <BookOpen className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
+                                                                      <span className="font-medium text-indigo-700 truncate">{banquet.name}</span>
+                                                                      <span className="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
+                                                                  </div>
+                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                                                      {typeof banquet.guests === 'number' && (
+                                                                          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>
+                                                                      )}
                                                                       <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
                                                                   </div>
                                                               </>
@@ -1922,6 +1992,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                        </div>
                                        <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
                                            <div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato
+                                       </div>
+                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                                           <div className="w-3 h-3 bg-indigo-50 border border-indigo-300 rounded-sm"></div> Banchetto
                                        </div>
                                        <div className="border-t border-[var(--color-line)] mt-1 pt-2">
                                            <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Occupazione</div>
