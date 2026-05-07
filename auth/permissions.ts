@@ -175,3 +175,27 @@ export class PermissionService {
     return this.hasPermission(role, 'settings:full');
   }
 }
+
+// Hierarchy used for task assignment: an actor can only assign work to
+// peers or subordinates, never up the ladder.
+// WAITER and KITCHEN sit at the same rank (lateral assignment is fine).
+const ROLE_RANK: Record<UserRole, number> = {
+  [UserRole.OWNER]: 4,
+  [UserRole.GENERAL_MANAGER]: 3,
+  [UserRole.MANAGER]: 2,
+  [UserRole.WAITER]: 1,
+  [UserRole.KITCHEN]: 1,
+};
+
+export const canAssignToRole = (actorRole: UserRole, targetRole: UserRole): boolean => {
+  const actor = ROLE_RANK[actorRole];
+  const target = ROLE_RANK[targetRole];
+  if (actor === undefined || target === undefined) return false;
+  return actor >= target;
+};
+
+export const getAssignableRoles = (actorRole: UserRole): UserRole[] => {
+  const actorRank = ROLE_RANK[actorRole];
+  if (actorRank === undefined) return [];
+  return (Object.values(UserRole) as UserRole[]).filter(r => ROLE_RANK[r] <= actorRank);
+};

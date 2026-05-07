@@ -63,6 +63,25 @@ const TEAM_COLORS: Record<UserRole, string> = {
   [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',
 };
 
+// Mirrors the server-side hierarchy in auth/permissions.ts: an actor can
+// only assign tasks to roles at or below their rank. Kept inline because
+// the auth/ module is server-only.
+const ROLE_RANK: Record<UserRole, number> = {
+  [UserRole.OWNER]: 4,
+  [UserRole.GENERAL_MANAGER]: 3,
+  [UserRole.MANAGER]: 2,
+  [UserRole.WAITER]: 1,
+  [UserRole.KITCHEN]: 1,
+};
+
+const canAssignToRole = (actorRole: UserRole | undefined, targetRole: UserRole): boolean => {
+  if (!actorRole) return false;
+  const actor = ROLE_RANK[actorRole];
+  const target = ROLE_RANK[targetRole];
+  if (actor === undefined || target === undefined) return false;
+  return actor >= target;
+};
+
 interface DashboardProps {
   reservations: Reservation[];
   tables: Table[];
@@ -2082,9 +2101,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     <option value="">Nessun team</option>
-                    {Object.entries(TEAM_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
+                    {(Object.entries(TEAM_LABELS) as [UserRole, string][])
+                      .filter(([key]) => canAssignToRole(user?.role, key))
+                      .map(([key, label]) => (
+                        <option key={key} value={key}>{label}</option>
+                      ))}
                   </select>
                 </div>
               </div>

@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
+import { getAssignableRoles } from './permissions.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
@@ -195,10 +196,18 @@ export class AuthService {
   }
 
   // Minimal user projection for assignment pickers (no email or audit fields).
-  // Returns only active users, sorted alphabetically.
-  static async getAssignableUsers(): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
+  // Returns only active users at or below the actor's rank, sorted alphabetically.
+  static async getAssignableUsers(
+    actorRole: UserRole
+  ): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
+    const allowedRoles = getAssignableRoles(actorRole);
+    if (allowedRoles.length === 0) return [];
     const result = await queryWithRetry(
-      'SELECT id, full_name, role FROM users WHERE is_active = TRUE ORDER BY full_name'
+      `SELECT id, full_name, role
+       FROM users
+       WHERE is_active = TRUE AND role = ANY($1::text[])
+       ORDER BY full_name`,
+      [allowedRoles]
     );
     return result.rows.map(row => ({
       id: row.id,

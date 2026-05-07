@@ -15,6 +15,7 @@ import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
 import { RolePermissionService } from './auth/permissionService.js';
+import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
 
@@ -1949,6 +1950,23 @@ app.post('/todos', authenticate, async (req, res) => {
             banquetReminderHours
         } = req.body;
 
+        const actorRole = req.user?.role;
+        if (actorRole) {
+            if (assignedToTeam && !canAssignToRole(actorRole, assignedToTeam)) {
+                return res.status(403).json({ error: 'Non puoi assegnare task a questo team' });
+            }
+            if (assignedToUserId) {
+                const target = await queryWithRetry(
+                    'SELECT role FROM users WHERE id = $1',
+                    [assignedToUserId]
+                );
+                const targetRole = target.rows[0]?.role as UserRole | undefined;
+                if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
+                    return res.status(403).json({ error: 'Non puoi assegnare task a questo utente' });
+                }
+            }
+        }
+
         const result = await queryWithRetry(`
             INSERT INTO todos (
                 title, description, priority, category, due_date,
@@ -2032,6 +2050,23 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             assignedToUserName,
             assignedToTeam
         } = req.body;
+
+        const actorRole = req.user?.role;
+        if (actorRole) {
+            if (req.body.hasOwnProperty('assignedToTeam') && assignedToTeam && !canAssignToRole(actorRole, assignedToTeam)) {
+                return res.status(403).json({ error: 'Non puoi assegnare task a questo team' });
+            }
+            if (req.body.hasOwnProperty('assignedToUserId') && assignedToUserId) {
+                const target = await queryWithRetry(
+                    'SELECT role FROM users WHERE id = $1',
+                    [assignedToUserId]
+                );
+                const targetRole = target.rows[0]?.role as UserRole | undefined;
+                if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
+                    return res.status(403).json({ error: 'Non puoi assegnare task a questo utente' });
+                }
+            }
+        }
 
         // Build dynamic update query
         const fields: string[] = [];

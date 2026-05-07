@@ -139,13 +139,14 @@ router.get('/users', authenticate, authorize(UserRole.OWNER), async (req: Reques
 
 // GET /auth/users/assignable - Minimal active-user list for task assignment pickers.
 // Available to managers and above so they can assign todos to specific people.
+// The list is scoped to the requester's rank: a manager only sees peers and below.
 router.get(
   '/users/assignable',
   authenticate,
   authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER),
   async (req: Request, res: Response) => {
     try {
-      const users = await AuthService.getAssignableUsers();
+      const users = await AuthService.getAssignableUsers(req.user!.role);
       res.json(users);
     } catch (error: any) {
       console.error('Get assignable users error:', error.message);
