@@ -111,9 +111,6 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                   return (
                     <div key={`${course.name}-${idx}`} className="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
                       <h4 className="text-sm font-semibold text-indigo-600 mb-2">{course.name}</h4>
-                      {course.notes && course.notes.trim() && (
-                        <p className="text-xs italic text-slate-600 mb-2 whitespace-pre-wrap">{course.notes}</p>
-                      )}
                       <ul className="space-y-2">
                         {items.map(d => (
                           <li key={d.id} className="flex items-center gap-3">
@@ -139,6 +136,9 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                           </li>
                         ))}
                       </ul>
+                      {course.notes && course.notes.trim() && (
+                        <p className="text-xs italic text-slate-600 mt-2 whitespace-pre-wrap">{course.notes}</p>
+                      )}
                     </div>
                   );
                 })}

@@ -95,10 +95,10 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
         return `
           <section class="category">
             <h3>${escapeHtml(course.name)}</h3>
-            ${noteHtml}
             <ul>
               ${items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
             </ul>
+            ${noteHtml}
           </section>
         `;
       })
@@ -130,43 +130,44 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     margin: 0;
     padding: 32px;
     background: #fff;
-    line-height: 1.45;
+    line-height: 1.5;
+    font-size: 16px;
   }
   header {
     border-bottom: 2px solid #4f46e5;
     padding-bottom: 16px;
     margin-bottom: 24px;
   }
-  h1 { margin: 0 0 6px; font-size: 28px; color: #1e1b4b; }
-  .date { color: #4f46e5; font-size: 14px; font-weight: 600; text-transform: capitalize; }
-  .description { color: #475569; margin: 16px 0 0; font-size: 14px; }
+  h1 { margin: 0 0 8px; font-size: 36px; color: #1e1b4b; }
+  .date { color: #4f46e5; font-size: 17px; font-weight: 600; text-transform: capitalize; }
+  .description { color: #475569; margin: 18px 0 0; font-size: 16px; }
   .pricing {
     display: flex;
     gap: 24px;
     margin: 24px 0;
-    padding: 16px;
+    padding: 18px;
     background: #f1f5f9;
     border-radius: 8px;
   }
   .pricing .item .label {
-    font-size: 11px;
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #64748b;
     font-weight: 600;
   }
   .pricing .item .value {
-    font-size: 22px;
+    font-size: 28px;
     font-weight: 700;
     color: #1e1b4b;
   }
-  .pricing .item .unit { font-size: 12px; color: #64748b; font-weight: 400; }
+  .pricing .item .unit { font-size: 15px; color: #64748b; font-weight: 400; }
   .badge {
     display: inline-block;
     margin-left: 10px;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 999px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -175,46 +176,46 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   .badge.lunch { background: #fef3c7; color: #b45309; }
   .badge.dinner { background: #e0e7ff; color: #4338ca; }
   h2 {
-    font-size: 16px;
+    font-size: 19px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #64748b;
-    margin: 0 0 12px;
+    margin: 0 0 14px;
   }
-  .notes-section { margin-top: 28px; }
+  .notes-section { margin-top: 32px; }
   .note-block {
-    margin-bottom: 16px;
-    padding: 12px 14px;
+    margin-bottom: 18px;
+    padding: 14px 16px;
     background: #fffbeb;
     border-left: 3px solid #f59e0b;
     border-radius: 4px;
     page-break-inside: avoid;
   }
   .note-block h3 {
-    margin: 0 0 6px;
-    font-size: 13px;
+    margin: 0 0 8px;
+    font-size: 15px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #b45309;
   }
   .note-block .note-content {
-    font-size: 13px;
+    font-size: 16px;
     color: #1e293b;
     white-space: pre-wrap;
   }
-  .category { margin-bottom: 18px; page-break-inside: avoid; }
+  .category { margin-bottom: 22px; page-break-inside: avoid; }
   .category h3 {
-    margin: 0 0 6px;
-    font-size: 15px;
+    margin: 0 0 8px;
+    font-size: 20px;
     color: #4f46e5;
     border-bottom: 1px dashed #cbd5e1;
-    padding-bottom: 4px;
+    padding-bottom: 6px;
   }
-  .category ul { margin: 0; padding-left: 18px; }
-  .category li { margin: 4px 0; font-size: 14px; }
+  .category ul { margin: 0; padding-left: 22px; }
+  .category li { margin: 6px 0; font-size: 17px; }
   .course-note {
-    margin: 0 0 8px;
-    font-size: 12px;
+    margin: 10px 0 0;
+    font-size: 14px;
     font-style: italic;
     color: #475569;
     white-space: pre-wrap;
@@ -224,7 +225,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     padding-top: 12px;
     border-top: 1px solid #e2e8f0;
     color: #94a3b8;
-    font-size: 11px;
+    font-size: 12px;
     text-align: center;
   }
   @media print {
