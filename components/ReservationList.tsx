@@ -1202,16 +1202,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
             </div>
 
-            {/* Clock + Shift Toggle - share a row, justified on mobile */}
-            <div className="flex items-stretch justify-between sm:justify-start gap-3 w-full sm:w-auto">
-                <div className="flex items-center gap-2 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] px-4 h-11">
+            {/* Clock + Shift Toggle - share a row, wrap on mobile when needed */}
+            <div className="flex flex-wrap items-stretch gap-2 sm:gap-3 w-full sm:w-auto">
+                <div className="flex items-center gap-2 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] px-3 sm:px-4 h-11 flex-shrink-0">
                     <Clock className="h-4 w-4 text-[var(--color-fg-muted)]" />
                     <span className="font-mono text-base font-medium text-[var(--color-fg)] tabular-nums">
                         {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                 </div>
 
-                <div className="bg-[var(--color-surface-3)] rounded-full flex items-center p-0.5 h-11">
+                <div className="bg-[var(--color-surface-3)] rounded-full flex items-center p-0.5 h-11 flex-shrink-0">
                     <button
                         onClick={() => setSelectedShift(Shift.LUNCH)}
                         className={`flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-sm font-medium transition ${selectedShift === Shift.LUNCH ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
@@ -1227,7 +1227,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 {/* List / Map view-mode toggle (moved from the global header) */}
-                <div className="bg-[var(--color-surface-3)] rounded-full flex items-center p-0.5 h-11">
+                <div className="bg-[var(--color-surface-3)] rounded-full flex items-center p-0.5 h-11 flex-shrink-0 ml-auto sm:ml-0">
                     <button
                         onClick={() => setViewMode('LIST')}
                         className={`flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-sm font-medium transition ${viewMode === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}

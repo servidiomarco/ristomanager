@@ -489,23 +489,23 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center justify-between gap-4 border-b border-[var(--color-line)] mb-6">
-        <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 border-b border-[var(--color-line)] mb-6">
+        <div className="flex gap-4 overflow-x-auto scrollbar-hide -mx-1 px-1">
           <button
               onClick={() => setActiveTab('BANQUETS')}
-              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'BANQUETS' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap flex-shrink-0 ${activeTab === 'BANQUETS' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
           >
               <BookOpen className="h-4 w-4" /> Menu Banchetti
           </button>
           <button
               onClick={() => setActiveTab('DISHES')}
-              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'DISHES' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap flex-shrink-0 ${activeTab === 'DISHES' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
           >
               <Utensils className="h-4 w-4" /> Piatti alla Carta
           </button>
         </div>
         {activeTab === 'BANQUETS' && (
-          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full mb-2">
+          <div className="inline-flex self-start sm:self-auto p-0.5 bg-[var(--color-surface-3)] rounded-full mb-2 flex-shrink-0">
             <button
               onClick={() => setBanquetView('LIST')}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
