@@ -1529,6 +1529,120 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
 });
 
 // ============================================
+// BANQUET PAYMENTS - require authentication; mutations require banquet:manage_payments
+// ============================================
+app.get('/banquet-menus/:id/payments', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry(
+            `SELECT p.id, p.banquet_id, p.amount, TO_CHAR(p.payment_date, 'YYYY-MM-DD') AS payment_date,
+                    p.payment_type, p.payment_method, p.notes, p.created_by_user_id, p.created_at,
+                    u.full_name AS created_by_user_name
+             FROM banquet_payments p
+             LEFT JOIN users u ON p.created_by_user_id = u.id
+             WHERE p.banquet_id = $1
+             ORDER BY p.payment_date DESC, p.id DESC`,
+            [id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /banquet-menus/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { amount, payment_date, payment_type, payment_method, notes } = req.body;
+        if (amount == null || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ error: 'amount must be a positive number' });
+        }
+        if (!payment_date) {
+            return res.status(400).json({ error: 'payment_date is required' });
+        }
+        const validTypes = ['DEPOSIT', 'BALANCE', 'OTHER'];
+        const validMethods = ['CASH', 'CARD', 'TRANSFER', 'OTHER'];
+        if (!validTypes.includes(payment_type)) {
+            return res.status(400).json({ error: 'invalid payment_type' });
+        }
+        if (!validMethods.includes(payment_method)) {
+            return res.status(400).json({ error: 'invalid payment_method' });
+        }
+
+        const banquetCheck = await queryWithRetry('SELECT id, name FROM banquet_menus WHERE id = $1', [id]);
+        if (banquetCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Banquet not found' });
+        }
+        const banquetName = banquetCheck.rows[0].name;
+
+        const result = await queryWithRetry(
+            `INSERT INTO banquet_payments (banquet_id, amount, payment_date, payment_type, payment_method, notes, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, banquet_id, amount, TO_CHAR(payment_date, 'YYYY-MM-DD') AS payment_date,
+                       payment_type, payment_method, notes, created_by_user_id, created_at`,
+            [id, amount, payment_date, payment_type, payment_method, notes ?? null, req.user?.userId ?? null]
+        );
+        const newPayment = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                banquetName,
+                { sub_action: 'payment_added', payment_id: newPayment.id, amount: Number(amount), payment_type, payment_method, payment_date }
+            );
+        }
+
+        res.status(201).json(newPayment);
+    } catch (err) {
+        console.error('POST /banquet-menus/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id, paymentId } = req.params;
+        const existing = await queryWithRetry(
+            `SELECT p.amount, p.payment_type, b.name AS banquet_name
+             FROM banquet_payments p
+             JOIN banquet_menus b ON p.banquet_id = b.id
+             WHERE p.id = $1 AND p.banquet_id = $2`,
+            [paymentId, id]
+        );
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: 'Payment not found' });
+        }
+        const { amount, payment_type, banquet_name } = existing.rows[0];
+
+        await queryWithRetry('DELETE FROM banquet_payments WHERE id = $1 AND banquet_id = $2', [paymentId, id]);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                banquet_name,
+                { sub_action: 'payment_deleted', payment_id: parseInt(paymentId, 10), amount: Number(amount), payment_type }
+            );
+        }
+
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /banquet-menus/:id/payments/:paymentId error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // TODOS - require authentication
 // ============================================
 app.get('/todos', authenticate, async (req, res) => {

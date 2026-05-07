@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2 } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
+import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers } from '../services/apiService';
@@ -51,6 +52,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
+  const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,6 +65,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [deleteDishConfirm, setDeleteDishConfirm] = useState<Dish | null>(null);
   const [deleteBanquetConfirm, setDeleteBanquetConfirm] = useState<BanquetMenu | null>(null);
   const [viewBanquet, setViewBanquet] = useState<BanquetMenu | null>(null);
+  const [paymentsBanquet, setPaymentsBanquet] = useState<BanquetMenu | null>(null);
   const [viewDish, setViewDish] = useState<Dish | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
@@ -626,6 +629,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           >
                               <Printer className="h-4 w-4" />
                           </button>
+                          {canManageBanquetPayments && (
+                          <button
+                              onClick={() => setPaymentsBanquet(menu)}
+                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 hover:text-emerald-600"
+                              title="Pagamenti"
+                          >
+                              <Wallet className="h-4 w-4" />
+                          </button>
+                          )}
                           {canEdit && (
                           <>
                           <button
@@ -1254,6 +1266,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           banquet={viewBanquet}
           dishes={dishes}
           onClose={() => setViewBanquet(null)}
+        />
+      )}
+
+      {paymentsBanquet && (
+        <BanquetPaymentsModal
+          banquet={paymentsBanquet}
+          onClose={() => setPaymentsBanquet(null)}
         />
       )}
 

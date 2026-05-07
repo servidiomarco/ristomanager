@@ -85,6 +85,32 @@ export enum PaymentStatus {
   REFUNDED = 'REFUNDED'
 }
 
+export enum BanquetPaymentType {
+  DEPOSIT = 'DEPOSIT',
+  BALANCE = 'BALANCE',
+  OTHER = 'OTHER'
+}
+
+export enum BanquetPaymentMethod {
+  CASH = 'CASH',
+  CARD = 'CARD',
+  TRANSFER = 'TRANSFER',
+  OTHER = 'OTHER'
+}
+
+export interface BanquetPayment {
+  id: number;
+  banquet_id: number;
+  amount: number;
+  payment_date: string; // YYYY-MM-DD
+  payment_type: BanquetPaymentType;
+  payment_method: BanquetPaymentMethod;
+  notes?: string | null;
+  created_by_user_id?: number | null;
+  created_by_user_name?: string;
+  created_at?: string;
+}
+
 export enum Shift {
   LUNCH = 'LUNCH',
   DINNER = 'DINNER'

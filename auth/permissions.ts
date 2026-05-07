@@ -22,6 +22,7 @@ export type Permission =
   | 'logs:view'
   | 'logs:full'
   | 'banquet:view_price'
+  | 'banquet:manage_payments'
   | 'customers:view'
   | 'customers:full';
 
@@ -48,6 +49,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'logs:view',
     'logs:full',
     'banquet:view_price',
+    'banquet:manage_payments',
     'customers:view',
     'customers:full'
   ],
@@ -67,6 +69,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reports:full',
     'logs:view',
     'banquet:view_price',
+    'banquet:manage_payments',
     'customers:view',
     'customers:full'
   ],

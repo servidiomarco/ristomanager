@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift, Customer } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, Shift, Customer } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -294,6 +294,34 @@ export const updateBanquetMenu = async (id: number, menu: Partial<BanquetMenu>):
 
 export const deleteBanquetMenu = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/banquet-menus/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// BANQUET PAYMENTS
+// ============================================
+
+export const getBanquetPayments = async (banquetId: number): Promise<BanquetPayment[]> => {
+  return apiRequest<BanquetPayment[]>(`${API_URL}/banquet-menus/${banquetId}/payments`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createBanquetPayment = async (
+  banquetId: number,
+  payment: Omit<BanquetPayment, 'id' | 'banquet_id' | 'created_at' | 'created_by_user_id' | 'created_by_user_name'>
+): Promise<BanquetPayment> => {
+  return apiRequest<BanquetPayment>(`${API_URL}/banquet-menus/${banquetId}/payments`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payment),
+  });
+};
+
+export const deleteBanquetPayment = async (banquetId: number, paymentId: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/banquet-menus/${banquetId}/payments/${paymentId}`, {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);

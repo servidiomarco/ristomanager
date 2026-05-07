@@ -431,6 +431,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
                 ['OWNER', 'staff:view'], ['OWNER', 'staff:full'],
                 ['OWNER', 'banquet:view_price'],
+                ['OWNER', 'banquet:manage_payments'],
                 // GENERAL_MANAGER
                 ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
                 ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
@@ -440,6 +441,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['GENERAL_MANAGER', 'logs:view'],
                 ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
                 ['GENERAL_MANAGER', 'banquet:view_price'],
+                ['GENERAL_MANAGER', 'banquet:manage_payments'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
@@ -529,6 +531,37 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
         console.log('GENERAL_MANAGER role and banquet:view_price migration completed');
+
+        // Add banquet:manage_payments for OWNER + GENERAL_MANAGER
+        const banquetPaymentPermissions = [
+            ['OWNER', 'banquet:manage_payments'],
+            ['GENERAL_MANAGER', 'banquet:manage_payments']
+        ];
+        for (const [role, permission] of banquetPaymentPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('banquet:manage_payments migration completed');
+
+        // ============================================
+        // BANQUET PAYMENTS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS banquet_payments (
+                id SERIAL PRIMARY KEY,
+                banquet_id INTEGER NOT NULL REFERENCES banquet_menus(id) ON DELETE CASCADE,
+                amount DECIMAL(10, 2) NOT NULL,
+                payment_date DATE NOT NULL,
+                payment_type VARCHAR(20) NOT NULL,
+                payment_method VARCHAR(20) NOT NULL,
+                notes TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_banquet_payments_banquet_id ON banquet_payments(banquet_id);`);
 
         // ============================================
         // TODOS TABLE
