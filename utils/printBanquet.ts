@@ -128,40 +128,45 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     color: #1e293b;
     margin: 0;
-    padding: 32px;
+    padding: 24px;
     background: #fff;
-    line-height: 1.5;
-    font-size: 16px;
+    line-height: 1.45;
+    font-size: 15px;
   }
   header {
-    border-bottom: 2px solid #4f46e5;
-    padding-bottom: 16px;
-    margin-bottom: 24px;
-  }
-  h1 { margin: 0 0 8px; font-size: 36px; color: #1e1b4b; }
-  .date { color: #4f46e5; font-size: 17px; font-weight: 600; text-transform: capitalize; }
-  .description { color: #475569; margin: 18px 0 0; font-size: 16px; }
-  .pricing {
     display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
     gap: 24px;
-    margin: 24px 0;
-    padding: 18px;
-    background: #f1f5f9;
-    border-radius: 8px;
+    border-bottom: 2px solid #4f46e5;
+    padding-bottom: 14px;
+    margin-bottom: 20px;
   }
-  .pricing .item .label {
-    font-size: 13px;
+  .header-main { flex: 1; min-width: 0; }
+  .header-meta {
+    display: flex;
+    gap: 18px;
+    flex-shrink: 0;
+    align-items: flex-start;
+  }
+  .meta-item { display: flex; flex-direction: column; text-align: right; }
+  .meta-item .meta-label {
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #64748b;
     font-weight: 600;
+    margin-bottom: 2px;
   }
-  .pricing .item .value {
-    font-size: 28px;
+  .meta-item .meta-value {
+    font-size: 20px;
     font-weight: 700;
     color: #1e1b4b;
+    line-height: 1.1;
   }
-  .pricing .item .unit { font-size: 15px; color: #64748b; font-weight: 400; }
+  h1 { margin: 0 0 6px; font-size: 32px; color: #1e1b4b; }
+  .date { color: #4f46e5; font-size: 16px; font-weight: 600; text-transform: capitalize; }
+  .description { color: #475569; margin: 12px 0 0; font-size: 15px; }
   .badge {
     display: inline-block;
     margin-left: 10px;
@@ -176,98 +181,93 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   .badge.lunch { background: #fef3c7; color: #b45309; }
   .badge.dinner { background: #e0e7ff; color: #4338ca; }
   h2 {
-    font-size: 19px;
+    font-size: 17px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #64748b;
-    margin: 0 0 14px;
+    margin: 0 0 10px;
   }
-  .notes-section { margin-top: 32px; }
+  .notes-section { margin-top: 20px; }
   .note-block {
-    margin-bottom: 18px;
-    padding: 14px 16px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
     background: #fffbeb;
     border-left: 3px solid #f59e0b;
     border-radius: 4px;
     page-break-inside: avoid;
   }
   .note-block h3 {
-    margin: 0 0 8px;
-    font-size: 15px;
+    margin: 0 0 6px;
+    font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #b45309;
   }
   .note-block .note-content {
-    font-size: 16px;
+    font-size: 15px;
     color: #1e293b;
     white-space: pre-wrap;
   }
-  .category { margin-bottom: 22px; page-break-inside: avoid; }
+  .category { margin-bottom: 14px; page-break-inside: avoid; }
   .category h3 {
-    margin: 0 0 8px;
-    font-size: 20px;
+    margin: 0 0 6px;
+    font-size: 18px;
     color: #4f46e5;
     border-bottom: 1px dashed #cbd5e1;
-    padding-bottom: 6px;
+    padding-bottom: 4px;
   }
   .category ul { margin: 0; padding-left: 22px; }
-  .category li { margin: 6px 0; font-size: 17px; }
+  .category li { margin: 4px 0; font-size: 16px; }
   .course-note {
-    margin: 10px 0 0;
+    margin: 8px 0 0;
     font-size: 14px;
     font-style: italic;
     color: #475569;
     white-space: pre-wrap;
   }
   footer {
-    margin-top: 40px;
-    padding-top: 12px;
+    margin-top: 24px;
+    padding-top: 10px;
     border-top: 1px solid #e2e8f0;
     color: #94a3b8;
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
   }
   @media print {
-    body { padding: 16mm; }
+    body { padding: 12mm; }
     header { break-after: avoid; }
   }
 </style>
 </head>
 <body>
   <header>
-    <h1>
-      ${escapeHtml(menu.name)}
-      ${menu.shift === Shift.LUNCH ? '<span class="badge lunch">Pranzo</span>' : ''}
-      ${menu.shift === Shift.DINNER ? '<span class="badge dinner">Cena</span>' : ''}
-    </h1>
-    ${eventDate ? `<div class="date">${escapeHtml(eventDate)}${shift ? ` &middot; ${escapeHtml(shift)}` : ''}</div>` : ''}
-    ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
+    <div class="header-main">
+      <h1>
+        ${escapeHtml(menu.name)}
+        ${menu.shift === Shift.LUNCH ? '<span class="badge lunch">Pranzo</span>' : ''}
+        ${menu.shift === Shift.DINNER ? '<span class="badge dinner">Cena</span>' : ''}
+      </h1>
+      ${eventDate ? `<div class="date">${escapeHtml(eventDate)}${shift ? ` &middot; ${escapeHtml(shift)}` : ''}</div>` : ''}
+      ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
+    </div>
+    <div class="header-meta">
+      ${guests != null ? `
+      <div class="meta-item">
+        <span class="meta-label">Coperti</span>
+        <span class="meta-value">${guests}</span>
+      </div>` : ''}
+      ${showPrice ? `
+      <div class="meta-item">
+        <span class="meta-label">Per persona</span>
+        <span class="meta-value">${price}</span>
+      </div>
+      ${deposit ? `
+      <div class="meta-item">
+        <span class="meta-label">Acconto</span>
+        <span class="meta-value">${deposit}</span>
+      </div>` : ''}` : ''}
+    </div>
   </header>
-
-  ${showPrice ? `
-  <div class="pricing">
-    <div class="item">
-      <div class="label">Prezzo per persona</div>
-      <div class="value">${price}<span class="unit"> / persona</span></div>
-    </div>
-    ${guests != null ? `
-    <div class="item">
-      <div class="label">Coperti</div>
-      <div class="value">${guests}<span class="unit"> ospiti</span></div>
-    </div>` : ''}
-    ${deposit ? `
-    <div class="item">
-      <div class="label">Acconto</div>
-      <div class="value">${deposit}</div>
-    </div>` : ''}
-  </div>` : (guests != null ? `
-  <div class="pricing">
-    <div class="item">
-      <div class="label">Coperti</div>
-      <div class="value">${guests}<span class="unit"> ospiti</span></div>
-    </div>
-  </div>` : '')}
 
   <h2>Composizione del menù</h2>
   ${dishesHtml || '<p style="color:#94a3b8;font-size:14px;">Nessun piatto selezionato.</p>'}
