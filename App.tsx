@@ -755,7 +755,7 @@ const App: React.FC = () => {
               icon={<UtensilsCrossed size={20} />}
               label="Menu & Banchetti"
               active={view === ViewState.MENU}
-              onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
+              onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -1335,7 +1335,7 @@ const App: React.FC = () => {
                 icon={<UtensilsCrossed size={20} />}
                 label="Menu"
                 active={view === ViewState.MENU}
-                onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
+                onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               />
             )}
             {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canManageUsers() || canAccessView(ViewState.SETTINGS)) && (

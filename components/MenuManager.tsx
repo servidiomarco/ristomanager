@@ -375,11 +375,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   };
 
   const dishCategories = useMemo(() => {
+    const order = ['antipasti', 'primi', 'secondi', 'contorni', 'dolci'];
     const set = new Set<string>();
     for (const d of dishes) {
       if (d.category && d.category.trim()) set.add(d.category.trim());
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'it'));
+    return Array.from(set).sort((a, b) => {
+      const ai = order.indexOf(a.toLowerCase());
+      const bi = order.indexOf(b.toLowerCase());
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b, 'it');
+    });
   }, [dishes]);
 
   const filteredDishes = dishes.filter(d => {
@@ -453,69 +461,61 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'DISHES' && (
           <>
-            {/* Stats/Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-line)]">
-                    <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Totale Piatti</div>
-                    <div className="text-2xl font-semibold text-[var(--color-fg)] mt-1">{dishes.length}</div>
+            <div className="flex flex-col md:flex-row md:items-center gap-3 mb-6">
+              {dishCategories.length > 0 && (
+                <div className="flex flex-wrap gap-2 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter(null)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                      categoryFilter === null
+                        ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
+                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                    }`}
+                  >
+                    Tutte ({dishes.length})
+                  </button>
+                  {dishCategories.map(cat => {
+                    const count = dishes.filter(d => d.category === cat).length;
+                    const isActive = categoryFilter === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setCategoryFilter(isActive ? null : cat)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                          isActive
+                            ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
+                            : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                        }`}
+                      >
+                        {cat} ({count})
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="md:col-span-3">
-                    <div className="relative h-11">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
-                        <input
-                            type="search"
-                            placeholder="Cerca piatto per nome o categoria..."
-                            className="w-full h-full pl-10 pr-10 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                        {searchTerm && (
-                            <button
-                                type="button"
-                                onClick={() => setSearchTerm('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                                aria-label="Cancella ricerca"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {dishCategories.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  type="button"
-                  onClick={() => setCategoryFilter(null)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                    categoryFilter === null
-                      ? 'bg-[var(--color-fg)] text-[var(--color-bg)] border-[var(--color-fg)]'
-                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  Tutte ({dishes.length})
-                </button>
-                {dishCategories.map(cat => {
-                  const count = dishes.filter(d => d.category === cat).length;
-                  const isActive = categoryFilter === cat;
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setCategoryFilter(isActive ? null : cat)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                        isActive
-                          ? 'bg-[var(--color-fg)] text-[var(--color-bg)] border-[var(--color-fg)]'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                      }`}
-                    >
-                      {cat} ({count})
-                    </button>
-                  );
-                })}
+              )}
+              <div className="relative h-10 md:w-72 md:flex-shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
+                <input
+                  type="search"
+                  placeholder="Cerca piatto per nome o categoria..."
+                  className="w-full h-full pl-9 pr-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                    aria-label="Cancella ricerca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Dish List */}
             <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
