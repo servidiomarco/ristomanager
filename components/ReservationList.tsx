@@ -179,6 +179,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSavingReservation, setIsSavingReservation] = useState(false);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
@@ -931,9 +932,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
+      if (isSavingReservation) return;
 
       // Combine allergens, quick notes, and additional notes
       const allergensText = selectedAllergens.length > 0
@@ -950,15 +952,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           notes: combinedNotes || undefined
       };
 
-      if (isEditing) {
-          onUpdateReservation(dataToSave as Reservation);
-      } else {
-          onAddReservation(dataToSave as Omit<Reservation, 'id'>);
-          clearDraft(DRAFT_KEYS.RESERVATION_NEW);
-      }
+      try {
+          setIsSavingReservation(true);
+          if (isEditing) {
+              await onUpdateReservation(dataToSave as Reservation);
+          } else {
+              await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+              clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+          }
 
-      setDraftBanner(null);
-      setIsFormOpen(false);
+          setDraftBanner(null);
+          setIsFormOpen(false);
+      } finally {
+          setIsSavingReservation(false);
+      }
   };
 
   const getStatusColor = (status: PaymentStatus) => {
@@ -2614,13 +2621,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <button
                         onClick={handleSubmit}
-                        disabled={mergeMode && selectedTablesForMerge.length > 0}
-                        className={`w-full sm:w-auto rounded-full px-4 py-2 text-sm font-medium transition-opacity ${
-                            mergeMode && selectedTablesForMerge.length > 0
+                        disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
+                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-opacity ${
+                            (mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation
                                 ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] cursor-not-allowed border border-[var(--color-line)]'
                                 : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90'
                         }`}
                     >
+                        {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                         {isEditing ? 'Salva' : 'Conferma'}
                     </button>
                 </div>

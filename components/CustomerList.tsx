@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2 } from 'lucide-react';
 
 interface Props {
   reservations: Reservation[];
@@ -426,8 +426,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                 <button
                   type="submit"
                   disabled={isSaving || !form.name.trim() || !form.phone.trim()}
-                  className="flex-1 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {isSaving ? 'Salvataggio...' : (form.id ? 'Salva modifiche' : 'Aggiungi alla rubrica')}
                 </button>
               </div>

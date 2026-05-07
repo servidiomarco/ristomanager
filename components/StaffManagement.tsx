@@ -111,6 +111,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   const [showTimeOffModal, setShowTimeOffModal] = useState(false);
   const [deleteStaffConfirm, setDeleteStaffConfirm] = useState<StaffMember | null>(null);
   const [deleteTimeOffConfirm, setDeleteTimeOffConfirm] = useState<{ id: string; label: string } | null>(null);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+  const [isSavingShift, setIsSavingShift] = useState(false);
+  const [isSavingTimeOff, setIsSavingTimeOff] = useState(false);
 
   // Forms
   const [staffForm, setStaffForm] = useState<CreateStaffInput>({
@@ -317,8 +320,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       showToast('Nome e cognome sono obbligatori', 'error');
       return;
     }
+    if (isSavingStaff) return;
 
     try {
+      setIsSavingStaff(true);
       if (editingStaff) {
         const updated = await staffApiService.updateStaffMember(editingStaff.id, staffForm);
         setStaffMembers(prev => prev.map(s => s.id === editingStaff.id ? updated : s));
@@ -332,6 +337,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       resetStaffForm();
     } catch (error) {
       showToast('Errore nel salvataggio', 'error');
+    } finally {
+      setIsSavingStaff(false);
     }
   };
 
@@ -374,12 +381,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
       return;
     }
+    if (isSavingShift) return;
 
     const shiftsToCreate: Shift[] = [];
     if (shiftForm.lunch) shiftsToCreate.push(Shift.LUNCH);
     if (shiftForm.dinner) shiftsToCreate.push(Shift.DINNER);
 
     try {
+      setIsSavingShift(true);
       const created = await Promise.all(
         shiftsToCreate.map(shift =>
           staffApiService.createShift({
@@ -405,6 +414,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       );
     } catch (error) {
       showToast('Errore nel salvataggio del turno', 'error');
+    } finally {
+      setIsSavingShift(false);
     }
   };
 
@@ -433,7 +444,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   };
 
   const handleSaveTimeOff = async () => {
+    if (isSavingTimeOff) return;
     try {
+      setIsSavingTimeOff(true);
       const created = await staffApiService.createTimeOff(timeOffForm);
       setTimeOffs(prev => [...prev, created]);
       setShowTimeOffModal(false);
@@ -441,6 +454,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     } catch (error: any) {
       console.error('createTimeOff failed', error);
       showToast(`Errore nel salvataggio: ${error?.message || 'sconosciuto'}`, 'error');
+    } finally {
+      setIsSavingTimeOff(false);
     }
   };
 
@@ -1135,8 +1150,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </button>
               <button
                 onClick={handleSaveStaff}
-                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                disabled={isSavingStaff}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingStaff && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingStaff ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
@@ -1216,8 +1233,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </button>
               <button
                 onClick={handleSaveShift}
-                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                disabled={isSavingShift}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingShift && <Loader2 className="h-4 w-4 animate-spin" />}
                 Aggiungi
               </button>
             </div>
@@ -1288,8 +1307,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </button>
               <button
                 onClick={handleSaveTimeOff}
-                className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                disabled={isSavingTimeOff}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingTimeOff && <Loader2 className="h-4 w-4 animate-spin" />}
                 Registra
               </button>
             </div>

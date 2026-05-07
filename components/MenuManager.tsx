@@ -125,6 +125,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   // Banquet form validation errors
   const [banquetFormErrors, setBanquetFormErrors] = useState<string[]>([]);
+  const [isSavingBanquet, setIsSavingBanquet] = useState(false);
+  const [isSavingDish, setIsSavingDish] = useState(false);
 
   // Load the selected customer when editing a banquet that has customer_id
   useEffect(() => {
@@ -146,34 +148,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     return () => { cancelled = true; };
   }, [isBanquetFormOpen, newBanquet.customer_id, selectedBanquetCustomer?.id]);
 
-  const handleAddDishSubmit = (e: React.FormEvent) => {
+  const handleAddDishSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDish.name || !newDish.price) return;
+    if (isSavingDish) return;
 
-    if (isEditingDish && editingDishId !== null) {
-      onUpdateDish(editingDishId, {
-        name: newDish.name!,
-        description: newDish.description || '',
-        price: Number(newDish.price),
-        category: newDish.category || 'Antipasti',
-        allergens: newDish.allergens || [],
-        photo_url: newDish.photo_url?.trim() || undefined
-      });
-    } else {
-      onAddDish({
-        name: newDish.name!,
-        description: newDish.description || '',
-        price: Number(newDish.price),
-        category: newDish.category || 'Antipasti',
-        allergens: newDish.allergens || [],
-        photo_url: newDish.photo_url?.trim() || undefined
-      } as Dish);
+    try {
+      setIsSavingDish(true);
+      if (isEditingDish && editingDishId !== null) {
+        await onUpdateDish(editingDishId, {
+          name: newDish.name!,
+          description: newDish.description || '',
+          price: Number(newDish.price),
+          category: newDish.category || 'Antipasti',
+          allergens: newDish.allergens || [],
+          photo_url: newDish.photo_url?.trim() || undefined
+        });
+      } else {
+        await onAddDish({
+          name: newDish.name!,
+          description: newDish.description || '',
+          price: Number(newDish.price),
+          category: newDish.category || 'Antipasti',
+          allergens: newDish.allergens || [],
+          photo_url: newDish.photo_url?.trim() || undefined
+        } as Dish);
+      }
+
+      setIsDishFormOpen(false);
+      setIsEditingDish(false);
+      setEditingDishId(null);
+      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+    } finally {
+      setIsSavingDish(false);
     }
-
-    setIsDishFormOpen(false);
-    setIsEditingDish(false);
-    setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
   };
 
   const handleEditDish = (dish: Dish) => {
@@ -206,8 +214,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }
   };
 
-  const handleAddBanquetSubmit = (e: React.FormEvent) => {
+  const handleAddBanquetSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (isSavingBanquet) return;
 
       const missing: string[] = [];
       if (!newBanquet.name || !newBanquet.name.trim()) missing.push('Nome Menu');
@@ -245,17 +254,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined
       };
 
-      if (isEditingBanquet && editingBanquetId !== null) {
-        onUpdateBanquetMenu(editingBanquetId, payload);
-      } else {
-        onAddBanquetMenu(payload as BanquetMenu);
-      }
+      try {
+        setIsSavingBanquet(true);
+        if (isEditingBanquet && editingBanquetId !== null) {
+          await onUpdateBanquetMenu(editingBanquetId, payload);
+        } else {
+          await onAddBanquetMenu(payload as BanquetMenu);
+        }
 
-      setIsBanquetFormOpen(false);
-      setIsEditingBanquet(false);
-      setEditingBanquetId(null);
-      setSelectedBanquetCustomer(null);
-      setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
+        setIsBanquetFormOpen(false);
+        setIsEditingBanquet(false);
+        setEditingBanquetId(null);
+        setSelectedBanquetCustomer(null);
+        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
+      } finally {
+        setIsSavingBanquet(false);
+      }
   };
 
   const handleEditBanquet = (menu: BanquetMenu) => {
@@ -916,8 +930,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                  disabled={isSavingDish}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  {isSavingDish && <Loader2 className="h-4 w-4 animate-spin" />}
                   Salva Piatto
                 </button>
               </div>
@@ -1317,8 +1333,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <button
                   onClick={handleAddBanquetSubmit}
                   type="submit"
-                  className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                  disabled={isSavingBanquet}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
                   {isEditingBanquet ? 'Salva Modifiche' : 'Crea Menu'}
                 </button>
               </div>

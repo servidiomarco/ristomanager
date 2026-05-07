@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, BellOff } from 'lucide-react';
+import { Bell, BellOff, Loader2 } from 'lucide-react';
 import {
     isPushSupported,
     getNotificationPermission,
@@ -87,13 +87,14 @@ export const PushNotificationsCard: React.FC = () => {
                         type="button"
                         onClick={handleToggle}
                         disabled={!supported || busy || permission === 'denied'}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition flex-shrink-0 ${
+                        className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition flex-shrink-0 ${
                             enabled
                                 ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
                                 : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
-                        {busy ? '...' : enabled ? 'Attive' : 'Attiva'}
+                        {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {enabled ? 'Attive' : 'Attiva'}
                     </button>
                 </div>
 
