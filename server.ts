@@ -16,6 +16,7 @@ import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
 import { RolePermissionService } from './auth/permissionService.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
+import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -179,6 +180,27 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
+
+        const reservationLabel = (() => {
+            try {
+                const dt = new Date(reservation_time);
+                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                return `${date} ${time}`;
+            } catch {
+                return reservation_time;
+            }
+        })();
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Nuova prenotazione',
+                body: `${customer_name} · ${guests} ospiti · ${reservationLabel}`,
+                url: '/',
+                tag: `reservation-${newReservation.id}`,
+            },
+            { excludeUserId: req.user?.userId ?? null }
+        ).catch(err => console.error('Push (new reservation) failed:', err));
 
         res.status(201).json(newReservation);
     } catch (err: any) {
@@ -1827,6 +1849,15 @@ app.post('/todos', authenticate, async (req, res) => {
             console.error('📝 socketService is undefined, cannot broadcast!');
         }
 
+        if (newTodo.assignedToUserId && newTodo.assignedToUserId !== req.user?.userId) {
+            pushSendToUser(newTodo.assignedToUserId, {
+                title: 'Nuovo todo assegnato',
+                body: newTodo.title,
+                url: '/',
+                tag: `todo-${newTodo.id}`,
+            }).catch(err => console.error('Push (todo assigned) failed:', err));
+        }
+
         res.status(201).json(newTodo);
     } catch (err) {
         console.error(err);
@@ -1894,6 +1925,15 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'No fields to update' });
         }
 
+        let previousAssignee: number | null = null;
+        if (req.body.hasOwnProperty('assignedToUserId')) {
+            const prev = await queryWithRetry(
+                'SELECT assigned_to_user_id FROM todos WHERE id = $1',
+                [id]
+            );
+            previousAssignee = prev.rows[0]?.assigned_to_user_id ?? null;
+        }
+
         values.push(id);
         const query = `
             UPDATE todos
@@ -1931,6 +1971,21 @@ app.put('/todos/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+
+        const newAssignee = updatedTodo.assignedToUserId ?? null;
+        if (
+            req.body.hasOwnProperty('assignedToUserId')
+            && newAssignee
+            && newAssignee !== previousAssignee
+            && newAssignee !== req.user?.userId
+        ) {
+            pushSendToUser(newAssignee, {
+                title: 'Todo assegnato a te',
+                body: updatedTodo.title,
+                url: '/',
+                tag: `todo-${updatedTodo.id}`,
+            }).catch(err => console.error('Push (todo reassigned) failed:', err));
+        }
 
         res.json(updatedTodo);
     } catch (err) {
@@ -2818,6 +2873,84 @@ app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (r
         res.status(204).send();
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PUSH NOTIFICATIONS (Web Push / VAPID)
+// ============================================
+
+app.get('/push/vapid-public-key', (_req, res) => {
+    if (!isPushConfigured()) {
+        return res.status(503).json({ error: 'Push notifications not configured' });
+    }
+    res.json({ publicKey: getVapidPublicKey() });
+});
+
+app.post('/push/subscribe', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const { endpoint, keys, userAgent } = req.body || {};
+        if (!endpoint || !keys?.p256dh || !keys?.auth) {
+            return res.status(400).json({ error: 'Invalid subscription payload' });
+        }
+
+        await queryWithRetry(
+            `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (endpoint) DO UPDATE
+             SET user_id = EXCLUDED.user_id,
+                 p256dh = EXCLUDED.p256dh,
+                 auth = EXCLUDED.auth,
+                 user_agent = EXCLUDED.user_agent`,
+            [userId, endpoint, keys.p256dh, keys.auth, userAgent || null]
+        );
+
+        res.status(201).json({ ok: true });
+    } catch (err) {
+        console.error('POST /push/subscribe error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/push/unsubscribe', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const { endpoint } = req.body || {};
+        if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+
+        await queryWithRetry(
+            'DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2',
+            [endpoint, userId]
+        );
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /push/unsubscribe error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/push/test', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const result = await pushSendToUser(userId, {
+            title: 'Notifica di test',
+            body: 'Le notifiche push funzionano correttamente.',
+            url: '/',
+            tag: 'test-notification'
+        });
+
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        console.error('POST /push/test error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
