@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
@@ -187,7 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [deleteTodoConfirm, setDeleteTodoConfirm] = useState<TodoItem | null>(null);
   const [showMyTasksModal, setShowMyTasksModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
-  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [staffUsers, setStaffUsers] = useState<Array<{ id: number; full_name: string; role: UserRole }>>([]);
   const [todoForm, setTodoForm] = useState({
     title: '',
     description: '',
@@ -391,12 +391,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     fetchTodos();
   }, [fetchTodos]);
 
-  // Load staff users for assignment (once on mount)
+  // Load active users for the assignment picker (managers+ have access).
   useEffect(() => {
-    authApiService.getUsers().then(users => {
-      setStaffUsers(users.filter(u => u.is_active));
+    authApiService.getAssignableUsers().then(users => {
+      setStaffUsers(users);
     }).catch(() => {
-      // Ignore error if not authorized to view users
+      // Roles without assignment access (waiter/kitchen) just see an empty list.
     });
   }, []);
 

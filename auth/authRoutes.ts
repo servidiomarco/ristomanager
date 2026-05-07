@@ -137,6 +137,23 @@ router.get('/users', authenticate, authorize(UserRole.OWNER), async (req: Reques
   }
 });
 
+// GET /auth/users/assignable - Minimal active-user list for task assignment pickers.
+// Available to managers and above so they can assign todos to specific people.
+router.get(
+  '/users/assignable',
+  authenticate,
+  authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER),
+  async (req: Request, res: Response) => {
+    try {
+      const users = await AuthService.getAssignableUsers();
+      res.json(users);
+    } catch (error: any) {
+      console.error('Get assignable users error:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
 // POST /auth/users - Create new user
 router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
   try {

@@ -276,6 +276,18 @@ class AuthApiService {
     return response.json();
   }
 
+  // Minimal active-user list for assignment pickers; available to managers+.
+  async getAssignableUsers(): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
+    const response = await this.authFetch(`${API_URL}/auth/users/assignable`);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch assignable users' }));
+      throw new Error(error.error || 'Failed to fetch assignable users');
+    }
+
+    return response.json();
+  }
+
   async createUser(userData: {
     email: string;
     password: string;

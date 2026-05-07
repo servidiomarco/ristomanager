@@ -194,6 +194,19 @@ export class AuthService {
     }));
   }
 
+  // Minimal user projection for assignment pickers (no email or audit fields).
+  // Returns only active users, sorted alphabetically.
+  static async getAssignableUsers(): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
+    const result = await queryWithRetry(
+      'SELECT id, full_name, role FROM users WHERE is_active = TRUE ORDER BY full_name'
+    );
+    return result.rows.map(row => ({
+      id: row.id,
+      full_name: row.full_name,
+      role: row.role as UserRole,
+    }));
+  }
+
   // Create new user
   static async createUser(
     email: string,
