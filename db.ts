@@ -757,6 +757,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // because deleting a customer should not destroy the banquet history.
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
 
+        // Tables assigned to a banquet (multi-table). Used by the floor plan and
+        // by overbooking checks against reservations on the same date+shift.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS table_ids INTEGER[];`);
+
         // Customer permissions for roles
         const customerPermissions = [
             ['OWNER', 'customers:view'], ['OWNER', 'customers:full'],

@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer } from '../types';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus } from '../types';
 import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
@@ -48,6 +48,8 @@ const computeBanquetPaymentStatus = (menu: BanquetMenu): BanquetPaymentStatus =>
 interface MenuManagerProps {
   dishes: Dish[];
   banquetMenus: BanquetMenu[];
+  tables: Table[];
+  reservations: Reservation[];
   onAddDish: (dish: Omit<Dish, 'id'>) => void;
   onUpdateDish: (id: number, dish: Partial<Dish>) => void;
   onDeleteDish: (id: number) => void;
@@ -61,6 +63,8 @@ interface MenuManagerProps {
 export const MenuManager: React.FC<MenuManagerProps> = ({
     dishes,
     banquetMenus,
+    tables,
+    reservations,
     onAddDish,
     onUpdateDish,
     onDeleteDish,
@@ -116,7 +120,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       customer_id: null,
       notes_courses: '',
       notes_service: '',
-      notes_mise_en_place: ''
+      notes_mise_en_place: '',
+      table_ids: []
   });
 
   // Customer picker (rubrica) state for banquet form
@@ -251,7 +256,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           customer_id: newBanquet.customer_id ?? null,
           notes_courses: newBanquet.notes_courses?.trim() || undefined,
           notes_service: newBanquet.notes_service?.trim() || undefined,
-          notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined
+          notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined,
+          table_ids: Array.isArray(newBanquet.table_ids) ? newBanquet.table_ids : []
       };
 
       try {
@@ -266,7 +272,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         setIsEditingBanquet(false);
         setEditingBanquetId(null);
         setSelectedBanquetCustomer(null);
-        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '' });
+        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [] });
+      } catch (err: any) {
+        const msg = err?.message || 'Errore durante il salvataggio';
+        const isConflict = err?.status === 409 || /tavolo/i.test(msg);
+        setBanquetFormErrors([isConflict ? `Conflitto tavoli: ${msg}` : msg]);
       } finally {
         setIsSavingBanquet(false);
       }
@@ -292,7 +302,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       customer_id: menu.customer_id ?? null,
       notes_courses: menu.notes_courses || '',
       notes_service: menu.notes_service || '',
-      notes_mise_en_place: menu.notes_mise_en_place || ''
+      notes_mise_en_place: menu.notes_mise_en_place || '',
+      table_ids: Array.isArray(menu.table_ids) ? [...menu.table_ids] : []
     });
     setSelectedBanquetCustomer(null);
     setBanquetFormErrors([]);
@@ -313,7 +324,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       event_date: '', shift: undefined, deposit_amount: undefined,
       guests: undefined,
       customer_id: null,
-      notes_courses: '', notes_service: '', notes_mise_en_place: ''
+      notes_courses: '', notes_service: '', notes_mise_en_place: '',
+      table_ids: []
     });
     setIsBanquetFormOpen(true);
   };
@@ -403,6 +415,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       return a.localeCompare(b, 'it');
     });
   }, [dishes]);
+
+  // Map of tableId -> occupancy info for the currently selected event_date+shift
+  // (excluding the banquet being edited). Used by the table picker in the form.
+  const tableOccupancyMap = useMemo(() => {
+    const map = new Map<number, { source: 'reservation' | 'banquet'; label: string }>();
+    const date = newBanquet.event_date;
+    const shift = newBanquet.shift;
+    if (!date || !shift) return map;
+
+    for (const r of reservations) {
+      if (!r.table_id) continue;
+      if (r.shift !== shift) continue;
+      if ((r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.DEPARTED) continue;
+      const resDate = (r.reservation_time || '').slice(0, 10);
+      if (resDate !== date) continue;
+      if (!map.has(r.table_id)) {
+        map.set(r.table_id, { source: 'reservation', label: r.customer_name });
+      }
+    }
+
+    for (const b of banquetMenus) {
+      if (editingBanquetId !== null && b.id === editingBanquetId) continue;
+      if (b.event_date !== date) continue;
+      if (b.shift !== shift) continue;
+      const ids = Array.isArray(b.table_ids) ? b.table_ids : [];
+      for (const tid of ids) {
+        if (!map.has(tid)) {
+          map.set(tid, { source: 'banquet', label: b.name });
+        }
+      }
+    }
+
+    return map;
+  }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId]);
 
   const filteredDishes = dishes.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1105,6 +1151,68 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <BookUser className="h-4 w-4" />
                     Seleziona dalla rubrica
                   </button>
+                )}
+              </div>
+              <div>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                  Tavoli Assegnati <span className="text-slate-400 font-normal normal-case tracking-normal">— opzionale</span>
+                </label>
+                {!newBanquet.event_date || !newBanquet.shift ? (
+                  <p className="text-xs text-[var(--color-fg-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
+                ) : tables.length === 0 ? (
+                  <p className="text-xs text-[var(--color-fg-muted)] italic">Nessun tavolo configurato.</p>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-[var(--color-fg-muted)]">Seleziona uno o più tavoli per il banchetto. I tavoli occupati da altre prenotazioni o banchetti nello stesso turno sono disabilitati.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {[...tables].sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true })).map(t => {
+                        const isSelected = (newBanquet.table_ids || []).includes(t.id);
+                        const occ = tableOccupancyMap.get(t.id);
+                        const isOccupied = !!occ && !isSelected;
+                        const title = isOccupied
+                          ? `Occupato — ${occ!.source === 'reservation' ? 'Prenotazione' : 'Banchetto'}: ${occ!.label}`
+                          : `Tavolo ${t.name} (${t.seats} posti)`;
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            disabled={isOccupied}
+                            onClick={() => {
+                              if (isOccupied) return;
+                              setNewBanquet(prev => {
+                                const current = Array.isArray(prev.table_ids) ? prev.table_ids : [];
+                                const next = current.includes(t.id)
+                                  ? current.filter(id => id !== t.id)
+                                  : [...current, t.id];
+                                return { ...prev, table_ids: next };
+                              });
+                            }}
+                            title={title}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition ${
+                              isSelected
+                                ? 'bg-indigo-600 border-indigo-600 text-white'
+                                : isOccupied
+                                  ? 'bg-rose-50 border-rose-200 text-rose-400 cursor-not-allowed opacity-60'
+                                  : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                            }`}
+                          >
+                            {isSelected && <Check className="h-3.5 w-3.5" />}
+                            <span>{t.name}</span>
+                            <span className="text-[11px] opacity-75">· {t.seats}p</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(newBanquet.table_ids || []).length > 0 && (
+                      <p className="text-xs text-[var(--color-fg-muted)]">
+                        Selezionati: {(newBanquet.table_ids || []).length} tavolo/i (
+                        {(newBanquet.table_ids || []).reduce((sum, tid) => {
+                          const t = tables.find(tt => tt.id === tid);
+                          return sum + (t ? t.seats : 0);
+                        }, 0)} posti totali)
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
               <div>

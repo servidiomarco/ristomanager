@@ -129,6 +129,92 @@ async function isTableInClosedRoom(tableId: number | null | undefined): Promise<
     return result.rows[0]?.is_closed === true;
 }
 
+// Find tables already booked on a given date+shift, either by a reservation
+// or by another banquet. Used to prevent overbooking across both sections.
+// Returns one row per (table_id, source) conflict; an empty result means free.
+interface TableConflict {
+    table_id: number;
+    table_name: string;
+    source: 'reservation' | 'banquet';
+    source_id: number;
+    source_name: string;
+}
+
+async function findTableConflicts(
+    eventDate: string,
+    shift: string | null | undefined,
+    tableIds: number[],
+    options?: { excludeBanquetId?: number; excludeReservationId?: number }
+): Promise<TableConflict[]> {
+    if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
+
+    const conflicts: TableConflict[] = [];
+
+    const resParams: any[] = [tableIds, eventDate, shift];
+    let resWhere = `r.table_id = ANY($1::int[])
+                    AND DATE(r.reservation_time) = $2::date
+                    AND r.shift = $3
+                    AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'`;
+    if (options?.excludeReservationId) {
+        resParams.push(options.excludeReservationId);
+        resWhere += ` AND r.id <> $${resParams.length}`;
+    }
+    const resResult = await queryWithRetry(
+        `SELECT r.id, r.customer_name, r.table_id, t.name AS table_name
+         FROM reservations r
+         JOIN tables t ON t.id = r.table_id
+         WHERE ${resWhere}`,
+        resParams
+    );
+    for (const row of resResult.rows) {
+        conflicts.push({
+            table_id: row.table_id,
+            table_name: row.table_name,
+            source: 'reservation',
+            source_id: row.id,
+            source_name: row.customer_name,
+        });
+    }
+
+    const banParams: any[] = [eventDate, shift, tableIds];
+    let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[]`;
+    if (options?.excludeBanquetId) {
+        banParams.push(options.excludeBanquetId);
+        banWhere += ` AND b.id <> $${banParams.length}`;
+    }
+    const banResult = await queryWithRetry(
+        `SELECT b.id, b.name, b.table_ids FROM banquet_menus b WHERE ${banWhere}`,
+        banParams
+    );
+    for (const row of banResult.rows) {
+        const overlap: number[] = (row.table_ids || []).filter((tid: number) => tableIds.includes(tid));
+        if (overlap.length === 0) continue;
+        const tableNames = await queryWithRetry(
+            'SELECT id, name FROM tables WHERE id = ANY($1::int[])',
+            [overlap]
+        );
+        for (const t of tableNames.rows) {
+            conflicts.push({
+                table_id: t.id,
+                table_name: t.name,
+                source: 'banquet',
+                source_id: row.id,
+                source_name: row.name,
+            });
+        }
+    }
+
+    return conflicts;
+}
+
+const buildConflictMessage = (conflicts: TableConflict[]): string => {
+    const parts = conflicts.map(c => {
+        const what = c.source === 'reservation' ? 'prenotazione di' : 'banchetto';
+        return `Tavolo ${c.table_name} occupato (${what} ${c.source_name})`;
+    });
+    return parts.join('; ');
+};
+
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
@@ -145,6 +231,16 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
+        if (table_id != null && reservation_time && shift) {
+            const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)]);
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
         }
         const result = await queryWithRetry(
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
@@ -221,6 +317,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
+        if (table_id != null && reservation_time && shift) {
+            const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id) });
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
         }
         const result = await queryWithRetry(
             'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
@@ -1436,6 +1542,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
             `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
                     b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    b.table_ids,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b
              ORDER BY b.event_date NULLS LAST, b.name`
@@ -1449,7 +1556,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1458,9 +1565,21 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
+        const tableIdsArr: number[] = Array.isArray(table_ids)
+            ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+            : [];
+        if (tableIdsArr.length > 0 && shift) {
+            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr);
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null]
         );
         const newMenu = result.rows[0];
 
@@ -1496,7 +1615,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1504,9 +1623,21 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
+        const tableIdsArr: number[] = Array.isArray(table_ids)
+            ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+            : [];
+        if (tableIdsArr.length > 0 && shift) {
+            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr, { excludeBanquetId: Number(id) });
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12, customer_id = $13 WHERE id = $14 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12, customer_id = $13, table_ids = $14 WHERE id = $15 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, id]
         );
         const updatedMenu = result.rows[0];
 

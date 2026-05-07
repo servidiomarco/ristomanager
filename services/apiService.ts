@@ -68,7 +68,10 @@ const apiRequest = async <T>(
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
     const baseMessage = errorData.error || `Request failed with status ${response.status}`;
     const message = errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage;
-    throw new Error(message);
+    const error = new Error(message) as Error & { status?: number; data?: any };
+    error.status = response.status;
+    error.data = errorData;
+    throw error;
   }
 
   if (expectJson) {

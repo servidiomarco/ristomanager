@@ -515,9 +515,10 @@ const App: React.FC = () => {
         await createBanquetMenu(menu);
         // Socket.IO will handle adding to state via banquet:created event
         addToast('Menu banchetto creato', 'success');
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error adding banquet menu:", error);
-        addToast('Error adding banquet menu', 'error');
+        addToast(error?.message || 'Errore creazione menu banchetto', 'error');
+        throw error;
     }
     };
 
@@ -526,9 +527,10 @@ const App: React.FC = () => {
         await updateBanquetMenu(id, menu);
         // Socket.IO will handle updating state via banquet:updated event
         addToast('Menu banchetto aggiornato', 'success');
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error updating banquet menu:", error);
-        addToast('Error updating banquet menu', 'error');
+        addToast(error?.message || 'Errore aggiornamento menu banchetto', 'error');
+        throw error;
     }
   };
 
@@ -581,9 +583,10 @@ const App: React.FC = () => {
         title: 'Modifica Prenotazione',
         details: buildReservationDetails(returnedRes),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating reservation:", error);
-      addToast('Error updating reservation', 'error');
+      addToast(error?.message || 'Errore aggiornamento prenotazione', 'error');
+      throw error;
     }
   };
 
@@ -604,9 +607,10 @@ const App: React.FC = () => {
         title: 'Nuova Prenotazione',
         details: buildReservationDetails(returnedRes),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding reservation:", error);
-      addToast('Error adding reservation', 'error');
+      addToast(error?.message || 'Errore creazione prenotazione', 'error');
+      throw error;
     }
   };
 
@@ -1167,6 +1171,7 @@ const App: React.FC = () => {
             rooms={rooms}
             tables={tables}
             reservations={reservations}
+            banquetMenus={banquetMenus}
             onUpdateTable={handleUpdateTable}
             onAddTable={handleAddTable}
             onDeleteTable={handleDeleteTable}
@@ -1183,6 +1188,8 @@ const App: React.FC = () => {
           <MenuManager
             dishes={dishes}
             banquetMenus={banquetMenus}
+            tables={tables}
+            reservations={reservations}
             onAddDish={handleAddDish}
             onUpdateDish={handleUpdateDish}
             onDeleteDish={handleDeleteDish}

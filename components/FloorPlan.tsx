@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -25,6 +25,7 @@ interface FloorPlanProps {
   rooms: Room[];
   tables: Table[];
   reservations: Reservation[];
+  banquetMenus: BanquetMenu[];
   onUpdateTable: (updatedTable: Table) => void;
   onDeleteTable: (tableId: number) => void;
   onAddTable: (table: Omit<Table, 'id'>) => void;
@@ -40,6 +41,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   rooms,
   tables,
   reservations,
+  banquetMenus,
   onUpdateTable,
   onDeleteTable,
   onAddTable,
@@ -328,6 +330,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       const interval = setInterval(() => setTick(t => t + 1), 1000);
       return () => clearInterval(interval);
   }, []);
+
+  // Map of tableId -> banquet occupying it for the currently selected date+shift.
+  // A table can only be in one banquet for a given date+shift (server enforces).
+  const banquetByTableId = useMemo(() => {
+    const map = new Map<number, BanquetMenu>();
+    for (const b of banquetMenus) {
+      if (b.event_date !== selectedDate) continue;
+      if (b.shift !== selectedShift) continue;
+      const ids = Array.isArray(b.table_ids) ? b.table_ids : [];
+      for (const tid of ids) {
+        if (!map.has(tid)) map.set(tid, b);
+      }
+    }
+    return map;
+  }, [banquetMenus, selectedDate, selectedShift]);
 
   // Helper to get Active Reservation details
   const getActiveReservation = (table: Table): Reservation | undefined => {
@@ -668,7 +685,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     const isSelected = selectedTables.includes(table.id);
-    const dynamicStatus = getDynamicTableStatus(table);
+    const banquet = banquetByTableId.get(table.id);
+    const dynamicStatus: TableStatus = banquet ? TableStatus.RESERVED : getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
     const isMerged = table.merged_with && table.merged_with.length > 0;
     const isHidden = hiddenTableIds.has(table.id);
@@ -783,17 +801,32 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   <EyeOff size={8} />
               </div>
           )}
+
+          {/* Banquet Badge */}
+          {banquet && !timerDisplay && (
+              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]" title={`Banchetto: ${banquet.name}`}>
+                  <BookOpen size={8} />
+              </div>
+          )}
         </div>
 
-        {/* Reservation Name — outside rotation, always anchored to bottom of rotated bounding box */}
-        {reservation && !timerDisplay && (
+        {/* Banquet Name — takes precedence over reservation when table is in a banquet */}
+        {banquet && !timerDisplay ? (
+          <div
+            style={{ top: pillTopPx }}
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-indigo-600 border border-indigo-700 shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-white whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+            title={banquet.name}
+          >
+            {banquet.name}
+          </div>
+        ) : reservation && !timerDisplay ? (
           <div
             style={{ top: pillTopPx }}
             className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[var(--color-surface)]/95 border border-[var(--color-line)] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
           >
             {reservation.customer_name}
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
