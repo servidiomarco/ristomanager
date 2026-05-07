@@ -1389,7 +1389,12 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b
+             ORDER BY b.event_date NULLS LAST, b.name`
         );
         res.json(result.rows);
     } catch (err) {
@@ -1598,6 +1603,17 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
             );
         }
 
+        // Re-fetch banquet with new total_paid and broadcast so all clients refresh
+        const refreshed = await queryWithRetry(
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b WHERE b.id = $1`,
+            [id]
+        );
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
+
         res.status(201).json(newPayment);
     } catch (err) {
         console.error('POST /banquet-menus/:id/payments error:', err);
@@ -1634,6 +1650,16 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
                 { sub_action: 'payment_deleted', payment_id: parseInt(paymentId, 10), amount: Number(amount), payment_type }
             );
         }
+
+        const refreshed = await queryWithRetry(
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b WHERE b.id = $1`,
+            [id]
+        );
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
 
         res.status(204).send();
     } catch (err) {

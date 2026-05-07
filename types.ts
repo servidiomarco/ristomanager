@@ -76,6 +76,7 @@ export interface BanquetMenu {
   notes_service?: string;
   notes_mise_en_place?: string;
   customer_id?: number | null;
+  total_paid?: number;
 }
 
 export enum PaymentStatus {

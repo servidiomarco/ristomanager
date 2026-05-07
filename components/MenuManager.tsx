@@ -25,6 +25,26 @@ const formatLocalDate = (d: Date): string => {
     return `${y}-${m}-${day}`;
 };
 
+type BanquetTimeStatus = 'PAST' | 'UPCOMING';
+
+const computeBanquetTimeStatus = (menu: BanquetMenu): BanquetTimeStatus => {
+    if (!menu.event_date) return 'UPCOMING';
+    const today = formatLocalDate(new Date());
+    return menu.event_date < today ? 'PAST' : 'UPCOMING';
+};
+
+type BanquetPaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
+
+const computeBanquetPaymentStatus = (menu: BanquetMenu): BanquetPaymentStatus => {
+    const paid = Number(menu.total_paid || 0);
+    const guests = Number(menu.guests || 0);
+    const price = Number(menu.price_per_person || 0);
+    const due = guests > 0 && price > 0 ? guests * price : 0;
+    if (paid <= 0) return 'UNPAID';
+    if (due > 0 && paid + 0.005 >= due) return 'PAID';
+    return 'PARTIAL';
+};
+
 interface MenuManagerProps {
   dishes: Dish[];
   banquetMenus: BanquetMenu[];
@@ -546,8 +566,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
           {banquetView === 'LIST' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              {banquetMenus.map(menu => (
-                  <div key={menu.id} className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow">
+              {banquetMenus.map(menu => {
+                const timeStatus = computeBanquetTimeStatus(menu);
+                const cardAccent = timeStatus === 'PAST'
+                  ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
+                  : 'border-l-4 border-l-emerald-400 bg-emerald-50/30';
+                return (
+                  <div key={menu.id} className={`rounded-lg border border-[var(--color-line)] overflow-hidden flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow ${cardAccent}`}>
                       <div className="p-5 flex-1">
                           <div className="mb-3">
                               <h3 className="font-semibold text-[15px] text-[var(--color-fg)] leading-tight">{menu.name}</h3>
@@ -572,6 +597,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   <Moon className="h-3 w-3" /> Cena
                                 </span>
                               )}
+                              {canManageBanquetPayments && (() => {
+                                const status = computeBanquetPaymentStatus(menu);
+                                if (status === 'PAID') return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full">
+                                    <Check className="h-3 w-3" /> Pagato
+                                  </span>
+                                );
+                                if (status === 'PARTIAL') return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full">
+                                    <Wallet className="h-3 w-3" /> Acconto
+                                  </span>
+                                );
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full">
+                                    <Wallet className="h-3 w-3" /> Da pagare
+                                  </span>
+                                );
+                              })()}
                           </div>
                           {canViewBanquetPrice && (
                           <div className="mb-4 flex items-baseline gap-4 flex-wrap">
@@ -658,7 +701,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           )}
                       </div>
                   </div>
-              ))}
+                );
+              })}
               {banquetMenus.length === 0 && (
                   <div className="col-span-full text-center py-12 text-[var(--color-fg-muted)]">
                       Non hai ancora creato menu per banchetti.
@@ -1306,6 +1350,7 @@ interface BanquetCalendarProps {
 const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, onViewBanquet, canEdit }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
+  const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -1408,11 +1453,15 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
           <div className="space-y-2">
             {selectedBanquets.map(menu => {
               const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
+              const timeStatus = computeBanquetTimeStatus(menu);
+              const accent = timeStatus === 'PAST'
+                ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
+                : 'border-l-4 border-l-emerald-400 bg-emerald-50/30';
               return (
                 <div
                   key={menu.id}
                   onClick={() => canEdit && onSelectBanquet(menu)}
-                  className={`p-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition ${canEdit ? 'cursor-pointer' : ''}`}
+                  className={`p-3 rounded-md border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition ${accent} ${canEdit ? 'cursor-pointer' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -1428,6 +1477,24 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                             <Moon className="h-3 w-3" /> Cena
                           </span>
                         )}
+                        {canManageBanquetPayments && (() => {
+                          const status = computeBanquetPaymentStatus(menu);
+                          if (status === 'PAID') return (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded-full">
+                              <Check className="h-3 w-3" /> Pagato
+                            </span>
+                          );
+                          if (status === 'PARTIAL') return (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                              <Wallet className="h-3 w-3" /> Acconto
+                            </span>
+                          );
+                          return (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100 px-1.5 py-0.5 rounded-full">
+                              <Wallet className="h-3 w-3" /> Da pagare
+                            </span>
+                          );
+                        })()}
                       </div>
                       {menu.description && <p className="text-xs text-[var(--color-fg-muted)] truncate mt-0.5">{menu.description}</p>}
                       <div className="flex items-center gap-3 mt-1.5 text-xs text-[var(--color-fg-muted)] flex-wrap">
