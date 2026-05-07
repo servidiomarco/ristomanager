@@ -1189,6 +1189,7 @@ const App: React.FC = () => {
             dishes={dishes}
             banquetMenus={banquetMenus}
             tables={tables}
+            rooms={rooms}
             reservations={reservations}
             onAddDish={handleAddDish}
             onUpdateDish={handleUpdateDish}

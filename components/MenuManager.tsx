@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus } from '../types';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, Room } from '../types';
 import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
@@ -49,6 +49,7 @@ interface MenuManagerProps {
   dishes: Dish[];
   banquetMenus: BanquetMenu[];
   tables: Table[];
+  rooms: Room[];
   reservations: Reservation[];
   onAddDish: (dish: Omit<Dish, 'id'>) => void;
   onUpdateDish: (id: number, dish: Partial<Dish>) => void;
@@ -64,6 +65,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     dishes,
     banquetMenus,
     tables,
+    rooms,
     reservations,
     onAddDish,
     onUpdateDish,
@@ -132,6 +134,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [banquetFormErrors, setBanquetFormErrors] = useState<string[]>([]);
   const [isSavingBanquet, setIsSavingBanquet] = useState(false);
   const [isSavingDish, setIsSavingDish] = useState(false);
+  const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
 
   // Load the selected customer when editing a banquet that has customer_id
   useEffect(() => {
@@ -990,8 +993,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-2 sm:p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-none overflow-hidden flex flex-col h-full">
             <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
               <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h2>
             </div>
@@ -1162,54 +1165,129 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 ) : tables.length === 0 ? (
                   <p className="text-xs text-[var(--color-fg-muted)] italic">Nessun tavolo configurato.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <p className="text-xs text-[var(--color-fg-muted)]">Seleziona uno o più tavoli per il banchetto. I tavoli occupati da altre prenotazioni o banchetti nello stesso turno sono disabilitati.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[...tables].sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true })).map(t => {
-                        const isSelected = (newBanquet.table_ids || []).includes(t.id);
-                        const occ = tableOccupancyMap.get(t.id);
-                        const isOccupied = !!occ && !isSelected;
-                        const title = isOccupied
-                          ? `Occupato — ${occ!.source === 'reservation' ? 'Prenotazione' : 'Banchetto'}: ${occ!.label}`
-                          : `Tavolo ${t.name} (${t.seats} posti)`;
-                        return (
-                          <button
-                            key={t.id}
-                            type="button"
-                            disabled={isOccupied}
-                            onClick={() => {
-                              if (isOccupied) return;
-                              setNewBanquet(prev => {
-                                const current = Array.isArray(prev.table_ids) ? prev.table_ids : [];
-                                const next = current.includes(t.id)
-                                  ? current.filter(id => id !== t.id)
-                                  : [...current, t.id];
-                                return { ...prev, table_ids: next };
-                              });
-                            }}
-                            title={title}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition ${
-                              isSelected
-                                ? 'bg-indigo-600 border-indigo-600 text-white'
-                                : isOccupied
-                                  ? 'bg-rose-50 border-rose-200 text-rose-400 cursor-not-allowed opacity-60'
-                                  : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                            }`}
-                          >
-                            {isSelected && <Check className="h-3.5 w-3.5" />}
-                            <span>{t.name}</span>
-                            <span className="text-[11px] opacity-75">· {t.seats}p</span>
-                          </button>
-                        );
-                      })}
+
+                    {/* Room tabs */}
+                    {(() => {
+                      const openRooms = rooms.filter(r => !r.is_closed);
+                      if (openRooms.length === 0) return null;
+                      return (
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Sale</p>
+                          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                            <button
+                              type="button"
+                              onClick={() => setTablePickerRoomFilter('ALL')}
+                              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                            >
+                              Tutte le sale
+                            </button>
+                            {openRooms.map(room => (
+                              <button
+                                key={room.id}
+                                type="button"
+                                onClick={() => setTablePickerRoomFilter(room.id)}
+                                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                              >
+                                {room.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Tables grouped by room — same UX as Reservations table picker */}
+                    <div className="bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
+                      {(() => {
+                        const openRooms = rooms.filter(r => !r.is_closed);
+                        const displayedRooms = tablePickerRoomFilter === 'ALL'
+                          ? openRooms
+                          : openRooms.filter(r => r.id === tablePickerRoomFilter);
+                        if (displayedRooms.length === 0) {
+                          return <div className="text-center py-10 text-[var(--color-fg-subtle)] text-sm">Nessuna sala disponibile.</div>;
+                        }
+                        return displayedRooms.map(room => {
+                          const roomTables = [...tables]
+                            .filter(t => t.room_id === room.id)
+                            .sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
+                          if (roomTables.length === 0) return null;
+                          return (
+                            <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
+                              <h4 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
+                              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
+                                {roomTables.map(t => {
+                                  const isSelected = (newBanquet.table_ids || []).includes(t.id);
+                                  const occ = tableOccupancyMap.get(t.id);
+                                  const isOccupied = !!occ && !isSelected;
+                                  return (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      disabled={isOccupied}
+                                      onClick={() => {
+                                        setNewBanquet(prev => {
+                                          const current = Array.isArray(prev.table_ids) ? prev.table_ids : [];
+                                          const next = current.includes(t.id)
+                                            ? current.filter(id => id !== t.id)
+                                            : [...current, t.id];
+                                          return { ...prev, table_ids: next };
+                                        });
+                                      }}
+                                      className={`relative p-2 sm:p-3 rounded-md border text-center transition-colors ${
+                                        isSelected
+                                          ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
+                                          : isOccupied
+                                            ? 'border-rose-200 bg-rose-50 opacity-90 cursor-not-allowed'
+                                            : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                      }`}
+                                    >
+                                      <div className={`text-xs sm:text-sm font-semibold truncate ${isOccupied ? 'text-rose-700' : 'text-[var(--color-fg)]'}`}>
+                                        {t.name}
+                                      </div>
+                                      <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700' : 'text-[var(--color-fg-muted)]'}`}>
+                                        <Users size={8} className="sm:hidden" />
+                                        <Users size={10} className="hidden sm:block" />
+                                        {t.seats}
+                                      </div>
+                                      {isOccupied && occ && (
+                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-rose-600 text-white text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
+                                          {occ.label}
+                                        </div>
+                                      )}
+                                      {isSelected && (
+                                        <div className="absolute -top-2 -right-2 bg-[var(--color-fg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
+                                          <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full m-1" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
+
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-4 text-[10px] text-[var(--color-fg-muted)] px-1">
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 rounded"></div> Occupato</div>
+                    </div>
+
                     {(newBanquet.table_ids || []).length > 0 && (
-                      <p className="text-xs text-[var(--color-fg-muted)]">
-                        Selezionati: {(newBanquet.table_ids || []).length} tavolo/i (
-                        {(newBanquet.table_ids || []).reduce((sum, tid) => {
-                          const t = tables.find(tt => tt.id === tid);
-                          return sum + (t ? t.seats : 0);
-                        }, 0)} posti totali)
+                      <p className="text-xs text-[var(--color-fg-muted)] px-1">
+                        Selezionati: <span className="font-semibold text-[var(--color-fg)]">{(newBanquet.table_ids || []).length}</span> tavolo/i ·{' '}
+                        <span className="font-semibold text-[var(--color-fg)]">
+                          {(newBanquet.table_ids || []).reduce((sum, tid) => {
+                            const t = tables.find(tt => tt.id === tid);
+                            return sum + (t ? t.seats : 0);
+                          }, 0)}
+                        </span>{' '}
+                        posti totali
                       </p>
                     )}
                   </div>
