@@ -99,6 +99,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [isBanquetCustomerPickerOpen, setIsBanquetCustomerPickerOpen] = useState(false);
   const [selectedBanquetCustomer, setSelectedBanquetCustomer] = useState<Customer | null>(null);
 
+  // Banquet form validation errors
+  const [banquetFormErrors, setBanquetFormErrors] = useState<string[]>([]);
+
   // Load the selected customer when editing a banquet that has customer_id
   useEffect(() => {
     if (!isBanquetFormOpen) return;
@@ -181,7 +184,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const handleAddBanquetSubmit = (e: React.FormEvent) => {
       e.preventDefault();
-      if(!newBanquet.name || !newBanquet.price_per_person || !newBanquet.event_date) return;
+
+      const missing: string[] = [];
+      if (!newBanquet.name || !newBanquet.name.trim()) missing.push('Nome Menu');
+      if (!newBanquet.event_date) missing.push('Data Evento');
+      if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
+        missing.push('Prezzo per Persona');
+      }
+
+      if (missing.length > 0) {
+        setBanquetFormErrors(missing);
+        return;
+      }
+      setBanquetFormErrors([]);
 
       const courses = (newBanquet.courses || []).filter(c => c.name.trim() !== '');
       const flatDishIds = courses.flatMap(c => c.dish_ids);
@@ -242,6 +257,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       notes_mise_en_place: menu.notes_mise_en_place || ''
     });
     setSelectedBanquetCustomer(null);
+    setBanquetFormErrors([]);
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setIsBanquetFormOpen(true);
@@ -251,6 +267,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsEditingBanquet(false);
     setEditingBanquetId(null);
     setSelectedBanquetCustomer(null);
+    setBanquetFormErrors([]);
     setNewBanquet({
       name: '', description: '', price_per_person: 0,
       dish_ids: [],
@@ -262,6 +279,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
     setIsBanquetFormOpen(true);
   };
+
+  const closeBanquetForm = () => {
+    setIsBanquetFormOpen(false);
+    setBanquetFormErrors([]);
+  };
+
+  const banquetFieldHasError = (field: string) => banquetFormErrors.includes(field);
 
   const addCourse = () => {
     setNewBanquet(prev => {
@@ -811,23 +835,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu</label>
+                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
                     <input
                         required
                         placeholder="es. Menu Matrimonio Gold"
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          banquetFieldHasError('Nome Menu')
+                            ? 'border-rose-400 focus:border-rose-500'
+                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                        }`}
                         value={newBanquet.name}
-                        onChange={e => setNewBanquet({...newBanquet, name: e.target.value})}
+                        onChange={e => {
+                          setNewBanquet({...newBanquet, name: e.target.value});
+                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Nome Menu'));
+                        }}
                     />
                 </div>
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento</label>
+                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
                     <input
                         type="date"
                         required
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          banquetFieldHasError('Data Evento')
+                            ? 'border-rose-400 focus:border-rose-500'
+                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                        }`}
                         value={newBanquet.event_date || ''}
-                        onChange={e => setNewBanquet({...newBanquet, event_date: e.target.value})}
+                        onChange={e => {
+                          setNewBanquet({...newBanquet, event_date: e.target.value});
+                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Data Evento'));
+                        }}
                     />
                 </div>
                 <div>
@@ -859,13 +897,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
                 {canViewBanquetPrice && (
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€)</label>
+                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€) <span className="text-rose-500">*</span></label>
                     <input
                         type="number"
                         required
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                        min="0"
+                        step="0.01"
+                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          banquetFieldHasError('Prezzo per Persona')
+                            ? 'border-rose-400 focus:border-rose-500'
+                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                        }`}
                         value={newBanquet.price_per_person}
-                        onChange={e => setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)})}
+                        onChange={e => {
+                          setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)});
+                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Prezzo per Persona'));
+                        }}
                     />
                 </div>
                 )}
@@ -1148,10 +1195,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
 
             </form>
+            {banquetFormErrors.length > 0 && (
+              <div className="px-5 py-3 border-t border-rose-200 bg-rose-50 text-rose-800">
+                <div className="text-sm font-semibold mb-1">Compila i campi obbligatori:</div>
+                <ul className="text-sm list-disc list-inside space-y-0.5">
+                  {banquetFormErrors.map(field => (
+                    <li key={field}>{field}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => setIsBanquetFormOpen(false)}
+                  onClick={closeBanquetForm}
                   className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
                 >
                   Annulla
