@@ -1091,6 +1091,17 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
                 hours,
             ]);
             if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+            if (created.rows[0]) {
+                pushSendToRoles(
+                    ['KITCHEN'],
+                    {
+                        title: 'Promemoria cucina',
+                        body: created.rows[0].title,
+                        url: '/',
+                        tag: `kitchen-reminder-${dueDate}-${hours}`,
+                    }
+                ).catch(err => console.error('Push (kitchen reminder) failed:', err));
+            }
         }
     }
 }
@@ -1206,6 +1217,17 @@ async function runDailyBreadReminder(): Promise<void> {
             RETURNING ${TODO_FULL_SELECT}
         `, [title, description, tomorrowIso, BREAD_AUTO_KIND]);
         if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+        if (created.rows[0]) {
+            pushSendToRoles(
+                ['OWNER'],
+                {
+                    title: 'Promemoria pane',
+                    body: title,
+                    url: '/',
+                    tag: `bread-${tomorrowIso}`,
+                }
+            ).catch(err => console.error('Push (bread reminder) failed:', err));
+        }
     }
     console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
 }
@@ -2932,6 +2954,26 @@ app.post('/push/unsubscribe', authenticate, async (req: any, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /push/unsubscribe error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/push/debug', authenticate, authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT ps.id, ps.user_id, u.email, u.full_name, u.role,
+                    ps.user_agent, ps.created_at,
+                    LEFT(ps.endpoint, 60) || '...' AS endpoint_preview
+             FROM push_subscriptions ps
+             JOIN users u ON u.id = ps.user_id
+             ORDER BY u.full_name, ps.created_at DESC`
+        );
+        res.json({
+            count: result.rows.length,
+            subscriptions: result.rows,
+        });
+    } catch (err) {
+        console.error('GET /push/debug error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
