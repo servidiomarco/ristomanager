@@ -89,9 +89,13 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
           .map(id => dishes.find(d => d.id === id))
           .filter((d): d is Dish => !!d);
         if (items.length === 0) return '';
+        const noteHtml = course.notes && course.notes.trim()
+          ? `<p class="course-note">${escapeHtml(course.notes)}</p>`
+          : '';
         return `
           <section class="category">
             <h3>${escapeHtml(course.name)}</h3>
+            ${noteHtml}
             <ul>
               ${items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
             </ul>
@@ -208,6 +212,13 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   }
   .category ul { margin: 0; padding-left: 18px; }
   .category li { margin: 4px 0; font-size: 14px; }
+  .course-note {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-style: italic;
+    color: #475569;
+    white-space: pre-wrap;
+  }
   footer {
     margin-top: 40px;
     padding-top: 12px;

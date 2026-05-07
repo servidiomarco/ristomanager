@@ -58,6 +58,7 @@ export const COMMON_ALLERGENS = [
 export interface BanquetCourse {
   name: string;          // e.g. "1ª Uscita", "Antipasti"
   dish_ids: number[];
+  notes?: string;
 }
 
 export interface BanquetMenu {

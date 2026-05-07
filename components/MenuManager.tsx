@@ -222,7 +222,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleEditBanquet = (menu: BanquetMenu) => {
     // Derive courses: use stored courses if present, otherwise wrap legacy flat list into a single course
     const courses: BanquetCourse[] = menu.courses && menu.courses.length > 0
-      ? menu.courses.map(c => ({ name: c.name, dish_ids: [...(c.dish_ids || [])] }))
+      ? menu.courses.map(c => ({ name: c.name, dish_ids: [...(c.dish_ids || [])], notes: c.notes || '' }))
       : (menu.dish_ids && menu.dish_ids.length > 0
           ? [{ name: 'Composizione', dish_ids: [...menu.dish_ids] }]
           : []);
@@ -283,6 +283,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const renameCourse = (index: number, name: string) => {
     setNewBanquet(prev => {
       const courses = (prev.courses || []).map((c, i) => i === index ? { ...c, name } : c);
+      return { ...prev, courses };
+    });
+  };
+
+  const setCourseNotes = (index: number, notes: string) => {
+    setNewBanquet(prev => {
+      const courses = (prev.courses || []).map((c, i) => i === index ? { ...c, notes } : c);
       return { ...prev, courses };
     });
   };
@@ -1108,6 +1115,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           {dishes.length === 0 && (
                             <div className="text-xs text-[var(--color-fg-subtle)] text-center py-4">Aggiungi prima dei piatti alla carta.</div>
                           )}
+                        </div>
+
+                        <div className="px-3 pb-3 pt-2 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
+                          <label className="block text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">
+                            Note uscita (opzionale)
+                          </label>
+                          <textarea
+                            value={course.notes || ''}
+                            onChange={e => setCourseNotes(courseIndex, e.target.value)}
+                            placeholder="Es. servire con pane caldo, abbinare a vino bianco fresco…"
+                            rows={2}
+                            className="w-full bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md p-2 text-sm focus:outline-none focus:border-[var(--color-fg)] resize-y"
+                          />
                         </div>
                       </div>
                     );
