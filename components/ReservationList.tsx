@@ -808,14 +808,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // --- Helper Logic ---
 
+  const getBanquetForTable = (table_id: number, checkDate: string, checkShift: Shift): BanquetMenu | null => {
+    for (const b of banquetMenus) {
+      if (b.event_date !== checkDate) continue;
+      if (b.shift !== checkShift) continue;
+      const ids = Array.isArray(b.table_ids) ? b.table_ids : [];
+      if (ids.includes(table_id)) return b;
+    }
+    return null;
+  };
+
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
-    return reservations.some(r =>
+    const occupiedByReservation = reservations.some(r =>
         r.table_id === table_id &&
         r.reservation_time.split('T')[0] === checkDate &&
         r.shift === checkShift &&
         r.id !== formData.id &&
         r.arrival_status !== ArrivalStatus.DEPARTED
     );
+    if (occupiedByReservation) return true;
+    return !!getBanquetForTable(table_id, checkDate, checkShift);
   };
 
   const getReservationForTable = (table_id: number) => {
@@ -827,16 +839,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
   }
 
-  const getReservationForTableInForm = (table_id: number) => {
+  // Returns either a reservation OR a banquet that occupies this table for the
+  // form's date+shift. The picker uses the result to mark the table as occupied
+  // and to display the occupier's name in the red pill.
+  const getOccupierForTableInForm = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
       if (!formData.reservation_time || !formData.shift) return null;
-      return reservations.find(r =>
+      const date = formData.reservation_time.split('T')[0];
+      const res = reservations.find(r =>
           r.table_id === table_id &&
-          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] &&
+          r.reservation_time.split('T')[0] === date &&
           r.shift === formData.shift &&
           r.id !== formData.id &&
           r.arrival_status !== ArrivalStatus.DEPARTED
       );
-  }
+      if (res) return { kind: 'reservation', data: res };
+      const banquet = getBanquetForTable(table_id, date, formData.shift);
+      if (banquet) return { kind: 'banquet', data: banquet };
+      return null;
+  };
+
+  // Backwards-compatible: returns only the reservation (or null) for legacy callers.
+  const getReservationForTableInForm = (table_id: number): Reservation | null => {
+      const occ = getOccupierForTableInForm(table_id);
+      return occ && occ.kind === 'reservation' ? occ.data : null;
+  };
 
   const handleTableSelection = (table: Table) => {
       const guests = formData.guests || 1;
@@ -2495,8 +2521,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     other.merged_with.map(id => Number(id)).includes(Number(t.id))
                                                 ))
                                                 .map(table => {
-                                                const occupiedReservation = getReservationForTableInForm(table.id);
-                                                const isOccupied = !!occupiedReservation;
+                                                const occupier = getOccupierForTableInForm(table.id);
+                                                const isOccupied = !!occupier;
+                                                const occupierIsBanquet = occupier?.kind === 'banquet';
+                                                const occupierLabel = occupier
+                                                  ? occupier.kind === 'reservation'
+                                                    ? toTitleCase(occupier.data.customer_name)
+                                                    : occupier.data.name
+                                                  : '';
                                                 const isSelected = formData.table_id === table.id;
                                                 const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
                                                 const fitsGuests = table.seats >= (formData.guests || 1);
@@ -2551,9 +2583,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             <Users size={10} className="hidden sm:block" />
                                                             {table.seats}
                                                         </div>
-                                                        {isOccupied && occupiedReservation && (
-                                                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-rose-600 text-white text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10">
-                                                                {toTitleCase(occupiedReservation.customer_name)}
+                                                        {isOccupied && occupier && (
+                                                            <div
+                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-white text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10 ${occupierIsBanquet ? 'bg-indigo-600' : 'bg-rose-600'}`}
+                                                                title={occupierIsBanquet ? `Banchetto: ${occupierLabel}` : `Prenotazione: ${occupierLabel}`}
+                                                            >
+                                                                {occupierLabel}
                                                             </div>
                                                         )}
                                                         {isSelected && !isSelectedForMerge && (
