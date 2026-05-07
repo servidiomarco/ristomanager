@@ -837,6 +837,22 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             console.log('Customers rubrica backfilled from reservations');
         }
 
+        // ============================================
+        // PUSH SUBSCRIPTIONS TABLE (Web Push)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                user_agent TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);`);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

@@ -11,6 +11,7 @@ import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
+import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -1271,6 +1272,8 @@ const App: React.FC = () => {
                 </div>
               </div>
             )}
+
+            <PushNotificationsCard />
 
             {/* Integrations */}
             <div className="mb-8">
