@@ -407,19 +407,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-[var(--color-line)] mb-6">
-        <button
-            onClick={() => setActiveTab('DISHES')}
-            className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'DISHES' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-        >
-            <Utensils className="h-4 w-4" /> Piatti alla Carta
-        </button>
-        <button
-            onClick={() => setActiveTab('BANQUETS')}
-            className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'BANQUETS' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-        >
-            <BookOpen className="h-4 w-4" /> Menu Banchetti
-        </button>
+      <div className="flex items-center justify-between gap-4 border-b border-[var(--color-line)] mb-6">
+        <div className="flex gap-4">
+          <button
+              onClick={() => setActiveTab('BANQUETS')}
+              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'BANQUETS' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+          >
+              <BookOpen className="h-4 w-4" /> Menu Banchetti
+          </button>
+          <button
+              onClick={() => setActiveTab('DISHES')}
+              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 ${activeTab === 'DISHES' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+          >
+              <Utensils className="h-4 w-4" /> Piatti alla Carta
+          </button>
+        </div>
+        {activeTab === 'BANQUETS' && (
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full mb-2">
+            <button
+              onClick={() => setBanquetView('LIST')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
+            >
+              <ListIcon className="h-4 w-4" /> Lista
+            </button>
+            <button
+              onClick={() => setBanquetView('CALENDAR')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'CALENDAR' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
+            >
+              <Calendar className="h-4 w-4" /> Calendario
+            </button>
+          </div>
+        )}
       </div>
 
       {activeTab === 'DISHES' && (
@@ -546,24 +564,6 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'BANQUETS' && (
         <div className="space-y-6">
-          {/* View toggle */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
-              <button
-                onClick={() => setBanquetView('LIST')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
-              >
-                <ListIcon className="h-4 w-4" /> Lista
-              </button>
-              <button
-                onClick={() => setBanquetView('CALENDAR')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'CALENDAR' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
-              >
-                <Calendar className="h-4 w-4" /> Calendario
-              </button>
-            </div>
-          </div>
-
           {banquetView === 'LIST' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {banquetMenus.map(menu => {
