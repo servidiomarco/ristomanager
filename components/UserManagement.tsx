@@ -176,25 +176,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     }
   };
 
-  const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    isModal ? (
-      <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-        <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-          {children}
-        </div>
-      </div>
-    ) : (
-      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] overflow-hidden flex flex-col">
-          {children}
-        </div>
-      </div>
-    )
-  );
-
-  return (
+  const content = (
     <>
-    <Wrapper>
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
           <div>
@@ -411,7 +394,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
             </button>
           </div>
         )}
-    </Wrapper>
+    </>
+  );
+
+  return (
+    <>
+      {isModal ? (
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            {content}
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] overflow-hidden flex flex-col">
+            {content}
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
