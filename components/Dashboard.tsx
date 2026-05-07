@@ -183,6 +183,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [todosLoading, setTodosLoading] = useState(true);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showTodoModal, setShowTodoModal] = useState(false);
+  const [isSavingTodo, setIsSavingTodo] = useState(false);
   const [deleteTodoConfirm, setDeleteTodoConfirm] = useState<TodoItem | null>(null);
   const [showMyTasksModal, setShowMyTasksModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
@@ -202,6 +203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [shoppingLoading, setShoppingLoading] = useState(true);
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
+  const [isAddingShoppingItem, setIsAddingShoppingItem] = useState(false);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -245,8 +247,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, []);
 
   const addShoppingItem = async () => {
-    if (!newItemName.trim()) return;
+    if (!newItemName.trim() || isAddingShoppingItem) return;
     try {
+      setIsAddingShoppingItem(true);
       // Don't add to state here - let the socket event handle it
       // This prevents duplicates on the creating device
       await shoppingApiService.createItem({
@@ -257,6 +260,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       setNewItemName('');
     } catch (error) {
       console.error('Error adding shopping item:', error);
+    } finally {
+      setIsAddingShoppingItem(false);
     }
   };
 
@@ -550,10 +555,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   };
 
   const handleSaveTodo = async () => {
-    if (!todoForm.title.trim()) return;
+    if (!todoForm.title.trim() || isSavingTodo) return;
     const assignedUser = staffUsers.find(u => u.id === todoForm.assignedToUserId);
 
     try {
+      setIsSavingTodo(true);
       if (editingTodo) {
         // Update existing todo
         const updated = await todoApiService.updateTodo(editingTodo.id, {
@@ -586,6 +592,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       setShowTodoModal(false);
     } catch (error) {
       console.error('Error saving todo:', error);
+    } finally {
+      setIsSavingTodo(false);
     }
   };
 
@@ -1703,11 +1711,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               )}
               <button
                 onClick={addShoppingItem}
-                disabled={!newItemName.trim()}
+                disabled={!newItemName.trim() || isAddingShoppingItem}
                 className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Aggiungi prodotto"
               >
-                <Plus className="h-4 w-4" />
+                {isAddingShoppingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               </button>
             </div>
           </div>
@@ -2083,7 +2091,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
             <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2 flex-shrink-0">
               <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim() || isSavingTodo} className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
+                {isSavingTodo && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingTodo ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
