@@ -42,6 +42,14 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
     return out;
 };
 
+const arrayBufferToBase64Url = (buffer: ArrayBuffer | null | undefined): string => {
+    if (!buffer) return '';
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
 const fetchVapidPublicKey = async (): Promise<string> => {
     const res = await fetch(`${API_URL}/push/vapid-public-key`, { headers: authHeaders() });
     if (!res.ok) throw new Error('Server push non configurato');
@@ -54,6 +62,66 @@ export const getCurrentSubscription = async (): Promise<PushSubscription | null>
     const reg = await registerServiceWorker();
     if (!reg) return null;
     return reg.pushManager.getSubscription();
+};
+
+const subscribeFresh = (reg: ServiceWorkerRegistration, publicKey: string): Promise<PushSubscription> => {
+    return reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+};
+
+const formatSubscribeError = (err: any): string => {
+    const name = err?.name;
+    const message = err?.message || 'Errore sconosciuto';
+    return name ? `${name}: ${message}` : message;
+};
+
+// Subscribe with recovery for two known Android failure modes:
+//   1. A cached subscription whose applicationServerKey doesn't match the
+//      current VAPID public key (typical after a key rotation) — reusing it
+//      would let the server send pushes that the browser silently rejects.
+//   2. subscribe() throwing "push service error" / AbortError on a device
+//      whose FCM/GCM token is in a corrupt state — clearing any lingering
+//      subscription and retrying once usually resolves it.
+const subscribeWithRecovery = async (
+    reg: ServiceWorkerRegistration,
+    publicKey: string
+): Promise<PushSubscription> => {
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+        const existingKey = arrayBufferToBase64Url(existing.options?.applicationServerKey ?? null);
+        if (existingKey === publicKey) {
+            return existing;
+        }
+        console.warn('Stale push subscription detected (VAPID key mismatch), unsubscribing');
+        try {
+            await existing.unsubscribe();
+        } catch (err) {
+            console.warn('Failed to unsubscribe stale push subscription', err);
+        }
+    }
+
+    try {
+        return await subscribeFresh(reg, publicKey);
+    } catch (firstErr: any) {
+        console.error('pushManager.subscribe failed, attempting cleanup + retry', firstErr);
+        try {
+            const lingering = await reg.pushManager.getSubscription();
+            if (lingering) await lingering.unsubscribe();
+        } catch (cleanupErr) {
+            console.warn('Cleanup unsubscribe failed', cleanupErr);
+        }
+
+        try {
+            return await subscribeFresh(reg, publicKey);
+        } catch (retryErr: any) {
+            const detail = formatSubscribeError(retryErr) || formatSubscribeError(firstErr);
+            throw new Error(
+                `Sottoscrizione push fallita (${detail}). Verifica connessione, account Google attivo sul dispositivo e che l'orologio di sistema sia corretto.`
+            );
+        }
+    }
 };
 
 export const enablePushNotifications = async (): Promise<PushSubscription> => {
@@ -69,14 +137,8 @@ export const enablePushNotifications = async (): Promise<PushSubscription> => {
     const reg = await registerServiceWorker();
     if (!reg) throw new Error('Impossibile registrare il service worker');
 
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-        const publicKey = await fetchVapidPublicKey();
-        sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(publicKey),
-        });
-    }
+    const publicKey = await fetchVapidPublicKey();
+    const sub = await subscribeWithRecovery(reg, publicKey);
 
     const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
     const res = await fetch(`${API_URL}/push/subscribe`, {
