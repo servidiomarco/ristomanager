@@ -3114,6 +3114,39 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                 <div className="flex-1 overflow-y-auto p-3">
                   <button
+                    onClick={async () => {
+                        const walkIn: Omit<Reservation, 'id'> = {
+                            customer_name: 'Walk-in',
+                            guests: Math.min(2, table.seats || 2),
+                            reservation_time: formatLocalDateTime(new Date()),
+                            shift: effectiveShift,
+                            table_id: table.id,
+                            payment_status: PaymentStatus.PENDING,
+                            arrival_status: ArrivalStatus.ARRIVED,
+                            enable_reminder: false,
+                            reminder_sent: false,
+                        };
+                        try {
+                            await onAddReservation(walkIn);
+                            showToast(`Walk-in al tavolo ${table.name} registrato`, 'success');
+                        } catch {
+                            showToast('Errore nella registrazione del walk-in', 'error');
+                        }
+                        setAssignTableModal(null);
+                    }}
+                    className="w-full text-left px-3 py-3 mb-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors flex items-center gap-3"
+                  >
+                    <div className="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <UserCheck className="h-5 w-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-emerald-900">Walk-in</div>
+                      <div className="text-xs text-emerald-700 mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                  </button>
+
+                  <button
                     onClick={() => {
                         setAssignTableModal(null);
                         handleOpenNew();
