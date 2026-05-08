@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser, BookOpen } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
@@ -260,6 +260,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Customer picker (rubrica) modal
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
 
+  // Inline customer autocomplete (name & phone fields in the reservation form)
+  const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
+  const [activeSuggestField, setActiveSuggestField] = useState<'name' | 'phone' | null>(null);
+  // Tracks which value we last queried for, so the dropdown closes on selection
+  // (we set this to the just-selected name/phone to skip re-querying for it).
+  const lastSuggestQueryRef = useRef<string>('');
+
   // Time slot options
   const LUNCH_TIMES = ['13:00', '13:30', '14:00'];
   const DINNER_TIMES = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
@@ -277,6 +284,44 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       reminder_sent: false,
       arrival_status: ArrivalStatus.WAITING
   });
+
+  // Debounced customer lookup for the active autocomplete field
+  useEffect(() => {
+    if (!activeSuggestField) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    const raw = activeSuggestField === 'name'
+      ? (formData.customer_name || '')
+      : (formData.phone || '');
+    const query = raw.trim();
+    if (query.length < 2 || query === lastSuggestQueryRef.current) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const data = await getCustomers(query);
+        if (!cancelled) setCustomerSuggestions(data.slice(0, 6));
+      } catch {
+        if (!cancelled) setCustomerSuggestions([]);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [activeSuggestField, formData.customer_name, formData.phone]);
+
+  const applyCustomerSuggestion = (c: Customer) => {
+    lastSuggestQueryRef.current = activeSuggestField === 'phone' ? (c.phone || '') : c.name;
+    setFormData(prev => ({
+      ...prev,
+      customer_name: c.name,
+      phone: c.phone || prev.phone || '',
+      email: c.email || prev.email || '',
+    }));
+    setActiveSuggestField(null);
+    setCustomerSuggestions([]);
+  };
 
   // Per-shift table merges. Use the form's date+shift while the modal is open;
   // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
@@ -2107,13 +2152,41 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div>
                                 <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Cliente</label>
                                 <div className="flex gap-2">
-                                    <input
-                                        required
-                                        className="flex-1 rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.customer_name}
-                                        onChange={e => setFormData({...formData, customer_name: e.target.value})}
-                                        placeholder="Mario Rossi"
-                                    />
+                                    <div className="flex-1 relative">
+                                        <input
+                                            required
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.customer_name}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setFormData({...formData, customer_name: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('name')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
+                                            placeholder="Mario Rossi"
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="text-sm font-medium text-[var(--color-fg)]">{c.name}</div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                     <button
                                         type="button"
                                         onClick={() => setIsCustomerPickerOpen(true)}
@@ -2149,13 +2222,41 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Telefono</label>
-                                    <input
-                                        type="tel"
-                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.phone || ''}
-                                        onChange={e => setFormData({...formData, phone: e.target.value})}
-                                        placeholder="+39 333..."
-                                    />
+                                    <div className="relative">
+                                        <input
+                                            type="tel"
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.phone || ''}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setFormData({...formData, phone: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('phone')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'phone' ? null : prev), 150)}
+                                            placeholder="+39 333..."
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="text-sm font-medium text-[var(--color-fg)]">{c.name}</div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Email</label>
