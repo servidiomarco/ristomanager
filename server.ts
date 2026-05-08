@@ -1435,13 +1435,32 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         if (!phone || !String(phone).trim()) {
             return res.status(400).json({ error: 'phone is required' });
         }
+
+        // Dedupe on the digit-only form of the phone — strips spaces, "+",
+        // dashes, etc. so "+39 333 1234567" and "3331234567" match. Phone
+        // is required, so it's a reliable identifier.
+        const trimmedPhone = String(phone).trim();
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (phoneDigits) {
+            const existing = await queryWithRetry(
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
+                 FROM customers
+                 WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+                 LIMIT 1`,
+                [phoneDigits]
+            );
+            if (existing.rows.length > 0) {
+                return res.status(200).json(existing.rows[0]);
+            }
+        }
+
         const result = await queryWithRetry(
             `INSERT INTO customers (name, phone, email, address, city, postal_code, notes)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
             [
                 normalizeCustomerName(String(name).trim()),
-                phone ? String(phone).trim() : null,
+                trimmedPhone || null,
                 email ? String(email).trim() : null,
                 address ?? null,
                 city ?? null,
