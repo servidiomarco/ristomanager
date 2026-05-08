@@ -41,10 +41,10 @@ self.addEventListener('notificationclick', (event) => {
       try {
         const url = new URL(client.url);
         if (url.origin === self.location.origin) {
+          // Tell the SPA to navigate in-app instead of reloading; client.navigate
+          // would force a full reload and lose unsaved state.
+          try { client.postMessage({ type: 'NOTIFICATION_CLICK', url: targetUrl }); } catch (e) { /* ignore */ }
           await client.focus();
-          if (typeof client.navigate === 'function') {
-            try { await client.navigate(targetUrl); } catch (e) { /* ignore */ }
-          }
           return;
         }
       } catch (e) {

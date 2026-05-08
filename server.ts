@@ -293,7 +293,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             {
                 title: 'Nuova prenotazione',
                 body: `${customer_name} · ${guests} ospiti · ${reservationLabel}`,
-                url: '/',
+                url: '/?view=RESERVATIONS',
                 tag: `reservation-${newReservation.id}`,
             },
             { excludeUserId: req.user?.userId ?? null }
@@ -1204,7 +1204,7 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
                     {
                         title: 'Promemoria cucina',
                         body: created.rows[0].title,
-                        url: '/',
+                        url: '/?view=DASHBOARD',
                         tag: `kitchen-reminder-${dueDate}-${hours}`,
                     }
                 ).catch(err => console.error('Push (kitchen reminder) failed:', err));
@@ -1330,7 +1330,7 @@ async function runDailyBreadReminder(): Promise<void> {
                 {
                     title: 'Promemoria pane',
                     body: title,
-                    url: '/',
+                    url: '/?view=DASHBOARD',
                     tag: `bread-${tomorrowIso}`,
                 }
             ).catch(err => console.error('Push (bread reminder) failed:', err));
@@ -2024,7 +2024,7 @@ app.post('/todos', authenticate, async (req, res) => {
             pushSendToUser(newTodo.assignedToUserId, {
                 title: 'Nuovo todo assegnato',
                 body: newTodo.title,
-                url: '/',
+                url: '/?view=DASHBOARD',
                 tag: `todo-${newTodo.id}`,
             }).catch(err => console.error('Push (todo assigned) failed:', err));
         }
@@ -2170,7 +2170,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             pushSendToUser(newAssignee, {
                 title: 'Todo assegnato a te',
                 body: updatedTodo.title,
-                url: '/',
+                url: '/?view=DASHBOARD',
                 tag: `todo-${updatedTodo.id}`,
             }).catch(err => console.error('Push (todo reassigned) failed:', err));
         }

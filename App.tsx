@@ -72,15 +72,57 @@ const App: React.FC = () => {
   }, [theme]);
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
-  // Redirect to first accessible view when user changes or doesn't have access to current view
+  // Redirect to first accessible view when user changes or doesn't have access to current view.
+  // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
+  // the right view (e.g. /?view=RESERVATIONS from a "new reservation" notification).
   useEffect(() => {
-    if (isAuthenticated && user) {
-      const accessibleViews = getAccessibleViews();
-      if (accessibleViews.length > 0 && !accessibleViews.includes(view)) {
-        setView(accessibleViews[0]);
+    if (!isAuthenticated || !user) return;
+    const accessibleViews = getAccessibleViews();
+
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get('view');
+    if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
+      const target = requestedView as ViewState;
+      if (accessibleViews.includes(target)) {
+        setView(target);
       }
+      // Strip the param either way so reloads don't keep re-navigating.
+      params.delete('view');
+      const search = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
+      if (accessibleViews.includes(target)) return;
+    }
+
+    if (accessibleViews.length > 0 && !accessibleViews.includes(view)) {
+      setView(accessibleViews[0]);
     }
   }, [isAuthenticated, user]);
+
+  // When a notification is clicked while the app is already open, the service
+  // worker postMessages us a URL instead of forcing a reload. Pick out ?view=
+  // from it and switch in-app if the user has access.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const handler = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.type !== 'NOTIFICATION_CLICK' || !data.url) return;
+      try {
+        const url = new URL(data.url, window.location.origin);
+        const requestedView = url.searchParams.get('view');
+        if (!requestedView) return;
+        if (!(Object.values(ViewState) as string[]).includes(requestedView)) return;
+        const target = requestedView as ViewState;
+        if (getAccessibleViews().includes(target)) {
+          setView(target);
+        }
+      } catch {
+        // Ignore malformed URLs
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, [isAuthenticated, user, getAccessibleViews]);
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
