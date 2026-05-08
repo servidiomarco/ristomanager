@@ -1179,9 +1179,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {reservation && (
                 <div
                     style={{ top: pillTopPx }}
-                    className={`absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
+                    className={`absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[200px] flex items-center gap-1.5 ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
+                    title={reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined}
                 >
-                    {toTitleCase(reservation.customer_name)}
+                    {reservation.created_by_user_name && (
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/25 text-[9px] font-bold flex-shrink-0">
+                            {getInitials(reservation.created_by_user_name)}
+                        </span>
+                    )}
+                    <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
                 </div>
             )}
             {banquet && (
@@ -1914,6 +1920,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                               <>
                                                                   <div className="flex items-center gap-2">
                                                                       <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
+                                                                      {reservation.created_by_user_name && (
+                                                                          <span
+                                                                              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+                                                                              title={`Presa da ${toTitleCase(reservation.created_by_user_name)}`}
+                                                                              aria-label={`Presa da ${toTitleCase(reservation.created_by_user_name)}`}
+                                                                          >
+                                                                              {getInitials(reservation.created_by_user_name)}
+                                                                          </span>
+                                                                      )}
                                                                       {isArrived && (
                                                                           <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>
                                                                       )}
