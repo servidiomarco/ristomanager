@@ -397,6 +397,7 @@ export interface StaffTimeOff {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   type: TimeOffType;
+  shift?: Shift | null; // null/undefined = full day; LUNCH or DINNER = single shift
   notes?: string;
   approved: boolean;
   createdAt?: string;

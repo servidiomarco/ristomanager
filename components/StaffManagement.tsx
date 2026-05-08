@@ -144,6 +144,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     startDate: '',
     endDate: '',
     type: TimeOffType.RIPOSO,
+    shift: null,
     notes: '',
     approved: true
   });
@@ -437,6 +438,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       startDate: today,
       endDate: today,
       type: TimeOffType.RIPOSO,
+      shift: null,
       notes: '',
       approved: true
     });
@@ -824,6 +826,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     const lunchShift = dayShifts.find(s => s.shift === Shift.LUNCH);
                     const dinnerShift = dayShifts.find(s => s.shift === Shift.DINNER);
 
+                    // A time-off entry can be full-day (shift=null) or scoped to a single shift.
+                    const timeOffShift = dayTimeOff?.shift ?? null;
+                    const isFullDayOff = !!dayTimeOff && timeOffShift === null;
+                    const lunchOff = !!dayTimeOff && (timeOffShift === null || timeOffShift === Shift.LUNCH);
+                    const dinnerOff = !!dayTimeOff && (timeOffShift === null || timeOffShift === Shift.DINNER);
+
                     const isWeeklyRest = selectedStaff.weeklyRestDay !== undefined
                       && selectedStaff.weeklyRestDay !== null
                       && day.getDay() === selectedStaff.weeklyRestDay;
@@ -832,19 +840,19 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                       && !isWeeklyRest
                       && isWithinHirePeriod(selectedStaff, dateStr);
 
-                    // Show shift if explicit DB row exists OR FISSO implicit presence applies
-                    const showLunch = !!lunchShift || (inHirePeriod && !dayTimeOff);
+                    // Show shift if explicit DB row exists OR FISSO implicit presence applies (and not on time-off for that shift)
+                    const showLunch = !!lunchShift || (inHirePeriod && !lunchOff);
                     const lunchPresent = lunchShift ? lunchShift.present : inHirePeriod;
                     const lunchImplicit = !lunchShift && inHirePeriod;
 
-                    const showDinner = !!dinnerShift || (inHirePeriod && !dayTimeOff);
+                    const showDinner = !!dinnerShift || (inHirePeriod && !dinnerOff);
                     const dinnerPresent = dinnerShift ? dinnerShift.present : inHirePeriod;
                     const dinnerImplicit = !dinnerShift && inHirePeriod;
 
                     const dayBgClass = !isCurrentMonth
                       ? 'border-transparent bg-slate-50/50 opacity-40'
-                      : dayTimeOff
-                        ? TIME_OFF_DAY_BG[dayTimeOff.type]
+                      : isFullDayOff
+                        ? TIME_OFF_DAY_BG[dayTimeOff!.type]
                         : isWeeklyRest && !lunchShift && !dinnerShift
                           ? 'border-slate-300 bg-slate-100'
                           : isToday
@@ -861,9 +869,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                           {day.getDate()}
                         </div>
 
-                        {dayTimeOff ? (
-                          <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff.type]}`}>
-                            {TIME_OFF_LABELS[dayTimeOff.type]}
+                        {isFullDayOff ? (
+                          <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff!.type]}`}>
+                            {TIME_OFF_LABELS[dayTimeOff!.type]}
                           </div>
                         ) : isWeeklyRest && !showLunch && !showDinner ? (
                           <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 text-slate-700">
@@ -871,7 +879,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                           </div>
                         ) : (
                           <div className="space-y-0.5">
-                            {showLunch && (
+                            {lunchOff && !lunchShift ? (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-medium px-1 py-0.5 rounded ${TIME_OFF_COLORS[dayTimeOff!.type]}`}
+                                title={`${TIME_OFF_LABELS[dayTimeOff!.type]} — Pranzo`}
+                              >
+                                <Sun className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">{TIME_OFF_LABELS[dayTimeOff!.type]}</span>
+                              </div>
+                            ) : showLunch && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   lunchPresent
@@ -890,7 +906,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                                 <span className="truncate">Pranzo</span>
                               </div>
                             )}
-                            {showDinner && (
+                            {dinnerOff && !dinnerShift ? (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-medium px-1 py-0.5 rounded ${TIME_OFF_COLORS[dayTimeOff!.type]}`}
+                                title={`${TIME_OFF_LABELS[dayTimeOff!.type]} — Cena`}
+                              >
+                                <Moon className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">{TIME_OFF_LABELS[dayTimeOff!.type]}</span>
+                              </div>
+                            ) : showDinner && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   dinnerPresent
@@ -961,6 +985,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${TIME_OFF_COLORS[timeOff.type]}`}>
                             {TIME_OFF_LABELS[timeOff.type]}
                           </span>
+                          {timeOff.shift && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
+                              {timeOff.shift === Shift.LUNCH ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
+                              {timeOff.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                            </span>
+                          )}
                           <span className="text-sm text-[var(--color-fg-muted)]">
                             {new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             {timeOff.startDate !== timeOff.endDate && (
@@ -1265,6 +1295,21 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <select
+                  value={timeOffForm.shift ?? 'ALL'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTimeOffForm({ ...timeOffForm, shift: v === 'ALL' ? null : (v as Shift) });
+                  }}
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                >
+                  <option value="ALL">Tutto il giorno</option>
+                  <option value={Shift.LUNCH}>Solo Pranzo</option>
+                  <option value={Shift.DINNER}>Solo Cena</option>
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

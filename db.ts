@@ -714,10 +714,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
                 type VARCHAR(20) NOT NULL CHECK (type IN ('RIPOSO', 'VACANZA', 'MALATTIA', 'PERMESSO')),
+                shift VARCHAR(10) CHECK (shift IN ('LUNCH', 'DINNER')),
                 notes TEXT,
                 approved BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
+        `);
+
+        // Add shift column to existing tables (NULL = full day, 'LUNCH'/'DINNER' = single shift)
+        await client.query(`
+            ALTER TABLE staff_time_off ADD COLUMN IF NOT EXISTS shift VARCHAR(10) CHECK (shift IN ('LUNCH', 'DINNER'));
         `);
 
         await client.query(`

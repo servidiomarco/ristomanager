@@ -124,6 +124,7 @@ export interface CreateTimeOffInput {
   startDate: string;
   endDate: string;
   type: TimeOffType;
+  shift?: Shift | null;
   notes?: string;
   approved?: boolean;
 }
@@ -132,6 +133,7 @@ export interface UpdateTimeOffInput {
   startDate?: string;
   endDate?: string;
   type?: TimeOffType;
+  shift?: Shift | null;
   notes?: string;
   approved?: boolean;
 }

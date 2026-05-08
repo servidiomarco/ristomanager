@@ -2746,6 +2746,7 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2761,17 +2762,21 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
 // Create time off
 app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { staffId, startDate, endDate, type, notes, approved } = req.body;
+        const { staffId, startDate, endDate, type, shift, notes, approved } = req.body;
 
         if (!staffId || !startDate || !endDate || !type) {
             return res.status(400).json({ error: 'staffId, startDate, endDate, and type are required' });
         }
 
+        if (shift && shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
+        }
+
         const result = await queryWithRetry(
-            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, notes, approved)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, shift, notes, approved)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING *`,
-            [staffId, startDate, endDate, type, notes || null, approved !== false]
+            [staffId, startDate, endDate, type, shift || null, notes || null, approved !== false]
         );
 
         const row = result.rows[0];
@@ -2781,6 +2786,7 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2801,18 +2807,27 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
 app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { startDate, endDate, type, notes, approved } = req.body;
+        const { startDate, endDate, type, shift, notes, approved } = req.body;
+
+        if (shift !== undefined && shift !== null && shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
+        }
+
+        // shift is set unconditionally when the key is present in the body so the
+        // client can clear it (full day) by sending null; COALESCE wouldn't allow that.
+        const shiftProvided = 'shift' in req.body;
 
         const result = await queryWithRetry(
             `UPDATE staff_time_off SET
                 start_date = COALESCE($1, start_date),
                 end_date = COALESCE($2, end_date),
                 type = COALESCE($3, type),
-                notes = COALESCE($4, notes),
-                approved = COALESCE($5, approved)
-             WHERE id = $6
+                shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
+                notes = COALESCE($6, notes),
+                approved = COALESCE($7, approved)
+             WHERE id = $8
              RETURNING *`,
-            [startDate, endDate, type, notes, approved, id]
+            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id]
         );
 
         if (result.rows.length === 0) {
@@ -2826,6 +2841,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2879,10 +2895,21 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
             queryWithRetry('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
             queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
-            queryWithRetry('SELECT staff_id FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
+            queryWithRetry('SELECT staff_id, shift FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
         ]);
 
-        const onTimeOff = new Set(timeOffResult.rows.map(r => r.staff_id));
+        // A NULL shift in time_off means the whole day is off; otherwise only the
+        // specific shift is off, leaving the other one available as usual.
+        const onTimeOffFullDay = new Set<string>();
+        const onTimeOffShift = new Set<string>(); // key: `${staffId}-${shift}`
+        for (const r of timeOffResult.rows) {
+            if (r.shift) {
+                onTimeOffShift.add(`${r.staff_id}-${r.shift}`);
+            } else {
+                onTimeOffFullDay.add(r.staff_id);
+            }
+        }
+
         const explicitShifts = new Map<string, boolean>();
         for (const row of shiftsResult.rows) {
             explicitShifts.set(`${row.staff_id}-${row.shift}`, row.present);
@@ -2897,7 +2924,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const dayOfWeek = new Date(`${dateStr}T00:00:00`).getDay();
 
         for (const row of staffResult.rows) {
-            if (onTimeOff.has(row.id)) continue;
+            if (onTimeOffFullDay.has(row.id)) continue;
             // Weekly rest day overrides implicit presence (explicit shifts can still override below)
             const isWeeklyRest = row.weekly_rest_day !== null && row.weekly_rest_day === dayOfWeek;
 
@@ -2922,6 +2949,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
 
             for (const shift of ['LUNCH', 'DINNER'] as const) {
+                if (onTimeOffShift.has(`${row.id}-${shift}`)) continue;
                 const explicit = explicitShifts.get(`${row.id}-${shift}`);
                 const present = explicit !== undefined ? explicit : inHirePeriod;
                 if (present) {
