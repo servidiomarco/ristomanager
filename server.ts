@@ -219,7 +219,12 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('SELECT * FROM reservations ORDER BY reservation_time DESC');
+        const result = await queryWithRetry(`
+            SELECT r.*, u.full_name AS created_by_user_name
+            FROM reservations r
+            LEFT JOIN users u ON r.created_by_user_id = u.id
+            ORDER BY r.reservation_time DESC
+        `);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -244,7 +249,14 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             }
         }
         const result = await queryWithRetry(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+            `WITH ins AS (
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                RETURNING *
+            )
+            SELECT ins.*, u.full_name AS created_by_user_name
+            FROM ins
+            LEFT JOIN users u ON ins.created_by_user_id = u.id`,
             [
                 customer_name,
                 reservation_time,
@@ -256,6 +268,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 phone ?? null,
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
+                req.user?.userId ?? null,
             ]
         );
         const newReservation = result.rows[0];
@@ -330,7 +343,15 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             }
         }
         const result = await queryWithRetry(
-            'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
+            `WITH upd AS (
+                UPDATE reservations
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10
+                WHERE id = $11
+                RETURNING *
+            )
+            SELECT upd.*, u.full_name AS created_by_user_name
+            FROM upd
+            LEFT JOIN users u ON upd.created_by_user_id = u.id`,
             [
                 customer_name,
                 reservation_time,

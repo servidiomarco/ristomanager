@@ -39,6 +39,16 @@ const formatDateTime = (isoString: string): string => {
   return new Date(isoString).toLocaleString();
 };
 
+// Two-letter initials from a full name (falls back to '?' on empty)
+const getInitials = (name?: string | null): string => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = parts[0][0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : '';
+  return (first + last).toUpperCase();
+};
+
 // Helper to format only time
 const formatTime = (isoString: string): string => {
   const match = isoString.match(/T(\d{2}):(\d{2})/);
@@ -1546,6 +1556,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div className="flex-1 min-w-0">
                                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
                                     <h3 className="font-semibold text-base sm:text-lg text-[var(--color-fg)]">{toTitleCase(res.customer_name)}</h3>
+                                    {res.created_by_user_name && (
+                                        <span
+                                            className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[10px] font-semibold"
+                                            title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+                                            aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+                                        >
+                                            {getInitials(res.created_by_user_name)}
+                                        </span>
+                                    )}
                                     {isDeparted && (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
                                             <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)]" />

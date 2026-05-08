@@ -156,6 +156,8 @@ export interface Reservation {
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
+  created_by_user_id?: number | null;
+  created_by_user_name?: string | null;
 }
 
 export interface Notification {

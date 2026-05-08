@@ -388,6 +388,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // Track who created each reservation (added after users table exists for the FK)
+        await client.query(`
+            ALTER TABLE reservations
+            ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        `);
+
         // ============================================
         // ROLE PERMISSIONS TABLE
         // ============================================
