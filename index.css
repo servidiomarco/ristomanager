@@ -218,18 +218,10 @@ body {
    keeps the typography scale on desktop intact while preventing the jump.
    ========================================================================= */
 @media (max-width: 768px) {
-  input[type="text"],
-  input[type="email"],
-  input[type="password"],
-  input[type="number"],
-  input[type="search"],
-  input[type="tel"],
-  input[type="url"],
-  input[type="date"],
-  input[type="datetime-local"],
-  input[type="month"],
-  input[type="time"],
-  input[type="week"],
+  /* Broad selector intentional: any text-style input without an explicit
+     `type` attribute (e.g. <input value=... />) still triggers iOS zoom,
+     and `input[type="text"]` does NOT match those in CSS. */
+  input,
   select,
   textarea {
     font-size: 16px !important;
