@@ -108,6 +108,17 @@ class ShoppingApiService {
   }
 
   /**
+   * Update name and/or category of a shopping item
+   */
+  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory }): Promise<ShoppingItem> {
+    return apiRequest<ShoppingItem>(`${API_URL}/shopping/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(updates),
+    });
+  }
+
+  /**
    * Toggle item checked status
    */
   async toggleItem(id: string): Promise<ShoppingItem> {

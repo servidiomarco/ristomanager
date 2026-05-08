@@ -223,6 +223,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
   const [isAddingShoppingItem, setIsAddingShoppingItem] = useState(false);
+  const [editingShoppingId, setEditingShoppingId] = useState<string | null>(null);
+  const [editShoppingName, setEditShoppingName] = useState('');
+  const [editShoppingCategory, setEditShoppingCategory] = useState<ShoppingCategory>('CUCINA');
+  const [isSavingShoppingEdit, setIsSavingShoppingEdit] = useState(false);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -301,6 +305,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       setShoppingItems(prev => prev.filter(item => item.id !== id));
     } catch (error) {
       console.error('Error deleting shopping item:', error);
+    }
+  };
+
+  const startEditShoppingItem = (item: ShoppingItem) => {
+    setEditingShoppingId(item.id);
+    setEditShoppingName(item.name);
+    setEditShoppingCategory(item.category);
+  };
+
+  const cancelEditShoppingItem = () => {
+    setEditingShoppingId(null);
+    setEditShoppingName('');
+  };
+
+  const saveEditShoppingItem = async () => {
+    if (!editingShoppingId || isSavingShoppingEdit) return;
+    const trimmed = editShoppingName.trim();
+    if (!trimmed) return;
+    try {
+      setIsSavingShoppingEdit(true);
+      const updated = await shoppingApiService.updateItem(editingShoppingId, {
+        name: trimmed,
+        category: editShoppingCategory,
+      });
+      setShoppingItems(prev => prev.map(item => item.id === updated.id ? updated : item));
+      setEditingShoppingId(null);
+      setEditShoppingName('');
+    } catch (error) {
+      console.error('Error updating shopping item:', error);
+    } finally {
+      setIsSavingShoppingEdit(false);
     }
   };
 
@@ -1806,6 +1841,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             ? ` · ${new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} ${new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
                             : ''
                         }`;
+                        const isEditing = editingShoppingId === item.id;
+                        if (isEditing) {
+                          return (
+                            <div key={item.id} className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editShoppingName}
+                                onChange={(e) => setEditShoppingName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') saveEditShoppingItem();
+                                  if (e.key === 'Escape') cancelEditShoppingItem();
+                                }}
+                                autoFocus
+                                className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+                              />
+                              <select
+                                value={editShoppingCategory}
+                                onChange={(e) => setEditShoppingCategory(e.target.value as ShoppingCategory)}
+                                className="text-xs bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+                              >
+                                <option value="CUCINA">Cucina</option>
+                                <option value="BAR">Bar</option>
+                                <option value="ALTRO">Altro</option>
+                              </select>
+                              <button
+                                onClick={saveEditShoppingItem}
+                                disabled={!editShoppingName.trim() || isSavingShoppingEdit}
+                                className="p-1 rounded text-emerald-600 hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
+                                title="Salva"
+                              >
+                                {isSavingShoppingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                onClick={cancelEditShoppingItem}
+                                disabled={isSavingShoppingEdit}
+                                className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                                title="Annulla"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        }
                         return (
                           <div key={item.id} className="group flex items-center gap-2" title={meta}>
                             <button
@@ -1821,6 +1899,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             <span className={`flex-1 text-sm ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                               {item.name}
                             </span>
+                            <button
+                              onClick={() => startEditShoppingItem(item)}
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-0 group-hover:opacity-100 transition-all"
+                              title="Modifica"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
                             <button
                               onClick={() => deleteShoppingItem(item.id)}
                               className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-all"

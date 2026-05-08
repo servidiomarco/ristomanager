@@ -2345,6 +2345,53 @@ app.post('/shopping', authenticate, async (req, res) => {
     }
 });
 
+app.put('/shopping/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, category } = req.body;
+
+        if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+            return res.status(400).json({ error: 'name must be a non-empty string' });
+        }
+        if (category !== undefined && !['CUCINA', 'BAR', 'ALTRO'].includes(category)) {
+            return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
+        }
+        if (name === undefined && category === undefined) {
+            return res.status(400).json({ error: 'At least one of name or category is required' });
+        }
+
+        const result = await queryWithRetry(`
+            UPDATE shopping_items
+            SET name = COALESCE($1, name),
+                category = COALESCE($2, category)
+            WHERE id = $3
+            RETURNING
+                id,
+                name,
+                category,
+                checked,
+                TO_CHAR(date, 'YYYY-MM-DD') as date,
+                created_at as "createdAt",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `, [name?.trim() ?? null, category ?? null, id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        const updatedItem = result.rows[0];
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:updated', updatedItem, socketId);
+
+        res.json(updatedItem);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
