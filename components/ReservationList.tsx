@@ -2908,7 +2908,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
                           >
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-slate-800 truncate block">{toTitleCase(r.customer_name)}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                {r.created_by_user_name && (
+                                  <span
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold flex-shrink-0"
+                                    title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                    aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                  >
+                                    {getInitials(r.created_by_user_name)}
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
                                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
@@ -3040,6 +3051,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                    {r.created_by_user_name && (
+                                      <span
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold flex-shrink-0"
+                                        title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                        aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                      >
+                                        {getInitials(r.created_by_user_name)}
+                                      </span>
+                                    )}
                                     {insufficient && (
                                       <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
                                         Capienza insufficiente
