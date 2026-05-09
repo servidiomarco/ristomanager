@@ -89,6 +89,7 @@ interface DashboardProps {
   rooms: Room[];
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
+  onNavigateToReservations: () => void;
 }
 
 // Shopping List Labels and Colors
@@ -154,7 +155,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -1124,7 +1125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         };
 
         return (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
             {/* Ospiti */}
             <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
               <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti</h3>
@@ -1143,13 +1144,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
             </div>
 
-            {/* Prenotazioni & Banchetti */}
+            {/* Prenotazioni */}
             <button
               type="button"
-              onClick={onNavigateToBanquets}
+              onClick={onNavigateToReservations}
               className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
             >
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni & banchetti</h3>
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni</h3>
               <div className="flex flex-wrap gap-2 flex-1 items-stretch">
                 {showLunch && (
                   <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
@@ -1157,6 +1158,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {showDinner && (
                   <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
                 )}
+              </div>
+            </button>
+
+            {/* Banchetti */}
+            <button
+              type="button"
+              onClick={onNavigateToBanquets}
+              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
+            >
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Banchetti</h3>
+              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
                 <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
               </div>
             </button>
