@@ -1132,9 +1132,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // Responsive table sizes - smaller on mobile and tablets
       const baseSize = window.innerWidth < 768 ? 50 : 100; // 50px on mobile/tablet, 100px on desktop
       const baseWidth = window.innerWidth < 768 ? 65 : 120; // For rectangles
-      // Visual spread factor: spaces tables further apart without touching the
-      // saved x/y in the floor-plan editor. The canvas auto-scales to fit.
-      const POSITION_SPREAD = window.innerWidth < 768 ? 1 : 1.25;
 
       let widthPx: number;
       let heightPx: number;
@@ -1179,8 +1176,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             key={table.id}
             className={`absolute ${isOccupied ? 'z-10' : ''} ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}`}
             style={{
-                left: table.x * POSITION_SPREAD,
-                top: table.y * POSITION_SPREAD,
+                left: table.x,
+                top: table.y,
                 width: `${widthPx}px`,
                 height: `${heightPx}px`,
             }}
@@ -1774,9 +1771,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const baseSize = isMobile ? 50 : 100;
           const baseWidth = isMobile ? 65 : 120;
           const seatMultiplier = isMobile ? 9 : 18;
-          // Must mirror POSITION_SPREAD in renderMapTable so the canvas extent
-          // accounts for the visually spread-out coordinates.
-          const POSITION_SPREAD = isMobile ? 1 : 1.25;
           let maxRight = 0;
           let maxBottom = 0;
           for (const t of tablesInRoom) {
@@ -1787,13 +1781,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   w = Math.max(baseWidth, t.seats * seatMultiplier);
                   h = baseSize;
               }
-              maxRight = Math.max(maxRight, t.x * POSITION_SPREAD + w);
-              maxBottom = Math.max(maxBottom, t.y * POSITION_SPREAD + h);
+              maxRight = Math.max(maxRight, t.x + w);
+              maxBottom = Math.max(maxBottom, t.y + h);
           }
           const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
           const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
+          // Allow scale ABOVE 1 so the canvas zooms in to fill the available
+          // space when the room is small. Capped at 1.6 so a sparse room
+          // doesn't render huge. Scrolling kicks in if extent is bigger than
+          // canvas (scale < 1).
           const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
-              ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
+              ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1.6)
               : 1;
 
           return (
