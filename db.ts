@@ -899,12 +899,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 unit VARCHAR(20),
                 notes TEXT,
                 category_id INTEGER REFERENCES inventory_categories(id) ON DELETE SET NULL,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(area, name)
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
         `);
         // Backfill: existing installs may not have category_id yet.
         await client.query(`ALTER TABLE inventory_products ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES inventory_categories(id) ON DELETE SET NULL;`);
+        // Migration: replace UNIQUE(area, name) with a per-category unique key
+        // so the same product name (e.g. "GNOCCHI") can live in multiple
+        // categories (PRIMI vs CELIACO). COALESCE(..., 0) keeps NULL-category
+        // products unique on name as well.
+        await client.query(`ALTER TABLE inventory_products DROP CONSTRAINT IF EXISTS inventory_products_area_name_key;`);
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_products_area_cat_name ON inventory_products (area, COALESCE(category_id, 0), name);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_products_area ON inventory_products(area, name);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_products_category ON inventory_products(category_id);`);
 
