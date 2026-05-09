@@ -1901,14 +1901,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </span>
                             <button
                               onClick={() => startEditShoppingItem(item)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
                               title="Modifica"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => deleteShoppingItem(item.id)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                              title="Elimina"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
