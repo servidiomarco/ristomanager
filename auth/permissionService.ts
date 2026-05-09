@@ -12,6 +12,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
   { feature: 'Clienti', permissions: ['customers:view', 'customers:full'] },
+  { feature: 'Inventario', permissions: ['inventory:view', 'inventory:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },
   { feature: 'Report', permissions: ['reports:view', 'reports:full'] },

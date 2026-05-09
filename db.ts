@@ -861,6 +861,81 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
 
         // ============================================
+        // INVENTORY TABLES
+        // ============================================
+        // Areas (CUCINA / SALA / BAR) are fixed enums on each row, not a table.
+        // Locations within an area are user-managed (e.g. "Cella 1" / "Cella 2"
+        // for CUCINA). Stock = quantity per (product, location). Movements
+        // capture every carico / scarico for the audit trail.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_locations (
+                id SERIAL PRIMARY KEY,
+                area VARCHAR(20) NOT NULL CHECK (area IN ('CUCINA', 'SALA', 'BAR')),
+                name VARCHAR(100) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(area, name)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_locations_area ON inventory_locations(area, sort_order);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_products (
+                id SERIAL PRIMARY KEY,
+                area VARCHAR(20) NOT NULL CHECK (area IN ('CUCINA', 'SALA', 'BAR')),
+                name VARCHAR(255) NOT NULL,
+                unit VARCHAR(20),
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(area, name)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_products_area ON inventory_products(area, name);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_stock (
+                product_id INTEGER NOT NULL REFERENCES inventory_products(id) ON DELETE CASCADE,
+                location_id INTEGER NOT NULL REFERENCES inventory_locations(id) ON DELETE CASCADE,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (product_id, location_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_stock_location ON inventory_stock(location_id);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_movements (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES inventory_products(id) ON DELETE CASCADE,
+                location_id INTEGER NOT NULL REFERENCES inventory_locations(id) ON DELETE CASCADE,
+                delta NUMERIC(12, 3) NOT NULL,
+                reason VARCHAR(20) NOT NULL CHECK (reason IN ('CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO')),
+                notes TEXT,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                user_name VARCHAR(255),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON inventory_movements(product_id, created_at DESC);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_movements_location ON inventory_movements(location_id, created_at DESC);`);
+
+        // Inventory permissions: view = read, full = create/edit products,
+        // locations and post movements.
+        const inventoryPermissions = [
+            ['OWNER', 'inventory:view'], ['OWNER', 'inventory:full'],
+            ['GENERAL_MANAGER', 'inventory:view'], ['GENERAL_MANAGER', 'inventory:full'],
+            ['MANAGER', 'inventory:view'], ['MANAGER', 'inventory:full'],
+            ['WAITER', 'inventory:view'],
+            ['KITCHEN', 'inventory:view'], ['KITCHEN', 'inventory:full'],
+        ];
+        for (const [role, permission] of inventoryPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // ============================================
         // PUSH SUBSCRIPTIONS TABLE (Web Push)
         // ============================================
         await client.query(`

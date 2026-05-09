@@ -8,7 +8,7 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
-import { createSchema, queryWithRetry } from './db.js';
+import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
@@ -1644,6 +1644,377 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
     } catch (err) {
         console.error('DELETE /customers/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// INVENTORY (rubrica magazzino) - require authentication
+// ============================================
+
+const ALLOWED_INVENTORY_AREAS = new Set(['CUCINA', 'SALA', 'BAR']);
+const ALLOWED_MOVEMENT_REASONS = new Set(['CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO']);
+
+// GET /inventory/locations?area=CUCINA — all locations, optionally filtered.
+app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT id, area, name, sort_order, created_at
+             FROM inventory_locations
+             ${where}
+             ORDER BY area, sort_order, name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/locations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/locations', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, sort_order } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO inventory_locations (area, name, sort_order)
+             VALUES ($1, $2, $3)
+             RETURNING id, area, name, sort_order, created_at`,
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_LOCATION,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Location with this name already exists in the area' });
+        }
+        console.error('POST /inventory/locations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/locations/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, sort_order } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE inventory_locations
+             SET name = $1, sort_order = $2
+             WHERE id = $3
+             RETURNING id, area, name, sort_order, created_at`,
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Location not found' });
+        }
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_LOCATION,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Location with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/locations/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/locations/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_locations WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Location not found' });
+        }
+        // ON DELETE CASCADE on inventory_stock + inventory_movements drops the
+        // related rows. Stock is destroyed — confirm on the client side.
+        await queryWithRetry('DELETE FROM inventory_locations WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_LOCATION,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/locations/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/products?area=CUCINA
+app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT id, area, name, unit, notes, created_at
+             FROM inventory_products
+             ${where}
+             ORDER BY area, name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/products error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/products', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, unit, notes } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO inventory_products (area, name, unit, notes)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id, area, name, unit, notes, created_at`,
+            [
+                area,
+                String(name).trim(),
+                unit ? String(unit).trim() : null,
+                notes ? String(notes).trim() : null,
+            ]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_PRODUCT,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'A product with this name already exists in the area' });
+        }
+        console.error('POST /inventory/products error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, unit, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE inventory_products
+             SET name = $1, unit = $2, notes = $3
+             WHERE id = $4
+             RETURNING id, area, name, unit, notes, created_at`,
+            [
+                String(name).trim(),
+                unit ? String(unit).trim() : null,
+                notes ? String(notes).trim() : null,
+                id,
+            ]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_PRODUCT,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'A product with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/products/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_products WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        await queryWithRetry('DELETE FROM inventory_products WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_PRODUCT,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/products/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/stock?area=CUCINA — full per-(product, location) breakdown.
+// Always returns numeric values (not strings) so the client can sum on read.
+app.get('/inventory/stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT s.product_id, s.location_id, s.quantity::float AS quantity
+             FROM inventory_stock s
+             JOIN inventory_products p ON p.id = s.product_id
+             ${where}`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/stock error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /inventory/movements — apply a delta to (product, location).
+// delta > 0 = carico, delta < 0 = scarico. The stock row is upserted in a
+// transaction so concurrent +/- never lose updates.
+app.post('/inventory/movements', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    const { product_id, location_id, delta, reason, notes } = req.body;
+    const productId = Number(product_id);
+    const locationId = Number(location_id);
+    const deltaNum = Number(delta);
+    if (!Number.isFinite(productId) || !Number.isFinite(locationId)) {
+        return res.status(400).json({ error: 'product_id and location_id are required' });
+    }
+    if (!Number.isFinite(deltaNum) || deltaNum === 0) {
+        return res.status(400).json({ error: 'delta must be a non-zero number' });
+    }
+    if (!reason || !ALLOWED_MOVEMENT_REASONS.has(reason)) {
+        return res.status(400).json({ error: 'Invalid reason' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Make sure product and location exist and belong to the same area.
+        const validation = await client.query(
+            `SELECT p.area AS p_area, l.area AS l_area, p.name AS p_name, l.name AS l_name
+             FROM inventory_products p, inventory_locations l
+             WHERE p.id = $1 AND l.id = $2`,
+            [productId, locationId]
+        );
+        if (validation.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Product or location not found' });
+        }
+        const v = validation.rows[0];
+        if (v.p_area !== v.l_area) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Product and location must belong to the same area' });
+        }
+
+        // Upsert the stock row. Negative results are allowed so carico/scarico
+        // never silently fails — the UI surfaces a warning when total < 0.
+        const upsert = await client.query(
+            `INSERT INTO inventory_stock (product_id, location_id, quantity, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (product_id, location_id)
+             DO UPDATE SET quantity = inventory_stock.quantity + EXCLUDED.quantity,
+                           updated_at = CURRENT_TIMESTAMP
+             RETURNING quantity::float AS quantity`,
+            [productId, locationId, deltaNum]
+        );
+
+        const movement = await client.query(
+            `INSERT INTO inventory_movements (product_id, location_id, delta, reason, notes, user_id, user_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, product_id, location_id, delta::float AS delta, reason, notes, user_id, user_name, created_at`,
+            [
+                productId,
+                locationId,
+                deltaNum,
+                reason,
+                notes ? String(notes).trim() : null,
+                req.user?.userId ?? null,
+                req.user?.email ?? null,
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_MOVEMENT,
+                movement.rows[0].id, `${v.p_name} @ ${v.l_name}`,
+                { delta: deltaNum, reason }
+            );
+        }
+
+        res.status(201).json({
+            movement: movement.rows[0],
+            stock: { product_id: productId, location_id: locationId, quantity: upsert.rows[0].quantity },
+        });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('POST /inventory/movements error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
     }
 });
 

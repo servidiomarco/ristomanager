@@ -24,7 +24,9 @@ export type Permission =
   | 'banquet:view_price'
   | 'banquet:manage_payments'
   | 'customers:view'
-  | 'customers:full';
+  | 'customers:full'
+  | 'inventory:view'
+  | 'inventory:full';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -51,7 +53,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'banquet:view_price',
     'banquet:manage_payments',
     'customers:view',
-    'customers:full'
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -71,7 +75,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'banquet:view_price',
     'banquet:manage_payments',
     'customers:view',
-    'customers:full'
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -88,7 +94,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reports:view',
     'logs:view',
     'customers:view',
-    'customers:full'
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -96,11 +104,14 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'floorplan:update_status',
     'reservations:view',
     'reservations:full',
-    'customers:view'
+    'customers:view',
+    'inventory:view'
   ],
   [UserRole.KITCHEN]: [
     'menu:view',
-    'reservations:view'
+    'reservations:view',
+    'inventory:view',
+    'inventory:full'
   ]
 };
 
@@ -112,6 +123,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.RESERVATIONS]: ['reservations:view'],
   [ViewState.STAFF]: ['staff:view'],
   [ViewState.CLIENTI]: ['customers:view'],
+  [ViewState.INVENTARIO]: ['inventory:view'],
   [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view']
 };

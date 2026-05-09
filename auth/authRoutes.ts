@@ -133,7 +133,7 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
 
     // Validate against the known view enum so we don't store junk that the
     // client would silently ignore on next login.
-    const allowedViews = ['DASHBOARD', 'FLOOR_PLAN', 'MENU', 'RESERVATIONS', 'STAFF', 'CLIENTI', 'USERS', 'SETTINGS'];
+    const allowedViews = ['DASHBOARD', 'FLOOR_PLAN', 'MENU', 'RESERVATIONS', 'STAFF', 'CLIENTI', 'INVENTARIO', 'USERS', 'SETTINGS'];
     if (preferred_landing_view !== null && preferred_landing_view !== undefined && !allowedViews.includes(preferred_landing_view)) {
       return res.status(400).json({ error: 'Invalid preferred_landing_view' });
     }

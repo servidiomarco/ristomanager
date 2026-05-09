@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -11,6 +11,7 @@ import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
+import { Inventory } from './components/Inventory';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
@@ -830,7 +831,7 @@ const App: React.FC = () => {
             />
           )}
 
-          {(canAccessView(ViewState.STAFF) || canManageUsers()) && !sidebarCollapsed && (
+          {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers()) && !sidebarCollapsed && (
             <div className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
               Gestione
             </div>
@@ -850,6 +851,15 @@ const App: React.FC = () => {
               label="Clienti"
               active={view === ViewState.CLIENTI}
               onClick={() => setView(ViewState.CLIENTI)}
+              collapsed={sidebarCollapsed}
+            />
+          )}
+          {canAccessView(ViewState.INVENTARIO) && (
+            <SidebarItem
+              icon={<Boxes size={20} />}
+              label="Inventario"
+              active={view === ViewState.INVENTARIO}
+              onClick={() => setView(ViewState.INVENTARIO)}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -1280,6 +1290,10 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.INVENTARIO && (
+          <Inventory showToast={addToast} />
+        )}
+
         {view === ViewState.SETTINGS && (
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
             <div className="mb-8">
@@ -1320,6 +1334,7 @@ const App: React.FC = () => {
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.STAFF]: 'Personale',
                       [ViewState.CLIENTI]: 'Clienti',
+                      [ViewState.INVENTARIO]: 'Inventario',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
                     };
@@ -1459,11 +1474,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canManageUsers() || canAccessView(ViewState.SETTINGS)) && (
+            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.USERS || view === ViewState.SETTINGS}
+                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1525,6 +1540,16 @@ const App: React.FC = () => {
                   >
                     <BookUser className="h-5 w-5 text-[var(--color-fg-muted)]" />
                     <span className="text-sm font-medium text-[var(--color-fg)]">Clienti</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canAccessView(ViewState.INVENTARIO) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.INVENTARIO); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.INVENTARIO ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <Boxes className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Inventario</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}

@@ -186,6 +186,7 @@ export enum ViewState {
   RESERVATIONS = 'RESERVATIONS',
   STAFF = 'STAFF',
   CLIENTI = 'CLIENTI',
+  INVENTARIO = 'INVENTARIO',
   USERS = 'USERS',
   SETTINGS = 'SETTINGS'
 }
@@ -392,6 +393,64 @@ export interface StaffShift {
   present: boolean;
   notes?: string;
   createdAt?: string;
+}
+
+// ============================================
+// INVENTORY TYPES
+// ============================================
+
+export enum InventoryArea {
+  CUCINA = 'CUCINA',
+  SALA = 'SALA',
+  BAR = 'BAR'
+}
+
+// A storage location within an area — e.g. "Cella 1" / "Cella 2" for CUCINA,
+// "Bancone" / "Magazzino" for BAR. Areas are fixed; locations are user-managed.
+export interface InventoryLocation {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+}
+
+// A product belongs to one area (CUCINA / SALA / BAR) but its quantity is
+// distributed across that area's locations.
+export interface InventoryProduct {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  unit?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+// Per-(product, location) quantity. Returned aggregated by GET /inventory/stock.
+export interface InventoryStockRow {
+  product_id: number;
+  location_id: number;
+  quantity: number;
+}
+
+// One audit entry per carico/scarico operation. Sum of deltas == stock.
+export enum InventoryMovementReason {
+  CARICO = 'CARICO',          // stock in
+  SCARICO = 'SCARICO',        // stock out (consumption)
+  RETTIFICA = 'RETTIFICA',    // manual correction (set to specific value)
+  TRASFERIMENTO = 'TRASFERIMENTO' // moved between cells
+}
+
+export interface InventoryMovement {
+  id: number;
+  product_id: number;
+  location_id: number;
+  delta: number;
+  reason: InventoryMovementReason;
+  notes?: string | null;
+  user_id?: number | null;
+  user_name?: string | null;
+  created_at: string;
 }
 
 export interface StaffTimeOff {
