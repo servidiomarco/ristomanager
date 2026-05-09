@@ -499,10 +499,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-[20px] font-semibold tracking-tight text-[var(--color-fg)]">Personale</h1>
-          <p className="text-sm text-[var(--color-fg-muted)]">Gestione dipendenti, turni e assenze</p>
-        </div>
+        <div />
         <button
           onClick={handleOpenAddStaff}
           className="w-full md:w-auto justify-center rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
@@ -600,7 +597,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
             <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-[var(--color-fg-muted)]" />
-                <h2 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Sala</h2>
+                <h2 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Sala</h2>
                 <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{salaStaff.length}</span>
               </div>
             </div>
@@ -649,7 +646,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
             <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
                 <ChefHat className="h-4 w-4 text-[var(--color-fg-muted)]" />
-                <h2 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Cucina</h2>
+                <h2 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Cucina</h2>
                 <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{cucinaStaff.length}</span>
               </div>
             </div>
@@ -809,7 +806,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 {/* Day Headers */}
                 <div className="grid grid-cols-7 gap-1 mb-2">
                   {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
-                    <div key={day} className="text-center text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)] py-2">
+                    <div key={day} className="text-center text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] py-2">
                       {day}
                     </div>
                   ))}
@@ -977,7 +974,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               {/* Time Off List */}
               {timeOffs.filter(t => t.staffId === selectedStaff.id).length > 0 && (
                 <div className="px-4 pb-4">
-                  <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Assenze Programmate</h3>
+                  <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Assenze Programmate</h3>
                   <div className="space-y-1.5">
                     {timeOffs.filter(t => t.staffId === selectedStaff.id).map(timeOff => (
                       <div key={timeOff.id} className="flex items-center justify-between p-2 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md">
@@ -1041,7 +1038,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
             <div className="px-5 py-4 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome *</label>
                   <input
                     type="text"
                     value={staffForm.name}
@@ -1051,7 +1048,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Cognome *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Cognome *</label>
                   <input
                     type="text"
                     value={staffForm.surname}
@@ -1064,7 +1061,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria *</label>
                   <select
                     value={staffForm.category}
                     onChange={(e) => setStaffForm({ ...staffForm, category: e.target.value as StaffCategory })}
@@ -1076,7 +1073,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo *</label>
                   <select
                     value={staffForm.staffType}
                     onChange={(e) => setStaffForm({ ...staffForm, staffType: e.target.value as StaffType })}
@@ -1090,7 +1087,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Ruolo</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Ruolo</label>
                 <input
                   type="text"
                   value={staffForm.role}
@@ -1102,7 +1099,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Telefono</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Telefono</label>
                   <input
                     type="tel"
                     value={staffForm.phone}
@@ -1112,7 +1109,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Email</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Email</label>
                   <input
                     type="email"
                     value={staffForm.email}
@@ -1125,7 +1122,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Assunzione</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Assunzione</label>
                   <input
                     type="date"
                     value={staffForm.hireDate}
@@ -1134,7 +1131,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Fine Contratto</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Fine Contratto</label>
                   <input
                     type="date"
                     value={staffForm.contractEndDate}
@@ -1145,7 +1142,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Giorno di Riposo Settimanale</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Giorno di Riposo Settimanale</label>
                 <select
                   value={staffForm.weeklyRestDay ?? ''}
                   onChange={(e) => setStaffForm({
@@ -1162,7 +1159,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <textarea
                   value={staffForm.notes}
                   onChange={(e) => setStaffForm({ ...staffForm, notes: e.target.value })}
@@ -1203,7 +1200,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
             </div>
             <div className="px-5 py-4 space-y-4">
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
                   type="date"
                   value={shiftForm.date}
@@ -1212,7 +1209,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 />
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
                 <p className="text-[11px] text-[var(--color-fg-subtle)] mb-2">Seleziona uno o entrambi i turni</p>
                 <div className="flex gap-2">
                   <button
@@ -1244,7 +1241,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={shiftForm.notes}
@@ -1286,7 +1283,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
             </div>
             <div className="px-5 py-4 space-y-4">
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo</label>
                 <select
                   value={timeOffForm.type}
                   onChange={(e) => setTimeOffForm({ ...timeOffForm, type: e.target.value as TimeOffType })}
@@ -1298,7 +1295,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 </select>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
                 <select
                   value={timeOffForm.shift ?? 'ALL'}
                   onChange={(e) => {
@@ -1314,7 +1311,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Da</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Da</label>
                   <input
                     type="date"
                     value={timeOffForm.startDate}
@@ -1323,7 +1320,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">A</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">A</label>
                   <input
                     type="date"
                     value={timeOffForm.endDate}
@@ -1333,7 +1330,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={timeOffForm.notes}

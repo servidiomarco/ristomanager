@@ -164,7 +164,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
-              <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-500">Totale dovuto</div>
+              <div className="text-[11px] tracking-wide font-semibold text-slate-500">Totale dovuto</div>
               <div className="text-xl font-bold text-slate-800 mt-1">
                 {totalDue > 0 ? formatEuro(totalDue) : '—'}
               </div>
@@ -175,14 +175,14 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
               )}
             </div>
             <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
-              <div className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700">Già pagato</div>
+              <div className="text-[11px] tracking-wide font-semibold text-emerald-700">Già pagato</div>
               <div className="text-xl font-bold text-emerald-800 mt-1">{formatEuro(totalPaid)}</div>
               <div className="text-[11px] text-emerald-700 mt-0.5">
                 {payments.length} {payments.length === 1 ? 'pagamento' : 'pagamenti'}
               </div>
             </div>
             <div className={`rounded-lg border p-3 ${remaining != null && remaining > 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
-              <div className={`text-[11px] uppercase tracking-wide font-semibold ${remaining != null && remaining > 0 ? 'text-rose-700' : 'text-slate-500'}`}>Residuo</div>
+              <div className={`text-[11px] tracking-wide font-semibold ${remaining != null && remaining > 0 ? 'text-rose-700' : 'text-slate-500'}`}>Residuo</div>
               <div className={`text-xl font-bold mt-1 ${remaining != null && remaining > 0 ? 'text-rose-800' : 'text-slate-800'}`}>
                 {remaining != null ? formatEuro(remaining) : '—'}
               </div>
@@ -200,7 +200,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pagamenti registrati</h3>
+              <h3 className="text-xs font-semibold tracking-wider text-slate-500">Pagamenti registrati</h3>
               {!showForm && (
                 <button
                   type="button"
@@ -231,7 +231,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${TYPE_BADGE[p.payment_type]}`}>
+                          <span className={`text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded ${TYPE_BADGE[p.payment_type]}`}>
                             {TYPE_LABEL[p.payment_type]}
                           </span>
                           <span className="text-xs text-slate-500">{formatDateIt(p.payment_date)}</span>
@@ -261,7 +261,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
           {showForm && (
             <form onSubmit={handleSubmit} className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4 space-y-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-indigo-700">Nuovo pagamento</div>
+              <div className="text-xs font-semibold tracking-wider text-indigo-700">Nuovo pagamento</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Importo (€) *</label>

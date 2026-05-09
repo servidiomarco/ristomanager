@@ -11,7 +11,7 @@ import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2 } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -234,6 +234,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [editShoppingName, setEditShoppingName] = useState('');
   const [editShoppingCategory, setEditShoppingCategory] = useState<ShoppingCategory>('CUCINA');
   const [isSavingShoppingEdit, setIsSavingShoppingEdit] = useState(false);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<number>>(new Set());
+  const [shoppingHistory, setShoppingHistory] = useState<string[]>([]);
+  const [showShoppingSuggestions, setShowShoppingSuggestions] = useState(false);
+  const shoppingInputRef = useRef<HTMLInputElement>(null);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -250,6 +254,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       setShoppingLoading(true);
       const items = await shoppingApiService.getAllItems();
       setShoppingItems(items);
+      // Build autocomplete history from all past items (deduplicated)
+      const names = Array.from(new Set(items.map(i => i.name)));
+      setShoppingHistory(names);
     } catch (error) {
       console.error('Error fetching shopping items:', error);
     } finally {
@@ -289,18 +296,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  const addShoppingItem = async () => {
-    if (!newItemName.trim() || isAddingShoppingItem) return;
+  const addShoppingItem = async (overrideName?: string) => {
+    const name = (overrideName ?? newItemName).trim();
+    if (!name || isAddingShoppingItem) return;
     try {
       setIsAddingShoppingItem(true);
       // Don't add to state here - let the socket event handle it
       // This prevents duplicates on the creating device
       await shoppingApiService.createItem({
-        name: newItemName.trim(),
+        name,
         category: newItemCategory,
         date: formatLocalDate(new Date())
       });
       setNewItemName('');
+      setShowShoppingSuggestions(false);
+      // Keep focus on input for rapid entry (Google Keep-style)
+      shoppingInputRef.current?.focus();
     } catch (error) {
       console.error('Error adding shopping item:', error);
     } finally {
@@ -382,6 +393,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [shoppingItems]);
 
   const totalItems = shoppingItems.length;
+
+  // Autocomplete suggestions for shopping — show past items not already in current list
+  const shoppingSuggestions = useMemo(() => {
+    const query = newItemName.trim().toLowerCase();
+    if (!query) return [];
+    const currentNames = new Set(shoppingItems.map(i => i.name.toLowerCase()));
+    return shoppingHistory
+      .filter(name => name.toLowerCase().includes(query) && !currentNames.has(name.toLowerCase()))
+      .slice(0, 5);
+  }, [newItemName, shoppingHistory, shoppingItems]);
 
   // Staff presence calculation:
   // - Excludes staff with time-off covering the selected date
@@ -990,6 +1011,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
+      {/* Today's Tasks Summary — prominent position at top */}
+      {todaysTodos.length > 0 && (
+        <div className="bg-sky-50 dark:bg-sky-500/10 p-4 rounded-xl border border-sky-200 dark:border-sky-500/20">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-2">
+              <ListTodo className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+              <h3 className="text-sm font-semibold text-sky-900 dark:text-sky-100">Attività di oggi</h3>
+              <span className="tabular inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-500/25 dark:text-sky-200 border border-sky-200 dark:border-sky-500/30">{todaysTodos.length}</span>
+            </div>
+            <button
+              onClick={() => {
+                todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="text-xs font-medium text-sky-700 dark:text-sky-300 hover:text-sky-900 dark:hover:text-sky-100 transition-colors"
+            >
+              Vedi tutte
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {todaysTodos.slice(0, 3).map(todo => (
+              <div key={todo.id} className="flex items-center gap-2.5">
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                  todo.priority === TodoPriority.HIGH
+                    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/20'
+                    : todo.priority === TodoPriority.MEDIUM
+                    ? 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/20'
+                    : 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                }`}>
+                  <Flag className="h-2.5 w-2.5" />
+                </span>
+                <span className="text-sm text-sky-900 dark:text-sky-100 truncate">{todo.title}</span>
+              </div>
+            ))}
+            {todaysTodos.length > 3 && (
+              <p className="tabular text-xs text-sky-600 dark:text-sky-400 pl-7">+{todaysTodos.length - 3} altre attività</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
@@ -1315,8 +1376,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Note & Allergeni */}
       <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center mb-3 gap-2">
-            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)] flex items-center gap-2">
-              <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
+            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">
               Note &amp; Allergeni
             </h2>
           </div>
@@ -1334,54 +1394,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {reservationNotes.map(({ reservation, table, room, allergens }) => {
                 const isLunch = reservation.shift === Shift.LUNCH;
                 const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
-                const accentBorder = isLunch ? 'border-l-amber-400' : 'border-l-indigo-400';
+                const circleBg = isLunch ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700';
+                const isExpanded = expandedNoteIds.has(reservation.id);
+                const noteText = reservation.notes || '';
+                const isTruncatable = noteText.length > 80;
                 return (
-                  <div key={reservation.id} className={`border border-[var(--color-line)] border-l-4 ${accentBorder} rounded-md p-2.5 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors`}>
-                    <div className="flex items-stretch justify-between gap-3">
-                      {/* Left: prominent table + room + customer */}
-                      <div className="flex-shrink-0 min-w-0 max-w-[40%]">
-                        {table ? (
-                          <>
-                            <div className="flex items-center gap-1 text-sm font-semibold text-[var(--color-fg)] leading-tight">
-                              <Armchair className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                              <span className="truncate">{table.name}</span>
-                            </div>
-                            {room && (
-                              <div className="text-[11px] font-medium text-[var(--color-fg-muted)] truncate mt-0.5">
-                                {room.name}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-xs text-[var(--color-fg-subtle)] italic">Tavolo non assegnato</div>
-                        )}
-                        <div className="text-[10px] text-[var(--color-fg-muted)] truncate mt-1">
-                          {reservation.customer_name}
+                  <div key={reservation.id} className="border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                    {/* Row 1: Table circle + Name/Time + Warning */}
+                    <div className="flex items-center gap-3">
+                      <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${circleBg}`}>
+                        {table ? table.name.replace(/[^0-9]/g, '') || table.name.charAt(0) : '–'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-fg)] truncate">{reservation.customer_name}</p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                          <span className="text-xs text-[var(--color-fg-muted)]">{time || '—'}</span>
+                          {room && (
+                            <>
+                              <span className="text-[var(--color-fg-subtle)] text-xs mx-0.5">·</span>
+                              <span className="text-xs text-[var(--color-fg-muted)] truncate">{room.name}</span>
+                            </>
+                          )}
                         </div>
-                        {time && (
-                          <div className="text-[10px] text-[var(--color-fg-subtle)] mt-0.5">
-                            {time}
-                          </div>
-                        )}
                       </div>
-
-                      {/* Right: notes + allergens */}
-                      <div className="flex-1 min-w-0 text-right">
-                        <p className="text-[11px] text-[var(--color-fg)] leading-snug whitespace-pre-wrap break-words">
-                          {reservation.notes}
-                        </p>
-                        {allergens.length > 0 && (
-                          <div className="flex items-center justify-end gap-1 mt-1.5 flex-wrap">
-                            <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
-                            {allergens.map(a => (
-                              <span key={a} className="inline-block bg-rose-50 text-rose-700 border border-rose-100 text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                {a}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {!table && (
+                        <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 border border-amber-200">
+                          <AlertTriangle className="h-3 w-3 text-amber-600" />
+                          <span className="text-[10px] font-medium text-amber-700 whitespace-nowrap">Non assegnato</span>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Row 2: Allergen chips */}
+                    {allergens.length > 0 && (
+                      <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
+                        {allergens.map(a => (
+                          <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100">
+                            {a}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Row 3: Notes (truncatable) */}
+                    {noteText && (
+                      <div className="mt-2">
+                        <p className="text-xs text-[var(--color-fg-muted)] leading-relaxed whitespace-pre-wrap break-words">
+                          {isTruncatable && !isExpanded ? noteText.slice(0, 80) + '…' : noteText}
+                        </p>
+                        {isTruncatable && (
+                          <button
+                            onClick={() => setExpandedNoteIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(reservation.id)) next.delete(reservation.id);
+                              else next.add(reservation.id);
+                              return next;
+                            })}
+                            className="text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] mt-1 transition-colors"
+                          >
+                            {isExpanded ? 'Mostra meno' : 'Mostra tutto'}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1396,7 +1472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-md border border-[var(--color-line)] p-0.5 bg-[var(--color-surface-3)]">
+            <div className="flex gap-2">
               {([
                 { key: 'ORARIO', label: 'Orario' },
                 { key: 'SETTIMANA', label: 'Settimana' },
@@ -1404,10 +1480,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <button
                   key={t.key}
                   onClick={() => setAffluenceTab(t.key)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors border ${
                     affluenceTab === t.key
-                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                   }`}
                 >
                   {t.label}
@@ -1630,7 +1706,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {/* Filter Tabs */}
-          <div className="flex gap-1 mb-4 p-0.5 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md">
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
             {[
               { key: 'mine', label: 'Mie' },
               { key: 'all', label: 'Tutte' },
@@ -1640,10 +1716,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <button
                 key={key}
                 onClick={() => setTodoFilter(key as typeof todoFilter)}
-                className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${
                   todoFilter === key
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                 }`}
               >
                 {label}
@@ -1653,12 +1729,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           {/* Overdue Alert */}
           {overdueTodos.length > 0 && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-md flex items-center gap-3">
-              <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
-              <div>
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
                 <p className="tabular text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
-                <p className="text-xs text-rose-600">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
               </div>
+              <p className="text-xs text-rose-600 pl-6">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
             </div>
           )}
 
@@ -1682,7 +1758,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 return (
                   <div
                     key={todo.id}
-                    className={`group p-3 rounded-md border transition-colors ${
+                    className={`group p-3 rounded-lg border transition-colors ${
                       todo.completed
                         ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
                         : isOverdue
@@ -1690,6 +1766,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
+                    {/* Row 1: Checkbox + Title + Actions */}
                     <div className="flex items-start gap-3">
                       <button
                         onClick={() => handleToggleTodo(todo.id)}
@@ -1706,7 +1783,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           <p className={`text-sm font-medium ${todo.completed ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                             {todo.title}
                           </p>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                             <button
                               onClick={() => handleOpenEditTodo(todo)}
                               className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
@@ -1721,40 +1798,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+
+                        {/* Row 2: Assignee + Due date */}
+                        <div className="flex items-center gap-2 mt-1.5 text-[var(--color-fg-muted)]">
+                          {todo.assignedToUserName && (
+                            <span className="inline-flex items-center gap-1 text-xs">
+                              <UserCircle className="h-3 w-3 flex-shrink-0" />
+                              {todo.assignedToUserName}
+                            </span>
+                          )}
+                          {todo.assignedToTeam && !todo.assignedToUserId && (
+                            <span className="inline-flex items-center gap-1 text-xs">
+                              <UsersRound className="h-3 w-3 flex-shrink-0" />
+                              {TEAM_LABELS[todo.assignedToTeam]}
+                            </span>
+                          )}
+                          {todo.dueDate && (
+                            <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 font-medium' : ''}`}>
+                              <Clock className="h-3 w-3 flex-shrink-0" />
+                              {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Row 3: Category + Priority + Banquet badge */}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
                             <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]}`} />
                             {CATEGORY_LABELS[todo.category]}
                           </span>
                           {todo.priority !== TodoPriority.LOW && (
-                            <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
-                          )}
-                          {todo.assignedToUserName && (
-                            <span className="text-[11px] text-[var(--color-fg-muted)]">
-                              {todo.assignedToUserName}
-                            </span>
-                          )}
-                          {todo.assignedToTeam && !todo.assignedToUserId && (
-                            <span className="text-[11px] text-[var(--color-fg-muted)]">
-                              {TEAM_LABELS[todo.assignedToTeam]}
-                            </span>
-                          )}
-                          {todo.dueDate && (
-                            <span className={`tabular text-[11px] ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
-                              {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
+                              todo.priority === TodoPriority.HIGH
+                                ? 'bg-rose-50 text-rose-600 border-rose-100'
+                                : 'bg-amber-50 text-amber-600 border-amber-100'
+                            }`}>
+                              <Flag className="h-3 w-3" />
+                              {todo.priority === TodoPriority.HIGH ? 'Alta' : 'Media'}
                             </span>
                           )}
                           {todo.banquetReminderHours != null && (
-                            <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 text-orange-700 border border-orange-100">
                               {todo.banquetReminderHours}h prima
                             </span>
                           )}
                         </div>
+
+                        {/* Row 4: Linked banquets */}
                         {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
                           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                              Banchetti:
-                            </span>
                             {todo.linkedBanquetIds.map(bid => {
                               const banquet = banquetMenus.find(b => b.id === bid);
                               if (!banquet) return null;
@@ -1789,7 +1881,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
               <p className="tabular text-xs text-[var(--color-fg-muted)]">{checkedItems}/{totalItems} completati</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {checkedItems > 0 && (
                 <button
                   onClick={clearCheckedItems}
@@ -1798,40 +1890,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   Rimuovi completati
                 </button>
               )}
-              <button
-                onClick={addShoppingItem}
-                disabled={!newItemName.trim() || isAddingShoppingItem}
-                className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Aggiungi prodotto"
-              >
-                {isAddingShoppingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              </button>
+              {totalItems > 0 && (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(cat => {
+                const items = shoppingByCategory[cat];
+                if (items.length === 0) return null;
+                return (
+                  <div key={cat} className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => shareShoppingListWhatsApp(items, cat, selectedDateStr)}
+                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
+                      title={`WhatsApp ${SHOPPING_CATEGORY_LABELS[cat]}`}
+                    >
+                      <Share2 className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => printShoppingList(items, cat, selectedDateStr)}
+                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
+                      title={`Stampa ${SHOPPING_CATEGORY_LABELS[cat]}`}
+                    >
+                      <Printer className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Add Item Form */}
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addShoppingItem()}
-              placeholder="Aggiungi prodotto..."
-              className="flex-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-            />
-            <select
-              value={newItemCategory}
-              onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-2 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-            >
-              <option value="CUCINA">Cucina</option>
-              <option value="BAR">Bar</option>
-              <option value="ALTRO">Altro</option>
-            </select>
-          </div>
-
           {/* Shopping List by Category */}
-          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-4">
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-3 mb-3">
             {shoppingLoading ? (
               <div className="py-8 text-center">
                 <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
@@ -1849,27 +1936,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 return (
                   <div key={category}>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-[11px] font-medium text-[var(--color-fg-muted)]">
-                        {SHOPPING_CATEGORY_LABELS[category]} <span className="tabular text-[var(--color-fg-subtle)]">({items.length})</span>
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${SHOPPING_CATEGORY_COLORS[category]}`}>
+                        {SHOPPING_CATEGORY_ICONS[category]}
+                        {SHOPPING_CATEGORY_LABELS[category]}
+                        <span className="tabular opacity-70">({items.length})</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => shareShoppingListWhatsApp(items, category, selectedDateStr)}
-                        className="ml-auto p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                        title={`Condividi su WhatsApp ${SHOPPING_CATEGORY_LABELS[category]}`}
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => printShoppingList(items, category, selectedDateStr)}
-                        className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                        title={`Stampa PDF ${SHOPPING_CATEGORY_LABELS[category]}`}
-                      >
-                        <Printer className="h-3.5 w-3.5" />
-                      </button>
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="space-y-0.5">
                       {items.map(item => {
                         const meta = `${item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}${
                           item.createdAt
@@ -1879,7 +1952,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         const isEditing = editingShoppingId === item.id;
                         if (isEditing) {
                           return (
-                            <div key={item.id} className="flex items-center gap-2">
+                            <div key={item.id} className="flex items-center gap-2 py-1.5 px-1">
                               <input
                                 type="text"
                                 value={editShoppingName}
@@ -1920,7 +1993,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           );
                         }
                         return (
-                          <div key={item.id} className="group flex items-center gap-2" title={meta}>
+                          <div key={item.id} className="group flex items-center gap-3 py-1.5 px-1 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors" title={meta}>
                             <button
                               onClick={() => toggleShoppingItem(item.id)}
                               className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
@@ -1931,19 +2004,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             >
                               {item.checked && <Check className="h-2.5 w-2.5" />}
                             </button>
-                            <span className={`flex-1 text-sm ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
+                            <span className={`flex-1 min-w-0 text-sm truncate ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                               {item.name}
                             </span>
                             <button
                               onClick={() => startEditShoppingItem(item)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
                               title="Modifica"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => deleteShoppingItem(item.id)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
                               title="Elimina"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1955,6 +2028,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 );
               })
+            )}
+          </div>
+
+          {/* Add Item — Google Keep style: input at bottom with autocomplete */}
+          <div className="relative border-t border-[var(--color-line)] pt-3">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+              <input
+                ref={shoppingInputRef}
+                type="text"
+                value={newItemName}
+                onChange={(e) => { setNewItemName(e.target.value); setShowShoppingSuggestions(true); }}
+                onFocus={() => setShowShoppingSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowShoppingSuggestions(false), 150)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); addShoppingItem(); }
+                }}
+                placeholder="Aggiungi prodotto..."
+                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+              />
+              <div className="relative flex-shrink-0">
+                <select
+                  value={newItemCategory}
+                  onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
+                  className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
+                >
+                  <option value="CUCINA">Cucina</option>
+                  <option value="BAR">Bar</option>
+                  <option value="ALTRO">Altro</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+              </div>
+              {isAddingShoppingItem && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-subtle)] flex-shrink-0" />}
+            </div>
+
+            {/* Autocomplete dropdown */}
+            {showShoppingSuggestions && shoppingSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 bottom-full mb-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-sm)] overflow-hidden z-10">
+                {shoppingSuggestions.map(name => (
+                  <button
+                    key={name}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setShowShoppingSuggestions(false);
+                      addShoppingItem(name);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-2"
+                  >
+                    <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                    {name}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -2023,7 +2150,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <div className="mb-4">
           <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
-          <p className="tabular text-xs text-[var(--color-fg-muted)]">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
         </div>
 
         {staffLoading ? (
@@ -2032,21 +2158,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         ) : (
           (() => {
-            const renderChip = (s: StaffMember, isLive: boolean) => (
-              <div
-                key={s.id}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
-                title={s.role ? `${s.name} ${s.surname} · ${s.role}` : `${s.name} ${s.surname}`}
-              >
-                <span className="truncate max-w-[8rem]">{s.name}</span>
-                {isLive && (
-                  <span className="relative flex h-1.5 w-1.5" aria-label="In servizio adesso">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            const renderChip = (s: StaffMember, _isLive: boolean) => {
+              const initials = `${(s.name || '').charAt(0)}${(s.surname || '').charAt(0)}`.toUpperCase();
+              return (
+                <div
+                  key={s.id}
+                  className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
+                  title={s.role ? `${s.name} ${s.surname} · ${s.role}` : `${s.name} ${s.surname}`}
+                >
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex items-center justify-center text-[10px] font-semibold">
+                    {initials}
                   </span>
-                )}
-              </div>
-            );
+                  <span className="truncate max-w-[8rem]">{s.name}</span>
+                </div>
+              );
+            };
 
             const renderShiftCard = (
               shiftKey: 'lunch' | 'dinner',
@@ -2055,22 +2181,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               iconWrap: string,
               cardWash: string,
               liveAccent: string,
+              restBorder: string,
             ) => {
               const data = staffPresence[shiftKey];
               const total = data.sala.length + data.cucina.length;
               const isLive = liveShift === shiftKey;
               return (
                 <div
-                  className={`relative rounded-lg p-4 border transition ${cardWash} ${
-                    isLive ? `${liveAccent} shadow-[var(--shadow-sm)]` : 'border-[var(--color-line)]'
+                  className={`relative rounded-lg p-4 transition ${
+                    isLive ? `border ${cardWash} ${liveAccent} shadow-[var(--shadow-sm)]` : `border ${restBorder}`
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-3">
                     <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconWrap}`}>{icon}</div>
-                    <span className="text-sm font-semibold text-[var(--color-fg)]">{label}</span>
-                    <span className="tabular text-xs text-[var(--color-fg-muted)]">({total})</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-sm font-semibold text-[var(--color-fg)]">{label}</span>
+                      <span className="tabular text-xs text-[var(--color-fg-muted)]">({total})</span>
+                    </div>
                     {isLive && (
-                      <span className="inline-flex items-center gap-1 ml-auto text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                      <span className="inline-flex items-center gap-1.5 ml-auto text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
                         <span className="relative flex h-1.5 w-1.5">
                           <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
                           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -2118,16 +2247,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   'Pranzo',
                   <Sun className="h-4 w-4 text-amber-700" />,
                   'bg-amber-100',
-                  'bg-gradient-to-br from-amber-50 to-orange-50/60 dark:from-amber-500/10 dark:to-orange-500/5',
+                  'bg-amber-50 dark:bg-amber-500/10',
                   'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
+                  'bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20',
                 )}
                 {showDinnerPersonale && renderShiftCard(
                   'dinner',
                   'Cena',
-                  <Sunset className="h-4 w-4 text-indigo-600" />,
-                  'bg-indigo-100',
-                  'bg-gradient-to-br from-indigo-50 to-blue-50/60 dark:from-indigo-500/10 dark:to-blue-500/5',
-                  'border-indigo-300/70 ring-1 ring-indigo-200/60 dark:ring-indigo-400/20',
+                  <Sunset className="h-4 w-4 text-blue-600" />,
+                  'bg-blue-100',
+                  'bg-blue-50 dark:bg-blue-500/10',
+                  'border-blue-300/70 ring-1 ring-blue-200/60 dark:ring-blue-400/20',
+                  'bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/20',
                 )}
               </div>
             );
@@ -2224,24 +2355,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { setShowTodoModal(false); resetTodoForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between flex-shrink-0">
               <h3 className="text-base font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
               <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"><X className="h-4 w-4" /></button>
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1">
               <div>
-                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Titolo</label>
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Titolo</label>
                 <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" autoFocus />
               </div>
               <div>
-                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Descrizione (opzionale)</label>
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Descrizione (opzionale)</label>
                 <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20 resize-none" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Priorità</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Priorità</label>
                   <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     <option value={TodoPriority.LOW}>Bassa</option>
                     <option value={TodoPriority.MEDIUM}>Media</option>
@@ -2249,19 +2380,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Categoria</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Categoria</label>
                   <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Scadenza (opzionale)</label>
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Scadenza (opzionale)</label>
                 <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Assegna a Persona</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a persona</label>
                   <select
                     value={todoForm.assignedToUserId || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
@@ -2274,7 +2405,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">Assegna a Team</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a team</label>
                   <select
                     value={todoForm.assignedToTeam || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
@@ -2301,25 +2432,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* Today's Tasks Summary */}
-      {todaysTodos.length > 0 && (
-        <div className="bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="h-4 w-4 text-[var(--color-fg-muted)]" />
-            <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Attività di oggi</h3>
-            <span className="tabular inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] border border-[var(--color-line)]">{todaysTodos.length}</span>
-          </div>
-          <div className="space-y-2">
-            {todaysTodos.slice(0, 3).map(todo => (
-              <div key={todo.id} className="flex items-center gap-2 text-sm text-[var(--color-fg)]">
-                <div className={`w-1.5 h-1.5 rounded-full ${PRIORITY_COLORS[todo.priority].replace('text-', 'bg-')}`} />
-                {todo.title}
-              </div>
-            ))}
-            {todaysTodos.length > 3 && <p className="tabular text-xs text-[var(--color-fg-muted)]">+{todaysTodos.length - 3} altre attività</p>}
-          </div>
-        </div>
-      )}
+      {/* Today's Tasks Summary — moved to top of page */}
 
       {/* AI Report Section */}
       {report && (

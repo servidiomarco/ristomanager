@@ -68,7 +68,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
 
           {dish.allergens && dish.allergens.length > 0 && (
             <div className="border-t border-slate-100 pt-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
                 <AlertCircle className="h-3.5 w-3.5 text-rose-500" />
                 Allergeni
               </h3>

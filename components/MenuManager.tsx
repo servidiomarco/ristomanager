@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, Room } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Moon, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -135,6 +135,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [isSavingBanquet, setIsSavingBanquet] = useState(false);
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
+  const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
+  const cardMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (cardMenuOpenId === null) return;
+    const handler = (e: MouseEvent) => {
+      if (cardMenuRef.current && !cardMenuRef.current.contains(e.target as Node)) {
+        setCardMenuOpenId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [cardMenuOpenId]);
 
   // Load the selected customer when editing a banquet that has customer_id
   useEffect(() => {
@@ -461,12 +474,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   });
 
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-        <div>
-          <h1 className="text-[20px] font-semibold tracking-tight text-[var(--color-fg)]">Gestione Menu & Banchetti</h1>
-          <p className="text-sm text-[var(--color-fg-muted)]">Configura i piatti e crea proposte per eventi.</p>
-        </div>
+        <div />
         {canEdit && (
         <div className="flex gap-2">
             {activeTab === 'DISHES' ? (
@@ -489,34 +499,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 border-b border-[var(--color-line)] mb-6">
-        <div className="flex gap-4 overflow-x-auto scrollbar-hide -mx-1 px-1">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-6">
+        <div className="flex gap-2 overflow-x-auto scrollbar-hide">
           <button
               onClick={() => setActiveTab('BANQUETS')}
-              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap flex-shrink-0 ${activeTab === 'BANQUETS' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'BANQUETS' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
           >
-              <BookOpen className="h-4 w-4" /> Menu Banchetti
+              Menu Banchetti
           </button>
           <button
               onClick={() => setActiveTab('DISHES')}
-              className={`pb-3 px-2 font-medium text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap flex-shrink-0 ${activeTab === 'DISHES' ? 'border-[var(--color-fg)] text-[var(--color-fg)]' : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'DISHES' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
           >
-              <Utensils className="h-4 w-4" /> Piatti alla Carta
+              Piatti alla Carta
           </button>
         </div>
         {activeTab === 'BANQUETS' && (
-          <div className="inline-flex self-start sm:self-auto p-0.5 bg-[var(--color-surface-3)] rounded-full mb-2 flex-shrink-0">
+          <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 self-start sm:self-auto flex-shrink-0">
             <button
               onClick={() => setBanquetView('LIST')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'LIST' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
+              className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${banquetView === 'LIST' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
             >
-              <ListIcon className="h-4 w-4" /> Lista
+              <ListIcon className="h-3.5 w-3.5" /> Lista
             </button>
             <button
               onClick={() => setBanquetView('CALENDAR')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition ${banquetView === 'CALENDAR' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'}`}
+              className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${banquetView === 'CALENDAR' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
             >
-              <Calendar className="h-4 w-4" /> Calendario
+              <Calendar className="h-3.5 w-3.5" /> Calendario
             </button>
           </div>
         )}
@@ -586,12 +596,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <table className="w-full text-left min-w-[640px]">
                 <thead className="bg-[var(--color-surface-3)] border-b border-[var(--color-line)]">
                     <tr>
-                    <th className="px-4 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)] w-16">Foto</th>
-                    <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Nome Piatto</th>
-                    <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Categoria</th>
-                    <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Prezzo</th>
-                    <th className="px-6 py-3 text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Allergeni</th>
-                    <th className="px-6 py-3 text-right text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">Azioni</th>
+                    <th className="px-4 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] w-16">Foto</th>
+                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Nome Piatto</th>
+                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Categoria</th>
+                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Prezzo</th>
+                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Allergeni</th>
+                    <th className="px-6 py-3 text-right text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Azioni</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -680,15 +690,78 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
                   : 'border-l-4 border-l-emerald-400 bg-emerald-50/30';
                 return (
-                  <div key={menu.id} className={`rounded-lg border border-[var(--color-line)] overflow-hidden flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow ${cardAccent}`}>
-                      <div className="p-5 flex-1">
-                          <div className="mb-3">
-                              <h3 className="font-semibold text-[15px] text-[var(--color-fg)] leading-tight">{menu.name}</h3>
-                              {menu.description && (
-                                <p className="text-sm text-[var(--color-fg-muted)] line-clamp-2 mt-1">{menu.description}</p>
-                              )}
+                  <div key={menu.id} className={`rounded-lg border border-[var(--color-line)] flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow ${cardAccent}`}>
+                      <div className="p-4 flex-1">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                              <div className="min-w-0">
+                                  <h3 className="font-semibold text-[15px] text-[var(--color-fg)] leading-tight truncate">{menu.name}</h3>
+                                  {menu.description && (
+                                    <p className="text-xs text-[var(--color-fg-muted)] line-clamp-1 mt-0.5">{menu.description}</p>
+                                  )}
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                  <button
+                                      onClick={() => setViewBanquet(menu)}
+                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                                      title="Visualizza piatti"
+                                  >
+                                      <Eye className="h-4 w-4" />
+                                  </button>
+                                  {canManageBanquetPayments && (
+                                  <button
+                                      onClick={() => setPaymentsBanquet(menu)}
+                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 hover:text-emerald-600"
+                                      title="Pagamenti"
+                                  >
+                                      <Wallet className="h-4 w-4" />
+                                  </button>
+                                  )}
+                                  {canEdit && (
+                                  <div className="relative">
+                                      <button
+                                          type="button"
+                                          onClick={() => setCardMenuOpenId(cardMenuOpenId === menu.id ? null : menu.id)}
+                                          className="p-1.5 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                          aria-label="Altre azioni"
+                                      >
+                                          <MoreHorizontal className="h-4 w-4" />
+                                      </button>
+                                      {cardMenuOpenId === menu.id && (
+                                          <div
+                                              ref={cardMenuRef}
+                                              className="absolute right-0 top-full mt-1 w-40 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] py-1 z-30 animate-in fade-in slide-in-from-top-1 duration-100"
+                                          >
+                                              <button
+                                                  type="button"
+                                                  onClick={() => { setCardMenuOpenId(null); printBanquet(menu, dishes, { showPrice: canViewBanquetPrice }); }}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                              >
+                                                  <Printer className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                                                  Stampa / PDF
+                                              </button>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => { setCardMenuOpenId(null); handleEditBanquet(menu); }}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                              >
+                                                  <Edit2 className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                                                  Modifica
+                                              </button>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => { setCardMenuOpenId(null); setDeleteBanquetConfirm(menu); }}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+                                              >
+                                                  <Trash2 className="h-3.5 w-3.5" />
+                                                  Elimina
+                                              </button>
+                                          </div>
+                                      )}
+                                  </div>
+                                  )}
+                              </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-wrap mb-4">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
                               {menu.event_date && (
                                 <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full">
                                   <Calendar className="h-3 w-3" />
@@ -702,7 +775,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               )}
                               {menu.shift === Shift.DINNER && (
                                 <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full">
-                                  <Moon className="h-3 w-3" /> Cena
+                                  <Sunset className="h-3 w-3" /> Cena
                                 </span>
                               )}
                               {canManageBanquetPayments && (() => {
@@ -723,90 +796,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   </span>
                                 );
                               })()}
-                          </div>
-                          {canViewBanquetPrice && (
-                          <div className="mb-4 flex items-baseline gap-4 flex-wrap">
-                              <div>
-                                  <span className="text-2xl font-semibold text-[var(--color-fg)]">€{menu.price_per_person}</span>
-                                  <span className="text-[var(--color-fg-subtle)] text-sm"> / persona</span>
-                              </div>
-                              {menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
-                                  <div className="text-sm">
-                                      <span className="text-[var(--color-fg-subtle)]">Acconto: </span>
-                                      <span className="font-medium text-[var(--color-fg)]">€{Number(menu.deposit_amount).toFixed(2)}</span>
-                                  </div>
+                              {canViewBanquetPrice && (
+                                <span className="inline-flex items-center text-[11px] font-semibold text-[var(--color-fg)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full">
+                                  €{menu.price_per_person}/pax
+                                </span>
                               )}
                           </div>
-                          )}
-                          <div className="space-y-3">
-                              <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Composizione</p>
+                          <div className="text-xs text-[var(--color-fg-muted)]">
                               {menu.courses && menu.courses.length > 0 ? (
-                                <div className="space-y-2.5">
-                                  {menu.courses.map((course, idx) => (
-                                    <div key={idx}>
-                                      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-subtle)] mb-1">{course.name}</div>
-                                      <ul className="text-sm text-[var(--color-fg)] space-y-1">
-                                        {course.dish_ids.map(id => {
-                                          const dish = dishes.find(d => d.id === id);
-                                          return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
-                                        })}
-                                        {course.dish_ids.length === 0 && <li className="text-xs text-[var(--color-fg-subtle)] italic">Nessun piatto</li>}
-                                      </ul>
-                                    </div>
-                                  ))}
-                                </div>
+                                <span>{menu.courses.length} portate · {menu.courses.reduce((sum, c) => sum + c.dish_ids.length, 0)} piatti</span>
                               ) : (
-                                <ul className="text-sm text-[var(--color-fg)] space-y-1">
-                                    {menu.dish_ids.map(id => {
-                                        const dish = dishes.find(d => d.id === id);
-                                        return dish ? <li key={id} className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-[var(--color-fg-muted)]"/> {dish.name}</li> : null;
-                                    })}
-                                </ul>
+                                <span>{menu.dish_ids.length} piatti</span>
+                              )}
+                              {canViewBanquetPrice && menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
+                                <span> · Acconto €{Number(menu.deposit_amount).toFixed(2)}</span>
                               )}
                           </div>
-                      </div>
-                      <div className="px-3 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-end gap-1">
-                          <button
-                              onClick={() => setViewBanquet(menu)}
-                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                              title="Visualizza piatti"
-                          >
-                              <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                              onClick={() => printBanquet(menu, dishes, { showPrice: canViewBanquetPrice })}
-                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                              title="Stampa / Salva PDF / Condividi"
-                          >
-                              <Printer className="h-4 w-4" />
-                          </button>
-                          {canManageBanquetPayments && (
-                          <button
-                              onClick={() => setPaymentsBanquet(menu)}
-                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 hover:text-emerald-600"
-                              title="Pagamenti"
-                          >
-                              <Wallet className="h-4 w-4" />
-                          </button>
-                          )}
-                          {canEdit && (
-                          <>
-                          <button
-                              onClick={() => handleEditBanquet(menu)}
-                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                              title="Modifica"
-                          >
-                              <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                              onClick={() => setDeleteBanquetConfirm(menu)}
-                              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
-                              title="Elimina"
-                          >
-                              <Trash2 className="h-4 w-4" />
-                          </button>
-                          </>
-                          )}
                       </div>
                   </div>
                 );
@@ -839,7 +844,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             </div>
             <form onSubmit={handleAddDishSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome</label>
                 <input 
                   required
                   className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
@@ -849,7 +854,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo (€)</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo (€)</label>
                   <input 
                     type="number"
                     step="0.5"
@@ -860,7 +865,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria</label>
                   <select 
                     className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     value={newDish.category}
@@ -876,7 +881,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione</label>
                 <textarea
                   className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
                   value={newDish.description}
@@ -885,7 +890,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
 
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Foto <span className="text-slate-400 font-normal">— opzionale</span></label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Foto <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
                 <div className="flex gap-3 items-start">
                   <div className="flex-1 flex flex-col gap-2">
                     <input
@@ -946,7 +951,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
 
               <div>
-                 <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-2">Allergeni</label>
+                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-2">Allergeni</label>
                  <div className="flex flex-wrap gap-2">
                     {COMMON_ALLERGENS.map(allergen => {
                         const isSelected = newDish.allergens?.includes(allergen);
@@ -993,15 +998,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-2 sm:p-4">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-2 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeBanquetForm(); }}>
           <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-none overflow-hidden flex flex-col h-full">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
+            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
               <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h2>
+              <button onClick={closeBanquetForm} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                <X className="h-4 w-4" />
+              </button>
             </div>
             <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
                     <input
                         required
                         placeholder="es. Menu Matrimonio Gold"
@@ -1018,7 +1026,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                 </div>
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
                     <input
                         type="date"
                         required
@@ -1035,14 +1043,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                 </div>
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
-                    <div className="flex gap-1 p-0.5 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                    <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
                         <button
                             type="button"
                             onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
-                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
                                 newBanquet.shift === Shift.LUNCH
-                                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                     : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                             }`}
                         >
@@ -1051,19 +1059,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         <button
                             type="button"
                             onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
-                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
                                 newBanquet.shift === Shift.DINNER
-                                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                     : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                             }`}
                         >
-                            <Moon className="h-3.5 w-3.5" /> Cena
+                            <Sunset className="h-3.5 w-3.5" /> Cena
                         </button>
                     </div>
                 </div>
                 {canViewBanquetPrice && (
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€) <span className="text-rose-500">*</span></label>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€) <span className="text-rose-500">*</span></label>
                     <input
                         type="number"
                         required
@@ -1084,7 +1092,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 )}
                 {canViewBanquetPrice && (
                 <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-slate-400 font-normal">— opzionale</span></label>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
                     <input
                         type="number"
                         min="0"
@@ -1097,25 +1105,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
                 )}
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Numero Ospiti <span className="text-slate-400 font-normal">— opzionale</span></label>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Numero Ospiti <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
                     <input
                         type="number"
                         min="1"
                         step="1"
                         placeholder="es. 80"
-                        className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                         value={newBanquet.guests ?? ''}
                         onChange={e => setNewBanquet({...newBanquet, guests: e.target.value === '' ? undefined : parseInt(e.target.value, 10)})}
                     />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Cliente <span className="text-slate-400 font-normal">— opzionale</span></label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Cliente <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
                 {selectedBanquetCustomer ? (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3">
                     <div className="min-w-0">
-                      <div className="font-semibold text-slate-800 truncate">{selectedBanquetCustomer.name}</div>
-                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-slate-600">
+                      <div className="font-semibold text-[var(--color-fg)] text-sm truncate">{selectedBanquetCustomer.name}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
                         {selectedBanquetCustomer.phone && (
                           <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {selectedBanquetCustomer.phone}</span>
                         )}
@@ -1128,7 +1136,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                        className="px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 rounded-md"
+                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] rounded-md"
                       >
                         Cambia
                       </button>
@@ -1138,7 +1146,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           setSelectedBanquetCustomer(null);
                           setNewBanquet(prev => ({ ...prev, customer_id: null }));
                         }}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"
+                        className="p-1.5 text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 rounded-md"
                         title="Rimuovi cliente"
                       >
                         <X className="h-4 w-4" />
@@ -1149,7 +1157,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                   >
                     <BookUser className="h-4 w-4" />
                     Seleziona dalla rubrica
@@ -1157,7 +1165,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 )}
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                   Tavoli Assegnati <span className="text-slate-400 font-normal normal-case tracking-normal">— opzionale</span>
                 </label>
                 {!newBanquet.event_date || !newBanquet.shift ? (
@@ -1174,7 +1182,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       if (openRooms.length === 0) return null;
                       return (
                         <div>
-                          <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Sale</p>
+                          <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Sale</p>
                           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                             <button
                               type="button"
@@ -1215,7 +1223,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           if (roomTables.length === 0) return null;
                           return (
                             <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                              <h4 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
+                              <h4 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
                               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
                                 {roomTables.map(t => {
                                   const isSelected = (newBanquet.table_ids || []).includes(t.id);
@@ -1294,7 +1302,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 )}
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale</label>
                 <textarea
                   className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
                   value={newBanquet.description}
@@ -1304,28 +1312,28 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Portate <span className="text-slate-400 font-normal">— cucina</span></label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
                   <textarea
                     placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
-                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
                     value={newBanquet.notes_courses || ''}
                     onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Servizio <span className="text-slate-400 font-normal">— sala</span></label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
                   <textarea
                     placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
-                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
                     value={newBanquet.notes_service || ''}
                     onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Note Mise en Place</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Mise en Place</label>
                   <textarea
                     placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
-                    className="w-full rounded-lg border-slate-300 border p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
                     value={newBanquet.notes_mise_en_place || ''}
                     onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
                   />
@@ -1334,7 +1342,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-700">Composizione del Menu — Uscite</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)]">Composizione del Menu — Uscite</label>
                   <button
                     type="button"
                     onClick={addCourse}
@@ -1356,7 +1364,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               type="button"
                               onClick={() => moveCourse(courseIndex, -1)}
                               disabled={courseIndex === 0}
-                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-30 disabled:cursor-not-allowed"
                               title="Sposta su"
                             >
                               <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
@@ -1365,7 +1373,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               type="button"
                               onClick={() => moveCourse(courseIndex, 1)}
                               disabled={courseIndex === totalCourses - 1}
-                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-30 disabled:cursor-not-allowed"
                               title="Sposta giù"
                             >
                               <ChevronRight className="h-3.5 w-3.5 rotate-90" />
@@ -1397,7 +1405,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             if (categoryDishes.length === 0) return null;
                             return (
                               <div key={category}>
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-subtle)] mb-1.5">
+                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--color-fg-subtle)] mb-1.5">
                                   {category}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1434,7 +1442,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             if (orphan.length === 0) return null;
                             return (
                               <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-subtle)] mb-1.5">Altro</div>
+                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--color-fg-subtle)] mb-1.5">Altro</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                   {orphan.map(dish => {
                                     const checked = course.dish_ids.includes(dish.id);
@@ -1468,7 +1476,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         </div>
 
                         <div className="px-3 pb-3 pt-2 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
-                          <label className="block text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">
+                          <label className="block text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">
                             Note uscita (opzionale)
                           </label>
                           <textarea
@@ -1659,7 +1667,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
         </button>
       </div>
 
-      <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-[0.06em] mb-2">
+      <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] mb-2">
         {ITALIAN_WEEKDAYS.map(d => <div key={d} className="py-1">{d}</div>)}
       </div>
 
@@ -1739,7 +1747,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         )}
                         {menu.shift === Shift.DINNER && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full">
-                            <Moon className="h-3 w-3" /> Cena
+                            <Sunset className="h-3 w-3" /> Cena
                           </span>
                         )}
                         {canManageBanquetPayments && (() => {

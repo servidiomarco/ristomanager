@@ -179,25 +179,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   const content = (
     <>
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-          <div>
+        {isModal && (
+          <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
             <h2 className="text-[18px] sm:text-[20px] font-semibold text-[var(--color-fg)] tracking-tight">Gestione Utenti</h2>
-            {!isModal && (
-              <p className="text-xs sm:text-sm text-[var(--color-fg-muted)] mt-0.5">Crea, modifica e gestisci gli utenti del ristorante.</p>
-            )}
-          </div>
-          {isModal && (
             <button
               onClick={onClose}
               className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
             >
               <X className="h-4 w-4" />
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className={isModal ? "flex-1 overflow-y-auto px-5 py-4" : ""}>
           {/* Error */}
           {error && (
             <div className="mb-4 px-3 py-2 bg-rose-50 border border-rose-100 rounded-md text-rose-700 text-sm flex items-center gap-2">
@@ -209,13 +204,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           {/* Add/Edit Form */}
           {showAddForm && (
             <div className="mb-6 p-5 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-lg">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-4">
+              <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-4">
                 {editingUser ? 'Modifica Utente' : 'Nuovo Utente'}
               </h3>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Nome Completo
                     </label>
                     <input
@@ -227,7 +222,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Email
                     </label>
                     <input
@@ -239,7 +234,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Password {editingUser && <span className="normal-case tracking-normal text-[var(--color-fg-subtle)]">(lascia vuoto per mantenere)</span>}
                     </label>
                     <input
@@ -252,7 +247,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Ruolo
                     </label>
                     <select
@@ -384,7 +379,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
 
         {/* Footer */}
         {!showAddForm && (
-          <div className="px-5 py-3 border-t border-[var(--color-line)] flex justify-end">
+          <div className={isModal ? "px-5 py-3 border-t border-[var(--color-line)] flex justify-end" : "flex justify-end"}>
             <button
               onClick={() => setShowAddForm(true)}
               className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
@@ -406,10 +401,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           </div>
         </div>
       ) : (
-        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] overflow-hidden flex flex-col">
-            {content}
-          </div>
+        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          {content}
         </div>
       )}
 

@@ -162,7 +162,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
         <div className="px-5 py-4 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
           <div className="flex items-center gap-2 mb-3">
             <Filter className="w-3.5 h-3.5 text-[var(--color-fg-subtle)]" />
-            <span className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">Filtri</span>
+            <span className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Filtri</span>
             {(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate) && (
               <button
                 onClick={resetFilters}
@@ -263,25 +263,25 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
             <table className="w-full">
               <thead className="bg-[var(--color-surface-3)] sticky top-0">
                 <tr>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Data/Ora
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Utente
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Azione
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Risorsa
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Nome
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Dettagli
                   </th>
-                  <th className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.06em] font-semibold text-[var(--color-fg-subtle)]">
+                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
                     Stato
                   </th>
                 </tr>

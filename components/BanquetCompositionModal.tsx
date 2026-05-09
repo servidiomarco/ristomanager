@@ -49,12 +49,12 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 </span>
               )}
               {banquet.shift === Shift.LUNCH && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
                   <Sun className="h-3 w-3" /> Pranzo
                 </span>
               )}
               {banquet.shift === Shift.DINNER && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
                   <Moon className="h-3 w-3" /> Cena
                 </span>
               )}
@@ -97,7 +97,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <h3 className="text-xs font-semibold tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
               <Utensils className="h-3.5 w-3.5" />
               Composizione del menù
             </h3>
@@ -173,25 +173,25 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
           {/* Notes */}
           {(banquet.notes_courses || banquet.notes_service || banquet.notes_mise_en_place) && (
             <div className="space-y-2 pt-2 border-t border-slate-100">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
                 <StickyNote className="h-3.5 w-3.5" />
                 Note operative
               </h3>
               {banquet.notes_courses && (
                 <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Portate (Cucina)</h4>
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Portate (Cucina)</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_courses}</p>
                 </div>
               )}
               {banquet.notes_service && (
                 <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Servizio (Sala)</h4>
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Servizio (Sala)</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_service}</p>
                 </div>
               )}
               {banquet.notes_mise_en_place && (
                 <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1">Mise en Place</h4>
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Mise en Place</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_mise_en_place}</p>
                 </div>
               )}

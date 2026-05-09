@@ -69,7 +69,7 @@ export const PushNotificationsCard: React.FC = () => {
 
     return (
         <div className="mb-8">
-            <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Notifiche</h3>
+            <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Notifiche</h3>
             <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">

@@ -790,7 +790,7 @@ const App: React.FC = () => {
 
         <nav className={`flex-1 py-5 space-y-0.5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
           {!sidebarCollapsed && (
-            <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+            <div className="px-3 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
               Operatività
             </div>
           )}
@@ -832,7 +832,7 @@ const App: React.FC = () => {
           )}
 
           {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers()) && !sidebarCollapsed && (
-            <div className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+            <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
               Gestione
             </div>
           )}
@@ -874,7 +874,7 @@ const App: React.FC = () => {
           )}
 
           {canAccessView(ViewState.SETTINGS) && !sidebarCollapsed && (
-            <div className="px-3 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+            <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
               Sistema
             </div>
           )}
@@ -1297,10 +1297,7 @@ const App: React.FC = () => {
 
         {view === ViewState.SETTINGS && (
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
-            <div className="mb-8">
-              <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">Impostazioni</h2>
-              <p className="text-sm text-[var(--color-fg-muted)] mt-0.5">Configurazione account, integrazioni, amministrazione.</p>
-            </div>
+            <div className="mb-2" />
 
             {/* Profile / Personal preferences */}
             <div className="mb-8">
@@ -1350,7 +1347,7 @@ const App: React.FC = () => {
             {/* Admin Section */}
             {canManageUsers() && (
               <div className="mb-8">
-                <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Amministrazione</h3>
+                <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Amministrazione</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
                     onClick={() => setView(ViewState.USERS)}
@@ -1388,7 +1385,7 @@ const App: React.FC = () => {
             {/* Monitoring Section */}
             {canViewLogs() && (
               <div className="mb-8">
-                <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Monitoraggio</h3>
+                <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Monitoraggio</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
                     onClick={() => setShowActivityLogs(true)}
@@ -1411,7 +1408,7 @@ const App: React.FC = () => {
 
             {/* Integrations */}
             <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Integrazioni</h3>
+              <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Integrazioni</h3>
               <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">

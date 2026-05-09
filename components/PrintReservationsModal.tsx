@@ -111,7 +111,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
           <div className="px-5 py-4 overflow-y-auto flex-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
                   type="date"
                   value={printDate}
@@ -120,7 +120,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 />
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
                 <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full w-full">
                   {(['ALL', Shift.LUNCH, Shift.DINNER] as const).map(s => (
                     <button
@@ -137,7 +137,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Sala</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Sala</label>
                 <select
                   value={printRoomId === 'ALL' ? 'ALL' : String(printRoomId)}
                   onChange={(e) => setPrintRoomId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
@@ -150,7 +150,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 </select>
               </div>
               <div>
-                <label className="block text-[12px] uppercase tracking-[0.06em] font-medium text-[var(--color-fg-subtle)] mb-1">Stato arrivo</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Stato arrivo</label>
                 <select
                   value={printArrival}
                   onChange={(e) => setPrintArrival(e.target.value as ArrivalStatus | 'ALL')}
@@ -175,7 +175,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
             </label>
 
             <div className="border-t border-[var(--color-line)] pt-4">
-              <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Anteprima</p>
+              <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Anteprima</p>
               <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md p-3 text-sm space-y-1">
                 <p className="font-semibold text-[var(--color-fg)] capitalize">{formatPrintDate(printDate)}</p>
                 <p className="text-[var(--color-fg-muted)]">{shiftLabel} · {roomLabel}</p>
