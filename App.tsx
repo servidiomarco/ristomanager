@@ -1191,6 +1191,7 @@ const App: React.FC = () => {
             banquetMenus={banquetMenus}
             onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
             onNavigateToReservations={() => setView(ViewState.RESERVATIONS)}
+            onNavigateToInventario={() => setView(ViewState.INVENTARIO)}
           />
         )}
 

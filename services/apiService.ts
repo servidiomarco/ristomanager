@@ -459,6 +459,21 @@ export const getInventoryStock = async (area?: InventoryArea): Promise<Inventory
   return apiRequest<InventoryStockRow[]>(url, { headers: getHeaders(false) });
 };
 
+export interface LowStockItem {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  unit: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  total_quantity: number;
+}
+
+export const getLowStockInventory = async (area?: InventoryArea): Promise<{ threshold: number; items: LowStockItem[] }> => {
+  const url = area ? `${API_URL}/inventory/low-stock?area=${area}` : `${API_URL}/inventory/low-stock`;
+  return apiRequest<{ threshold: number; items: LowStockItem[] }>(url, { headers: getHeaders(false) });
+};
+
 export const postInventoryMovement = async (move: {
   product_id: number;
   location_id: number;

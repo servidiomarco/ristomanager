@@ -136,17 +136,26 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
     return m;
   }, [stock]);
 
+  // Sum across all locations — used for the low-stock indicator regardless
+  // of which location filter is active.
+  const totalQuantityFor = (productId: number): number => {
+    let total = 0;
+    for (const loc of locations) {
+      total += stockMap.get(stockKey(productId, loc.id)) ?? 0;
+    }
+    return total;
+  };
+
+  const LOW_STOCK_THRESHOLD = 5;
+  const isLowStock = (productId: number): boolean => totalQuantityFor(productId) <= LOW_STOCK_THRESHOLD;
+
   // For a product, the quantity in the active location, or the total across
   // all locations when "Totale" is selected.
   const quantityFor = (productId: number): number => {
     if (activeLocationId != null) {
       return stockMap.get(stockKey(productId, activeLocationId)) ?? 0;
     }
-    let total = 0;
-    for (const loc of locations) {
-      total += stockMap.get(stockKey(productId, loc.id)) ?? 0;
-    }
-    return total;
+    return totalQuantityFor(productId);
   };
 
   // Per-product breakdown across locations — used in the Totale view as a
@@ -561,14 +570,21 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
             const breakdown = isTotale ? breakdownFor(p.id) : [];
             const key = activeLocationId != null ? stockKey(p.id, activeLocationId) : '';
             const isPending = key && pendingKeys.has(key);
+            const lowStock = isLowStock(p.id);
             return (
               <div
                 key={p.id}
-                className={`flex items-center gap-3 p-3 sm:p-4 ${idx > 0 ? 'border-t border-[var(--color-line)]' : ''}`}
+                className={`flex items-center gap-3 p-3 sm:p-4 ${idx > 0 ? 'border-t border-[var(--color-line)]' : ''} ${lowStock ? 'bg-red-50 dark:bg-red-950/20' : ''}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">{p.name}</span>
+                    <span className={`font-medium text-[14px] truncate ${lowStock ? 'text-red-700 dark:text-red-300' : 'text-[var(--color-fg)]'}`}>{p.name}</span>
+                    {lowStock && (
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-full px-2 py-0.5">
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        Scorta bassa
+                      </span>
+                    )}
                     {p.unit && (
                       <span className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)]">{p.unit}</span>
                     )}
@@ -633,7 +649,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                   </div>
                 ) : (
                   <div className="text-right">
-                    <div className="font-semibold tabular-nums text-[15px] text-[var(--color-fg)]">{qty}</div>
+                    <div className={`font-semibold tabular-nums text-[15px] ${lowStock ? 'text-red-700 dark:text-red-300' : 'text-[var(--color-fg)]'}`}>{qty}</div>
                     {p.unit && <div className="text-[11px] text-[var(--color-fg-subtle)] uppercase">{p.unit}</div>}
                   </div>
                 )}

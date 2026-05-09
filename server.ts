@@ -1653,6 +1653,8 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
 
 const ALLOWED_INVENTORY_AREAS = new Set(['CUCINA', 'SALA', 'BAR']);
 const ALLOWED_MOVEMENT_REASONS = new Set(['CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO']);
+const LOW_STOCK_THRESHOLD = 5;
+const LOW_STOCK_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'KITCHEN'];
 
 // GET /inventory/locations?area=CUCINA — all locations, optionally filtered.
 app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
@@ -2091,6 +2093,41 @@ app.get('/inventory/stock', authenticate, requirePermission('inventory:view'), a
     }
 });
 
+// GET /inventory/low-stock?area=CUCINA — products whose total quantity across
+// all locations is at or below LOW_STOCK_THRESHOLD. Includes products with no
+// stock rows at all (treated as 0).
+app.get('/inventory/low-stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [LOW_STOCK_THRESHOLD];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $2';
+        }
+        const result = await queryWithRetry(
+            `SELECT p.id, p.area, p.name, p.unit, p.category_id,
+                    c.name AS category_name,
+                    COALESCE(SUM(s.quantity), 0)::float AS total_quantity
+             FROM inventory_products p
+             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             LEFT JOIN inventory_stock s     ON s.product_id = p.id
+             ${where}
+             GROUP BY p.id, c.name
+             HAVING COALESCE(SUM(s.quantity), 0) <= $1
+             ORDER BY total_quantity ASC, p.name`,
+            params
+        );
+        res.json({ threshold: LOW_STOCK_THRESHOLD, items: result.rows });
+    } catch (err) {
+        console.error('GET /inventory/low-stock error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // POST /inventory/movements — apply a delta to (product, location).
 // delta > 0 = carico, delta < 0 = scarico. The stock row is upserted in a
 // transaction so concurrent +/- never lose updates.
@@ -2115,7 +2152,7 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
 
         // Make sure product and location exist and belong to the same area.
         const validation = await client.query(
-            `SELECT p.area AS p_area, l.area AS l_area, p.name AS p_name, l.name AS l_name
+            `SELECT p.area AS p_area, l.area AS l_area, p.name AS p_name, l.name AS l_name, p.unit AS p_unit
              FROM inventory_products p, inventory_locations l
              WHERE p.id = $1 AND l.id = $2`,
             [productId, locationId]
@@ -2129,6 +2166,15 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Product and location must belong to the same area' });
         }
+
+        // Snapshot the total stock before the update so we can detect a
+        // threshold-crossing once the delta lands.
+        const totalBeforeRes = await client.query(
+            `SELECT COALESCE(SUM(quantity), 0)::float AS total
+             FROM inventory_stock WHERE product_id = $1`,
+            [productId]
+        );
+        const totalBefore: number = totalBeforeRes.rows[0]?.total ?? 0;
 
         // Upsert the stock row. Negative results are allowed so carico/scarico
         // never silently fails — the UI surfaces a warning when total < 0.
@@ -2166,6 +2212,22 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
                 movement.rows[0].id, `${v.p_name} @ ${v.l_name}`,
                 { delta: deltaNum, reason }
             );
+        }
+
+        // Push alert when this movement crosses the low-stock threshold.
+        const totalAfter = totalBefore + deltaNum;
+        if (totalBefore > LOW_STOCK_THRESHOLD && totalAfter <= LOW_STOCK_THRESHOLD) {
+            const unit = v.p_unit ? ` ${v.p_unit}` : '';
+            const qtyText = Number.isInteger(totalAfter) ? String(totalAfter) : totalAfter.toFixed(1);
+            pushSendToRoles(
+                LOW_STOCK_ALERT_ROLES,
+                {
+                    title: 'Scorta bassa',
+                    body: `${v.p_name}: ${qtyText}${unit} rimanenti`,
+                    url: '/?view=INVENTARIO',
+                    tag: `low-stock-${productId}`,
+                }
+            ).catch(err => console.error('Push (low stock) failed:', err));
         }
 
         res.status(201).json({

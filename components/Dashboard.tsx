@@ -3,6 +3,7 @@ import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPri
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { getLowStockInventory, LowStockItem } from '../services/apiService';
 import { printShoppingList, shareShoppingListWhatsApp } from '../utils/printShoppingList';
 import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
@@ -90,6 +91,7 @@ interface DashboardProps {
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
   onNavigateToReservations: () => void;
+  onNavigateToInventario: () => void;
 }
 
 // Shopping List Labels and Colors
@@ -155,7 +157,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -218,6 +220,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     assignedToTeam: undefined as UserRole | undefined,
   });
 
+  // Low-stock inventory state
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
+  const [lowStockLoading, setLowStockLoading] = useState(true);
+
   // Shopping List State
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
   const [shoppingLoading, setShoppingLoading] = useState(true);
@@ -248,6 +254,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       console.error('Error fetching shopping items:', error);
     } finally {
       setShoppingLoading(false);
+    }
+  }, []);
+
+  // Fetch low-stock items across all inventory areas
+  const fetchLowStock = useCallback(async () => {
+    try {
+      setLowStockLoading(true);
+      const { items } = await getLowStockInventory();
+      setLowStockItems(items);
+    } catch (error) {
+      console.error('Error fetching low stock:', error);
+    } finally {
+      setLowStockLoading(false);
     }
   }, []);
 
@@ -512,6 +531,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   useEffect(() => {
     fetchShopping();
   }, [fetchShopping]);
+
+  useEffect(() => {
+    fetchLowStock();
+  }, [fetchLowStock]);
 
   // Fetch staff when selectedDate changes
   useEffect(() => {
@@ -1586,8 +1609,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
 
-      {/* Row 3: Attività + Spesa del giorno */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+      {/* Row 3: Attività + Spesa del giorno + Sotto Scorta */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
         <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
@@ -1932,6 +1955,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 );
               })
+            )}
+          </div>
+        </div>
+
+        {/* Sotto Scorta (Low Stock) */}
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Sotto Scorta</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">
+                {lowStockLoading ? 'Caricamento…' : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} ≤ 5`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onNavigateToInventario}
+              className="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+              title="Vai all'inventario"
+            >
+              Apri
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-1.5">
+            {lowStockLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
+              </div>
+            ) : lowStockItems.length === 0 ? (
+              <div className="py-8 text-center">
+                <Package className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Tutte le scorte sono in regola</p>
+              </div>
+            ) : (
+              lowStockItems.map(item => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md bg-rose-50 dark:bg-red-950/20 border border-rose-100 dark:border-red-900/40"
+                >
+                  <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-rose-700 dark:text-rose-300 truncate">{item.name}</div>
+                    {(item.category_name || item.area) && (
+                      <div className="text-[11px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70 truncate">
+                        {[item.area, item.category_name].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-sm font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                      {Number.isInteger(item.total_quantity) ? item.total_quantity : item.total_quantity.toFixed(1)}
+                    </div>
+                    {item.unit && (
+                      <div className="text-[10px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70">{item.unit}</div>
+                    )}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
