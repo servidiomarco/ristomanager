@@ -7,13 +7,13 @@
 --   psql "$DATABASE_URL" -f scripts/import-inventory-cucina.sql
 --
 -- Note:
---   - "GNOCCHI" è presente sia in PRIMI sia in CELIACO. Per consentirlo, lo
+--   - "Gnocchi" è presente sia in Primi sia in Celiaco. Per consentirlo, lo
 --     script migra il vincolo UNIQUE su inventory_products da (area, name) a
 --     (area, COALESCE(category_id, 0), name): stesso nome in categorie diverse
 --     OK, ma unico all'interno della stessa categoria.
 --   - Le quantità a 0 non vengono inserite in inventory_stock (default 0).
---   - SUCCO DI LIMONE: TOTALE=0 nel CSV ma C1=4. Si è seguita la cella.
---   - PANE GRATTUGGIATO: "0'" in C3 (typo); interpretato come 0.
+--   - Succo di limone: TOTALE=0 nel CSV ma C1=4. Si è seguita la cella.
+--   - Pane grattuggiato: "0'" in C3 (typo); interpretato come 0.
 
 BEGIN;
 
@@ -30,13 +30,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_products_area_cat_name
 -- CATEGORIE
 -- ============================================
 INSERT INTO inventory_categories (area, name, sort_order) VALUES
-    ('CUCINA', 'ANTIPASTI', 0),
-    ('CUCINA', 'PRIMI',     1),
-    ('CUCINA', 'SECONDI',   2),
-    ('CUCINA', 'CELIACO',   3),
-    ('CUCINA', 'VERDURE',   4),
-    ('CUCINA', 'VARIE',     5),
-    ('CUCINA', 'DOLCI',     6)
+    ('CUCINA', 'Antipasti', 0),
+    ('CUCINA', 'Primi',     1),
+    ('CUCINA', 'Secondi',   2),
+    ('CUCINA', 'Celiaco',   3),
+    ('CUCINA', 'Verdure',   4),
+    ('CUCINA', 'Varie',     5),
+    ('CUCINA', 'Dolci',     6)
 ON CONFLICT (area, name) DO NOTHING;
 
 -- ============================================
@@ -52,128 +52,128 @@ ON CONFLICT (area, name) DO NOTHING;
 -- PRODOTTI
 -- ============================================
 INSERT INTO inventory_products (area, name, unit, category_id) VALUES
-    -- ANTIPASTI
-    ('CUCINA', 'POLPETTE DI MELANZANE',     'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='ANTIPASTI')),
-    ('CUCINA', 'MEDAGLIONI DI PATATE',      'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='ANTIPASTI')),
-    ('CUCINA', 'POLENTA STICK',             'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='ANTIPASTI')),
-    ('CUCINA', 'COTOLETTE VITELLO',         'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='ANTIPASTI')),
-    ('CUCINA', 'COTOLETTE POLLO',           'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='ANTIPASTI')),
-    -- PRIMI
-    ('CUCINA', 'GNOCCHI',                   'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'GNOCCO DI ZUCCA',           'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'RAGU ALLA BOLOGNESE',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'LASAGNE',                   'teglie',        (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'PASTA AL FORNO',            'teglie',        (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'SALSA ZINGARA',             'buste da 1kg',  (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    ('CUCINA', 'ZINGARA BIANCA',            'buste da 1kg',  (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='PRIMI')),
-    -- SECONDI
-    ('CUCINA', 'REALE ANGUS',               NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'COSTINE AGNELLO TAGLIATE',  'cartoni',       (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'LOMBATA AGNELLO',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'SALSICCE POLLO',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'STINCHI VITELLO',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'STINCHI MAIALE',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'SALSICCIA',                 NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'COSTINE MAIALE',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'CAPOCOLLO MAIALE',          NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'BRASATO',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'FILETTO',                   'kg',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'TESTA FILETTO',             'kg',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'DOPPIETTE',                 NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'PETTO DI POLLO',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'PORCINI',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'OVULI',                     NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    ('CUCINA', 'POLLO A PEZZI',             NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='SECONDI')),
-    -- CELIACO
-    ('CUCINA', 'GNOCCHI',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='CELIACO')),
-    ('CUCINA', 'POLPETTE',                  NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='CELIACO')),
-    ('CUCINA', 'MEDAGLIONI',                NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='CELIACO')),
-    -- VERDURE
-    ('CUCINA', 'BROCCOLO MOLLO',            'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'BROCCOLO MARR',             'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'CICORIA NOSTRANA',          'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'CICORIA MARR',              'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'VERDURE PASTELLATE',        'cartoni',       (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'OLIVE ALL''ASCOLANA',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'CIME DI RAPA',              'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'CAVOLFIORE',                'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'CECI',                      'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    ('CUCINA', 'PEPERONCINO FRESCO',        'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VERDURE')),
-    -- VARIE
-    ('CUCINA', 'PANE AMMOLLATO',            'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VARIE')),
-    ('CUCINA', 'PANE GRATTUGGIATO',         'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VARIE')),
-    ('CUCINA', 'FORMAGGIO PER PIZZA',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VARIE')),
-    ('CUCINA', 'SUCCO DI LIMONE',           'litri',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VARIE')),
-    ('CUCINA', 'PUNTILLAS',                 'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='VARIE')),
-    -- DOLCI
-    ('CUCINA', 'TARTUFI EVENTI',            'PZ',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='DOLCI')),
-    ('CUCINA', 'TIRAMISU',                  NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='DOLCI')),
-    ('CUCINA', 'TIRAMISU PISTACCHIO',       NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='DOLCI')),
-    ('CUCINA', 'SORBETTO LIMONE',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='DOLCI')),
-    ('CUCINA', 'SORBETTO CEDRO',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='DOLCI'))
+    -- Antipasti
+    ('CUCINA', 'Polpette di melanzane',     'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Antipasti')),
+    ('CUCINA', 'Medaglioni di patate',      'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Antipasti')),
+    ('CUCINA', 'Polenta stick',             'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Antipasti')),
+    ('CUCINA', 'Cotolette vitello',         'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Antipasti')),
+    ('CUCINA', 'Cotolette pollo',           'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Antipasti')),
+    -- Primi
+    ('CUCINA', 'Gnocchi',                   'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Gnocco di zucca',           'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Ragu alla bolognese',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Lasagne',                   'teglie',        (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Pasta al forno',            'teglie',        (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Salsa zingara',             'buste da 1kg',  (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    ('CUCINA', 'Zingara bianca',            'buste da 1kg',  (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Primi')),
+    -- Secondi
+    ('CUCINA', 'Reale angus',               NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Costine agnello tagliate',  'cartoni',       (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Lombata agnello',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Salsicce pollo',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Stinchi vitello',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Stinchi maiale',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Salsiccia',                 NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Costine maiale',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Capocollo maiale',          NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Brasato',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Filetto',                   'kg',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Testa filetto',             'kg',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Doppiette',                 NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Petto di pollo',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Porcini',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Ovuli',                     NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    ('CUCINA', 'Pollo a pezzi',             NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Secondi')),
+    -- Celiaco
+    ('CUCINA', 'Gnocchi',                   NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Celiaco')),
+    ('CUCINA', 'Polpette',                  NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Celiaco')),
+    ('CUCINA', 'Medaglioni',                NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Celiaco')),
+    -- Verdure
+    ('CUCINA', 'Broccolo mollo',            'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Broccolo marr',             'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Cicoria nostrana',          'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Cicoria marr',              'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Verdure pastellate',        'cartoni',       (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Olive all''ascolana',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Cime di rapa',              'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Cavolfiore',                'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Ceci',                      'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    ('CUCINA', 'Peperoncino fresco',        'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Verdure')),
+    -- Varie
+    ('CUCINA', 'Pane ammollato',            'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Varie')),
+    ('CUCINA', 'Pane grattuggiato',         'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Varie')),
+    ('CUCINA', 'Formaggio per pizza',       'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Varie')),
+    ('CUCINA', 'Succo di limone',           'litri',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Varie')),
+    ('CUCINA', 'Puntillas',                 'buste',         (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Varie')),
+    -- Dolci
+    ('CUCINA', 'Tartufi eventi',            'PZ',            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Dolci')),
+    ('CUCINA', 'Tiramisu',                  NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Dolci')),
+    ('CUCINA', 'Tiramisu pistacchio',       NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Dolci')),
+    ('CUCINA', 'Sorbetto limone',           NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Dolci')),
+    ('CUCINA', 'Sorbetto cedro',            NULL,            (SELECT id FROM inventory_categories WHERE area='CUCINA' AND name='Dolci'))
 ON CONFLICT (area, (COALESCE(category_id, 0)), name) DO UPDATE
     SET unit = EXCLUDED.unit;
 
 -- ============================================
 -- STOCK (solo quantità non-zero — il default è 0)
--- I lookup di GNOCCHI sono qualificati per categoria perché esiste sia in
--- PRIMI sia in CELIACO.
+-- I lookup di Gnocchi sono qualificati per categoria perché esiste sia in
+-- Primi sia in Celiaco.
 -- ============================================
 INSERT INTO inventory_stock (product_id, location_id, quantity) VALUES
-    -- ANTIPASTI
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='POLPETTE DI MELANZANE'),    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 23),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='POLPETTE DI MELANZANE'),    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 35),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='MEDAGLIONI DI PATATE'),     (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 39),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='POLENTA STICK'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 14),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='COTOLETTE VITELLO'),        (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  9),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='COTOLETTE POLLO'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  6),
-    -- PRIMI
-    ((SELECT p.id FROM inventory_products p JOIN inventory_categories c ON c.id = p.category_id WHERE p.area='CUCINA' AND p.name='GNOCCHI' AND c.name='PRIMI'),
+    -- Antipasti
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Polpette di melanzane'),    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 23),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Polpette di melanzane'),    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 35),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Medaglioni di patate'),     (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 39),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Polenta stick'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 14),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Cotolette vitello'),        (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  9),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Cotolette pollo'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  6),
+    -- Primi
+    ((SELECT p.id FROM inventory_products p JOIN inventory_categories c ON c.id = p.category_id WHERE p.area='CUCINA' AND p.name='Gnocchi' AND c.name='Primi'),
                                                                                                   (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 73),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='GNOCCO DI ZUCCA'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  4),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='RAGU ALLA BOLOGNESE'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  6),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='LASAGNE'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  1),
-    -- SECONDI
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='REALE ANGUS'),              (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='COSTINE AGNELLO TAGLIATE'), (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2.5),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='LOMBATA AGNELLO'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='SALSICCE POLLO'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='STINCHI VITELLO'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 11),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='STINCHI MAIALE'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='SALSICCIA'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='COSTINE MAIALE'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='CAPOCOLLO MAIALE'),         (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='BRASATO'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='FILETTO'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 755),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='TESTA FILETTO'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 160),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='DOPPIETTE'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  7),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PETTO DI POLLO'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 10),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PORCINI'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='OVULI'),                    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  1),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='POLLO A PEZZI'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
-    -- CELIACO
-    ((SELECT p.id FROM inventory_products p JOIN inventory_categories c ON c.id = p.category_id WHERE p.area='CUCINA' AND p.name='GNOCCHI' AND c.name='CELIACO'),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Gnocco di zucca'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  4),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Ragu alla bolognese'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  6),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Lasagne'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  1),
+    -- Secondi
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Reale angus'),              (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Costine agnello tagliate'), (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2.5),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Lombata agnello'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Salsicce pollo'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Stinchi vitello'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 11),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Stinchi maiale'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Salsiccia'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Costine maiale'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Capocollo maiale'),         (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Brasato'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Filetto'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 755),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Testa filetto'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 160),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Doppiette'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  7),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Petto di pollo'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'), 10),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Porcini'),                  (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Ovuli'),                    (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  1),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Pollo a pezzi'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
+    -- Celiaco
+    ((SELECT p.id FROM inventory_products p JOIN inventory_categories c ON c.id = p.category_id WHERE p.area='CUCINA' AND p.name='Gnocchi' AND c.name='Celiaco'),
                                                                                                   (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='MEDAGLIONI'),               (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  7),
-    -- VERDURE
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='BROCCOLO MOLLO'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 29),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='BROCCOLO MOLLO'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 133),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='BROCCOLO MARR'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='CICORIA NOSTRANA'),         (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 73),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='CICORIA MARR'),             (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='VERDURE PASTELLATE'),       (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  4),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='OLIVE ALL''ASCOLANA'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='CAVOLFIORE'),               (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='CECI'),                     (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  4),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PEPERONCINO FRESCO'),       (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
-    -- VARIE
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PANE AMMOLLATO'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PANE GRATTUGGIATO'),        (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  9),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='FORMAGGIO PER PIZZA'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  2),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='SUCCO DI LIMONE'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='PUNTILLAS'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
-    -- DOLCI
-    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='TARTUFI EVENTI'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 40)
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Medaglioni'),               (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  7),
+    -- Verdure
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Broccolo mollo'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'), 29),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Broccolo mollo'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 133),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Broccolo marr'),            (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Cicoria nostrana'),         (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 73),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Cicoria marr'),             (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Verdure pastellate'),       (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  4),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Olive all''ascolana'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  1),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Cavolfiore'),               (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Ceci'),                     (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  4),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Peperoncino fresco'),       (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  3),
+    -- Varie
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Pane ammollato'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Pane grattuggiato'),        (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  9),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Formaggio per pizza'),      (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 2'),  2),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Succo di limone'),          (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  4),
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Puntillas'),                (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 1'),  2),
+    -- Dolci
+    ((SELECT id FROM inventory_products WHERE area='CUCINA' AND name='Tartufi eventi'),           (SELECT id FROM inventory_locations WHERE area='CUCINA' AND name='Cella 3'), 40)
 ON CONFLICT (product_id, location_id) DO UPDATE
     SET quantity   = EXCLUDED.quantity,
         updated_at = CURRENT_TIMESTAMP;
