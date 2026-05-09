@@ -322,7 +322,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 banquet_menu_id INTEGER REFERENCES banquet_menus(id),
                 enable_reminder BOOLEAN DEFAULT true,
                 reminder_sent BOOLEAN DEFAULT false,
-                arrival_status VARCHAR(50) DEFAULT 'WAITING'
+                arrival_status VARCHAR(50) DEFAULT 'WAITING',
+                reservation_status VARCHAR(50) DEFAULT 'CONFIRMED'
             );
         `);
 
@@ -335,6 +336,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     WHERE table_name = 'reservations' AND column_name = 'arrival_status'
                 ) THEN
                     ALTER TABLE reservations ADD COLUMN arrival_status VARCHAR(50) DEFAULT 'WAITING';
+                END IF;
+            END $$;
+        `);
+
+        // Add reservation_status column to existing tables if it doesn't exist
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'reservations' AND column_name = 'reservation_status'
+                ) THEN
+                    ALTER TABLE reservations ADD COLUMN reservation_status VARCHAR(50) DEFAULT 'CONFIRMED';
                 END IF;
             END $$;
         `);

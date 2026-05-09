@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -276,6 +276,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Inline customer autocomplete (name & phone fields in the reservation form)
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
   const [activeSuggestField, setActiveSuggestField] = useState<'name' | 'phone' | null>(null);
+  const [matchedCustomerNoShows, setMatchedCustomerNoShows] = useState<number>(0);
   // Tracks which value we last queried for, so the dropdown closes on selection
   // (we set this to the just-selected name/phone to skip re-querying for it).
   const lastSuggestQueryRef = useRef<string>('');
@@ -324,6 +325,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; clearTimeout(handle); };
   }, [activeSuggestField, formData.customer_name, formData.phone]);
 
+  // Auto-detect exact phone match against fetched suggestions, so the no-show
+  // warning surfaces even when the user types/pastes a known number directly.
+  useEffect(() => {
+    const digits = (s: string | null | undefined) => (s || '').replace(/\D/g, '');
+    const typedPhone = digits(formData.phone);
+    if (typedPhone.length < 6 || customerSuggestions.length === 0) return;
+    const exact = customerSuggestions.find(c => digits(c.phone) === typedPhone);
+    if (exact && (exact.no_show_count || 0) > 0) {
+      setMatchedCustomerNoShows(exact.no_show_count || 0);
+    }
+  }, [customerSuggestions, formData.phone]);
+
   const applyCustomerSuggestion = (c: Customer) => {
     lastSuggestQueryRef.current = activeSuggestField === 'phone' ? (c.phone || '') : c.name;
     setFormData(prev => ({
@@ -332,6 +345,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       phone: c.phone || prev.phone || '',
       email: c.email || prev.email || '',
     }));
+    setMatchedCustomerNoShows(c.no_show_count || 0);
     setActiveSuggestField(null);
     setCustomerSuggestions([]);
   };
@@ -663,6 +677,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
   };
 
+  const handleToggleNoShow = (res: Reservation) => {
+      const isNoShow = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
+      if (isNoShow) {
+          onUpdateReservation({ ...res, reservation_status: ReservationStatus.CONFIRMED });
+          showToast(`No-show rimosso per ${toTitleCase(res.customer_name)}`, 'success');
+      } else {
+          onUpdateReservation({
+              ...res,
+              reservation_status: ReservationStatus.NO_SHOW,
+              arrival_status: ArrivalStatus.WAITING,
+          });
+          showToast(`${toTitleCase(res.customer_name)} segnato come no-show`, 'success');
+      }
+  };
+
   // Voice input handler
   const handleVoiceInput = async () => {
     if (!isVoiceSupported()) {
@@ -802,6 +831,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setShowAllergensSection(false);
       setShowNotesSection(false);
       setModalRoomFilter('ALL');
+      setMatchedCustomerNoShows(0);
       setIsEditing(false);
       setIsFormOpen(true);
 
@@ -1684,8 +1714,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               const table = displayTables.find(t => t.id === res.table_id);
               const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
               const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+              const isNoShow = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
               const isDeparted = arrivalStatus === ArrivalStatus.DEPARTED;
-              const cardOpacity = isDeparted ? 'opacity-60' : '';
+              const cardOpacity = (isDeparted || isNoShow) ? 'opacity-60' : '';
               const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
 
               const minutesLate = getMinutesLate(res.reservation_time);
@@ -1694,9 +1725,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   : resIsToday && minutesLate >= 15 ? 'text-amber-600'
                   : '';
 
-              const circleBg = isDeparted
-                  ? 'bg-slate-400'
-                  : arrivalStatus === ArrivalStatus.ARRIVED ? 'bg-orange-500' : 'bg-emerald-600';
+              const circleBg = isNoShow
+                  ? 'bg-rose-500'
+                  : isDeparted
+                      ? 'bg-slate-400'
+                      : arrivalStatus === ArrivalStatus.ARRIVED ? 'bg-orange-500' : 'bg-emerald-600';
 
               return (
                         <div key={res.id} className={`relative bg-[var(--color-surface)] p-3.5 rounded-xl border border-[var(--color-line)] ${cardOpacity} hover:border-[var(--color-fg-subtle)] transition-colors`}>
@@ -1793,8 +1826,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
 
                             {/* Badges + notes/allergens */}
-                            {(isDeparted || res.payment_status !== PaymentStatus.PENDING || menu || res.notes) && (
+                            {(isNoShow || isDeparted || res.payment_status !== PaymentStatus.PENDING || menu || res.notes) && (
                                 <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                    {isNoShow && (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
+                                            <UserX className="h-2.5 w-2.5" />
+                                            NO SHOW
+                                        </span>
+                                    )}
                                     {isDeparted && (
                                         <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]">
                                             LIBERATO
@@ -1838,30 +1877,54 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Actions: arrival + free table — always visible */}
                             {canEdit && (
                                 <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[var(--color-line)]">
-                                    <button
-                                        onClick={() => handleToggleArrivalStatus(res)}
-                                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                                            isDeparted
-                                                ? 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                                                : arrivalStatus === ArrivalStatus.ARRIVED
-                                                    ? 'text-orange-700 bg-orange-50 hover:bg-orange-100'
-                                                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                                        }`}
-                                        title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                    >
-                                        <UserCheck className="h-4 w-4" />
-                                        {isDeparted ? 'Riapri' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                    </button>
-
-                                    {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                                    {isNoShow ? (
                                         <button
-                                            onClick={() => handleFreeTable(res)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                            title="Libera tavolo (fine pasto)"
+                                            onClick={() => handleToggleNoShow(res)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 transition-colors"
+                                            title="Annulla no-show e riapri prenotazione"
                                         >
-                                            <LogOut className="h-4 w-4" />
-                                            Libera
+                                            <RotateCcw className="h-4 w-4" />
+                                            Annulla no-show
                                         </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                onClick={() => handleToggleArrivalStatus(res)}
+                                                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                                                    isDeparted
+                                                        ? 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                                                        : arrivalStatus === ArrivalStatus.ARRIVED
+                                                            ? 'text-orange-700 bg-orange-50 hover:bg-orange-100'
+                                                            : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                                                }`}
+                                                title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                            >
+                                                <UserCheck className="h-4 w-4" />
+                                                {isDeparted ? 'Riapri' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
+                                            </button>
+
+                                            {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                                                <button
+                                                    onClick={() => handleFreeTable(res)}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                    title="Libera tavolo (fine pasto)"
+                                                >
+                                                    <LogOut className="h-4 w-4" />
+                                                    Libera
+                                                </button>
+                                            )}
+
+                                            {arrivalStatus !== ArrivalStatus.ARRIVED && !isDeparted && (
+                                                <button
+                                                    onClick={() => handleToggleNoShow(res)}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors ml-auto"
+                                                    title="Cliente non presentato"
+                                                >
+                                                    <UserX className="h-4 w-4" />
+                                                    No show
+                                                </button>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             )}
@@ -2309,6 +2372,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
+                    {matchedCustomerNoShows > 0 && (
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
+                            <UserX className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-rose-900">
+                                    Attenzione: cliente con {matchedCustomerNoShows} no-show
+                                </p>
+                                <p className="text-xs text-rose-700 mt-0.5">
+                                    Questo cliente non si è presentato {matchedCustomerNoShows === 1 ? 'una volta' : `${matchedCustomerNoShows} volte`} in passato.
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     {!isEditing && draftBanner && (
                         <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
                             <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -2358,6 +2434,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             value={formData.customer_name}
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
                                                 setFormData({...formData, customer_name: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('name')}
@@ -2375,7 +2452,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             onClick={() => applyCustomerSuggestion(c)}
                                                             className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
                                                         >
-                                                            <div className="text-sm font-medium text-[var(--color-fg)]">{c.name}</div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
                                                                 {c.phone && <span>{c.phone}</span>}
                                                                 {c.email && <span className="truncate">{c.email}</span>}
@@ -2428,6 +2513,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             value={formData.phone || ''}
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
                                                 setFormData({...formData, phone: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('phone')}
@@ -2445,7 +2531,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             onClick={() => applyCustomerSuggestion(c)}
                                                             className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
                                                         >
-                                                            <div className="text-sm font-medium text-[var(--color-fg)]">{c.name}</div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
                                                                 {c.phone && <span>{c.phone}</span>}
                                                                 {c.email && <span className="truncate">{c.email}</span>}

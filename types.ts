@@ -139,6 +139,11 @@ export enum ArrivalStatus {
   DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
 }
 
+export enum ReservationStatus {
+  CONFIRMED = 'CONFIRMED',  // Default — booking is on
+  NO_SHOW = 'NO_SHOW'       // Customer did not show up
+}
+
 export interface Reservation {
   id: number;
   customer_name: string;
@@ -156,6 +161,7 @@ export interface Reservation {
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
+  reservation_status?: ReservationStatus;
   created_by_user_id?: number | null;
   created_by_user_name?: string | null;
 }
@@ -202,6 +208,7 @@ export interface Customer {
   notes?: string | null;
   created_at?: string;
   updated_at?: string;
+  no_show_count?: number;
 }
 
 // ============================================

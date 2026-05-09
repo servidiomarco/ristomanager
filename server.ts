@@ -234,7 +234,7 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
@@ -250,8 +250,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, created_by_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name
@@ -268,6 +268,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 phone ?? null,
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
+                reservation_status ?? 'CONFIRMED',
                 req.user?.userId ?? null,
             ]
         );
@@ -337,7 +338,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
@@ -354,8 +355,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const result = await queryWithRetry(
             `WITH upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10
-                WHERE id = $11
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10, reservation_status = $11
+                WHERE id = $12
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name
@@ -372,6 +373,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 phone ?? null,
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
+                reservation_status ?? 'CONFIRMED',
                 id,
             ]
         );
@@ -387,7 +389,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ResourceType.RESERVATION,
                 parseInt(id, 10),
                 customer_name,
-                { guests, reservation_time, shift, payment_status, arrival_status }
+                { guests, reservation_time, shift, payment_status, arrival_status, reservation_status }
             );
         }
 
@@ -1469,11 +1471,21 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
     try {
         const { q, limit } = req.query as { q?: string; limit?: string };
         const cap = Math.min(Math.max(parseInt(limit || '500', 10) || 500, 1), 1000);
+        // Sub-select counts past NO_SHOW reservations matching this customer's phone.
+        // Phone is required on rubrica records, so this is the reliable identifier.
+        const noShowSubquery = `(
+            SELECT COUNT(*)::int
+            FROM reservations r
+            WHERE r.reservation_status = 'NO_SHOW'
+              AND r.phone IS NOT NULL
+              AND REGEXP_REPLACE(r.phone, '\\D', '', 'g') = REGEXP_REPLACE(c.phone, '\\D', '', 'g')
+        ) AS no_show_count`;
         if (q && q.trim()) {
             const term = `%${q.trim().toLowerCase()}%`;
             const result = await queryWithRetry(
-                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
-                 FROM customers
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                        ${noShowSubquery}
+                 FROM customers c
                  WHERE phone IS NOT NULL AND TRIM(phone) <> ''
                    AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
                  ORDER BY name
@@ -1483,8 +1495,9 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             return res.json(result.rows);
         }
         const result = await queryWithRetry(
-            `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
-             FROM customers
+            `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                    ${noShowSubquery}
+             FROM customers c
              WHERE phone IS NOT NULL AND TRIM(phone) <> ''
              ORDER BY name
              LIMIT $1`,
