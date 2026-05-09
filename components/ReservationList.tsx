@@ -1129,20 +1129,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         table.name.toLowerCase().includes(trimmedSearch)
       ));
 
-      // Responsive table sizes - smaller on mobile and tablets
-      const baseSize = window.innerWidth < 768 ? 50 : 100; // 50px on mobile/tablet, 100px on desktop
-      const baseWidth = window.innerWidth < 768 ? 65 : 120; // For rectangles
+      // Uniform table sizes on the map. The seat count is shown inside the
+      // card, so we don't need to scale rectangles by capacity.
+      const baseSize = window.innerWidth < 768 ? 50 : 100;
 
       let widthPx: number;
       let heightPx: number;
       let borderRadius: string;
       if (table.shape === TableShape.CIRCLE) {
           widthPx = baseSize; heightPx = baseSize; borderRadius = '50%';
-      } else if (table.shape === TableShape.SQUARE) {
-          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       } else {
-          widthPx = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 9 : 18));
-          heightPx = baseSize; borderRadius = '8px';
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       }
 
       // Anchor the reservation pill below the rotated bounding box so it
@@ -1769,20 +1766,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const PADDING = 80;
           const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
           const baseSize = isMobile ? 50 : 100;
-          const baseWidth = isMobile ? 65 : 120;
-          const seatMultiplier = isMobile ? 9 : 18;
           let maxRight = 0;
           let maxBottom = 0;
           for (const t of tablesInRoom) {
-              let w: number, h: number;
-              if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) {
-                  w = baseSize; h = baseSize;
-              } else {
-                  w = Math.max(baseWidth, t.seats * seatMultiplier);
-                  h = baseSize;
-              }
-              maxRight = Math.max(maxRight, t.x + w);
-              maxBottom = Math.max(maxBottom, t.y + h);
+              maxRight = Math.max(maxRight, t.x + baseSize);
+              maxBottom = Math.max(maxBottom, t.y + baseSize);
           }
           const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
           const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
