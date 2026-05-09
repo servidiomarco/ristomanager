@@ -1773,8 +1773,8 @@ app.delete('/inventory/locations/:id', authenticate, requirePermission('inventor
     }
 });
 
-// GET /inventory/products?area=CUCINA
-app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
+// ----- Categories CRUD -----
+app.get('/inventory/categories', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
         const params: any[] = [];
@@ -1787,10 +1787,130 @@ app.get('/inventory/products', authenticate, requirePermission('inventory:view')
             where = 'WHERE area = $1';
         }
         const result = await queryWithRetry(
-            `SELECT id, area, name, unit, notes, created_at
-             FROM inventory_products
+            `SELECT id, area, name, sort_order, created_at
+             FROM inventory_categories
              ${where}
-             ORDER BY area, name`,
+             ORDER BY area, sort_order, name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/categories', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, sort_order } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO inventory_categories (area, name, sort_order)
+             VALUES ($1, $2, $3)
+             RETURNING id, area, name, sort_order, created_at`,
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_CATEGORY,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Category with this name already exists in the area' });
+        }
+        console.error('POST /inventory/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/categories/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, sort_order } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE inventory_categories
+             SET name = $1, sort_order = $2
+             WHERE id = $3
+             RETURNING id, area, name, sort_order, created_at`,
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_CATEGORY,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Category with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/categories/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/categories/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_categories WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        // ON DELETE SET NULL on inventory_products.category_id keeps products
+        // alive but unassigned.
+        await queryWithRetry('DELETE FROM inventory_categories WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_CATEGORY,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/categories/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/products?area=CUCINA
+app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT p.id, p.area, p.name, p.unit, p.notes, p.category_id, c.name AS category_name, p.created_at
+             FROM inventory_products p
+             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             ${where}
+             ORDER BY p.area, p.name`,
             params
         );
         res.json(result.rows);
@@ -1802,22 +1922,43 @@ app.get('/inventory/products', authenticate, requirePermission('inventory:view')
 
 app.post('/inventory/products', authenticate, requirePermission('inventory:full'), async (req, res) => {
     try {
-        const { area, name, unit, notes } = req.body;
+        const { area, name, unit, notes, category_id } = req.body;
         if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
             return res.status(400).json({ error: 'Invalid area' });
         }
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
+        // Validate category_id belongs to the same area, if provided.
+        let validCategoryId: number | null = null;
+        if (category_id != null && category_id !== '') {
+            const catCheck = await queryWithRetry(
+                'SELECT area FROM inventory_categories WHERE id = $1',
+                [category_id]
+            );
+            if (catCheck.rowCount === 0) {
+                return res.status(400).json({ error: 'Invalid category' });
+            }
+            if (catCheck.rows[0].area !== area) {
+                return res.status(400).json({ error: 'Category belongs to a different area' });
+            }
+            validCategoryId = Number(category_id);
+        }
         const result = await queryWithRetry(
-            `INSERT INTO inventory_products (area, name, unit, notes)
-             VALUES ($1, $2, $3, $4)
-             RETURNING id, area, name, unit, notes, created_at`,
+            `WITH inserted AS (
+               INSERT INTO inventory_products (area, name, unit, notes, category_id)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id, area, name, unit, notes, category_id, created_at
+             )
+             SELECT i.*, c.name AS category_name
+             FROM inserted i
+             LEFT JOIN inventory_categories c ON c.id = i.category_id`,
             [
                 area,
                 String(name).trim(),
                 unit ? String(unit).trim() : null,
                 notes ? String(notes).trim() : null,
+                validCategoryId,
             ]
         );
         const created = result.rows[0];
@@ -1841,25 +1982,47 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
 app.put('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, unit, notes } = req.body;
+        const { name, unit, notes, category_id } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
+        // Look up product area to validate category_id stays in the same area.
+        const prod = await queryWithRetry('SELECT area FROM inventory_products WHERE id = $1', [id]);
+        if (prod.rowCount === 0) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        let validCategoryId: number | null = null;
+        if (category_id != null && category_id !== '') {
+            const catCheck = await queryWithRetry(
+                'SELECT area FROM inventory_categories WHERE id = $1',
+                [category_id]
+            );
+            if (catCheck.rowCount === 0) {
+                return res.status(400).json({ error: 'Invalid category' });
+            }
+            if (catCheck.rows[0].area !== prod.rows[0].area) {
+                return res.status(400).json({ error: 'Category belongs to a different area' });
+            }
+            validCategoryId = Number(category_id);
+        }
         const result = await queryWithRetry(
-            `UPDATE inventory_products
-             SET name = $1, unit = $2, notes = $3
-             WHERE id = $4
-             RETURNING id, area, name, unit, notes, created_at`,
+            `WITH updated AS (
+               UPDATE inventory_products
+               SET name = $1, unit = $2, notes = $3, category_id = $4
+               WHERE id = $5
+               RETURNING id, area, name, unit, notes, category_id, created_at
+             )
+             SELECT u.*, c.name AS category_name
+             FROM updated u
+             LEFT JOIN inventory_categories c ON c.id = u.category_id`,
             [
                 String(name).trim(),
                 unit ? String(unit).trim() : null,
                 notes ? String(notes).trim() : null,
+                validCategoryId,
                 id,
             ]
         );
-        if (result.rowCount === 0) {
-            return res.status(404).json({ error: 'Product not found' });
-        }
         const updated = result.rows[0];
         if (req.user) {
             LogService.logActivity(

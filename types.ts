@@ -415,6 +415,16 @@ export interface InventoryLocation {
   created_at?: string;
 }
 
+// A category groups products within an area (e.g. "Verdure", "Pesce" for CUCINA).
+// Categories are user-managed and optional.
+export interface InventoryCategory {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+}
+
 // A product belongs to one area (CUCINA / SALA / BAR) but its quantity is
 // distributed across that area's locations.
 export interface InventoryProduct {
@@ -423,6 +433,8 @@ export interface InventoryProduct {
   name: string;
   unit?: string | null;
   notes?: string | null;
+  category_id?: number | null;
+  category_name?: string | null;
   created_at?: string;
 }
 

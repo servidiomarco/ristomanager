@@ -5,23 +5,28 @@ import {
   InventoryProduct,
   InventoryStockRow,
   InventoryMovementReason,
+  InventoryCategory,
 } from '../types';
 import {
   getInventoryLocations,
   getInventoryProducts,
   getInventoryStock,
+  getInventoryCategories,
   createInventoryLocation,
   updateInventoryLocation,
   deleteInventoryLocation,
   createInventoryProduct,
   updateInventoryProduct,
   deleteInventoryProduct,
+  createInventoryCategory,
+  updateInventoryCategory,
+  deleteInventoryCategory,
   postInventoryMovement,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Loader2, Plus, Minus, Pencil, Trash2, X, Settings, Boxes,
-  ChefHat, Wine, GlassWater, AlertTriangle,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag,
 } from 'lucide-react';
 
 interface Props {
@@ -54,8 +59,12 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [stock, setStock] = useState<InventoryStockRow[]>([]);
+  const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Category filter — null = all, -1 = "Senza categoria", number = category id
+  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
 
   // Locations modal
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
@@ -64,10 +73,17 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
   const [editingLocationName, setEditingLocationName] = useState('');
   const [confirmDeleteLocationId, setConfirmDeleteLocationId] = useState<number | null>(null);
 
+  // Categories modal
+  const [categoriesModalOpen, setCategoriesModalOpen] = useState(false);
+  const [categoryDraftName, setCategoryDraftName] = useState('');
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [confirmDeleteCategoryId, setConfirmDeleteCategoryId] = useState<number | null>(null);
+
   // Product create/edit modal
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [productEditing, setProductEditing] = useState<InventoryProduct | null>(null);
-  const [productForm, setProductForm] = useState<{ name: string; unit: string; notes: string }>({ name: '', unit: '', notes: '' });
+  const [productForm, setProductForm] = useState<{ name: string; unit: string; notes: string; category_id: number | null }>({ name: '', unit: '', notes: '', category_id: null });
   const [confirmDeleteProductId, setConfirmDeleteProductId] = useState<number | null>(null);
 
   // Per-row pending state for the +/- stepper buttons so the user gets immediate
@@ -85,12 +101,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
       getInventoryLocations(activeArea),
       getInventoryProducts(activeArea),
       getInventoryStock(activeArea),
+      getInventoryCategories(activeArea),
     ])
-      .then(([locs, prods, st]) => {
+      .then(([locs, prods, st, cats]) => {
         if (cancelled) return;
         setLocations(locs);
         setProducts(prods);
         setStock(st);
+        setCategories(cats);
+        setCategoryFilter(null);
         // If the previously active location is gone (or we changed area), reset
         // to Totale so the UI doesn't show an empty grid.
         setActiveLocationId(prev => {
@@ -140,9 +159,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(p => p.name.toLowerCase().includes(q));
-  }, [products, search]);
+    let list = products;
+    if (categoryFilter === -1) {
+      list = list.filter(p => p.category_id == null);
+    } else if (categoryFilter != null) {
+      list = list.filter(p => p.category_id === categoryFilter);
+    }
+    if (q) list = list.filter(p => p.name.toLowerCase().includes(q));
+    return list;
+  }, [products, search, categoryFilter]);
 
   const applyMovement = async (productId: number, locationId: number, delta: number, reason: InventoryMovementReason) => {
     const key = stockKey(productId, locationId);
@@ -173,7 +198,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
   const handleStep = (productId: number, sign: 1 | -1) => {
     if (activeLocationId == null) {
-      showToast('Seleziona una cella per modificare le quantità', 'info');
+      showToast("Seleziona un'area per modificare le quantità", 'info');
       return;
     }
     const reason = sign > 0 ? InventoryMovementReason.CARICO : InventoryMovementReason.SCARICO;
@@ -204,9 +229,9 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
       });
       setLocations(prev => [...prev, created]);
       setLocationDraftName('');
-      showToast('Cella creata', 'success');
+      showToast('Area creata', 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore creazione cella', 'error');
+      showToast(err?.message || 'Errore creazione area', 'error');
     }
   };
 
@@ -221,9 +246,9 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
       setLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
       setEditingLocationId(null);
       setEditingLocationName('');
-      showToast('Cella aggiornata', 'success');
+      showToast('Area aggiornata', 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore aggiornamento cella', 'error');
+      showToast(err?.message || 'Errore aggiornamento area', 'error');
     }
   };
 
@@ -234,22 +259,80 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
       setStock(prev => prev.filter(s => s.location_id !== id));
       if (activeLocationId === id) setActiveLocationId(null);
       setConfirmDeleteLocationId(null);
-      showToast('Cella eliminata', 'success');
+      showToast('Area eliminata', 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione cella', 'error');
+      showToast(err?.message || 'Errore eliminazione area', 'error');
       setConfirmDeleteLocationId(null);
+    }
+  };
+
+  // ---------- Categories modal handlers ----------
+  const handleAddCategory = async () => {
+    if (!categoryDraftName.trim()) return;
+    try {
+      const created = await createInventoryCategory({
+        area: activeArea,
+        name: categoryDraftName.trim(),
+        sort_order: categories.length,
+      });
+      setCategories(prev => [...prev, created]);
+      setCategoryDraftName('');
+      showToast('Categoria creata', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore creazione categoria', 'error');
+    }
+  };
+
+  const handleSaveCategoryEdit = async () => {
+    if (editingCategoryId == null || !editingCategoryName.trim()) return;
+    try {
+      const sortOrder = categories.find(c => c.id === editingCategoryId)?.sort_order ?? 0;
+      const updated = await updateInventoryCategory(editingCategoryId, {
+        name: editingCategoryName.trim(),
+        sort_order: sortOrder,
+      });
+      setCategories(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+      // Refresh products' category_name in-place where they referenced this category.
+      setProducts(prev => prev.map(p => p.category_id === updated.id ? { ...p, category_name: updated.name } : p));
+      setEditingCategoryId(null);
+      setEditingCategoryName('');
+      showToast('Categoria aggiornata', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore aggiornamento categoria', 'error');
+    }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    try {
+      await deleteInventoryCategory(id);
+      setCategories(prev => prev.filter(c => c.id !== id));
+      // Products keep existing — backend ON DELETE SET NULL clears their FK.
+      setProducts(prev => prev.map(p => p.category_id === id ? { ...p, category_id: null, category_name: null } : p));
+      if (categoryFilter === id) setCategoryFilter(null);
+      setConfirmDeleteCategoryId(null);
+      showToast('Categoria eliminata', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore eliminazione categoria', 'error');
+      setConfirmDeleteCategoryId(null);
     }
   };
 
   // ---------- Product modal handlers ----------
   const openCreateProduct = () => {
     setProductEditing(null);
-    setProductForm({ name: '', unit: '', notes: '' });
+    // Pre-select the currently filtered category, if any, for fast bulk-add.
+    const presetCategory = (categoryFilter != null && categoryFilter !== -1) ? categoryFilter : null;
+    setProductForm({ name: '', unit: '', notes: '', category_id: presetCategory });
     setProductModalOpen(true);
   };
   const openEditProduct = (p: InventoryProduct) => {
     setProductEditing(p);
-    setProductForm({ name: p.name, unit: p.unit || '', notes: p.notes || '' });
+    setProductForm({
+      name: p.name,
+      unit: p.unit || '',
+      notes: p.notes || '',
+      category_id: p.category_id ?? null,
+    });
     setProductModalOpen(true);
   };
 
@@ -265,6 +348,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           name,
           unit: productForm.unit.trim() || null,
           notes: productForm.notes.trim() || null,
+          category_id: productForm.category_id,
         });
         setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)));
         showToast('Prodotto aggiornato', 'success');
@@ -274,6 +358,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           name,
           unit: productForm.unit.trim() || null,
           notes: productForm.notes.trim() || null,
+          category_id: productForm.category_id,
         });
         setProducts(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
         showToast('Prodotto creato', 'success');
@@ -331,7 +416,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
         ))}
       </div>
 
-      {/* Location tabs (always show "Totale", then each location, then "Gestisci celle") */}
+      {/* Location tabs (always show "Totale", then each location, then management buttons) */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setActiveLocationId(null)}
@@ -357,16 +442,68 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           </button>
         ))}
         {canEdit && (
-          <button
-            onClick={() => setLocationsModalOpen(true)}
-            className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg)]"
-            title="Gestisci celle"
-          >
-            <Settings className="h-4 w-4" />
-            Gestisci celle
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setCategoriesModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg)]"
+              title="Gestione categorie"
+            >
+              <Tag className="h-4 w-4" />
+              Gestione categorie
+            </button>
+            <button
+              onClick={() => setLocationsModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg)]"
+              title="Gestione aree"
+            >
+              <Settings className="h-4 w-4" />
+              Gestione aree
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Category filter pills — always shows "Tutte"; "Senza categoria" appears
+          only if there's at least one uncategorized product. */}
+      {(categories.length > 0 || products.some(p => p.category_id == null)) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setCategoryFilter(null)}
+            className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+              categoryFilter === null
+                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+            }`}
+          >
+            Tutte
+          </button>
+          {categories.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setCategoryFilter(cat.id)}
+              className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+                categoryFilter === cat.id
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+              }`}
+            >
+              {cat.name}
+            </button>
+          ))}
+          {products.some(p => p.category_id == null) && (
+            <button
+              onClick={() => setCategoryFilter(-1)}
+              className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+                categoryFilter === -1
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+              }`}
+            >
+              Senza categoria
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Search + add product */}
       <div className="mb-4 flex flex-col sm:flex-row gap-2">
@@ -434,6 +571,12 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                     <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">{p.name}</span>
                     {p.unit && (
                       <span className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)]">{p.unit}</span>
+                    )}
+                    {p.category_name && (
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-2 py-0.5">
+                        <Tag className="h-2.5 w-2.5" />
+                        {p.category_name}
+                      </span>
                     )}
                   </div>
                   {isTotale && breakdown.length > 0 && (
@@ -524,7 +667,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setLocationsModalOpen(false)}>
           <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Celle / Posizioni — {AREA_LABEL[activeArea]}</h3>
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aree — {AREA_LABEL[activeArea]}</h3>
               <button onClick={() => setLocationsModalOpen(false)} className="p-1 hover:bg-[var(--color-surface-hover)] rounded">
                 <X className="h-5 w-5 text-[var(--color-fg-muted)]" />
               </button>
@@ -532,7 +675,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
             <div className="p-4 space-y-3">
               {locations.length === 0 && (
                 <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
-                  Nessuna cella. Aggiungine una qui sotto.
+                  Nessuna area. Aggiungine una qui sotto.
                 </div>
               )}
               {locations.map(loc => (
@@ -575,7 +718,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                   value={locationDraftName}
                   onChange={(e) => setLocationDraftName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddLocation(); }}
-                  placeholder="Nome cella (es. Cella 1)"
+                  placeholder="Nome area (es. Area 1)"
                   className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
                 />
                 <button
@@ -591,13 +734,102 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
         </div>
       )}
 
+      {/* ----- Categories modal ----- */}
+      {categoriesModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCategoriesModalOpen(false)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Categorie — {AREA_LABEL[activeArea]}</h3>
+              <button onClick={() => setCategoriesModalOpen(false)} className="p-1 hover:bg-[var(--color-surface-hover)] rounded">
+                <X className="h-5 w-5 text-[var(--color-fg-muted)]" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {categories.length === 0 && (
+                <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
+                  Nessuna categoria. Aggiungine una qui sotto.
+                </div>
+              )}
+              {categories.map(cat => (
+                <div key={cat.id} className="flex items-center gap-2">
+                  {editingCategoryId === cat.id ? (
+                    <>
+                      <input
+                        type="text"
+                        value={editingCategoryName}
+                        onChange={(e) => setEditingCategoryName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCategoryEdit(); }}
+                        className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
+                        autoFocus
+                      />
+                      <button onClick={handleSaveCategoryEdit} className="px-3 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium">Salva</button>
+                      <button onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 text-[14px] text-[var(--color-fg)]">{cat.name}</span>
+                      <button
+                        onClick={() => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name); }}
+                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteCategoryId(cat.id)}
+                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-[var(--color-surface-hover)]"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              <div className="pt-3 border-t border-[var(--color-line)] flex items-center gap-2">
+                <input
+                  type="text"
+                  value={categoryDraftName}
+                  onChange={(e) => setCategoryDraftName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
+                  placeholder="Nome categoria (es. Verdure)"
+                  className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
+                />
+                <button
+                  onClick={handleAddCategory}
+                  disabled={!categoryDraftName.trim()}
+                  className="px-4 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4 inline" /> Aggiungi
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----- Confirm delete category ----- */}
+      {confirmDeleteCategoryId != null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
+            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare la categoria?</h4>
+            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
+              I prodotti associati resteranno, ma diventeranno "Senza categoria".
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDeleteCategoryId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
+              <button onClick={() => handleDeleteCategory(confirmDeleteCategoryId)} className="px-3 py-2 rounded-md bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700">Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ----- Confirm delete location ----- */}
       {confirmDeleteLocationId != null && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
           <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare la cella?</h4>
+            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare l'area?</h4>
             <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              Tutte le quantità in questa cella verranno cancellate. L'azione non è reversibile.
+              Tutte le quantità in quest'area verranno cancellate. L'azione non è reversibile.
             </p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmDeleteLocationId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
@@ -642,6 +874,24 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                 />
               </div>
               <div>
+                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Categoria</label>
+                <select
+                  value={productForm.category_id ?? ''}
+                  onChange={(e) => setProductForm(f => ({ ...f, category_id: e.target.value ? Number(e.target.value) : null }))}
+                  className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
+                >
+                  <option value="">Senza categoria</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {categories.length === 0 && (
+                  <p className="text-[11px] text-[var(--color-fg-muted)] mt-1">
+                    Nessuna categoria. Aggiungine una da "Gestione categorie".
+                  </p>
+                )}
+              </div>
+              <div>
                 <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Note</label>
                 <textarea
                   value={productForm.notes}
@@ -665,7 +915,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
             <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il prodotto?</h4>
             <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              Verrà rimosso dall'inventario in tutte le celle. L'azione non è reversibile.
+              Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
             </p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmDeleteProductId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>

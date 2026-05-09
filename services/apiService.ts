@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -398,12 +398,40 @@ export const deleteInventoryLocation = async (id: number): Promise<void> => {
   }, false);
 };
 
+export const getInventoryCategories = async (area?: InventoryArea): Promise<InventoryCategory[]> => {
+  const url = area ? `${API_URL}/inventory/categories?area=${area}` : `${API_URL}/inventory/categories`;
+  return apiRequest<InventoryCategory[]>(url, { headers: getHeaders(false) });
+};
+
+export const createInventoryCategory = async (cat: { area: InventoryArea; name: string; sort_order?: number }): Promise<InventoryCategory> => {
+  return apiRequest<InventoryCategory>(`${API_URL}/inventory/categories`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(cat),
+  });
+};
+
+export const updateInventoryCategory = async (id: number, cat: { name: string; sort_order?: number }): Promise<InventoryCategory> => {
+  return apiRequest<InventoryCategory>(`${API_URL}/inventory/categories/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(cat),
+  });
+};
+
+export const deleteInventoryCategory = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/inventory/categories/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
 export const getInventoryProducts = async (area?: InventoryArea): Promise<InventoryProduct[]> => {
   const url = area ? `${API_URL}/inventory/products?area=${area}` : `${API_URL}/inventory/products`;
   return apiRequest<InventoryProduct[]>(url, { headers: getHeaders(false) });
 };
 
-export const createInventoryProduct = async (prod: { area: InventoryArea; name: string; unit?: string | null; notes?: string | null }): Promise<InventoryProduct> => {
+export const createInventoryProduct = async (prod: { area: InventoryArea; name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
   return apiRequest<InventoryProduct>(`${API_URL}/inventory/products`, {
     method: 'POST',
     headers: getHeaders(),
@@ -411,7 +439,7 @@ export const createInventoryProduct = async (prod: { area: InventoryArea; name: 
   });
 };
 
-export const updateInventoryProduct = async (id: number, prod: { name: string; unit?: string | null; notes?: string | null }): Promise<InventoryProduct> => {
+export const updateInventoryProduct = async (id: number, prod: { name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
   return apiRequest<InventoryProduct>(`${API_URL}/inventory/products/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
