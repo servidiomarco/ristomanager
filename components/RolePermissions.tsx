@@ -173,15 +173,15 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           ) : (
             <>
               {/* Role Tabs */}
-              <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full mb-6">
+              <div className="inline-flex items-center p-1 gap-0.5 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full mb-6">
                 {roles.map(role => (
                   <button
                     key={role}
                     onClick={() => setSelectedRole(role)}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                       selectedRole === role
-                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
-                        : 'text-[var(--color-fg-muted)]'
+                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                     }`}
                   >
                     {ROLE_LABELS[role]}

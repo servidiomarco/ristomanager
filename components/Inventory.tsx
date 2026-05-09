@@ -478,7 +478,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setCategoryFilter(null)}
-            className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+            className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
               categoryFilter === null
                 ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
                 : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
@@ -490,7 +490,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
             <button
               key={cat.id}
               onClick={() => setCategoryFilter(cat.id)}
-              className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+              className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
                 categoryFilter === cat.id
                   ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
                   : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
@@ -502,7 +502,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           {products.some(p => p.category_id == null) && (
             <button
               onClick={() => setCategoryFilter(-1)}
-              className={`px-3 py-1 rounded-full text-[12px] font-medium border transition-colors ${
+              className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
                 categoryFilter === -1
                   ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
                   : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'

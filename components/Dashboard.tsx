@@ -1138,8 +1138,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
 
               {/* Separate time chip — always shows live current time */}
-              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2">
-                <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 py-2.5">
+                <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                 <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
                   {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                 </span>
@@ -1149,13 +1149,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
                 {([
                   { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
-                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
-                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
+                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
                 ] as const).map(opt => (
                   <button
                     key={opt.key}
                     onClick={() => setGlobalShiftFilter(opt.key)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex-1 md:flex-none ${
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
                       globalShiftFilter === opt.key
                         ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                         : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'

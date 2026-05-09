@@ -503,13 +503,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <div className="flex gap-2 overflow-x-auto scrollbar-hide">
           <button
               onClick={() => setActiveTab('BANQUETS')}
-              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'BANQUETS' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+              className={`px-4 py-2.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'BANQUETS' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
           >
               Menu Banchetti
           </button>
           <button
               onClick={() => setActiveTab('DISHES')}
-              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'DISHES' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+              className={`px-4 py-2.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'DISHES' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
           >
               Piatti alla Carta
           </button>
@@ -518,15 +518,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 self-start sm:self-auto flex-shrink-0">
             <button
               onClick={() => setBanquetView('LIST')}
-              className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${banquetView === 'LIST' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${banquetView === 'LIST' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
             >
-              <ListIcon className="h-3.5 w-3.5" /> Lista
+              <ListIcon className="h-4 w-4" /> Lista
             </button>
             <button
               onClick={() => setBanquetView('CALENDAR')}
-              className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${banquetView === 'CALENDAR' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${banquetView === 'CALENDAR' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
             >
-              <Calendar className="h-3.5 w-3.5" /> Calendario
+              <Calendar className="h-4 w-4" /> Calendario
             </button>
           </div>
         )}
@@ -540,7 +540,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => setCategoryFilter(null)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                    className={`px-4 py-2.5 rounded-full text-sm font-medium border transition ${
                       categoryFilter === null
                         ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
                         : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
@@ -556,7 +556,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         key={cat}
                         type="button"
                         onClick={() => setCategoryFilter(isActive ? null : cat)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                        className={`px-4 py-2.5 rounded-full text-sm font-medium border transition ${
                           isActive
                             ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
                             : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
@@ -1048,24 +1048,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         <button
                             type="button"
                             onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                                 newBanquet.shift === Shift.LUNCH
                                     ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                     : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                             }`}
                         >
-                            <Sun className="h-3.5 w-3.5" /> Pranzo
+                            <Sun className="h-4 w-4" /> Pranzo
                         </button>
                         <button
                             type="button"
                             onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                                 newBanquet.shift === Shift.DINNER
                                     ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                     : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                             }`}
                         >
-                            <Sunset className="h-3.5 w-3.5" /> Cena
+                            <Sunset className="h-4 w-4" /> Cena
                         </button>
                     </div>
                 </div>

@@ -854,19 +854,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
           <button
             onClick={() => setSelectedShift(Shift.LUNCH)}
-            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
               selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Sun className="h-3.5 w-3.5" /> Pranzo
+            <Sun className="h-4 w-4" /> Pranzo
           </button>
           <button
             onClick={() => setSelectedShift(Shift.DINNER)}
-            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
               selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Sunset className="h-3.5 w-3.5" /> Cena
+            <Sunset className="h-4 w-4" /> Cena
           </button>
         </div>
         <span className="text-xs text-[var(--color-fg-subtle)] hidden sm:inline">
@@ -898,7 +898,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`rounded-full px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium transition whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+              className={`rounded-full px-4 py-2.5 text-sm font-medium transition whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
                   ? room.is_closed
                     ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
@@ -909,7 +909,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }`}
               title={room.is_closed ? `${room.name} (Chiusa)` : room.name}
             >
-              {room.is_closed && <DoorClosed size={12} />}
+              {room.is_closed && <DoorClosed size={14} />}
               {room.name}
             </button>
           ))}
