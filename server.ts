@@ -287,6 +287,15 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             );
         }
 
+        // Auto-save contact to the customer rubrica if a phone was provided
+        // and no matching customer exists. Side-effect — never fails the route.
+        await upsertCustomerFromReservation(
+            customer_name,
+            phone,
+            email,
+            req.user ? { userId: req.user.userId, email: req.user.email } : null
+        );
+
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
@@ -381,6 +390,15 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 { guests, reservation_time, shift, payment_status, arrival_status }
             );
         }
+
+        // Auto-save contact to the customer rubrica if a phone was provided
+        // and no matching customer exists. Side-effect — never fails the route.
+        await upsertCustomerFromReservation(
+            customer_name,
+            phone,
+            email,
+            req.user ? { userId: req.user.userId, email: req.user.email } : null
+        );
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
@@ -1392,6 +1410,59 @@ const normalizeCustomerName = (raw: string): string => {
     return raw
         .toLowerCase()
         .replace(/(^|[\s'’\-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
+};
+
+// Auto-add the reservation contact to the rubrica when a phone is provided and
+// no customer with the same digits-only phone already exists. Failures are
+// swallowed: the reservation save must succeed even if this side-effect fails.
+const upsertCustomerFromReservation = async (
+    customerName: string | null | undefined,
+    phone: string | null | undefined,
+    email: string | null | undefined,
+    actor: { userId: number; email: string } | null | undefined
+): Promise<void> => {
+    try {
+        if (!phone || !String(phone).trim()) return;
+        if (!customerName || !String(customerName).trim()) return;
+        const trimmedPhone = String(phone).trim();
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (!phoneDigits) return;
+
+        const existing = await queryWithRetry(
+            `SELECT id FROM customers
+             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+             LIMIT 1`,
+            [phoneDigits]
+        );
+        if (existing.rows.length > 0) return;
+
+        const inserted = await queryWithRetry(
+            `INSERT INTO customers (name, phone, email)
+             VALUES ($1, $2, $3)
+             RETURNING id, name`,
+            [
+                normalizeCustomerName(String(customerName).trim()),
+                trimmedPhone,
+                email && String(email).trim() ? String(email).trim() : null,
+            ]
+        );
+        const newCustomer = inserted.rows[0];
+
+        if (actor && newCustomer) {
+            LogService.logActivity(
+                actor.userId,
+                actor.email,
+                actor.email,
+                ActivityAction.CREATE,
+                ResourceType.CUSTOMER,
+                newCustomer.id,
+                newCustomer.name,
+                { source: 'reservation_autosave' }
+            );
+        }
+    } catch (err) {
+        console.error('upsertCustomerFromReservation failed:', err);
+    }
 };
 
 app.get('/customers', authenticate, requirePermission('customers:view'), async (req, res) => {
