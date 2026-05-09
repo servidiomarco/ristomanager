@@ -1254,7 +1254,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {/* Page title — inline (was previously portaled into the global header) */}
       <div>
         <h1 className="text-[20px] sm:text-[22px] lg:text-[24px] font-semibold tracking-tight text-[var(--color-fg)]">Gestione Prenotazioni</h1>
-        <p className="text-sm text-[var(--color-fg-muted)] mt-0.5">Pianifica turni, gestisci tavoli e tieni traccia degli arrivi.</p>
       </div>
 
       {/* Search & Filters Bar */}
