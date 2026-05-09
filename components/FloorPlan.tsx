@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -843,8 +843,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     >
       {/* Date + Shift Picker (controls per-shift merge scope) */}
       <div className="bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
-        <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-[var(--color-fg-muted)]" />
+        <div>
           <input
             type="date"
             value={selectedDate}
@@ -852,22 +851,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
           />
         </div>
-        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
+        <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
           <button
             onClick={() => setSelectedShift(Shift.LUNCH)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium transition ${
-              selectedShift === Shift.LUNCH ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Sun size={14} /> Pranzo
+            <Sun className="h-3.5 w-3.5" /> Pranzo
           </button>
           <button
             onClick={() => setSelectedShift(Shift.DINNER)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium transition ${
-              selectedShift === Shift.DINNER ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Moon size={14} /> Cena
+            <Sunset className="h-3.5 w-3.5" /> Cena
           </button>
         </div>
         <span className="text-xs text-[var(--color-fg-subtle)] hidden sm:inline">
@@ -955,7 +954,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
         <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] overflow-x-auto shrink-0 w-full sm:w-auto">
-          <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-[0.08em] hidden xl:block">Strumenti</span>
+          <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Strumenti</span>
 
           <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
@@ -1029,7 +1028,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
-            <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-[0.08em] hidden xl:block">Modifica</span>
+            <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Modifica</span>
 
             {/* Lock/Unlock */}
             <button
@@ -1224,7 +1223,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           )}
 
           {rooms.find(r => r.id === activeRoomId)?.is_closed && (
-              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 uppercase tracking-wide">
+              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
                   <DoorClosed size={12} /> Sala Chiusa
               </div>
           )}
@@ -1245,7 +1244,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)] p-3 rounded-md border border-[var(--color-line)] shadow-[var(--shadow-overlay)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
+                    <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
                         <div className="w-3 h-3 bg-emerald-50 border border-emerald-200 rounded-sm"></div> Libero
                     </div>
@@ -1346,7 +1345,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                <label className="text-xs font-semibold tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
                   <Ruler className="h-3.5 w-3.5 text-slate-400" /> Dimensioni (cm)
                 </label>
                 <div className="flex items-center gap-2">
@@ -1376,7 +1375,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
+                <label className="text-xs font-semibold tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
                   <StickyNote className="h-3.5 w-3.5 text-slate-400" /> Note
                 </label>
                 <textarea

@@ -205,7 +205,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                 {features.map(feature => (
                   <div key={feature.feature} className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg overflow-hidden">
                     <div className="bg-[var(--color-surface-3)] px-4 py-2.5 border-b border-[var(--color-line)]">
-                      <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">{feature.feature}</h3>
+                      <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">{feature.feature}</h3>
                     </div>
                     <div className="p-4">
                       <div className="flex flex-wrap gap-2">

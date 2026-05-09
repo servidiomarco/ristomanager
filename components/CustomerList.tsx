@@ -194,13 +194,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <BookUser className="h-6 w-6 text-indigo-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Clienti</h1>
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">Rubrica degli ospiti del ristorante e dei banchetti</p>
-        </div>
+        <div />
         {canEdit && (
           <button
             type="button"
@@ -533,21 +527,21 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                     <div className="border-t border-slate-100 pt-3 grid grid-cols-3 gap-2 text-center">
                       <div className="bg-indigo-50 rounded-lg py-2">
                         <div className="text-xl font-bold text-indigo-700">{s.reservations.length}</div>
-                        <div className="text-[11px] uppercase tracking-wide text-indigo-600">Prenot.</div>
+                        <div className="text-[11px] tracking-wide text-indigo-600">Prenot.</div>
                       </div>
                       <div className="bg-emerald-50 rounded-lg py-2">
                         <div className="text-xl font-bold text-emerald-700">{s.banquets.length}</div>
-                        <div className="text-[11px] uppercase tracking-wide text-emerald-600">Banch.</div>
+                        <div className="text-[11px] tracking-wide text-emerald-600">Banch.</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg py-2">
                         <div className="text-xs font-bold text-slate-700 mt-1">{formatLastVisit(s.lastVisit) || '—'}</div>
-                        <div className="text-[11px] uppercase tracking-wide text-slate-500">Ultima</div>
+                        <div className="text-[11px] tracking-wide text-slate-500">Ultima</div>
                       </div>
                     </div>
 
                     {sortedReservations.length > 0 && (
                       <div className="border-t border-slate-100 pt-3">
-                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 tracking-wide">
                           <History className="h-3.5 w-3.5" />
                           Storico prenotazioni
                         </div>
@@ -582,7 +576,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
 
                     {s.banquets.length > 0 && (
                       <div className="border-t border-slate-100 pt-3">
-                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 tracking-wide">
                           <UtensilsCrossed className="h-3.5 w-3.5" />
                           Banchetti
                         </div>
