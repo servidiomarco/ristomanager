@@ -1130,8 +1130,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       ));
 
       // Responsive table sizes - smaller on mobile and tablets
-      const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
-      const baseWidth = window.innerWidth < 768 ? 60 : 100; // For rectangles
+      const baseSize = window.innerWidth < 768 ? 50 : 100; // 50px on mobile/tablet, 100px on desktop
+      const baseWidth = window.innerWidth < 768 ? 65 : 120; // For rectangles
+      // Visual spread factor: spaces tables further apart without touching the
+      // saved x/y in the floor-plan editor. The canvas auto-scales to fit.
+      const POSITION_SPREAD = window.innerWidth < 768 ? 1 : 1.25;
 
       let widthPx: number;
       let heightPx: number;
@@ -1141,7 +1144,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       } else if (table.shape === TableShape.SQUARE) {
           widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       } else {
-          widthPx = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
+          widthPx = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 9 : 18));
           heightPx = baseSize; borderRadius = '8px';
       }
 
@@ -1176,8 +1179,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             key={table.id}
             className={`absolute ${isOccupied ? 'z-10' : ''} ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}`}
             style={{
-                left: table.x,
-                top: table.y,
+                left: table.x * POSITION_SPREAD,
+                top: table.y * POSITION_SPREAD,
                 width: `${widthPx}px`,
                 height: `${heightPx}px`,
             }}
@@ -1206,41 +1209,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <EyeOff size={8} />
                     </div>
                 )}
-                <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
+                <span className="font-bold text-lg sm:text-xl tracking-tight truncate px-1 max-w-full leading-tight">{table.name}</span>
                 {reservation ? (
-                    <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
-                        <Users size={16} /> {reservation.guests}
+                    <span className="flex items-center gap-1 text-lg sm:text-xl font-bold leading-tight">
+                        <Users size={18} /> {reservation.guests}
                     </span>
                 ) : banquet ? (
-                    <span className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold">
-                        <BookOpen size={12} />
+                    <span className="flex items-center gap-1 text-xs sm:text-sm font-semibold">
+                        <BookOpen size={14} />
                     </span>
                 ) : (
-                    <span className="text-[10px] flex items-center gap-1 opacity-80">
-                        <Armchair size={10} /> {table.seats}
+                    <span className="text-xs sm:text-sm flex items-center gap-1 opacity-80">
+                        <Armchair size={12} /> {table.seats}
                     </span>
                 )}
             </div>
             {reservation && (
                 <div
                     style={{ top: pillTopPx }}
-                    className={`absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
+                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-white text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
                     title={reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined}
                 >
-                    {reservation.created_by_user_name && (
-                        <span className="absolute -left-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white text-[var(--color-fg)] text-[9px] font-bold shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                    {reservation.created_by_user_name ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white text-[var(--color-fg)] text-[10px] font-bold border border-[var(--color-line)] flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
+                    ) : (
+                        <span className="pl-2" />
                     )}
-                    {toTitleCase(reservation.customer_name)}
+                    <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
                 </div>
             )}
             {banquet && (
                 <div
                     style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[180px] truncate bg-indigo-600 flex items-center gap-1"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-white text-sm sm:text-base font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-indigo-600"
                 >
-                    <BookOpen size={12} className="flex-shrink-0" />
+                    <BookOpen size={14} className="flex-shrink-0" />
                     <span className="truncate">{banquet.name}</span>
                 </div>
             )}
@@ -1763,11 +1768,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           // Compute the natural bounding box of the room and a scale factor
           // so the room fits the available canvas width/height on tablet+desktop.
           // On mobile (<768px) we keep scale=1 and rely on overflow scrolling.
-          const PADDING = 40;
+          // PADDING leaves room for the customer-name pill rendered below each table.
+          const PADDING = 80;
           const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-          const baseSize = isMobile ? 45 : 80;
-          const baseWidth = isMobile ? 60 : 100;
-          const seatMultiplier = isMobile ? 8 : 15;
+          const baseSize = isMobile ? 50 : 100;
+          const baseWidth = isMobile ? 65 : 120;
+          const seatMultiplier = isMobile ? 9 : 18;
+          // Must mirror POSITION_SPREAD in renderMapTable so the canvas extent
+          // accounts for the visually spread-out coordinates.
+          const POSITION_SPREAD = isMobile ? 1 : 1.25;
           let maxRight = 0;
           let maxBottom = 0;
           for (const t of tablesInRoom) {
@@ -1778,8 +1787,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   w = Math.max(baseWidth, t.seats * seatMultiplier);
                   h = baseSize;
               }
-              maxRight = Math.max(maxRight, t.x + w);
-              maxBottom = Math.max(maxBottom, t.y + h);
+              maxRight = Math.max(maxRight, t.x * POSITION_SPREAD + w);
+              maxBottom = Math.max(maxBottom, t.y * POSITION_SPREAD + h);
           }
           const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
           const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
