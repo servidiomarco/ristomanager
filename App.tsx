@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -45,9 +45,12 @@ import {
 } from './services/apiService';
 
 const App: React.FC = () => {
-  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // Tracks whether we've already applied the user's preferred landing for this
+  // session. Reset on logout so the next login re-applies it.
+  const appliedPreferredLandingRef = useRef(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
@@ -75,8 +78,13 @@ const App: React.FC = () => {
   // Redirect to first accessible view when user changes or doesn't have access to current view.
   // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
   // the right view (e.g. /?view=RESERVATIONS from a "new reservation" notification).
+  // On the first authenticated render, also applies the user's preferred landing view
+  // (settable from Impostazioni → Profilo) — but ?view= deep-links always win.
   useEffect(() => {
-    if (!isAuthenticated || !user) return;
+    if (!isAuthenticated || !user) {
+      appliedPreferredLandingRef.current = false;
+      return;
+    }
     const accessibleViews = getAccessibleViews();
 
     const params = new URLSearchParams(window.location.search);
@@ -85,6 +93,7 @@ const App: React.FC = () => {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
         setView(target);
+        appliedPreferredLandingRef.current = true;
       }
       // Strip the param either way so reloads don't keep re-navigating.
       params.delete('view');
@@ -92,6 +101,20 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
     }
+
+    // Apply preferred landing view once per session (after login or initial load).
+    if (!appliedPreferredLandingRef.current && user.preferred_landing_view) {
+      const preferred = user.preferred_landing_view as ViewState;
+      if (
+        (Object.values(ViewState) as string[]).includes(preferred) &&
+        accessibleViews.includes(preferred)
+      ) {
+        setView(preferred);
+        appliedPreferredLandingRef.current = true;
+        return;
+      }
+    }
+    appliedPreferredLandingRef.current = true;
 
     if (accessibleViews.length > 0 && !accessibleViews.includes(view)) {
       setView(accessibleViews[0]);
@@ -1262,6 +1285,50 @@ const App: React.FC = () => {
             <div className="mb-8">
               <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">Impostazioni</h2>
               <p className="text-sm text-[var(--color-fg-muted)] mt-0.5">Configurazione account, integrazioni, amministrazione.</p>
+            </div>
+
+            {/* Profile / Personal preferences */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Profilo</h3>
+              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                <label htmlFor="preferred-landing" className="block text-[14px] font-medium text-[var(--color-fg)] mb-1">
+                  Pagina di partenza
+                </label>
+                <p className="text-[13px] text-[var(--color-fg-muted)] mb-3">
+                  La sezione che si apre dopo il login.
+                </p>
+                <select
+                  id="preferred-landing"
+                  value={user?.preferred_landing_view ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ preferred_landing_view: v });
+                      addToast(v ? 'Pagina di partenza aggiornata' : 'Pagina di partenza ripristinata', 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                    }
+                  }}
+                  className="w-full sm:max-w-sm rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]"
+                >
+                  <option value="">Predefinita (prima sezione disponibile)</option>
+                  {getAccessibleViews().map(v => {
+                    const labels: Record<ViewState, string> = {
+                      [ViewState.DASHBOARD]: 'Dashboard',
+                      [ViewState.RESERVATIONS]: 'Prenotazioni',
+                      [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
+                      [ViewState.MENU]: 'Menu & Banchetti',
+                      [ViewState.STAFF]: 'Personale',
+                      [ViewState.CLIENTI]: 'Clienti',
+                      [ViewState.USERS]: 'Utenti',
+                      [ViewState.SETTINGS]: 'Impostazioni',
+                    };
+                    return (
+                      <option key={v} value={v}>{labels[v]}</option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
 
             {/* Admin Section */}

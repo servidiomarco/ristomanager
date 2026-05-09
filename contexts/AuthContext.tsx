@@ -32,6 +32,7 @@ interface AuthContextType {
   canManageUsers: () => boolean;
   canViewLogs: () => boolean;
   getAccessToken: () => string | null;
+  updatePreferences: (prefs: { preferred_landing_view?: string | null }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -128,6 +129,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return authApiService.getAccessToken();
   }, []);
 
+  const updatePreferences = useCallback(async (prefs: { preferred_landing_view?: string | null }) => {
+    const updated = await authApiService.updatePreferences(prefs);
+    setUser(updated);
+  }, []);
+
   const value: AuthContextType = {
     user,
     permissions,
@@ -140,7 +146,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     getAccessibleViews,
     canManageUsers,
     canViewLogs,
-    getAccessToken
+    getAccessToken,
+    updatePreferences
   };
 
   return (

@@ -224,6 +224,7 @@ export interface User {
   created_at?: string;
   updated_at?: string;
   last_login?: string;
+  preferred_landing_view?: string | null;
 }
 
 export interface AuthUser extends User {

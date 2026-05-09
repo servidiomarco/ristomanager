@@ -388,6 +388,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // Per-user landing preference: which view to open after login.
+        // NULL = fall back to the first accessible view (legacy behavior).
+        await client.query(`
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS preferred_landing_view VARCHAR(50);
+        `);
+
         // Track who created each reservation (added after users table exists for the FK)
         await client.query(`
             ALTER TABLE reservations

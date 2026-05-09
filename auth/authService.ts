@@ -60,7 +60,7 @@ export class AuthService {
   // Login user
   static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, last_login FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -102,7 +102,8 @@ export class AuthService {
       is_active: userRow.is_active,
       created_at: userRow.created_at,
       updated_at: userRow.updated_at,
-      last_login: userRow.last_login
+      last_login: userRow.last_login,
+      preferred_landing_view: userRow.preferred_landing_view ?? null
     };
 
     return { user, tokens };
@@ -156,7 +157,7 @@ export class AuthService {
   // Get user by ID
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login FROM users WHERE id = $1',
+      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE id = $1',
       [userId]
     );
 
@@ -173,14 +174,15 @@ export class AuthService {
       is_active: row.is_active,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      last_login: row.last_login
+      last_login: row.last_login,
+      preferred_landing_view: row.preferred_landing_view ?? null
     };
   }
 
   // Get all users
   static async getAllUsers(): Promise<User[]> {
     const result = await queryWithRetry(
-      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login FROM users ORDER BY created_at DESC'
+      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users ORDER BY created_at DESC'
     );
 
     return result.rows.map(row => ({
@@ -191,8 +193,42 @@ export class AuthService {
       is_active: row.is_active,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      last_login: row.last_login
+      last_login: row.last_login,
+      preferred_landing_view: row.preferred_landing_view ?? null
     }));
+  }
+
+  // Update only the preferred landing view for a given user. Used by the
+  // self-service /auth/me/preferences endpoint — narrower than updateUser
+  // so non-owners can't accidentally touch role/email/etc.
+  static async updatePreferredLanding(
+    userId: number,
+    view: string | null
+  ): Promise<User | null> {
+    const result = await queryWithRetry(
+      `UPDATE users
+       SET preferred_landing_view = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view`,
+      [view, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      email: row.email,
+      full_name: row.full_name,
+      role: row.role as UserRole,
+      is_active: row.is_active,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      last_login: row.last_login,
+      preferred_landing_view: row.preferred_landing_view ?? null
+    };
   }
 
   // Minimal user projection for assignment pickers (no email or audit fields).
@@ -282,7 +318,7 @@ export class AuthService {
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(userId);
 
-    const query = `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login`;
+    const query = `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view`;
 
     const result = await queryWithRetry(query, values);
 
@@ -299,7 +335,8 @@ export class AuthService {
       is_active: row.is_active,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      last_login: row.last_login
+      last_login: row.last_login,
+      preferred_landing_view: row.preferred_landing_view ?? null
     };
   }
 
