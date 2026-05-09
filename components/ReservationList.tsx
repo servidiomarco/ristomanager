@@ -973,6 +973,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   other.merged_with && other.merged_with.length > 0 &&
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
               ))
+              .filter(t => !hiddenTableIds.has(t.id))
               .sort((a, b) => a.seats - b.seats);
 
           if (suitableTables.length > 0) {
@@ -1113,10 +1114,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     );
   };
 
-  // Get visible tables (not merged into another table)
+  // Get visible tables (not merged into another table, not hidden for this shift)
   const visibleTables = displayTables.filter(t =>
     (modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter) &&
-    !isTableMergedIntoAnother(t.id)
+    !isTableMergedIntoAnother(t.id) &&
+    !hiddenTableIds.has(t.id)
   );
 
   const totalTablesInFilter = visibleTables.length;
@@ -2918,6 +2920,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     other.merged_with && other.merged_with.length > 0 &&
                                                     other.merged_with.map(id => Number(id)).includes(Number(t.id))
                                                 ))
+                                                .filter(t => !hiddenTableIds.has(t.id))
                                                 .map(table => {
                                                 const occupier = getOccupierForTableInForm(table.id);
                                                 const isOccupied = !!occupier;
