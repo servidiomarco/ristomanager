@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -804,44 +804,47 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  const handleToggleArrivalStatus = (res: Reservation) => {
-      const currentStatus = res.arrival_status || ArrivalStatus.WAITING;
-      // DEPARTED → WAITING (reopen), ARRIVED → WAITING, WAITING → ARRIVED
-      const newStatus = currentStatus === ArrivalStatus.ARRIVED ? ArrivalStatus.WAITING : ArrivalStatus.ARRIVED;
-      const finalStatus = currentStatus === ArrivalStatus.DEPARTED ? ArrivalStatus.WAITING : newStatus;
-      onUpdateReservation({ ...res, arrival_status: finalStatus });
-      showToast(
-          finalStatus === ArrivalStatus.ARRIVED
-              ? `${toTitleCase(res.customer_name)} è arrivato`
-              : `${toTitleCase(res.customer_name)} è in attesa`,
-          'success'
-      );
+  type ReservationStateKey = 'waiting' | 'arrived' | 'freed' | 'noshow';
+
+  const getReservationState = (res: Reservation): ReservationStateKey => {
+    if ((res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW) return 'noshow';
+    const a = res.arrival_status || ArrivalStatus.WAITING;
+    if (a === ArrivalStatus.DEPARTED) return 'freed';
+    if (a === ArrivalStatus.ARRIVED) return 'arrived';
+    return 'waiting';
   };
 
-  const handleFreeTable = (res: Reservation) => {
-      onUpdateReservation({ ...res, arrival_status: ArrivalStatus.DEPARTED });
-      const tableName = tables.find(t => t.id === res.table_id)?.name;
-      showToast(
-          tableName
-              ? `Tavolo ${tableName} liberato (${toTitleCase(res.customer_name)})`
-              : `Prenotazione di ${toTitleCase(res.customer_name)} chiusa`,
-          'success'
-      );
+  const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
+    waiting: { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
+    arrived: { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
+    freed:   { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200' },
+    noshow:  { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' },
   };
 
-  const handleToggleNoShow = (res: Reservation) => {
-      const isNoShow = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
-      if (isNoShow) {
-          onUpdateReservation({ ...res, reservation_status: ReservationStatus.CONFIRMED });
-          showToast(`No-show rimosso per ${toTitleCase(res.customer_name)}`, 'success');
-      } else {
-          onUpdateReservation({
-              ...res,
-              reservation_status: ReservationStatus.NO_SHOW,
-              arrival_status: ArrivalStatus.WAITING,
-          });
-          showToast(`${toTitleCase(res.customer_name)} segnato come no-show`, 'success');
-      }
+  const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
+
+  const handleSetReservationState = (res: Reservation, state: ReservationStateKey) => {
+    const update: Partial<Reservation> = {};
+    switch (state) {
+      case 'waiting':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'arrived':
+        update.arrival_status = ArrivalStatus.ARRIVED;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'freed':
+        update.arrival_status = ArrivalStatus.DEPARTED;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'noshow':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.NO_SHOW;
+        break;
+    }
+    onUpdateReservation({ ...res, ...update });
+    showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
   };
 
   // Voice input handler
@@ -1539,34 +1542,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Row 3: Actions */}
           {canEdit && (
             <div className="flex items-center gap-1.5 mt-1.5">
-              {group.key === 'waiting' && (
-                <button type="button" onClick={() => handleToggleArrivalStatus(res)}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                  <UserCheck className="h-3.5 w-3.5" /> Arrivato
-                </button>
-              )}
+              {(() => {
+                const state = getReservationState(res);
+                const meta = RESERVATION_STATE_META[state];
+                return (
+                  <button type="button" onClick={() => setStateChangeReservation(res)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                    title="Cambia stato">
+                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
+                    {meta.label}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </button>
+                );
+              })()}
               {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                 <button type="button" onClick={() => handleEditClick(res)}
                   className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Tavolo
-                </button>
-              )}
-              {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
-                <button type="button" onClick={() => handleFreeTable(res)}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                  <LogOut className="h-3.5 w-3.5" /> Libera
-                </button>
-              )}
-              {group.key === 'waiting' && (
-                <button type="button" onClick={() => handleToggleNoShow(res)}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors" title="Segna come no-show">
-                  <UserX className="h-3.5 w-3.5" /> No show
-                </button>
-              )}
-              {group.key === 'noshow' && (
-                <button type="button" onClick={() => handleToggleNoShow(res)}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors" title="Annulla no-show">
-                  <RotateCcw className="h-3.5 w-3.5" /> Annulla no-show
                 </button>
               )}
               <button type="button" onClick={() => handleEditClick(res)}
@@ -1686,34 +1678,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {/* Actions */}
           {canEdit && (
-            <div className="flex items-center gap-1.5 pt-1">
-              {arrivalStatus === ArrivalStatus.WAITING && (
-                <button onClick={() => { handleToggleArrivalStatus(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
-                  <UserCheck className="h-3.5 w-3.5" /> Segna arrivato
-                </button>
-              )}
+            <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+              {(() => {
+                const state = getReservationState(res);
+                const meta = RESERVATION_STATE_META[state];
+                return (
+                  <button onClick={() => setStateChangeReservation(res)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                    title="Cambia stato">
+                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
+                    Stato: {meta.label}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </button>
+                );
+              })()}
               {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                 <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
-                </button>
-              )}
-              {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
-                <button onClick={() => { handleFreeTable(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
-                  <LogOut className="h-3.5 w-3.5" /> Libera tavolo
-                </button>
-              )}
-              {(res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW ? (
-                <button onClick={() => { handleToggleNoShow(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
-                  <RotateCcw className="h-3.5 w-3.5" /> Annulla no-show
-                </button>
-              ) : arrivalStatus === ArrivalStatus.WAITING && (
-                <button onClick={() => { handleToggleNoShow(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors">
-                  <UserX className="h-3.5 w-3.5" /> No show
                 </button>
               )}
               <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
@@ -2373,34 +2355,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   {/* Row 3: Actions */}
                                   {canEdit && (
                                     <div className="flex items-center gap-1.5 mt-2">
-                                      {group.key === 'waiting' && (
-                                        <button onClick={() => handleToggleArrivalStatus(res)}
-                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                                          <UserCheck className="h-3.5 w-3.5" /> Arrivato
-                                        </button>
-                                      )}
+                                      {(() => {
+                                        const state = getReservationState(res);
+                                        const meta = RESERVATION_STATE_META[state];
+                                        return (
+                                          <button onClick={() => setStateChangeReservation(res)}
+                                            className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                                            title="Cambia stato">
+                                            <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
+                                            {meta.label}
+                                            <ChevronDown className="h-3 w-3 opacity-60" />
+                                          </button>
+                                        );
+                                      })()}
                                       {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                                         <button onClick={() => handleEditClick(res)}
                                           className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
                                           <MapPin className="h-3.5 w-3.5" /> Tavolo
-                                        </button>
-                                      )}
-                                      {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
-                                        <button onClick={() => handleFreeTable(res)}
-                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                                          <LogOut className="h-3.5 w-3.5" /> Libera
-                                        </button>
-                                      )}
-                                      {group.key === 'waiting' && (
-                                        <button onClick={() => handleToggleNoShow(res)}
-                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors" title="Segna come no-show">
-                                          <UserX className="h-3.5 w-3.5" /> No show
-                                        </button>
-                                      )}
-                                      {group.key === 'noshow' && (
-                                        <button onClick={() => handleToggleNoShow(res)}
-                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors" title="Annulla no-show">
-                                          <RotateCcw className="h-3.5 w-3.5" /> Annulla
                                         </button>
                                       )}
                                       <button onClick={() => handleEditClick(res)}
@@ -3451,6 +3422,60 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         initialDate={selectedDate.split('T')[0]}
         initialShift={selectedShift}
       />
+
+      {/* State picker modal */}
+      {stateChangeReservation && (() => {
+        const res = stateChangeReservation;
+        const current = getReservationState(res);
+        const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow'];
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4" onClick={() => setStateChangeReservation(null)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-[var(--color-line)]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold text-[var(--color-fg)]">Cambia stato</h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                      {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
+                    </p>
+                  </div>
+                  <button onClick={() => setStateChangeReservation(null)}
+                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="p-3 space-y-1.5">
+                {options.map(opt => {
+                  const meta = RESERVATION_STATE_META[opt];
+                  const isCurrent = opt === current;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        if (!isCurrent) handleSetReservationState(res, opt);
+                        setStateChangeReservation(null);
+                      }}
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                        isCurrent
+                          ? `${meta.chipClass} ring-2 ring-offset-1 ring-[var(--color-fg)]/20`
+                          : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <span className={`w-2 h-2 rounded-full ${meta.dotClass}`} />
+                        <span className="text-sm font-medium text-[var(--color-fg)]">{meta.label}</span>
+                      </span>
+                      {isCurrent && <Check className="h-4 w-4 text-[var(--color-fg-muted)]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Unassigned-reservations modal: opened from the map header badge */}
       {showUnassignedModal && (() => {
