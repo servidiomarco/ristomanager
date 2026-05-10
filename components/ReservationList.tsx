@@ -1804,6 +1804,97 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           ))}
         </div>
       )}
+
+      {/* Sort modal — slides up within list column on desktop */}
+      {showSortModal && (
+        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-2">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+            </div>
+            <div className="px-3">
+              {[
+                { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
+                { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
+                { value: 'name-asc' as const, label: 'Nome A → Z' },
+                { value: 'name-desc' as const, label: 'Nome Z → A' },
+                { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
+                { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+              ].map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
+                    sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                  }`}>
+                  {opt.label}
+                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter modal — slides up within list column on desktop */}
+      {showFiltersPanel && (
+        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+              {activeFilterCount > 0 && (
+                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                  <RotateCcw className="h-3.5 w-3.5" /> Reimposta
+                </button>
+              )}
+            </div>
+            <div className="px-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'ALL', label: 'Tutti' },
+                    { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                    { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                    { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                        filterStatus === opt.value
+                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                      }`}>{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Allergeni
+                  </button>
+                  <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Con note
+                  </button>
+                  <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Senza tavolo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -2109,7 +2200,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Split view */}
           <div className="flex flex-1 min-h-0">
             {/* Left column — Reservation list (25%) */}
-            <div className="w-[25%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col">
+            <div className="w-[25%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
               {renderGroupedList()}
             </div>
 
@@ -2380,97 +2471,97 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
           </div>
 
-        </div>
-      )}
-
-      {/* Sort modal — slide up (desktop + mobile) */}
-      {showSortModal && (
-        <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
-          <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
-            </div>
-            <div className="px-5 pb-2">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
-            </div>
-            <div className="px-3">
-              {[
-                { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
-                { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
-                { value: 'name-asc' as const, label: 'Nome A → Z' },
-                { value: 'name-desc' as const, label: 'Nome Z → A' },
-                { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
-                { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
-              ].map(opt => (
-                <button key={opt.value} type="button"
-                  onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
-                  className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-lg transition-colors ${
-                    sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                  }`}>
-                  {opt.label}
-                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Filter modal — slide up (desktop + mobile) */}
-      {showFiltersPanel && (
-        <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
-          <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
-            </div>
-            <div className="px-5 pb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
-              {activeFilterCount > 0 && (
-                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
-                  <RotateCcw className="h-3.5 w-3.5" /> Reimposta
-                </button>
-              )}
-            </div>
-            <div className="px-5 space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
-                <div className="flex flex-wrap gap-2">
+          {/* Sort modal — slide up (mobile/tablet) */}
+          {showSortModal && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-2">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+                </div>
+                <div className="px-3">
                   {[
-                    { value: 'ALL', label: 'Tutti' },
-                    { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                    { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                    { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                    { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
+                    { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
+                    { value: 'name-asc' as const, label: 'Nome A → Z' },
+                    { value: 'name-desc' as const, label: 'Nome Z → A' },
+                    { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
+                    { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
                   ].map(opt => (
-                    <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
-                        filterStatus === opt.value
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-                      }`}>{opt.label}</button>
+                    <button key={opt.value} type="button"
+                      onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-lg transition-colors ${
+                        sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                      }`}>
+                      {opt.label}
+                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                    </button>
                   ))}
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
-                    Allergeni
-                  </button>
-                  <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
-                    Con note
-                  </button>
-                  <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
-                    Senza tavolo
-                  </button>
+            </div>
+          )}
+
+          {/* Filter modal — slide up (mobile/tablet) */}
+          {showFiltersPanel && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                      <RotateCcw className="h-3.5 w-3.5" /> Reimposta
+                    </button>
+                  )}
+                </div>
+                <div className="px-5 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: 'Tutti' },
+                        { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                        { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            filterStatus === opt.value
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Allergeni
+                      </button>
+                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Con note
+                      </button>
+                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Senza tavolo
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
         </div>
       )}
 
