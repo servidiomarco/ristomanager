@@ -1095,7 +1095,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return reservations.find(r =>
           r.table_id === table_id &&
           r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
-          r.shift === selectedShift &&
+          (selectedShift === 'ALL' || r.shift === selectedShift) &&
           r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
@@ -1497,6 +1497,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         `}
         onMouseEnter={() => setHoveredReservationId(res.id)}
         onMouseLeave={() => setHoveredReservationId(null)}
+        onClick={() => handleRowClick(res)}
       >
         {/* Left content */}
         <div className="flex-1 min-w-0 px-3 py-2">
@@ -1546,7 +1547,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 const state = getReservationState(res);
                 const meta = RESERVATION_STATE_META[state];
                 return (
-                  <button type="button" onClick={() => setStateChangeReservation(res)}
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
                     className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
                     title="Cambia stato">
                     <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
@@ -1556,16 +1557,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 );
               })()}
               {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
-                <button type="button" onClick={() => handleEditClick(res)}
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                   className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Tavolo
                 </button>
               )}
-              <button type="button" onClick={() => handleEditClick(res)}
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                 className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                 <Edit2 className="h-3.5 w-3.5" />
               </button>
-              <button type="button" onClick={() => handleDeleteClick(res.id, res.customer_name)}
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
                 className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -2310,7 +2311,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               : 'bg-blue-500';
 
                             return (
-                              <div key={res.id} className={`bg-[var(--color-surface)] rounded-xl border ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''}`}>
+                              <div key={res.id}
+                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                onMouseEnter={() => setHoveredReservationId(res.id)}
+                                onMouseLeave={() => setHoveredReservationId(null)}
+                                onClick={() => handleRowClick(res)}>
                                 {/* Left content */}
                                 <div className="flex-1 min-w-0 p-3">
                                   {/* Row 1: Time + indicator icons */}
@@ -2359,7 +2364,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         const state = getReservationState(res);
                                         const meta = RESERVATION_STATE_META[state];
                                         return (
-                                          <button onClick={() => setStateChangeReservation(res)}
+                                          <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
                                             className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
                                             title="Cambia stato">
                                             <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
@@ -2369,16 +2374,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         );
                                       })()}
                                       {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
-                                        <button onClick={() => handleEditClick(res)}
+                                        <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                                           className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
                                           <MapPin className="h-3.5 w-3.5" /> Tavolo
                                         </button>
                                       )}
-                                      <button onClick={() => handleEditClick(res)}
+                                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                                         className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                                         <Edit2 className="h-3.5 w-3.5" />
                                       </button>
-                                      <button onClick={() => handleDeleteClick(res.id, res.customer_name)}
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
                                         className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
                                         <Trash2 className="h-3.5 w-3.5" />
                                       </button>
