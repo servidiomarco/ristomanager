@@ -35,6 +35,8 @@ interface FloorPlanProps {
   onDeleteRoom: (room_id: number) => void;
   onToggleRoomClosed: (room_id: number, is_closed: boolean) => void;
   canEdit?: boolean;
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
@@ -50,7 +52,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onAddRoom,
   onDeleteRoom,
   onToggleRoomClosed,
-  canEdit = true
+  canEdit = true,
+  globalDate,
+  globalShiftFilter: globalShiftFilterProp,
 }) => {
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
 
@@ -63,9 +67,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
 
-  // Per-shift merge context
-  const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDate(new Date()));
-  const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
+  // Per-shift merge context — synced from global header on desktop
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    globalDate ? formatLocalDate(globalDate) : formatLocalDate(new Date())
+  );
+  const [selectedShift, setSelectedShift] = useState<Shift>(() => {
+    if (globalShiftFilterProp === 'LUNCH') return Shift.LUNCH;
+    if (globalShiftFilterProp === 'DINNER') return Shift.DINNER;
+    return detectShiftFromNow();
+  });
+
+  useEffect(() => {
+    if (globalDate) setSelectedDate(formatLocalDate(globalDate));
+  }, [globalDate]);
+  useEffect(() => {
+    if (globalShiftFilterProp === 'LUNCH') setSelectedShift(Shift.LUNCH);
+    else if (globalShiftFilterProp === 'DINNER') setSelectedShift(Shift.DINNER);
+  }, [globalShiftFilterProp]);
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
@@ -841,8 +859,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
+      {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
+      <div className="md:hidden bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
         <div>
           <input
             type="date"
@@ -869,7 +887,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <Sunset className="h-3.5 w-3.5" /> Cena
           </button>
         </div>
-        <span className="text-xs text-[var(--color-fg-subtle)] hidden sm:inline">
+        {hiddenTableIds.size > 0 && (
+            <button
+                onClick={() => setShowHidden(s => !s)}
+                className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                    showHidden
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+                title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+            >
+                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
+            </button>
+        )}
+      </div>
+
+      {/* Desktop: Merge scope note + hidden toggle */}
+      <div className="hidden md:flex items-center gap-3 px-1 z-20">
+        <span className="inline-flex items-center gap-1.5 text-xs text-[var(--color-fg-subtle)]">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
         {hiddenTableIds.size > 0 && (

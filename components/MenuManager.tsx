@@ -59,6 +59,11 @@ interface MenuManagerProps {
   onDeleteBanquetMenu: (id: number) => void;
   canEdit?: boolean;
   initialTab?: 'DISHES' | 'BANQUETS';
+  autoOpenNewBanquet?: boolean;
+  onAutoOpenNewBanquetHandled?: () => void;
+  autoOpenNewDish?: boolean;
+  onAutoOpenNewDishHandled?: () => void;
+  onActiveTabChange?: (tab: 'DISHES' | 'BANQUETS') => void;
 }
 
 export const MenuManager: React.FC<MenuManagerProps> = ({
@@ -74,7 +79,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onUpdateBanquetMenu,
     onDeleteBanquetMenu,
     canEdit = true,
-    initialTab = 'BANQUETS'
+    initialTab = 'BANQUETS',
+    autoOpenNewBanquet,
+    onAutoOpenNewBanquetHandled,
+    autoOpenNewDish,
+    onAutoOpenNewDishHandled,
+    onActiveTabChange
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -137,6 +147,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (autoOpenNewBanquet) {
+      handleOpenNewBanquet();
+      onAutoOpenNewBanquetHandled?.();
+    }
+  }, [autoOpenNewBanquet]);
+
+  useEffect(() => {
+    if (autoOpenNewDish) {
+      setIsDishFormOpen(true);
+      onAutoOpenNewDishHandled?.();
+    }
+  }, [autoOpenNewDish]);
 
   useEffect(() => {
     if (cardMenuOpenId === null) return;
@@ -475,29 +503,6 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-        <div />
-        {canEdit && (
-        <div className="flex gap-2">
-            {activeTab === 'DISHES' ? (
-                 <button
-                 onClick={() => setIsDishFormOpen(true)}
-                 className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
-               >
-                 <Plus className="h-4 w-4" /> Nuovo Piatto
-               </button>
-            ) : (
-                <button
-                onClick={handleOpenNewBanquet}
-                className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" /> Nuovo Banchetto
-              </button>
-            )}
-        </div>
-        )}
-      </div>
-
       {/* Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-6">
         <div className="flex gap-2 overflow-x-auto scrollbar-hide">
@@ -837,10 +842,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Dish Modal */}
       {isDishFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDishFormOpen(false); }}>
           <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
+            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
               <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{isEditingDish ? 'Modifica Piatto' : 'Aggiungi Nuovo Piatto'}</h2>
+              <button type="button" onClick={() => setIsDishFormOpen(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+                <X className="h-4 w-4" />
+              </button>
             </div>
             <form onSubmit={handleAddDishSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
               <div>

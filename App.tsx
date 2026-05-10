@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, UtensilsCrossed, Plus, BookUser, Clock } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -51,11 +51,58 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
-  // Global header search — only active on Dashboard. Selecting a result navigates
-  // to Prenotazioni and seeds its search term via initialSearchTerm.
-  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
+  const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
+  const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
+  const [autoOpenNewStaff, setAutoOpenNewStaff] = useState(false);
+  const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
+  const [showCreateSheet, setShowCreateSheet] = useState(false);
+  const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
+
+  // Global date/shift state — drives the header control group on desktop
+  const [globalDate, setGlobalDate] = useState<Date>(new Date());
+  const [globalShiftFilter, setGlobalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(() =>
+    new Date().getHours() < 17 ? 'LUNCH' : 'DINNER'
+  );
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const globalDateInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    let interval: ReturnType<typeof setInterval>;
+    const timeout = setTimeout(() => {
+      setCurrentTime(new Date());
+      interval = setInterval(() => setCurrentTime(new Date()), 60_000);
+    }, msUntilNextMinute);
+    return () => { clearTimeout(timeout); if (interval) clearInterval(interval); };
+  }, []);
+
+  const formatLocalDateGlobal = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const globalDateStr = formatLocalDateGlobal(globalDate);
+  const globalIsToday = globalDateStr === formatLocalDateGlobal(new Date());
+
+  const goToPreviousDay = () => setGlobalDate(prev => { const d = new Date(prev); d.setDate(d.getDate() - 1); return d; });
+  const goToNextDay = () => setGlobalDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + 1); return d; });
+  const goToToday = () => setGlobalDate(new Date());
+  const handleGlobalDateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [y, m, d] = e.target.value.split('-').map(Number);
+    if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+  };
+  const formatDateDisplay = (date: Date) => date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Auto-switch from 'ALL' when navigating away from Dashboard
+  useEffect(() => {
+    if (view !== ViewState.DASHBOARD && globalShiftFilter === 'ALL') {
+      setGlobalShiftFilter(new Date().getHours() < 17 ? 'LUNCH' : 'DINNER');
+    }
+  }, [view]);
 
   // Theme (light/dark) — persisted, respects prefers-color-scheme on first visit
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -733,7 +780,7 @@ const App: React.FC = () => {
               icon={<LayoutDashboard size={20} />}
               label="Dashboard"
               active={view === ViewState.DASHBOARD}
-              onClick={() => setView(ViewState.DASHBOARD)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.DASHBOARD); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -742,7 +789,7 @@ const App: React.FC = () => {
               icon={<Calendar size={20} />}
               label="Prenotazioni"
               active={view === ViewState.RESERVATIONS}
-              onClick={() => setView(ViewState.RESERVATIONS)}
+              onClick={() => { setSidebarCollapsed(true); setView(ViewState.RESERVATIONS); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -751,7 +798,7 @@ const App: React.FC = () => {
               icon={<Grid size={20} />}
               label="Sale & Tavoli"
               active={view === ViewState.FLOOR_PLAN}
-              onClick={() => setView(ViewState.FLOOR_PLAN)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.FLOOR_PLAN); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -760,7 +807,7 @@ const App: React.FC = () => {
               icon={<UtensilsCrossed size={20} />}
               label="Menu & Banchetti"
               active={view === ViewState.MENU}
-              onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+              onClick={() => { setSidebarCollapsed(false); setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -775,7 +822,7 @@ const App: React.FC = () => {
               icon={<UsersRound size={20} />}
               label="Personale"
               active={view === ViewState.STAFF}
-              onClick={() => setView(ViewState.STAFF)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.STAFF); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -784,7 +831,7 @@ const App: React.FC = () => {
               icon={<BookUser size={20} />}
               label="Clienti"
               active={view === ViewState.CLIENTI}
-              onClick={() => setView(ViewState.CLIENTI)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.CLIENTI); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -793,7 +840,7 @@ const App: React.FC = () => {
               icon={<Users size={20} />}
               label="Utenti"
               active={view === ViewState.USERS}
-              onClick={() => setView(ViewState.USERS)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.USERS); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -808,7 +855,7 @@ const App: React.FC = () => {
               icon={<Settings size={20} />}
               label="Impostazioni"
               active={view === ViewState.SETTINGS}
-              onClick={() => setView(ViewState.SETTINGS)}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.SETTINGS); }}
               collapsed={sidebarCollapsed}
             />
           )}
@@ -888,60 +935,93 @@ const App: React.FC = () => {
 
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
       <main id="main" className="flex-1 overflow-y-auto relative pb-20 lg:pb-0 bg-[var(--color-surface-2)]">
-        {/* Header */}
-        <header className="h-14 bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] sticky top-0 z-10 flex items-center justify-between px-4 lg:px-6">
-           {/* Mobile expanded search — replaces header content when active on mobile */}
-           {mobileSearchOpen && view === ViewState.DASHBOARD ? (
-             <div className="flex items-center gap-2 w-full md:hidden">
-               <label className="relative flex-1">
-                 <span className="sr-only">Cerca</span>
-                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
-                 <input
-                   type="search"
-                   autoFocus
-                   value={globalSearchTerm}
-                   onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                   placeholder="Cerca cliente o tavolo..."
-                   className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
-                 />
-               </label>
-               <button
-                 type="button"
-                 onClick={() => { setMobileSearchOpen(false); setGlobalSearchTerm(''); }}
-                 className="h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                 aria-label="Chiudi ricerca"
-               >
-                 <X className="h-4 w-4" />
-               </button>
-             </div>
-           ) : (
-           <>
+        {/* Header — taller on desktop to house the date/time/shift controls */}
+        <header className="h-14 md:h-[72px] bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] sticky top-0 z-10 flex items-center justify-between px-4 lg:px-6">
            <div className="flex items-center gap-2 lg:hidden">
               <div className="bg-[var(--color-fg)] p-1.5 rounded-md">
                 <ChefHat className="text-[var(--color-fg-on-brand)] h-4 w-4" />
               </div>
               <span className="font-semibold text-[15px] tracking-tight text-[var(--color-fg)]">RistoCRM</span>
            </div>
-           {/* Page header slot — used by views (e.g. Reservations) to portal in sticky controls */}
-           <div id="page-header-slot" className="hidden md:flex flex-1 min-w-0 items-center gap-3 mx-4 empty:hidden" />
-           {/* Global search — Dashboard only, hidden when page-header-slot has content */}
-           {view === ViewState.DASHBOARD && (
-             <div className="hidden md:flex flex-1 max-w-md mx-4 has-[+#page-header-slot:not(:empty)]:hidden relative">
-                <label className="relative w-full">
-                  <span className="sr-only">Cerca</span>
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" aria-hidden />
-                  <input
-                    type="search"
-                    value={globalSearchTerm}
-                    onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                    placeholder="Cerca cliente o tavolo..."
-                    className="w-full h-9 pl-9 pr-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/10 focus:border-[var(--color-fg-muted)] transition-colors"
-                  />
-                </label>
+
+           {/* Desktop date/time/shift control group — takes ~half the header width */}
+           <div className={`hidden md:flex items-center gap-2.5 w-1/2 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF].includes(view) ? '!hidden' : ''}`}>
+             {/* Date navigator pill */}
+             <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 min-w-0">
+               {!globalIsToday && (
+                 <button
+                   onClick={goToToday}
+                   className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0"
+                 >
+                   Oggi
+                 </button>
+               )}
+               <button
+                 onClick={goToPreviousDay}
+                 className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                 aria-label="Giorno precedente"
+               >
+                 <ChevronLeft className="h-4 w-4" />
+               </button>
+               <div className="relative w-[200px] flex justify-center min-w-0">
+                 <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
+                   <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
+                     {formatDateDisplay(globalDate)}
+                   </span>
+                 </div>
+                 <input
+                   ref={globalDateInputRef}
+                   type="date"
+                   value={globalDateStr}
+                   onChange={handleGlobalDateInput}
+                   onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch {} }}
+                   aria-label="Seleziona data"
+                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                 />
+               </div>
+               <button
+                 onClick={goToNextDay}
+                 className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                 aria-label="Giorno successivo"
+               >
+                 <ChevronRight className="h-4 w-4" />
+               </button>
              </div>
-           )}
+
+             {/* Live time chip */}
+             <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2 flex-shrink-0">
+               <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+               <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+                 {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+               </span>
+             </div>
+
+             {/* Shift filter — "Tutti" only on Dashboard */}
+             <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0">
+               {([
+                 { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                 { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
+                 { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+               ] as const).filter(opt => opt.key !== 'ALL' || view === ViewState.DASHBOARD).map(opt => (
+                 <button
+                   key={opt.key}
+                   onClick={() => setGlobalShiftFilter(opt.key)}
+                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                     globalShiftFilter === opt.key
+                       ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                       : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                   }`}
+                   aria-pressed={globalShiftFilter === opt.key}
+                 >
+                   {opt.icon}
+                   {opt.label}
+                 </button>
+               ))}
+             </div>
+           </div>
+
            <div className="ml-auto flex items-center gap-2">
-              {/* Nuova prenotazione — primary CTA, first on the right side */}
+              {/* Nuova prenotazione — primary CTA */}
               {hasPermission('reservations:full') && (
                 <button
                   type="button"
@@ -950,6 +1030,58 @@ const App: React.FC = () => {
                 >
                   <Plus className="h-4 w-4" />
                   Nuova prenotazione
+                </button>
+              )}
+
+              {/* Secondary CTAs — context-aware per view */}
+              {view === ViewState.MENU && hasPermission('menu:full') && activeMenuTab === 'BANQUETS' && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewBanquet(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuovo Banchetto
+                </button>
+              )}
+              {view === ViewState.MENU && hasPermission('menu:full') && activeMenuTab === 'DISHES' && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewDish(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuovo Piatto
+                </button>
+              )}
+              {view === ViewState.CLIENTI && hasPermission('customers:full') && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewCustomer(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuovo cliente
+                </button>
+              )}
+              {view === ViewState.STAFF && hasPermission('staff:full') && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewStaff(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Aggiungi Dipendente
+                </button>
+              )}
+              {view === ViewState.USERS && canManageUsers() && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewUser(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Aggiungi Utente
                 </button>
               )}
 
@@ -994,18 +1126,6 @@ const App: React.FC = () => {
                 ></span>
               </span>
 
-              {/* Search trigger — mobile only, Dashboard only */}
-              {view === ViewState.DASHBOARD && (
-                <button
-                  type="button"
-                  onClick={() => setMobileSearchOpen(true)}
-                  className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                  aria-label="Cerca"
-                  title="Cerca"
-                >
-                  <Search className="h-4 w-4" />
-                </button>
-              )}
 
 
                <div className="relative">
@@ -1048,63 +1168,6 @@ const App: React.FC = () => {
                </div>
 
            </div>
-           </>
-           )}
-
-           {/* Global search results dropdown — Dashboard only */}
-           {view === ViewState.DASHBOARD && globalSearchTerm.trim().length > 0 && (() => {
-             const term = globalSearchTerm.trim().toLowerCase();
-             const todayStr = new Date().toISOString().split('T')[0];
-             const matches = reservations
-               .filter(r => {
-                 if (r.reservation_time.split('T')[0] < todayStr) return false;
-                 const name = r.customer_name.toLowerCase();
-                 if (name.includes(term)) return true;
-                 const tbl = r.table_id ? tables.find(t => t.id === r.table_id) : null;
-                 if (tbl && tbl.name.toLowerCase().includes(term)) return true;
-                 return false;
-               })
-               .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time))
-               .slice(0, 8);
-             const onPickResult = (r: Reservation) => {
-               setReservationsSearchPrefill(r.customer_name);
-               setView(ViewState.RESERVATIONS);
-               setGlobalSearchTerm('');
-               setMobileSearchOpen(false);
-             };
-             return (
-               <div className="absolute left-2 right-2 md:left-1/2 md:-translate-x-1/2 md:w-[28rem] mt-1 top-14 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden z-30 animate-in fade-in slide-in-from-top-2">
-                 {matches.length === 0 ? (
-                   <div className="p-4 text-center text-sm text-[var(--color-fg-subtle)]">Nessuna prenotazione trovata</div>
-                 ) : (
-                   <ul className="max-h-80 overflow-y-auto divide-y divide-[var(--color-line)]">
-                     {matches.map(r => {
-                       const tbl = r.table_id ? tables.find(t => t.id === r.table_id) : null;
-                       const time = r.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] ?? '';
-                       const dateLabel = new Date(r.reservation_time.split('T')[0] + 'T00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
-                       return (
-                         <li key={r.id}>
-                           <button
-                             type="button"
-                             onClick={() => onPickResult(r)}
-                             className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-[var(--color-surface-hover)] transition-colors"
-                           >
-                             <div className="flex-1 min-w-0">
-                               <p className="text-sm font-medium text-[var(--color-fg)] truncate">{r.customer_name}</p>
-                               <p className="text-xs text-[var(--color-fg-muted)] truncate">
-                                 {dateLabel}{time ? ` · ${time}` : ''} · {r.guests} {r.guests === 1 ? 'ospite' : 'ospiti'}{tbl ? ` · ${tbl.name}` : ''}
-                               </p>
-                             </div>
-                             <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                           </button>
-                         </li>
-                       );
-                     })}
-                   </ul>
-                 )}
-               </div>
-             );
-           })()}
         </header>
 
         {view === ViewState.DASHBOARD && (
@@ -1115,6 +1178,10 @@ const App: React.FC = () => {
             rooms={rooms}
             banquetMenus={banquetMenus}
             onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+            globalDate={globalDate}
+            globalShiftFilter={globalShiftFilter}
+            onDateChange={setGlobalDate}
+            onShiftFilterChange={setGlobalShiftFilter}
           />
         )}
 
@@ -1159,11 +1226,15 @@ const App: React.FC = () => {
                 onAutoOpenNewHandled={() => setAutoOpenNewReservation(false)}
                 initialSearchTerm={reservationsSearchPrefill}
                 onInitialSearchTermHandled={() => setReservationsSearchPrefill(undefined)}
+                globalDate={globalDate}
+                globalShiftFilter={globalShiftFilter}
+                onDateChange={setGlobalDate}
+                onShiftFilterChange={setGlobalShiftFilter}
             />
         )}
 
         {view === ViewState.USERS && canManageUsers() && (
-          <UserManagement />
+          <UserManagement autoOpenNew={autoOpenNewUser} onAutoOpenNewHandled={() => setAutoOpenNewUser(false)} />
         )}
 
         {view === ViewState.FLOOR_PLAN && (
@@ -1181,6 +1252,8 @@ const App: React.FC = () => {
             onDeleteRoom={handleDeleteRoom}
             onToggleRoomClosed={handleToggleRoomClosed}
             canEdit={hasPermission('floorplan:full')}
+            globalDate={globalDate}
+            globalShiftFilter={globalShiftFilter}
           />
         )}
 
@@ -1199,11 +1272,16 @@ const App: React.FC = () => {
             onDeleteBanquetMenu={handleDeleteBanquet}
             canEdit={hasPermission('menu:full')}
             initialTab={menuInitialTab}
+            autoOpenNewBanquet={autoOpenNewBanquet}
+            onAutoOpenNewBanquetHandled={() => setAutoOpenNewBanquet(false)}
+            autoOpenNewDish={autoOpenNewDish}
+            onAutoOpenNewDishHandled={() => setAutoOpenNewDish(false)}
+            onActiveTabChange={setActiveMenuTab}
           />
         )}
 
         {view === ViewState.STAFF && (
-          <StaffManagement showToast={addToast} />
+          <StaffManagement showToast={addToast} autoOpenNew={autoOpenNewStaff} onAutoOpenNewHandled={() => setAutoOpenNewStaff(false)} />
         )}
 
         {view === ViewState.CLIENTI && (
@@ -1211,6 +1289,8 @@ const App: React.FC = () => {
             reservations={reservations}
             banquetMenus={banquetMenus}
             showToast={addToast}
+            autoOpenNew={autoOpenNewCustomer}
+            onAutoOpenNewHandled={() => setAutoOpenNewCustomer(false)}
           />
         )}
 
@@ -1325,19 +1405,17 @@ const App: React.FC = () => {
                 onClick={() => setView(ViewState.RESERVATIONS)}
               />
             )}
-            {/* Center "Nuova prenotazione" — circular, raised above the nav */}
-            {hasPermission('reservations:full') && (
-              <div className="flex-1 flex justify-center items-end">
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewReservation(true)}
-                  aria-label="Nuova prenotazione"
-                  className="h-14 w-14 -translate-y-3 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all ring-4 ring-[var(--color-surface)]"
-                >
-                  <Plus className="h-6 w-6" />
-                </button>
-              </div>
-            )}
+            {/* Center "+" — circular, raised above the nav — opens context-aware action sheet */}
+            <div className="flex-1 flex justify-center items-end">
+              <button
+                type="button"
+                onClick={() => setShowCreateSheet(v => !v)}
+                aria-label="Crea nuovo"
+                className="h-14 w-14 -translate-y-3 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all ring-4 ring-[var(--color-surface)]"
+              >
+                <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
+              </button>
+            </div>
             {canAccessView(ViewState.MENU) && (
               <BottomNavItem
                 icon={<UtensilsCrossed size={20} />}
@@ -1356,6 +1434,43 @@ const App: React.FC = () => {
             )}
           </div>
         </nav>
+
+        {/* "Create" action sheet — slides up from behind the bottom nav */}
+        {showCreateSheet && (
+          <>
+            <div
+              className="fixed inset-0 z-[29] lg:hidden bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)]"
+              style={{ animation: 'fadeIn 280ms ease-out both' }}
+              onClick={() => setShowCreateSheet(false)}
+            />
+            <div
+              className="fixed left-0 right-0 z-[29] lg:hidden bg-[var(--color-surface)] rounded-t-[20px] border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)]"
+              style={{ bottom: 0, animation: 'slideUpBehindNav 280ms ease-out both' }}
+            >
+              <div className="px-6 pt-5 pb-20 grid grid-cols-2 gap-4 justify-items-center" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+                {[
+                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
+                  { key: 'dish', icon: <UtensilsCrossed className="h-7 w-7" />, label: 'Piatto', action: () => { setView(ViewState.MENU); setMenuInitialTab('DISHES'); setAutoOpenNewDish(true); setShowCreateSheet(false); } },
+                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
+                ].map((tile, i) => (
+                  <button
+                    key={tile.key}
+                    type="button"
+                    onClick={tile.action}
+                    className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
+                    style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
+                  >
+                    <div className="w-20 h-20 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
+                      {tile.icon}
+                    </div>
+                    <span className="text-[12px] font-semibold text-[var(--color-fg)]">{tile.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* "Altro" bottom sheet — mobile */}
         {showMoreMenu && (

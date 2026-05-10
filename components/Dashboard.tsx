@@ -89,6 +89,10 @@ interface DashboardProps {
   rooms: Room[];
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  onDateChange?: (date: Date) => void;
+  onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
 }
 
 // Shopping List Labels and Colors
@@ -154,23 +158,39 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  // Global meal filter — drives KPI cards, Stato Tavoli, Note & Allergeni, Affluenza, Personale.
-  // Defaults to the current meal based on time-of-day; user can switch to "Tutti" anytime.
-  const [globalShiftFilter, setGlobalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(() =>
-    new Date().getHours() < 17 ? 'LUNCH' : 'DINNER'
+
+  // On desktop, date/shift are driven by App-level props (header controls).
+  // On mobile, local state + inline controls.
+  const [localDate, setLocalDate] = useState<Date>(globalDate ?? new Date());
+  const [localShiftFilter, setLocalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(
+    globalShiftFilterProp ?? (new Date().getHours() < 17 ? 'LUNCH' : 'DINNER')
   );
+
+  useEffect(() => { if (globalDate) setLocalDate(globalDate); }, [globalDate]);
+  useEffect(() => { if (globalShiftFilterProp) setLocalShiftFilter(globalShiftFilterProp); }, [globalShiftFilterProp]);
+
+  const selectedDate = globalDate ?? localDate;
+  const globalShiftFilter = globalShiftFilterProp ?? localShiftFilter;
+  const setSelectedDate = (valOrFn: Date | ((prev: Date) => Date)) => {
+    const next = typeof valOrFn === 'function' ? valOrFn(selectedDate) : valOrFn;
+    setLocalDate(next);
+    onDateChange?.(next);
+  };
+  const setGlobalShiftFilter = (v: 'ALL' | 'LUNCH' | 'DINNER') => {
+    setLocalShiftFilter(v);
+    onShiftFilterChange?.(v);
+  };
+
   const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
   const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
-  // Tick the header clock once per minute (start of each minute)
   useEffect(() => {
     const now = new Date();
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
@@ -697,10 +717,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Format date for display
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('it-IT', {
-      weekday: 'long',
+      weekday: 'short',
       day: 'numeric',
-      month: 'long',
-      year: 'numeric'
+      month: 'short',
     });
   };
 
@@ -952,46 +971,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* Today's Tasks Summary — prominent position at top */}
-      {todaysTodos.length > 0 && (
-        <div className="bg-sky-50 dark:bg-sky-500/10 p-4 rounded-xl border border-sky-200 dark:border-sky-500/20">
-          <div className="flex items-center justify-between mb-2.5">
-            <div className="flex items-center gap-2">
-              <ListTodo className="h-4 w-4 text-sky-600 dark:text-sky-400" />
-              <h3 className="text-sm font-semibold text-sky-900 dark:text-sky-100">Attività di oggi</h3>
-              <span className="tabular inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-500/25 dark:text-sky-200 border border-sky-200 dark:border-sky-500/30">{todaysTodos.length}</span>
-            </div>
-            <button
-              onClick={() => {
-                todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="text-xs font-medium text-sky-700 dark:text-sky-300 hover:text-sky-900 dark:hover:text-sky-100 transition-colors"
-            >
-              Vedi tutte
-            </button>
-          </div>
-          <div className="space-y-1.5">
-            {todaysTodos.slice(0, 3).map(todo => (
-              <div key={todo.id} className="flex items-center gap-2.5">
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
-                  todo.priority === TodoPriority.HIGH
-                    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/20'
-                    : todo.priority === TodoPriority.MEDIUM
-                    ? 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/20'
-                    : 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-                }`}>
-                  <Flag className="h-2.5 w-2.5" />
-                </span>
-                <span className="text-sm text-sky-900 dark:text-sky-100 truncate">{todo.title}</span>
-              </div>
-            ))}
-            {todaysTodos.length > 3 && (
-              <p className="tabular text-xs text-sky-600 dark:text-sky-400 pl-7">+{todaysTodos.length - 3} altre attività</p>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
@@ -1012,20 +991,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
         return (
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
-                <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
-                  {serviceLabel.text}
-                </span>
+            <div className="flex items-center justify-between w-full gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
+                  <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
+                    {serviceLabel.text}
+                  </span>
+                </div>
+                <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
+                  {greeting}, {firstName}.
+                </h1>
               </div>
-              <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
-                {greeting}, {firstName}.
-              </h1>
+              {todaysTodos.length > 0 && (
+                <button
+                  onClick={() => todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-500/10 transition-colors flex-shrink-0 self-end"
+                  aria-label={`${todaysTodos.length} attività di oggi`}
+                  title="Attività di oggi"
+                >
+                  <ListTodo className="h-7 w-7" />
+                  <span className="hidden md:inline text-sm font-semibold">Attività di oggi</span>
+                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-sky-500 text-white">
+                    {todaysTodos.length}
+                  </span>
+                </button>
+              )}
             </div>
 
-            {/* Date navigator + time chip + new reservation button */}
-            <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto w-full md:w-auto">
+            {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
+            <div className="flex flex-wrap items-center gap-2 self-stretch w-full md:hidden">
               {/* Date pill with fixed-position arrows */}
               <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 md:flex-none min-w-0">
                 {!isToday && (
