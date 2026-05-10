@@ -9,9 +9,11 @@ interface UserManagementProps {
   // When provided, the component renders as a modal with a close button.
   // When omitted, it renders as an inline page (no overlay).
   onClose?: () => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
-export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
+export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpenNew, onAutoOpenNewHandled }) => {
   const isModal = typeof onClose === 'function';
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -38,6 +40,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    if (autoOpenNew) {
+      setShowAddForm(true);
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
 
   const fetchUsers = async () => {
     try {
@@ -379,7 +388,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
 
         {/* Footer */}
         {!showAddForm && (
-          <div className={isModal ? "px-5 py-3 border-t border-[var(--color-line)] flex justify-end" : "flex justify-end"}>
+          <div className={isModal ? "px-5 py-3 border-t border-[var(--color-line)] flex justify-end" : "lg:hidden flex justify-end"}>
             <button
               onClick={() => setShowAddForm(true)}
               className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
@@ -401,7 +410,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           </div>
         </div>
       ) : (
-        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
           {content}
         </div>
       )}

@@ -8,6 +8,8 @@ interface Props {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
 interface FormState {
@@ -58,7 +60,7 @@ const formatReservationDateTime = (isoString: string): { date: string; time: str
   return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
 };
 
-export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, showToast }) => {
+export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, showToast, autoOpenNew, onAutoOpenNewHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
@@ -83,6 +85,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (autoOpenNew) {
+      openCreate();
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
 
   // Aggregate reservations/banquets per customer for the detail panel.
   // Customers are matched on phone (when available) or normalised name to
@@ -192,21 +201,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
   };
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <div />
-        {canEdit && (
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 shadow-sm"
-          >
-            <Plus className="h-5 w-5" />
-            Nuovo cliente
-          </button>
-        )}
-      </div>
-
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-4 relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <input

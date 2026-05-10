@@ -82,9 +82,11 @@ const toDateOnly = (date: string): string => date.substring(0, 10);
 
 interface StaffManagementProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
-export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) => {
+export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, autoOpenNew, onAutoOpenNewHandled }) => {
   // ============================================
   // STATE
   // ============================================
@@ -181,6 +183,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (autoOpenNew) {
+      handleOpenAddStaff();
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
 
   // ============================================
   // FILTERED DATA
@@ -497,17 +506,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div />
-        <button
-          onClick={handleOpenAddStaff}
-          className="w-full md:w-auto justify-center rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
-        >
-          <UserPlus className="h-4 w-4" />
-          Aggiungi Dipendente
-        </button>
-      </div>
+      <button
+        onClick={handleOpenAddStaff}
+        className="w-full lg:hidden justify-center rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
+      >
+        <UserPlus className="h-4 w-4" />
+        Aggiungi Dipendente
+      </button>
 
       {/* Filters */}
       <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg p-4">

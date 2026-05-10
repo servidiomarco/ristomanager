@@ -267,20 +267,20 @@ body {
 @keyframes glow-pulse {
   0% {
     box-shadow:
-      0 0 0 0 rgba(17, 24, 39, 0.7),
-      0 0 14px 2px rgba(17, 24, 39, 0.55);
+      0 0 0 0 color-mix(in srgb, var(--glow-color, #111827) 70%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--glow-color, #111827) 55%, transparent);
     transform: scale(1);
   }
   50% {
     box-shadow:
-      0 0 0 14px rgba(17, 24, 39, 0),
-      0 0 38px 10px rgba(17, 24, 39, 0.85);
+      0 0 0 14px transparent,
+      0 0 38px 10px color-mix(in srgb, var(--glow-color, #111827) 85%, transparent);
     transform: scale(1.06);
   }
   100% {
     box-shadow:
-      0 0 0 0 rgba(17, 24, 39, 0),
-      0 0 14px 2px rgba(17, 24, 39, 0.55);
+      0 0 0 0 transparent,
+      0 0 14px 2px color-mix(in srgb, var(--glow-color, #111827) 55%, transparent);
     transform: scale(1);
   }
 }
@@ -288,6 +288,31 @@ body {
 .animate-glow-pulse {
   animation: glow-pulse 1.4s ease-in-out infinite;
 }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.6); }
+  70% { box-shadow: 0 0 0 8px rgba(96, 165, 250, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+@keyframes flash-row {
+  0% { background-color: rgba(59, 130, 246, 0.15); }
+  100% { background-color: transparent; }
+}
+
+.animate-flash-row {
+  animation: flash-row 1.5s ease-out;
+}
+
+/* Create-sheet animations */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUpSheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes slideUpBehindNav { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes tileIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ===========================================================================
    Print

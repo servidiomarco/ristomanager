@@ -88,6 +88,11 @@ interface ReservationListProps {
   // Pre-fill search term when navigating in from the global header search
   initialSearchTerm?: string;
   onInitialSearchTermHandled?: () => void;
+  // Global date/shift from App header (desktop)
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  onDateChange?: (date: Date) => void;
+  onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -109,13 +114,54 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onModalClose,
   initialSearchTerm,
   onInitialSearchTermHandled,
+  globalDate,
+  globalShiftFilter: globalShiftFilterProp,
+  onDateChange,
+  onShiftFilterChange,
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
-  const [selectedDate, setSelectedDate] = useState<string>(formatLocalDateTime(new Date()));
-  const [selectedShift, setSelectedShift] = useState<Shift | 'ALL'>('ALL');
+  const [selectedDate, setSelectedDateLocal] = useState<string>(() => {
+    if (globalDate) return formatLocalDate(globalDate) + 'T' + (new Date().getHours() < 17 ? '13:00' : '20:00');
+    return formatLocalDateTime(new Date());
+  });
+  const setSelectedDate = (val: string) => {
+    setSelectedDateLocal(val);
+    const [datePart] = val.split('T');
+    if (datePart && onDateChange) {
+      const [y, m, d] = datePart.split('-').map(Number);
+      if (y && m && d) onDateChange(new Date(y, m - 1, d));
+    }
+  };
+  const [selectedShift, setSelectedShiftLocal] = useState<Shift | 'ALL'>(() => {
+    if (globalShiftFilterProp === 'LUNCH') return Shift.LUNCH;
+    if (globalShiftFilterProp === 'DINNER') return Shift.DINNER;
+    return 'ALL';
+  });
+  const setSelectedShift = (val: Shift | 'ALL') => {
+    setSelectedShiftLocal(val);
+    if (onShiftFilterChange) {
+      if (val === Shift.LUNCH) onShiftFilterChange('LUNCH');
+      else if (val === Shift.DINNER) onShiftFilterChange('DINNER');
+    }
+  };
+
+  // Sync from global header changes
+  useEffect(() => {
+    if (globalDate) {
+      const time = selectedDate.split('T')[1] || '12:00';
+      const newDateStr = formatLocalDate(globalDate) + 'T' + time;
+      if (newDateStr.split('T')[0] !== selectedDate.split('T')[0]) {
+        setSelectedDateLocal(newDateStr);
+      }
+    }
+  }, [globalDate]);
+  useEffect(() => {
+    if (globalShiftFilterProp === 'LUNCH') setSelectedShiftLocal(Shift.LUNCH);
+    else if (globalShiftFilterProp === 'DINNER') setSelectedShiftLocal(Shift.DINNER);
+  }, [globalShiftFilterProp]);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterArrivalStatus, setFilterArrivalStatus] = useState<ArrivalStatus | 'ALL'>('ALL');
   const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
@@ -202,6 +248,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
 
@@ -215,6 +262,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [cardMenuOpenId]);
+
+  // Split-view state
+  const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived']));
+  const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
+  const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
+  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note'; text: string; x: number; y: number } | null>(null);
+
+  // Desktop breakpoint for split-view (>= 1024px)
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
 
   // Draft restore banner — only shown while creating a new reservation
   const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
@@ -561,6 +633,64 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterNoTable(false);
     setSortBy('time-asc');
   };
+
+  // --- Grouped reservation list for split-view ---
+  // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
+  type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
+  const groupedReservations = useMemo((): ReservationGroup[] => {
+    const dateFiltered = reservations.filter(r => {
+      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      const trimmedSearch = searchTerm.trim().toLowerCase();
+      let matchesSearch = true;
+      if (trimmedSearch) {
+        const nameHit = !!r.customer_name && r.customer_name.toLowerCase().includes(trimmedSearch);
+        const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
+        const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
+        matchesSearch = nameHit || tableHit;
+      }
+      return matchesDate && matchesShift && matchesSearch;
+    });
+
+    const waiting: Reservation[] = [];
+    const arrived: Reservation[] = [];
+    const freed: Reservation[] = [];
+
+    for (const r of dateFiltered) {
+      const status = r.arrival_status || ArrivalStatus.WAITING;
+      if (status === ArrivalStatus.DEPARTED) {
+        freed.push(r);
+      } else if (status === ArrivalStatus.ARRIVED) {
+        arrived.push(r);
+      } else {
+        waiting.push(r);
+      }
+    }
+
+    waiting.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
+
+    return [
+      { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
+      { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
+      { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
+    ].filter(g => g.items.length > 0);
+  }, [reservations, selectedDate, selectedShift, searchTerm, displayTables]);
+
+  const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
+
+  const selectedReservation = selectedReservationId
+    ? reservations.find(r => r.id === selectedReservationId) ?? null
+    : null;
+
+  // Flash animation for newly arriving reservations
+  useEffect(() => {
+    if (newReservationFlashId !== null) {
+      const timer = setTimeout(() => setNewReservationFlashId(null), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [newReservationFlashId]);
 
   // Date Navigation Helpers
   const selectedDateObj = new Date(selectedDate);
@@ -1227,6 +1357,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           ${isHidden ? 'opacity-40 grayscale' : ''}
       `;
 
+      const isHighlighted = selectedReservation?.table_id === table.id && detailDrawerOpen;
+      const hoveredRes = hoveredReservationId ? reservations.find(r => r.id === hoveredReservationId) : null;
+      const isHoverMatch = hoveredRes?.table_id === table.id;
+
       const tooltipText = isHidden
           ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
           : reservation
@@ -1238,12 +1372,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return (
         <div
             key={table.id}
-            className={`absolute ${isOccupied ? 'z-10' : ''} ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}`}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'animate-glow-pulse z-20' : ''} ${isHighlighted ? 'z-30' : ''}`}
             style={{
                 left: table.x,
                 top: table.y,
                 width: `${widthPx}px`,
                 height: `${heightPx}px`,
+                ...((isSearchMatch || isHoverMatch) ? { '--glow-color': isArrived ? '#ea580c' : reservation ? '#e11d48' : banquet ? '#4f46e5' : '#111827' } as React.CSSProperties : {}),
             }}
             title={tooltipText}
             onClick={() => {
@@ -1257,7 +1392,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={shapeClasses}
+                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''}`}
                 style={{
                     width: `${widthPx}px`,
                     height: `${heightPx}px`,
@@ -1314,1074 +1449,1040 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       );
   };
 
+  // --- Helpers for reservation rows ---
+  const handleRowClick = (res: Reservation) => {
+    if (selectedReservationId === res.id) {
+      setSelectedReservationId(null);
+      setDetailDrawerOpen(false);
+    } else {
+      setSelectedReservationId(res.id);
+      setDetailDrawerOpen(true);
+    }
+  };
+
+  const closeDetailDrawer = () => {
+    setSelectedReservationId(null);
+    setDetailDrawerOpen(false);
+  };
+
+  const renderReservationRow = (res: Reservation, group: ReservationGroup) => {
+    const table = displayTables.find(t => t.id === res.table_id);
+    const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
+    const isSelected = selectedReservationId === res.id;
+    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
+    const isFlashing = newReservationFlashId === res.id;
+    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+
+    return (
+      <div
+        key={res.id}
+        className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
+          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-[var(--color-surface-hover)]'}
+          ${isFlashing ? 'animate-flash-row' : ''}
+          ${group.key === 'freed' ? 'opacity-60' : ''}
+        `}
+        onMouseEnter={() => setHoveredReservationId(res.id)}
+        onMouseLeave={() => setHoveredReservationId(null)}
+      >
+        {/* Left content */}
+        <div className="flex-1 min-w-0 px-3 py-2">
+          {/* Row 1: Time + indicator icons */}
+          <div className="flex items-center gap-1.5 h-5">
+            <span className="text-xs text-[var(--color-fg)] tabular">
+              {formatTime(res.reservation_time)}
+            </span>
+            {allergenText && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
+                className="flex-shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+              </button>
+            )}
+            {noteText && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                className="flex-shrink-0">
+                <StickyNote className="h-3.5 w-3.5 text-amber-500" />
+              </button>
+            )}
+            {res.payment_status !== PaymentStatus.PENDING && (
+              <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+              </span>
+            )}
+            {menu && (
+              <span className="flex-shrink-0" title={menu.name}>
+                <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+              </span>
+            )}
+          </div>
+
+          {/* Row 2: Customer name */}
+          <p className="text-base font-medium text-[var(--color-fg)] leading-6 truncate">
+            {toTitleCase(res.customer_name)}
+          </p>
+
+          {/* Row 3: Actions */}
+          {canEdit && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              {group.key === 'waiting' && (
+                <button type="button" onClick={() => handleToggleArrivalStatus(res)}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                  <UserCheck className="h-3.5 w-3.5" /> Arrivato
+                </button>
+              )}
+              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                <button type="button" onClick={() => handleEditClick(res)}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                  <MapPin className="h-3.5 w-3.5" /> Tavolo
+                </button>
+              )}
+              {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                <button type="button" onClick={() => handleFreeTable(res)}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                  <LogOut className="h-3.5 w-3.5" /> Libera
+                </button>
+              )}
+              <button type="button" onClick={() => handleEditClick(res)}
+                className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => handleDeleteClick(res.id, res.customer_name)}
+                className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Covers count */}
+        <div className="flex items-start pt-2 pr-1 flex-shrink-0">
+          <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+            <Users className="h-3.5 w-3.5" />
+            <span className="text-base font-medium tabular">{res.guests}</span>
+          </div>
+        </div>
+
+        {/* Table strip — full height */}
+        <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 ${
+          table
+            ? group.key === 'freed' ? 'bg-slate-100'
+              : group.key === 'arrived' ? 'bg-emerald-50'
+              : 'bg-[#dbeafe]'
+            : 'bg-[var(--color-surface-3)]'
+        }`}>
+          {table ? (
+            <>
+              <span className={`text-base font-bold leading-6 ${
+                group.key === 'freed' ? 'text-slate-500'
+                  : group.key === 'arrived' ? 'text-emerald-700'
+                  : 'text-[#193cb8]'
+              }`}>{table.name}</span>
+              {tableRoom && <span className="text-xs text-[#4d4d4d] text-center leading-4">{tableRoom.name}</span>}
+            </>
+          ) : (
+            <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- Detail drawer content ---
+  const renderDetailDrawer = (res: Reservation) => {
+    const table = displayTables.find(t => t.id === res.table_id);
+    const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
+    const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
+    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+
+    return (
+      <div className="bg-[var(--color-surface)] border-t border-[var(--color-line)] shadow-[0_-4px_12px_rgba(0,0,0,0.08)] rounded-t-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+        {/* Drag handle */}
+        <div className="flex justify-center pt-2 pb-1">
+          <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+        </div>
+
+        <div className="px-4 pb-4 space-y-3 max-h-[50vh] lg:max-h-none overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name)}</h3>
+              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
+                <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
+                {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
+              </div>
+            </div>
+            <button type="button" onClick={closeDetailDrawer} className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Info badges */}
+          <div className="flex flex-wrap gap-1.5">
+            {res.payment_status !== PaymentStatus.PENDING && (
+              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${getStatusColor(res.payment_status)}`}>
+                <CreditCard className="h-2.5 w-2.5" />
+                {res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}
+              </span>
+            )}
+            {menu && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-medium">
+                <BookOpen className="h-2.5 w-2.5" /> {menu.name}
+              </span>
+            )}
+            {allergenText && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-[10px] font-medium">
+                <AlertTriangle className="h-2.5 w-2.5" /> {allergenText}
+              </span>
+            )}
+          </div>
+
+          {/* Contact info */}
+          {(res.phone || res.email) && (
+            <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+              {res.phone && <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" /> {res.phone}</span>}
+              {res.email && <span className="flex items-center gap-1 truncate"><Mail className="h-3 w-3 flex-shrink-0" /> {res.email}</span>}
+            </div>
+          )}
+
+          {/* Notes */}
+          {noteText && (
+            <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] rounded-md px-3 py-2">
+              <StickyNote className="h-3 w-3 inline mr-1" />{noteText}
+            </div>
+          )}
+
+          {/* Actions */}
+          {canEdit && (
+            <div className="flex items-center gap-1.5 pt-1">
+              {arrivalStatus === ArrivalStatus.WAITING && (
+                <button onClick={() => { handleToggleArrivalStatus(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                  <UserCheck className="h-3.5 w-3.5" /> Segna arrivato
+                </button>
+              )}
+              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                  <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
+                </button>
+              )}
+              {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                <button onClick={() => { handleFreeTable(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                  <LogOut className="h-3.5 w-3.5" /> Libera tavolo
+                </button>
+              )}
+              <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                <Edit2 className="h-3.5 w-3.5" /> Modifica
+              </button>
+              <button onClick={() => { handleDeleteClick(res.id, res.customer_name); closeDetailDrawer(); }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Annulla
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- Desktop header controls (date/shift moved to App header) ---
+  const renderHeaderControls = () => null;
+
+  // --- Grouped list panel (shared between desktop left column and mobile list view) ---
+  const renderGroupedList = () => (
+    <>
+      {/* Search + filter + sort row */}
+      <div className="px-3 pt-3 pb-2 flex items-center gap-1.5">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
+          <input type="text" placeholder="Cerca per nome o tavolo..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
+            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          {searchTerm && (
+            <button type="button" onClick={() => setSearchTerm('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Sort */}
+        <div className="relative flex-shrink-0">
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="appearance-none h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-transparent hover:bg-[var(--color-surface-hover)] focus:outline-none cursor-pointer"
+            aria-label="Ordina">
+            <option value="time-asc">Orario ↑</option>
+            <option value="time-desc">Orario ↓</option>
+            <option value="name-asc">Nome A–Z</option>
+            <option value="name-desc">Nome Z–A</option>
+            <option value="guests-asc">Coperti ↑</option>
+            <option value="guests-desc">Coperti ↓</option>
+          </select>
+          <ArrowUpDown className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-muted)] pointer-events-none" />
+        </div>
+
+        {/* Filter */}
+        <button type="button" onClick={() => setShowFiltersPanel(o => !o)}
+          className={`relative h-9 w-9 rounded-full border text-xs font-medium transition-colors flex items-center justify-center flex-shrink-0 ${
+            showFiltersPanel || activeFilterCount > 0
+              ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+              : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+          }`} aria-expanded={showFiltersPanel}>
+          <Filter className="h-3.5 w-3.5" />
+          {activeFilterCount > 0 && (
+            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+
+        {/* Print — desktop only (next to search/filter/sort) */}
+        <button type="button" onClick={() => setIsPrintModalOpen(true)}
+          className="hidden lg:flex h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors items-center justify-center flex-shrink-0"
+          aria-label="Stampa">
+          <Printer className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Filter panel — collapsible */}
+      {showFiltersPanel && (
+        <div className="px-3 pb-2 space-y-2 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-[var(--color-fg)] flex items-center gap-1.5"><Filter className="h-3 w-3" /> Filtri</h3>
+            {activeFilterCount > 0 && (
+              <button type="button" onClick={resetFilters} className="flex items-center gap-1 text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                <RotateCcw className="h-3 w-3" /> Reimposta
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { value: 'ALL', label: 'Tutti' },
+              { value: PaymentStatus.PENDING, label: 'Sospeso' },
+              { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+              { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+            ].map(opt => (
+              <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                  filterStatus === opt.value
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                }`}>{opt.label}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+              Allergeni
+            </button>
+            <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+              Con note
+            </button>
+            <button type="button" onClick={() => setFilterNoTable(v => !v)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+              Senza tavolo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Grouped reservation list */}
+      {totalGroupedCount === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-4">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
+            {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
+          </div>
+          <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
+          <p className="text-xs text-[var(--color-fg-muted)] mt-1">
+            Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
+          </p>
+          {canEdit && (
+            <button onClick={handleOpenNew}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
+              <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          {groupedReservations.map(group => (
+            <div key={group.key}>
+              {/* Group header */}
+              <button type="button" onClick={() => toggleGroup(group.key)}
+                className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10">
+                <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
+                <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
+                <span className="text-xs text-[var(--color-fg-muted)] font-medium">
+                  {group.items.length} {group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · {group.items.reduce((s, r) => s + (r.guests || 0), 0)} coperti
+                </span>
+                <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
+              </button>
+              {/* Group items */}
+              {expandedGroups.has(group.key) && (
+                <div>
+                  {group.items.map(res => renderReservationRow(res, group))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  // --- Map panel (shared between desktop right column and mobile map view) ---
+  const renderMapPanel = () => {
+    const tablesInRoom = displayTables
+      .filter(t => t.room_id === activeMapRoomId)
+      .filter(t => !displayTables.some(other =>
+        other.merged_with && other.merged_with.length > 0 &&
+        other.merged_with.map(id => Number(id)).includes(Number(t.id))
+      ))
+      .filter(t => showHidden || !hiddenTableIds.has(t.id));
+
+    const occupiedTablesCount = tablesInRoom.filter(t => getOccupierForTable(t.id)).length;
+    const totalTablesInRoom = tablesInRoom.length;
+    const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
+
+    const reservationsForDayShift = reservations.filter(r => {
+      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      return matchesDate && matchesShift;
+    });
+    const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
+    const reservationCountForDayShift = reservationsForDayShift.length;
+    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
+
+    const PADDING = 40;
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const baseSize = isMobile ? 45 : 80;
+    const baseWidth = isMobile ? 60 : 100;
+    const seatMultiplier = isMobile ? 8 : 15;
+    let maxRight = 0;
+    let maxBottom = 0;
+    for (const t of tablesInRoom) {
+      let w: number, h: number;
+      if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) { w = baseSize; h = baseSize; }
+      else { w = Math.max(baseWidth, t.seats * seatMultiplier); h = baseSize; }
+      maxRight = Math.max(maxRight, t.x + w);
+      maxBottom = Math.max(maxBottom, t.y + h);
+    }
+    const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
+    const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
+    const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
+      ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
+      : 1;
+
+    return (
+      <div className="flex flex-col h-full">
+        {/* Room tabs + stats */}
+        <div className="flex items-center gap-3 px-3 py-2 border-b border-[var(--color-line)]">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+            {rooms.filter(r => !r.is_closed).map(room => (
+              <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
+                className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
+                  activeMapRoomId === room.id
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                }`}>
+                {room.name}
+              </button>
+            ))}
+          </div>
+          {hiddenTableIds.size > 0 && (
+            <button type="button" onClick={() => setShowHidden(v => !v)}
+              className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                showHidden
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
+              {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+              <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
+            </button>
+          )}
+          <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+              <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+              <span className="text-[var(--color-fg-muted)]">coperti</span>
+            </div>
+            <span className="text-[var(--color-fg-subtle)]">·</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+              <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+            </div>
+            {unassignedCountForDayShift > 0 && (
+              <button type="button" onClick={() => setShowUnassignedModal(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors"
+                title="Tocca per vedere le prenotazioni senza tavolo">
+                <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+                <span className="text-xs">senza tavolo</span>
+                <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+              </button>
+            )}
+            <span className="text-[var(--color-fg-subtle)]">·</span>
+            <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+              <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile stats */}
+        <div className="md:hidden px-3 py-2 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+            <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+            <span className="text-[var(--color-fg-muted)]">coperti</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+            <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+          </div>
+          {unassignedCountForDayShift > 0 && (
+            <button type="button" onClick={() => setShowUnassignedModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors w-fit">
+              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+              <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+              <span className="text-xs">senza tavolo</span>
+            </button>
+          )}
+          <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
+            <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+            <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+          </div>
+        </div>
+
+        {/* Map canvas */}
+        {isPhone ? (
+          <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative m-3">
+            {isLoadingMerges && (
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                </div>
+              </div>
+            )}
+            {tablesInRoom.length === 0 ? (
+              <div className="text-center py-10 px-4 text-sm text-[var(--color-fg-muted)]">
+                Nessun tavolo in questa sala.
+              </div>
+            ) : (
+              <ul className="divide-y divide-[var(--color-line)]">
+                {[...tablesInRoom]
+                  .sort((a, b) => {
+                    const oa = getOccupierForTable(a.id);
+                    const ob = getOccupierForTable(b.id);
+                    if (!!oa !== !!ob) return oa ? -1 : 1;
+                    const ra = oa?.kind === 'reservation' ? oa.data : null;
+                    const rb = ob?.kind === 'reservation' ? ob.data : null;
+                    if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
+                    if (ra && !rb) return -1;
+                    if (!ra && rb) return 1;
+                    return a.name.localeCompare(b.name, 'it', { numeric: true });
+                  })
+                  .map(table => {
+                    const occupier = getOccupierForTable(table.id);
+                    const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
+                    const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+                    const isOccupied = !!occupier;
+                    const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                    const trimmedSearch = searchTerm.trim().toLowerCase();
+                    const isSearchMatch = !!(trimmedSearch && (
+                      (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+                      (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
+                      table.name.toLowerCase().includes(trimmedSearch)
+                    ));
+                    const mergedNames = (table.merged_with && table.merged_with.length > 0)
+                      ? table.merged_with.map(id => tables.find(t => Number(t.id) === Number(id))?.name).filter((n): n is string => !!n)
+                      : [];
+                    const displayName = mergedNames.length > 0 ? `${table.name}+${mergedNames.join('+')}` : table.name;
+                    const isMerged = mergedNames.length > 0;
+                    return (
+                      <li key={table.id}>
+                        <button
+                          onClick={() => {
+                            if (reservation) handleEditClick(reservation);
+                            else if (banquet) { /* not assignable */ }
+                            else if (canEdit) setAssignTableModal(table);
+                          }}
+                          className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
+                            isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
+                          }`}>
+                          <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
+                            isArrived ? 'bg-orange-50 border-orange-300 text-orange-700'
+                              : reservation ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : banquet ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                              : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
+                          }`}>
+                            <span className="text-center leading-tight break-all">{displayName}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {reservation ? (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
+                                  {isArrived && <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>}
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                </div>
+                              </>
+                            ) : banquet ? (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
+                                  <span className="font-medium text-indigo-700 truncate">{banquet.name}</span>
+                                  <span className="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  {typeof banquet.guests === 'number' && <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>}
+                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="font-medium text-emerald-700">Libero</div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
+                                  {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div ref={setMapCanvasNode}
+            className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden m-3"
+            style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px' }}>
+            {isLoadingMerges && (
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                </div>
+              </div>
+            )}
+            <div style={{ width: extentWidth, height: extentHeight, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
+              {tablesInRoom.map(renderMapTable)}
+            </div>
+
+            {/* Legend */}
+            <div className="absolute bottom-4 right-4 z-10 select-none">
+              <button type="button" onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
+                aria-expanded={isLegendOpen}>
+                <Info size={14} className="text-[var(--color-fg-muted)]" /> Legenda
+              </button>
+              {isLegendOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                  onClick={(e) => e.stopPropagation()}>
+                  <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-rose-50 border border-rose-300 rounded-sm"></div> Occupato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-indigo-50 border border-indigo-300 rounded-sm"></div> Banchetto</div>
+                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                    <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
+                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)</div>
+                  </div>
+                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                    <div className="text-sm font-semibold text-[var(--color-fg)]">Coperti</div>
+                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className={modalOnly ? 'contents' : `${viewMode === 'MAP' ? 'p-4 sm:p-6' : 'p-4 sm:p-6 lg:p-8'} space-y-4 sm:space-y-6`}>
+    <div className={modalOnly ? 'contents' : 'h-[calc(100vh-56px)] flex flex-col'}>
       {!modalOnly && (
       <React.Fragment>
-      {/* Row 1: Date pill + Time chip + Shift toggle + View toggle (desktop) */}
-      <div className="flex flex-wrap items-center gap-2">
-            {/* Date pill — same pattern as Dashboard */}
-            <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 md:flex-none min-w-0">
+
+      {/* ===== DESKTOP: Two-column split view (>= 1024px) ===== */}
+      {isDesktop ? (
+        <div className="flex flex-col h-full">
+          {/* Split view */}
+          <div className="flex flex-1 min-h-0">
+            {/* Left column — Reservation list (25%) */}
+            <div className="w-[25%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col">
+              {renderGroupedList()}
+            </div>
+
+            {/* Right column — Floor map (75%) */}
+            <div className="flex-1 min-w-0 bg-[var(--color-surface)]">
+              {renderMapPanel()}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* ===== MOBILE / TABLET: List only (< 1024px) ===== */
+        <div className="flex flex-col h-full">
+          {/* Row 1: Date - Shift - Print */}
+          <div className="px-4 py-2.5 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
+            <div className="flex items-center gap-2">
+              {/* Date pill */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-0">
                 {!isToday && (
-                    <button
-                        onClick={goToToday}
-                        className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0"
-                    >
-                        Oggi
-                    </button>
+                  <button onClick={goToToday} className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0">
+                    Oggi
+                  </button>
                 )}
-
-                <button
-                    onClick={goToPreviousDay}
-                    className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                    aria-label="Giorno precedente"
-                >
-                    <ChevronLeft className="h-4 w-4" />
+                <button onClick={goToPreviousDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno precedente">
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
-
-                <div className="relative flex-1 md:w-[200px] md:flex-none flex justify-center min-w-0">
-                    <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
-                        <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
-                            <span className="sm:hidden">{formatSelectedDateShort(selectedDateObj)}</span>
-                            <span className="hidden sm:inline">{formatSelectedDate(selectedDateObj)}</span>
-                        </span>
-                    </div>
-                    <input
-                        ref={dateInputRef}
-                        type="date"
-                        value={selectedDateStr}
-                        onChange={handleDateInputChange}
-                        onClick={(e) => {
-                            const input = e.currentTarget;
-                            try {
-                                if (typeof input.showPicker === 'function') input.showPicker();
-                            } catch {
-                                // ignore — fall back to native focus
-                            }
-                        }}
-                        aria-label="Seleziona data"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
+                <div className="relative flex-1 flex justify-center min-w-0">
+                  <div className="flex items-center justify-center px-2 py-1.5 pointer-events-none">
+                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">{formatSelectedDateShort(selectedDateObj)}</span>
+                  </div>
+                  <input ref={dateInputRef} type="date" value={selectedDateStr} onChange={handleDateInputChange}
+                    onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch {} }}
+                    aria-label="Seleziona data" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 </div>
-
-                <button
-                    onClick={goToNextDay}
-                    className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                    aria-label="Giorno successivo"
-                >
-                    <ChevronRight className="h-4 w-4" />
+                <button onClick={goToNextDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno successivo">
+                  <ChevronRight className="h-4 w-4" />
                 </button>
-            </div>
+              </div>
 
-            {/* Time chip — same as Dashboard */}
-            <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 py-2.5">
-                <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
-                    {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-            </div>
-
-            {/* Shift toggle — pill style like Dashboard */}
-            <div className="basis-full md:basis-auto flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-                <button
-                    onClick={() => setSelectedShift(Shift.LUNCH)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
-                        selectedShift === Shift.LUNCH
-                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                            : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                    }`}
-                >
-                    <Sun className="h-4 w-4" /> Pranzo
+              {/* Shift toggle — icon only */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0">
+                <button onClick={() => setSelectedShift(Shift.LUNCH)}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                    selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
+                  }`} aria-label="Pranzo">
+                  <Sun className="h-4 w-4" />
                 </button>
-                <button
-                    onClick={() => setSelectedShift(Shift.DINNER)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
-                        selectedShift === Shift.DINNER
-                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                            : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                    }`}
-                >
-                    <Sunset className="h-4 w-4" /> Cena
+                <button onClick={() => setSelectedShift(Shift.DINNER)}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                    selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
+                  }`} aria-label="Cena">
+                  <Sunset className="h-4 w-4" />
                 </button>
-            </div>
+              </div>
 
-            {/* View toggle — desktop: far right in Row 1 */}
-            <div className="hidden md:flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 ml-auto">
-                <button
-                    onClick={() => setViewMode('LIST')}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                        viewMode === 'LIST'
-                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                            : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                    }`}
-                    title="Vista Elenco"
-                >
-                    <List className="h-4 w-4" /> Lista
-                </button>
-                <button
-                    onClick={() => setViewMode('MAP')}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                        viewMode === 'MAP'
-                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                            : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                    }`}
-                    title="Vista Mappa Sala"
-                >
-                    <MapIcon className="h-4 w-4" /> Mappa
-                </button>
-            </div>
-      </div>
-
-      {/* Row 2: Search + Sort + Filters — secondary controls */}
-      {viewMode === 'LIST' && (
-      <div className="flex items-center gap-2">
-            <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-                <input
-                    type="text"
-                    placeholder="Cerca per nome o tavolo..."
-                    className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                    <button
-                        type="button"
-                        onClick={() => setSearchTerm('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors"
-                        title="Cancella ricerca"
-                        aria-label="Cancella ricerca"
-                    >
-                        <X className="h-3.5 w-3.5" />
-                    </button>
-                )}
-            </div>
-
-            <div className="relative h-9 flex-shrink-0 hidden md:block">
-                <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                    className="appearance-none h-9 pl-8 pr-7 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] focus:outline-none focus:border-[var(--color-fg)] cursor-pointer"
-                    aria-label="Ordina prenotazioni"
-                >
-                    <option value="time-asc">Orario ↑</option>
-                    <option value="time-desc">Orario ↓</option>
-                    <option value="name-asc">Nome A–Z</option>
-                    <option value="name-desc">Nome Z–A</option>
-                    <option value="guests-asc">Coperti ↑</option>
-                    <option value="guests-desc">Coperti ↓</option>
-                </select>
-                <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-            </div>
-
-            <button
-                type="button"
-                onClick={() => setShowFiltersPanel(o => !o)}
-                className={`relative h-9 px-3 rounded-full border text-xs font-medium transition-colors hidden md:flex items-center gap-1.5 flex-shrink-0 ${
-                    showFiltersPanel || activeFilterCount > 0
-                        ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                        : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                }`}
-                aria-expanded={showFiltersPanel}
-            >
-                <Filter className="h-3.5 w-3.5" />
-                Filtri
-                {activeFilterCount > 0 && (
-                    <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] text-[10px] font-semibold">
-                        {activeFilterCount}
-                    </span>
-                )}
-            </button>
-
-            <button
-                type="button"
-                onClick={() => setIsPrintModalOpen(true)}
-                className="h-9 w-auto px-3 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] text-xs font-medium transition-colors hidden md:flex items-center justify-center gap-1.5 flex-shrink-0"
-                title="Stampa lista prenotazioni"
-                aria-label="Stampa lista prenotazioni"
-            >
+              {/* Print */}
+              <button type="button" onClick={() => setIsPrintModalOpen(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Stampa">
                 <Printer className="h-3.5 w-3.5" />
-                Stampa
-            </button>
-      </div>
-      )}
+              </button>
+            </div>
+          </div>
 
-      {/* Filters Panel */}
-      {viewMode === 'LIST' && showFiltersPanel && (
-          <div className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-line)] space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-[var(--color-fg)] flex items-center gap-2">
-                      <Filter className="h-3.5 w-3.5" />
-                      Filtri
-                  </h3>
-                  {activeFilterCount > 0 && (
-                      <button
-                          type="button"
-                          onClick={resetFilters}
-                          className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
-                      >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          Reimposta
+          {/* Content: Card-based list */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {/* Search + filter + sort row */}
+            <div className="px-4 pt-3 pb-2 flex items-center gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
+                <input type="text" placeholder="Cerca..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
+                  value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                {searchTerm && (
+                  <button type="button" onClick={() => setSearchTerm('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Sort — opens modal */}
+              <button type="button" onClick={() => setShowSortModal(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Ordina">
+                <ArrowUpDown className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+              </button>
+
+              {/* Filter — opens modal */}
+              <button type="button" onClick={() => setShowFiltersPanel(true)}
+                className={`relative h-9 w-9 rounded-full border transition-colors flex items-center justify-center flex-shrink-0 ${
+                  activeFilterCount > 0
+                    ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                }`}>
+                <Filter className="h-3.5 w-3.5" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {totalGroupedCount === 0 ? (
+              <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
+                  {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
+                </div>
+                <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
+                <p className="text-xs text-[var(--color-fg-muted)] mt-1">Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}.</p>
+                {canEdit && (
+                  <button onClick={handleOpenNew}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
+                    <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="px-4 pb-4 space-y-2">
+                {groupedReservations.map(group => {
+                  const groupCovers = group.items.reduce((s, r) => s + (r.guests || 0), 0);
+                  return (
+                    <div key={group.key}>
+                      {/* Group header */}
+                      <button type="button" onClick={() => toggleGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-1 py-3 transition-colors">
+                        <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
+                        <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
+                        <span className="text-xs text-[var(--color-fg-muted)]">{group.items.length} · {groupCovers} coperti</span>
+                        <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
                       </button>
-                  )}
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div>
-                      <label className="text-sm font-semibold text-[var(--color-fg)] mb-1.5 block">Stato pagamento</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {[
-                              { value: 'ALL', label: 'Tutti' },
-                              { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                              { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                              { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
-                              { value: PaymentStatus.REFUNDED, label: 'Rimborsato' },
-                          ].map(opt => (
-                              <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setFilterStatus(opt.value)}
-                                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                                      filterStatus === opt.value
-                                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                                  }`}
-                              >
-                                  {opt.label}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
+                      {/* Cards */}
+                      {expandedGroups.has(group.key) && (
+                        <div className="space-y-2">
+                          {group.items.map(res => {
+                            const table = displayTables.find(t => t.id === res.table_id);
+                            const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
+                            const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+                            const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+                            const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+                            const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+                            const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
 
-                  <div>
-                      <label className="text-sm font-semibold text-[var(--color-fg)] mb-1.5 block">Stato arrivo</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {[
-                              { value: 'ALL', label: 'Tutti' },
-                              { value: ArrivalStatus.WAITING, label: 'In attesa' },
-                              { value: ArrivalStatus.ARRIVED, label: 'Arrivato' },
-                              { value: ArrivalStatus.DEPARTED, label: 'Liberato' },
-                          ].map(opt => (
-                              <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setFilterArrivalStatus(opt.value as ArrivalStatus | 'ALL')}
-                                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                                      filterArrivalStatus === opt.value
-                                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                                  }`}
-                              >
-                                  {opt.label}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
+                            const circleColor = group.key === 'freed' ? 'bg-slate-400'
+                              : group.key === 'arrived' ? 'bg-emerald-500'
+                              : group.key === 'noshow' ? 'bg-rose-500'
+                              : 'bg-blue-500';
 
-                  <div>
-                      <label className="text-sm font-semibold text-[var(--color-fg)] mb-1.5 block">Coperti</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {(['ALL', '1-2', '3-4', '5-6', '7+'] as const).map(range => (
-                              <button
-                                  key={range}
-                                  type="button"
-                                  onClick={() => setFilterGuestRange(range)}
-                                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                                      filterGuestRange === range
-                                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                                  }`}
-                              >
-                                  {range === 'ALL' ? 'Tutti' : range}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div className="md:col-span-2 lg:col-span-3">
-                      <label className="text-sm font-semibold text-[var(--color-fg)] mb-1.5 block">Altri filtri</label>
-                      <div className="flex flex-wrap gap-2">
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterHasAllergens}
-                                  onChange={(e) => setFilterHasAllergens(e.target.checked)}
-                                  className="h-4 w-4 rounded border-[var(--color-line)] text-[var(--color-fg)] focus:ring-0"
-                              />
-                              <span className="text-xs font-medium text-[var(--color-fg)] flex items-center gap-1">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                                  Solo con allergeni
-                              </span>
-                          </label>
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterHasNotes}
-                                  onChange={(e) => setFilterHasNotes(e.target.checked)}
-                                  className="h-4 w-4 rounded border-[var(--color-line)] text-[var(--color-fg)] focus:ring-0"
-                              />
-                              <span className="text-xs font-medium text-[var(--color-fg)] flex items-center gap-1">
-                                  <StickyNote className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                                  Solo con note
-                              </span>
-                          </label>
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterNoTable}
-                                  onChange={(e) => setFilterNoTable(e.target.checked)}
-                                  className="h-4 w-4 rounded border-[var(--color-line)] text-[var(--color-fg)] focus:ring-0"
-                              />
-                              <span className="text-xs font-medium text-[var(--color-fg)] flex items-center gap-1">
-                                  <Armchair className="h-3.5 w-3.5 text-rose-600" />
-                                  Senza tavolo
-                              </span>
-                          </label>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* View toggle + sort/filter/print — mobile only, placed before results */}
-      <div className="flex items-center gap-2 md:hidden">
-          <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-              <button
-                  onClick={() => setViewMode('LIST')}
-                  className={`inline-flex items-center justify-center p-2 rounded-full transition-colors ${
-                      viewMode === 'LIST'
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                          : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                  title="Vista Elenco"
-              >
-                  <List className="h-4 w-4" />
-              </button>
-              <button
-                  onClick={() => setViewMode('MAP')}
-                  className={`inline-flex items-center justify-center p-2 rounded-full transition-colors ${
-                      viewMode === 'MAP'
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                          : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                  title="Vista Mappa Sala"
-              >
-                  <MapIcon className="h-4 w-4" />
-              </button>
-          </div>
-
-          {viewMode === 'LIST' && (
-              <>
-                  <div className="relative h-9 flex-shrink-0">
-                      <select
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                          className="appearance-none h-9 pl-8 pr-7 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] focus:outline-none focus:border-[var(--color-fg)] cursor-pointer"
-                          aria-label="Ordina prenotazioni"
-                      >
-                          <option value="time-asc">Orario ↑</option>
-                          <option value="time-desc">Orario ↓</option>
-                          <option value="name-asc">Nome A–Z</option>
-                          <option value="name-desc">Nome Z–A</option>
-                          <option value="guests-asc">Coperti ↑</option>
-                          <option value="guests-desc">Coperti ↓</option>
-                      </select>
-                      <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-                  </div>
-
-                  <button
-                      type="button"
-                      onClick={() => setShowFiltersPanel(o => !o)}
-                      className={`relative h-9 w-9 rounded-full border text-xs font-medium transition-colors flex items-center justify-center flex-shrink-0 ${
-                          showFiltersPanel || activeFilterCount > 0
-                              ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                              : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                      }`}
-                      aria-expanded={showFiltersPanel}
-                  >
-                      <Filter className="h-3.5 w-3.5" />
-                      {activeFilterCount > 0 && (
-                          <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
-                              {activeFilterCount}
-                          </span>
-                      )}
-                  </button>
-
-                  <button
-                      type="button"
-                      onClick={() => setIsPrintModalOpen(true)}
-                      className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                      title="Stampa lista prenotazioni"
-                      aria-label="Stampa lista prenotazioni"
-                  >
-                      <Printer className="h-3.5 w-3.5" />
-                  </button>
-              </>
-          )}
-      </div>
-
-      {/* --- LIST VIEW --- */}
-      {viewMode === 'LIST' && (() => {
-          const renderCard = (res: Reservation) => {
-              const table = displayTables.find(t => t.id === res.table_id);
-              const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
-              const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-              const isNoShow = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
-              const isDeparted = arrivalStatus === ArrivalStatus.DEPARTED;
-              const cardOpacity = (isDeparted || isNoShow) ? 'opacity-60' : '';
-              const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
-
-              const minutesLate = getMinutesLate(res.reservation_time);
-              const resIsToday = res.reservation_time.split('T')[0] === new Date().toISOString().split('T')[0];
-              const lateColor = resIsToday && minutesLate >= 30 ? 'text-rose-600'
-                  : resIsToday && minutesLate >= 15 ? 'text-amber-600'
-                  : '';
-
-              const circleBg = isNoShow
-                  ? 'bg-rose-500'
-                  : isDeparted
-                      ? 'bg-slate-400'
-                      : arrivalStatus === ArrivalStatus.ARRIVED ? 'bg-orange-500' : 'bg-emerald-600';
-
-              return (
-                        <div key={res.id} className={`relative bg-[var(--color-surface)] p-3.5 rounded-xl border border-[var(--color-line)] ${cardOpacity} hover:border-[var(--color-fg-subtle)] transition-colors`}>
-                            {/* Header: table circle + customer name + ··· menu */}
-                            <div className="flex items-center gap-3">
-                                {/* Table circle */}
-                                {isLoadingMerges && res.table_id ? (
-                                    <div className="w-12 h-12 rounded-full bg-[var(--color-surface-3)] flex items-center justify-center flex-shrink-0">
-                                        <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                                    </div>
-                                ) : table ? (
-                                    <div className={`w-12 h-12 rounded-full ${circleBg} flex flex-col items-center justify-center flex-shrink-0`}>
-                                        <span className="text-white text-base font-bold leading-none">{table.name}</span>
-                                        {tableRoomName && (
-                                            <span className="text-white/80 text-[8px] font-medium leading-none mt-0.5 max-w-[40px] truncate">{tableRoomName}</span>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleEditClick(res)}
-                                        className="w-12 h-12 rounded-full bg-rose-100 flex flex-col items-center justify-center flex-shrink-0 hover:bg-rose-200 transition-colors cursor-pointer"
-                                        title="Assegna un tavolo"
-                                    >
-                                        <AlertCircle className="h-4 w-4 text-rose-600" />
-                                        <span className="text-rose-600 text-[7px] font-bold mt-0.5">N/A</span>
-                                    </button>
-                                )}
-
-                                {/* Name + time/guests under it */}
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                        <h3 className="font-semibold text-[15px] text-[var(--color-fg)] truncate">{toTitleCase(res.customer_name)}</h3>
-                                        {res.created_by_user_name && (
-                                            <span
-                                                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                                                title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-                                                aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-                                            >
-                                                {getInitials(res.created_by_user_name)}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--color-fg-muted)]">
-                                        <span className={`flex items-center gap-1 font-medium ${lateColor}`}>
-                                            <Clock className="h-3 w-3" />
-                                            {formatTime(res.reservation_time)}
-                                            {resIsToday && minutesLate >= 15 && (
-                                                <span className="text-[10px]">+{minutesLate}′</span>
-                                            )}
-                                        </span>
-                                        <span className="flex items-center gap-1">
-                                            <Users className="h-3 w-3" /> {res.guests}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* ··· menu */}
-                                {canEdit && (
-                                    <div className="relative flex-shrink-0">
-                                        <button
-                                            type="button"
-                                            onClick={() => setCardMenuOpenId(cardMenuOpenId === res.id ? null : res.id)}
-                                            className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                            aria-label="Altre azioni"
-                                        >
-                                            <MoreHorizontal className="h-4 w-4" />
-                                        </button>
-                                        {cardMenuOpenId === res.id && (
-                                            <div
-                                                ref={cardMenuRef}
-                                                className="absolute right-0 top-full mt-1 w-36 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] py-1 z-30 animate-in fade-in slide-in-from-top-1 duration-100"
-                                            >
-                                                <button
-                                                    type="button"
-                                                    onClick={() => { setCardMenuOpenId(null); handleEditClick(res); }}
-                                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                                >
-                                                    <Edit2 className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                                                    Modifica
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => { setCardMenuOpenId(null); handleDeleteClick(res.id, res.customer_name); }}
-                                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-                                                >
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                    Elimina
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Badges + notes/allergens */}
-                            {(isNoShow || isDeparted || res.payment_status !== PaymentStatus.PENDING || menu || res.notes) && (
-                                <div className="flex items-center gap-1 mt-2 flex-wrap">
-                                    {isNoShow && (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
-                                            <UserX className="h-2.5 w-2.5" />
-                                            NO SHOW
-                                        </span>
+                            return (
+                              <div key={res.id} className={`bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''}`}>
+                                {/* Left content */}
+                                <div className="flex-1 min-w-0 p-3">
+                                  {/* Row 1: Time + indicator icons */}
+                                  <div className="flex items-center gap-1.5 h-5">
+                                    <span className="text-xs text-[var(--color-fg)] tabular">
+                                      {formatTime(res.reservation_time)}
+                                    </span>
+                                    {allergenText && (
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
+                                        className="flex-shrink-0">
+                                        <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                                      </button>
                                     )}
-                                    {isDeparted && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]">
-                                            LIBERATO
-                                        </span>
+                                    {noteText && (
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                                        className="flex-shrink-0">
+                                        <StickyNote className="h-3.5 w-3.5 text-amber-500" />
+                                      </button>
                                     )}
                                     {res.payment_status !== PaymentStatus.PENDING && (
-                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium border ${getStatusColor(res.payment_status)}`}>
-                                            <CreditCard className="h-2.5 w-2.5" />
-                                            {res.payment_status === PaymentStatus.PAID_FULL ? 'SALDATO' : 'ACCONTO'}
-                                        </span>
+                                      <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                                        <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+                                      </span>
                                     )}
                                     {menu && (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[9px] font-medium">
-                                            <BookOpen className="h-2.5 w-2.5" />
-                                            {menu.name}
-                                        </span>
+                                      <span className="flex-shrink-0" title={menu.name}>
+                                        <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+                                      </span>
                                     )}
-                                    {res.notes && (() => {
-                                        const hasAllergens = /intolleranze:/i.test(res.notes);
-                                        const noteText = res.notes.replace(/intolleranze:.*$/im, '').trim();
-                                        return (
-                                            <>
-                                                {hasAllergens && (
-                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-[9px] font-medium">
-                                                        <AlertTriangle className="h-2.5 w-2.5" />
-                                                        Allergeni
-                                                    </span>
-                                                )}
-                                                {noteText && (
-                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 text-[9px] font-medium truncate max-w-[120px]">
-                                                        <StickyNote className="h-2.5 w-2.5 flex-shrink-0" />
-                                                        {noteText}
-                                                    </span>
-                                                )}
-                                            </>
-                                        );
-                                    })()}
-                                </div>
-                            )}
-
-                            {/* Actions: arrival + free table — always visible */}
-                            {canEdit && (
-                                <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-[var(--color-line)]">
-                                    {isNoShow ? (
-                                        <button
-                                            onClick={() => handleToggleNoShow(res)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 transition-colors"
-                                            title="Annulla no-show e riapri prenotazione"
-                                        >
-                                            <RotateCcw className="h-4 w-4" />
-                                            Annulla no-show
-                                        </button>
-                                    ) : (
-                                        <>
-                                            <button
-                                                onClick={() => handleToggleArrivalStatus(res)}
-                                                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                                                    isDeparted
-                                                        ? 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                                                        : arrivalStatus === ArrivalStatus.ARRIVED
-                                                            ? 'text-orange-700 bg-orange-50 hover:bg-orange-100'
-                                                            : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                                                }`}
-                                                title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                            >
-                                                <UserCheck className="h-4 w-4" />
-                                                {isDeparted ? 'Riapri' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                            </button>
-
-                                            {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
-                                                <button
-                                                    onClick={() => handleFreeTable(res)}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                                    title="Libera tavolo (fine pasto)"
-                                                >
-                                                    <LogOut className="h-4 w-4" />
-                                                    Libera
-                                                </button>
-                                            )}
-
-                                            {arrivalStatus !== ArrivalStatus.ARRIVED && !isDeparted && (
-                                                <button
-                                                    onClick={() => handleToggleNoShow(res)}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-700 hover:bg-rose-50 transition-colors ml-auto"
-                                                    title="Cliente non presentato"
-                                                >
-                                                    <UserX className="h-4 w-4" />
-                                                    No show
-                                                </button>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-              );
-          };
-
-          if (filteredReservations.length === 0) {
-              return (
-                  <div className="text-center py-16 sm:py-20 animate-in fade-in duration-300">
-                      <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
-                          {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : selectedShift === Shift.DINNER ? <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Calendar className="h-5 w-5 text-[var(--color-fg-muted)]" />}
-                      </div>
-                      <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione</h3>
-                      <p className="text-xs text-[var(--color-fg-muted)] mt-1">
-                          Non ci sono prenotazioni{selectedShift === 'ALL' ? '' : ` per il turno di ${selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}`} in questa data.
-                      </p>
-                      <button
-                          onClick={handleOpenNew}
-                          className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity"
-                      >
-                          <Plus className="h-3.5 w-3.5" />
-                          Aggiungine una ora
-                      </button>
-                  </div>
-              );
-          }
-
-          const getTimeSectionIdx = (res: Reservation): 0 | 1 | 2 => {
-              const timePart = (res.reservation_time.split('T')[1] || '00:00').slice(0, 5);
-              const [h, m] = timePart.split(':').map(Number);
-              const totalMin = h * 60 + m;
-              if (selectedShift === Shift.LUNCH) {
-                  if (totalMin < 13 * 60) return 0;
-                  if (totalMin < 14 * 60) return 1;
-                  return 2;
-              }
-              if (selectedShift === Shift.DINNER) {
-                  if (totalMin < 21 * 60) return 0;
-                  if (totalMin < 22 * 60 + 30) return 1;
-                  return 2;
-              }
-              if (totalMin < 18 * 60) return 0;
-              if (totalMin < 21 * 60 + 30) return 1;
-              return 2;
-          };
-
-          const sectionLabels: [string, string, string] = selectedShift === Shift.LUNCH
-              ? ['12:00 — 13:00', '13:00 — 14:00', '14:00 — 15:00']
-              : selectedShift === Shift.DINNER
-                  ? ['19:30 — 20:30', '21:00 — 22:00', '22:30 — 23:30']
-                  : ['Pranzo', 'Cena (presto)', 'Cena (tardi)'];
-
-          const sections: Reservation[][] = [[], [], []];
-          filteredReservations.forEach(r => sections[getTimeSectionIdx(r)].push(r));
-
-          return (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-in fade-in duration-300">
-                {sections.map((cards, idx) => (
-                    <div key={idx} className="space-y-3 min-w-0">
-                        <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-muted)]">
-                            {sectionLabels[idx]}
-                            <span className="ml-1.5 normal-case tracking-normal text-[var(--color-fg-subtle)] font-normal">({cards.length})</span>
-                        </div>
-                        {cards.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-[var(--color-line)] py-6 text-center text-xs text-[var(--color-fg-subtle)]">
-                                Nessuna prenotazione
-                            </div>
-                        ) : (
-                            cards.map(renderCard)
-                        )}
-                    </div>
-                ))}
-              </div>
-          );
-      })()}
-
-      {/* --- MAP VIEW --- */}
-      {viewMode === 'MAP' && (() => {
-          const tablesInRoom = displayTables
-              .filter(t => t.room_id === activeMapRoomId)
-              .filter(t => !displayTables.some(other =>
-                  other.merged_with && other.merged_with.length > 0 &&
-                  other.merged_with.map(id => Number(id)).includes(Number(t.id))
-              ))
-              // Hide per-shift unless user toggled "show hidden".
-              .filter(t => showHidden || !hiddenTableIds.has(t.id));
-          const occupiedTablesCount = tablesInRoom.filter(t => getOccupierForTable(t.id)).length;
-          const totalTablesInRoom = tablesInRoom.length;
-          const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
-
-          // Total guests (coperti) for the selected day + shift
-          const reservationsForDayShift = reservations.filter(r => {
-              const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
-              const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
-              return matchesDate && matchesShift;
-          });
-          const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
-          const reservationCountForDayShift = reservationsForDayShift.length;
-          const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
-
-          // Compute the natural bounding box of the room and a scale factor
-          // so the room fits the available canvas width/height on tablet+desktop.
-          // On mobile (<768px) we keep scale=1 and rely on overflow scrolling.
-          // PADDING leaves room for the customer-name pill rendered below each table.
-          const PADDING = 80;
-          const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-          const baseSize = isMobile ? 50 : 100;
-          let maxRight = 0;
-          let maxBottom = 0;
-          for (const t of tablesInRoom) {
-              maxRight = Math.max(maxRight, t.x + baseSize);
-              maxBottom = Math.max(maxBottom, t.y + baseSize);
-          }
-          const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
-          const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
-          // Allow scale ABOVE 1 so the canvas zooms in to fill the available
-          // space when the room is small. Capped at 1.6 so a sparse room
-          // doesn't render huge. Scrolling kicks in if extent is bigger than
-          // canvas (scale < 1).
-          const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
-              ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1.6)
-              : 1;
-
-          return (
-              <div className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-line)] shadow-[var(--shadow-xs)] flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-220px)] animate-in fade-in duration-300">
-                  {/* Combined room selector + stats row */}
-                  <div className="flex items-center gap-3 mb-3 border-b border-[var(--color-line)] pb-2">
-                      <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-                          {rooms.filter(r => !r.is_closed).map(room => (
-                              <button
-                                  key={room.id}
-                                  onClick={() => setActiveMapRoomId(room.id)}
-                                  className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
-                                      activeMapRoomId === room.id
-                                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                                  }`}
-                              >
-                                  {room.name}
-                              </button>
-                          ))}
-                      </div>
-                      {hiddenTableIds.size > 0 && (
-                          <>
-                              <button
-                                  type="button"
-                                  onClick={() => setShowHidden(v => !v)}
-                                  className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
-                                      showHidden
-                                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                                  }`}
-                                  title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}
-                              >
-                                  {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                                  <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
-                              </button>
-                              <button
-                                  type="button"
-                                  onClick={() => setUnhideAllConfirm(true)}
-                                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border bg-[var(--color-surface)] text-emerald-700 border-emerald-200 hover:bg-emerald-50 transition-colors"
-                                  title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
-                              >
-                                  <Eye size={14} />
-                                  <span>Riattiva tutti</span>
-                              </button>
-                          </>
-                      )}
-                      <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
-                          <div className="flex items-center gap-1.5">
-                              <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
-                              <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
-                              <span className="text-[var(--color-fg-muted)]">coperti</span>
-                          </div>
-                          <span className="text-[var(--color-fg-subtle)]">·</span>
-                          <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
-                              <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                          </div>
-                          {unassignedCountForDayShift > 0 && (
-                              <button
-                                  type="button"
-                                  onClick={() => setShowUnassignedModal(true)}
-                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors"
-                                  title="Tocca per vedere le prenotazioni senza tavolo"
-                              >
-                                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
-                                  <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
-                                  <span className="text-xs">senza tavolo</span>
-                                  <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
-                              </button>
-                          )}
-                          <span className="text-[var(--color-fg-subtle)]">·</span>
-                          <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
-                              <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
-                              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* Mobile/tablet stats bar (shown below room tabs when md breakpoint is too narrow) */}
-                  <div className="md:hidden mb-3 px-3 py-2 bg-[var(--color-surface-3)] rounded-md border border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div className="flex items-center gap-1.5">
-                          <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
-                          <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
-                          <span className="text-[var(--color-fg-muted)]">coperti</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
-                          <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                      </div>
-                      {unassignedCountForDayShift > 0 && (
-                          <button
-                              type="button"
-                              onClick={() => setShowUnassignedModal(true)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors w-fit"
-                              title="Tocca per vedere le prenotazioni senza tavolo"
-                          >
-                              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
-                              <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
-                              <span className="text-xs">senza tavolo</span>
-                              <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
-                          </button>
-                      )}
-                      <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
-                          <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
-                          <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-                      </div>
-                  </div>
-
-                  {isPhone ? (
-                      /* Mobile (smartphone) list view */
-                      <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative">
-                          {isLoadingMerges && (
-                              <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                                      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                                      <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                                   </div>
-                              </div>
-                          )}
-                          {tablesInRoom.length === 0 ? (
-                              <div className="text-center py-10 px-4 text-sm text-[var(--color-fg-muted)]">
-                                  Nessun tavolo in questa sala.
-                              </div>
-                          ) : (
-                              <ul className="divide-y divide-[var(--color-line)]">
-                                  {[...tablesInRoom]
-                                      .sort((a, b) => {
-                                          const oa = getOccupierForTable(a.id);
-                                          const ob = getOccupierForTable(b.id);
-                                          if (!!oa !== !!ob) return oa ? -1 : 1;
-                                          const ra = oa?.kind === 'reservation' ? oa.data : null;
-                                          const rb = ob?.kind === 'reservation' ? ob.data : null;
-                                          if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
-                                          if (ra && !rb) return -1;
-                                          if (!ra && rb) return 1;
-                                          return a.name.localeCompare(b.name, 'it', { numeric: true });
-                                      })
-                                      .map(table => {
-                                          const occupier = getOccupierForTable(table.id);
-                                          const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
-                                          const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
-                                          const isOccupied = !!occupier;
-                                          const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
-                                          const trimmedSearch = searchTerm.trim().toLowerCase();
-                                          const isSearchMatch = !!(trimmedSearch && (
-                                            (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
-                                            (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
-                                            table.name.toLowerCase().includes(trimmedSearch)
-                                          ));
-                                          const mergedNames = (table.merged_with && table.merged_with.length > 0)
-                                              ? table.merged_with
-                                                  .map(id => tables.find(t => Number(t.id) === Number(id))?.name)
-                                                  .filter((n): n is string => !!n)
-                                              : [];
-                                          const displayName = mergedNames.length > 0
-                                              ? `${table.name}+${mergedNames.join('+')}`
-                                              : table.name;
-                                          const isMerged = mergedNames.length > 0;
-                                          return (
-                                              <li key={table.id}>
-                                                  <button
-                                                      onClick={() => {
-                                                          if (reservation) {
-                                                              handleEditClick(reservation);
-                                                          } else if (banquet) {
-                                                              // Banquet-occupied tables are not assignable from this view.
-                                                          } else if (canEdit) {
-                                                              setAssignTableModal(table);
-                                                          }
-                                                      }}
-                                                      className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
-                                                          isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
-                                                      }`}
-                                                  >
-                                                      <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
-                                                          isArrived
-                                                              ? 'bg-orange-50 border-orange-300 text-orange-700'
-                                                              : reservation
-                                                                  ? 'bg-rose-50 border-rose-300 text-rose-700'
-                                                                  : banquet
-                                                                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                                                                      : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
-                                                      }`}>
-                                                          <span className="text-center leading-tight break-all">{displayName}</span>
-                                                      </div>
-                                                      <div className="flex-1 min-w-0">
-                                                          {reservation ? (
-                                                              <>
-                                                                  <div className="flex items-center gap-2">
-                                                                      <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
-                                                                      {reservation.created_by_user_name && (
-                                                                          <span
-                                                                              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                                                                              title={`Presa da ${toTitleCase(reservation.created_by_user_name)}`}
-                                                                              aria-label={`Presa da ${toTitleCase(reservation.created_by_user_name)}`}
-                                                                          >
-                                                                              {getInitials(reservation.created_by_user_name)}
-                                                                          </span>
-                                                                      )}
-                                                                      {isArrived && (
-                                                                          <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>
-                                                                      )}
-                                                                  </div>
-                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
-                                                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
-                                                                      <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
-                                                                      <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
-                                                                  </div>
-                                                              </>
-                                                          ) : banquet ? (
-                                                              <>
-                                                                  <div className="flex items-center gap-2">
-                                                                      <BookOpen className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
-                                                                      <span className="font-medium text-indigo-700 truncate">{banquet.name}</span>
-                                                                      <span className="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
-                                                                  </div>
-                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
-                                                                      {typeof banquet.guests === 'number' && (
-                                                                          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>
-                                                                      )}
-                                                                      <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
-                                                                  </div>
-                                                              </>
-                                                          ) : (
-                                                              <>
-                                                                  <div className="font-medium text-emerald-700">Libero</div>
-                                                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
-                                                                      <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
-                                                                      {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
-                                                                  </div>
-                                                              </>
-                                                          )}
-                                                      </div>
-                                                      <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                                                  </button>
-                                              </li>
-                                          );
-                                      })}
-                              </ul>
-                          )}
-                      </div>
-                  ) : (
-                      /* Desktop / tablet positioned canvas view */
-                      <div
-                        ref={setMapCanvasNode}
-                        className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden"
-                        style={{
-                            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                            backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
-                        }}
-                      >
-                           {isLoadingMerges && (
-                               <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                                   <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                                       <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                                       <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
-                                   </div>
-                               </div>
-                           )}
-                           <div
-                               style={{
-                                   width: extentWidth,
-                                   height: extentHeight,
-                                   transform: `scale(${scale})`,
-                                   transformOrigin: 'top left',
-                                   position: 'relative'
-                               }}
-                           >
-                               {tablesInRoom.map(renderMapTable)}
-                           </div>
 
-                           {/* Legend - collapsible */}
-                           <div className="absolute bottom-4 right-4 z-10 select-none">
-                               <button
-                                   type="button"
-                                   onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                                   className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
-                                   aria-expanded={isLegendOpen}
-                               >
-                                   <Info size={14} className="text-[var(--color-fg-muted)]" />
-                                   Legenda
-                               </button>
-                               {isLegendOpen && (
-                                   <div
-                                       className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
-                                       onClick={(e) => e.stopPropagation()}
-                                   >
-                                       <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
-                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                           <div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero
-                                       </div>
-                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                           <div className="w-3 h-3 bg-rose-50 border border-rose-300 rounded-sm"></div> Occupato
-                                       </div>
-                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                           <div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato
-                                       </div>
-                                       <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                                           <div className="w-3 h-3 bg-indigo-50 border border-indigo-300 rounded-sm"></div> Banchetto
-                                       </div>
-                                       <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                                           <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
-                                           <div className="text-sm text-[var(--color-fg)]">
-                                               <span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)
-                                           </div>
-                                       </div>
-                                       <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                                           <div className="text-sm font-semibold text-[var(--color-fg)]">Coperti</div>
-                                           <div className="text-sm text-[var(--color-fg)]">
-                                               <span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
-                                           </div>
-                                       </div>
-                                   </div>
-                               )}
-                           </div>
-                      </div>
-                  )}
+                                  {/* Row 2: Customer name */}
+                                  <p className="text-base font-medium text-[var(--color-fg)] leading-6 truncate mt-0.5">
+                                    {toTitleCase(res.customer_name)}
+                                  </p>
+
+                                  {/* Row 3: Actions */}
+                                  {canEdit && (
+                                    <div className="flex items-center gap-1.5 mt-2">
+                                      {group.key === 'waiting' && (
+                                        <button onClick={() => handleToggleArrivalStatus(res)}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                          <UserCheck className="h-3.5 w-3.5" /> Arrivato
+                                        </button>
+                                      )}
+                                      {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                                        <button onClick={() => handleEditClick(res)}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                          <MapPin className="h-3.5 w-3.5" /> Tavolo
+                                        </button>
+                                      )}
+                                      {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
+                                        <button onClick={() => handleFreeTable(res)}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                          <LogOut className="h-3.5 w-3.5" /> Libera
+                                        </button>
+                                      )}
+                                      <button onClick={() => handleEditClick(res)}
+                                        className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                                        <Edit2 className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button onClick={() => handleDeleteClick(res.id, res.customer_name)}
+                                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Covers count */}
+                                <div className="flex items-start pt-3 pr-1 flex-shrink-0">
+                                  <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+                                    <Users className="h-3.5 w-3.5" />
+                                    <span className="text-base font-medium tabular">{res.guests}</span>
+                                  </div>
+                                </div>
+
+                                {/* Table strip */}
+                                <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-lg ${
+                                  table
+                                    ? group.key === 'freed' ? 'bg-slate-100'
+                                      : group.key === 'arrived' ? 'bg-emerald-50'
+                                      : 'bg-[#dbeafe]'
+                                    : 'bg-[var(--color-surface-3)]'
+                                }`}>
+                                  {table ? (
+                                    <>
+                                      <span className={`text-base font-bold leading-6 ${
+                                        group.key === 'freed' ? 'text-slate-500'
+                                          : group.key === 'arrived' ? 'text-emerald-700'
+                                          : 'text-[#193cb8]'
+                                      }`}>{table.name}</span>
+                                      {tableRoom && <span className="text-xs text-[#4d4d4d] text-center leading-4">{tableRoom.name}</span>}
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-          );
-      })()}
+            )}
+          </div>
+
+          {/* Sort modal — slide up */}
+          {showSortModal && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-2">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+                </div>
+                <div className="px-3">
+                  {[
+                    { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
+                    { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
+                    { value: 'name-asc' as const, label: 'Nome A → Z' },
+                    { value: 'name-desc' as const, label: 'Nome Z → A' },
+                    { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
+                    { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-lg transition-colors ${
+                        sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                      }`}>
+                      {opt.label}
+                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Filter modal — slide up */}
+          {showFiltersPanel && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                      <RotateCcw className="h-3.5 w-3.5" /> Reimposta
+                    </button>
+                  )}
+                </div>
+                <div className="px-5 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: 'Tutti' },
+                        { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                        { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            filterStatus === opt.value
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Allergeni
+                      </button>
+                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Con note
+                      </button>
+                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Senza tavolo
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       </React.Fragment>
       )}
@@ -3570,6 +3671,37 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           }));
         }}
       />
+
+      {/* Tooltip for allergens / notes */}
+      {tooltipReservation && (
+        <div className="fixed inset-0 z-[9999]" onClick={() => setTooltipReservation(null)}>
+          <div
+            className="absolute bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl shadow-[var(--shadow-lg)] px-4 py-3 max-w-xs min-w-[200px]"
+            style={{
+              left: Math.min(tooltipReservation.x, window.innerWidth - 280),
+              top: tooltipReservation.y + 8,
+              ...(tooltipReservation.y + 150 > window.innerHeight ? { top: undefined, bottom: window.innerHeight - tooltipReservation.y + 8 } as any : {}),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                {tooltipReservation.type === 'allergen'
+                  ? <AlertTriangle className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                  : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                <span className="text-xs font-semibold text-[var(--color-fg)]">
+                  {tooltipReservation.type === 'allergen' ? 'Intolleranze' : 'Note'}
+                </span>
+              </div>
+              <button type="button" onClick={() => setTooltipReservation(null)}
+                className="p-0.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">{tooltipReservation.text}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
