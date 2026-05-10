@@ -1402,7 +1402,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'outline outline-3 outline-rose-500 outline-offset-2 animate-pulse-ring' : ''}`}
+                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
                 style={{
                     width: `${widthPx}px`,
                     height: `${heightPx}px`,

@@ -299,6 +299,28 @@ body {
   animation: pulse-ring 2s ease-out infinite;
 }
 
+@keyframes search-pulse-ring {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(244, 63, 94, 0.85),
+      0 0 0 0 rgba(244, 63, 94, 0.55);
+  }
+  70% {
+    box-shadow:
+      0 0 0 14px rgba(244, 63, 94, 0),
+      0 0 0 24px rgba(244, 63, 94, 0);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(244, 63, 94, 0),
+      0 0 0 0 rgba(244, 63, 94, 0);
+  }
+}
+
+.animate-search-pulse {
+  animation: search-pulse-ring 1.2s ease-out infinite;
+}
+
 @keyframes flash-row {
   0% { background-color: rgba(59, 130, 246, 0.15); }
   100% { background-color: transparent; }
