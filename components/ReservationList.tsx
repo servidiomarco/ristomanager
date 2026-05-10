@@ -266,7 +266,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Split-view state
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note'; text: string; x: number; y: number } | null>(null);
@@ -655,8 +655,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const waiting: Reservation[] = [];
     const arrived: Reservation[] = [];
     const freed: Reservation[] = [];
+    const noshow: Reservation[] = [];
 
     for (const r of dateFiltered) {
+      const isNoShow = (r.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
+      if (isNoShow) {
+        noshow.push(r);
+        continue;
+      }
       const status = r.arrival_status || ArrivalStatus.WAITING;
       if (status === ArrivalStatus.DEPARTED) {
         freed.push(r);
@@ -670,10 +676,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     waiting.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
+    noshow.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
     return [
       { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
       { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
+      { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
     ].filter(g => g.items.length > 0);
   }, [reservations, selectedDate, selectedShift, searchTerm, displayTables]);
@@ -1480,7 +1488,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <div
         key={res.id}
         className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
-          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-[var(--color-surface-hover)]'}
+          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' ? 'bg-rose-50/40 hover:bg-rose-50' : 'hover:bg-[var(--color-surface-hover)]'}
           ${isFlashing ? 'animate-flash-row' : ''}
           ${group.key === 'freed' ? 'opacity-60' : ''}
         `}
@@ -1516,6 +1524,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
               </span>
             )}
+            {group.key === 'noshow' && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                <UserX className="h-2.5 w-2.5" /> No show
+              </span>
+            )}
           </div>
 
           {/* Row 2: Customer name */}
@@ -1544,6 +1557,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <LogOut className="h-3.5 w-3.5" /> Libera
                 </button>
               )}
+              {group.key === 'waiting' && (
+                <button type="button" onClick={() => handleToggleNoShow(res)}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors" title="Segna come no-show">
+                  <UserX className="h-3.5 w-3.5" /> No show
+                </button>
+              )}
+              {group.key === 'noshow' && (
+                <button type="button" onClick={() => handleToggleNoShow(res)}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors" title="Annulla no-show">
+                  <RotateCcw className="h-3.5 w-3.5" /> Annulla no-show
+                </button>
+              )}
               <button type="button" onClick={() => handleEditClick(res)}
                 className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                 <Edit2 className="h-3.5 w-3.5" />
@@ -1569,6 +1594,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           table
             ? group.key === 'freed' ? 'bg-slate-100'
               : group.key === 'arrived' ? 'bg-emerald-50'
+              : group.key === 'noshow' ? 'bg-rose-50'
               : 'bg-[#dbeafe]'
             : 'bg-[var(--color-surface-3)]'
         }`}>
@@ -1577,6 +1603,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <span className={`text-base font-bold leading-6 ${
                 group.key === 'freed' ? 'text-slate-500'
                   : group.key === 'arrived' ? 'text-emerald-700'
+                  : group.key === 'noshow' ? 'text-rose-700'
                   : 'text-[#193cb8]'
               }`}>{table.name}</span>
               {tableRoom && <span className="text-xs text-[#4d4d4d] text-center leading-4">{tableRoom.name}</span>}
@@ -1676,6 +1703,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <button onClick={() => { handleFreeTable(res); closeDetailDrawer(); }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
                   <LogOut className="h-3.5 w-3.5" /> Libera tavolo
+                </button>
+              )}
+              {(res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW ? (
+                <button onClick={() => { handleToggleNoShow(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                  <RotateCcw className="h-3.5 w-3.5" /> Annulla no-show
+                </button>
+              ) : arrivalStatus === ArrivalStatus.WAITING && (
+                <button onClick={() => { handleToggleNoShow(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors">
+                  <UserX className="h-3.5 w-3.5" /> No show
                 </button>
               )}
               <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
@@ -1898,16 +1936,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             ))}
           </div>
           {hiddenTableIds.size > 0 && (
-            <button type="button" onClick={() => setShowHidden(v => !v)}
-              className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
-                showHidden
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-              }`}
-              title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
-              {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-              <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
-            </button>
+            <>
+              <button type="button" onClick={() => setShowHidden(v => !v)}
+                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                  showHidden
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                }`}
+                title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
+                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
+              </button>
+              {canEdit && (
+                <button type="button" onClick={() => setUnhideAllConfirm(true)}
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                  title="Riattiva tutti i tavoli nascosti per questo turno">
+                  <RotateCcw size={14} />
+                  <span>Riattiva tutti</span>
+                </button>
+              )}
+            </>
           )}
           <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
             <div className="flex items-center gap-1.5">
@@ -2280,7 +2328,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               : 'bg-blue-500';
 
                             return (
-                              <div key={res.id} className={`bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''}`}>
+                              <div key={res.id} className={`bg-[var(--color-surface)] rounded-xl border ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''}`}>
                                 {/* Left content */}
                                 <div className="flex-1 min-w-0 p-3">
                                   {/* Row 1: Time + indicator icons */}
@@ -2310,6 +2358,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
                                       </span>
                                     )}
+                                    {group.key === 'noshow' && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                        <UserX className="h-2.5 w-2.5" /> No show
+                                      </span>
+                                    )}
                                   </div>
 
                                   {/* Row 2: Customer name */}
@@ -2336,6 +2389,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <button onClick={() => handleFreeTable(res)}
                                           className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
                                           <LogOut className="h-3.5 w-3.5" /> Libera
+                                        </button>
+                                      )}
+                                      {group.key === 'waiting' && (
+                                        <button onClick={() => handleToggleNoShow(res)}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors" title="Segna come no-show">
+                                          <UserX className="h-3.5 w-3.5" /> No show
+                                        </button>
+                                      )}
+                                      {group.key === 'noshow' && (
+                                        <button onClick={() => handleToggleNoShow(res)}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors" title="Annulla no-show">
+                                          <RotateCcw className="h-3.5 w-3.5" /> Annulla
                                         </button>
                                       )}
                                       <button onClick={() => handleEditClick(res)}
