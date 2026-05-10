@@ -256,6 +256,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
   const [detailsModal, setDetailsModal] = useState<{ table: Table; widthCm: string; lengthCm: string; notes: string } | null>(null);
   const [deleteTablesConfirm, setDeleteTablesConfirm] = useState<number[] | null>(null);
+  const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -899,7 +900,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
                 </button>
                 <button
-                    onClick={handleUnhideAll}
+                    onClick={() => setUnhideAllConfirm(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 transition-colors"
                     title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
                 >
@@ -1346,6 +1347,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             setSelectedTables([]);
           }
           setDeleteTablesConfirm(null);
+        }}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={unhideAllConfirm}
+        title="Riattiva tutti i tavoli"
+        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
+        confirmLabel="Riattiva tutti"
+        icon={<Eye className="h-5 w-5 text-emerald-600" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition"
+        showIrreversibleWarning={false}
+        onCancel={() => setUnhideAllConfirm(false)}
+        onConfirm={async () => {
+          setUnhideAllConfirm(false);
+          await handleUnhideAll();
         }}
       />
 

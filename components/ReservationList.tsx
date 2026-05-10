@@ -198,6 +198,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
+  const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -2098,7 +2099,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               </button>
                               <button
                                   type="button"
-                                  onClick={handleUnhideAllTables}
+                                  onClick={() => setUnhideAllConfirm(true)}
                                   className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border bg-[var(--color-surface)] text-emerald-700 border-emerald-200 hover:bg-emerald-50 transition-colors"
                                   title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
                               >
@@ -3256,6 +3257,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         itemName={deleteConfirmModal.customerName}
         onCancel={handleCancelDelete}
         onConfirm={handleConfirmDelete}
+      />
+
+      <ConfirmDeleteModal
+        isOpen={unhideAllConfirm}
+        title="Riattiva tutti i tavoli"
+        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
+        confirmLabel="Riattiva tutti"
+        icon={<Eye className="h-5 w-5 text-emerald-600" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition"
+        showIrreversibleWarning={false}
+        onCancel={() => setUnhideAllConfirm(false)}
+        onConfirm={async () => {
+          setUnhideAllConfirm(false);
+          await handleUnhideAllTables();
+        }}
       />
 
       <PrintReservationsModal
