@@ -109,6 +109,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
   };
 
+  const handleUnhideAll = async () => {
+    if (hiddenTableIds.size === 0) return;
+    const ids = [...hiddenTableIds];
+    try {
+      await Promise.all(ids.map(id => deleteTableHidden(selectedDate, selectedShift, id)));
+      setHiddenTableIds(new Set());
+      setShowHidden(false);
+    } catch (err: any) {
+      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+    }
+  };
+
   // Fetch merges whenever date/shift changes
   useEffect(() => {
     let cancelled = false;
@@ -873,18 +885,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
         {hiddenTableIds.size > 0 && (
-            <button
-                onClick={() => setShowHidden(s => !s)}
-                className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                    showHidden
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-                title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
-            >
-                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
-            </button>
+            <div className="ml-auto flex items-center gap-1.5">
+                <button
+                    onClick={() => setShowHidden(s => !s)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                        showHidden
+                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                    title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+                >
+                    {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                    {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
+                </button>
+                <button
+                    onClick={handleUnhideAll}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 transition-colors"
+                    title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
+                >
+                    <Eye size={14} />
+                    Riattiva tutti
+                </button>
+            </div>
         )}
       </div>
 
