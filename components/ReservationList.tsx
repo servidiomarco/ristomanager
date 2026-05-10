@@ -1383,13 +1383,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return (
         <div
             key={table.id}
-            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'animate-glow-pulse z-20' : ''} ${isHighlighted ? 'z-30' : ''}`}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isHighlighted ? 'z-30' : ''}`}
             style={{
                 left: table.x,
                 top: table.y,
                 width: `${widthPx}px`,
                 height: `${heightPx}px`,
-                ...((isSearchMatch || isHoverMatch) ? { '--glow-color': isArrived ? '#ea580c' : reservation ? '#e11d48' : banquet ? '#4f46e5' : '#111827' } as React.CSSProperties : {}),
             }}
             title={tooltipText}
             onClick={() => {
@@ -1403,7 +1402,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''}`}
+                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'outline outline-3 outline-rose-500 outline-offset-2 animate-pulse-ring' : ''}`}
                 style={{
                     width: `${widthPx}px`,
                     height: `${heightPx}px`,
