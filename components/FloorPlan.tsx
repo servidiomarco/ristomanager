@@ -732,9 +732,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     const statusColors = {
-      [TableStatus.FREE]: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-      [TableStatus.OCCUPIED]: 'bg-rose-50 border-rose-200 text-rose-700',
-      [TableStatus.RESERVED]: 'bg-amber-50 border-amber-200 text-amber-700',
+      [TableStatus.FREE]: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
+      [TableStatus.OCCUPIED]: 'bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300',
+      [TableStatus.RESERVED]: 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300',
       [TableStatus.DIRTY]: 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg-muted)]'
     };
 
@@ -814,7 +814,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {/* Timer Badge */}
           {timerDisplay && (
-              <div className="absolute -top-2.5 -right-2 bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+              <div className="absolute -top-2.5 -right-2 bg-amber-500 text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
                   <Timer size={8} /> {timerDisplay}
               </div>
           )}
@@ -835,7 +835,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {/* Banquet Badge */}
           {banquet && !timerDisplay && (
-              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]" title={`Banchetto: ${banquet.name}`}>
+              <div className="absolute -top-2 -right-2 bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]" title={`Banchetto: ${banquet.name}`}>
                   <BookOpen size={8} />
               </div>
           )}
@@ -845,7 +845,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {banquet && !timerDisplay ? (
           <div
             style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-indigo-600 border border-indigo-700 shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-white whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[#4f46e5] border border-[#4338ca] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[#ffffff] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
             title={banquet.name}
           >
             {banquet.name}
@@ -905,8 +905,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 onClick={() => setShowHidden(s => !s)}
                 className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                     showHidden
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
+                        : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
                 }`}
                 title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
             >
@@ -928,8 +928,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     onClick={() => setShowHidden(s => !s)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                         showHidden
-                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
+                            : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
                     }`}
                     title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
                 >
@@ -938,7 +938,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </button>
                 <button
                     onClick={() => setUnhideAllConfirm(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 transition-colors"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white dark:bg-[var(--color-surface)] text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors"
                     title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
                 >
                     <Eye size={14} />
@@ -1031,7 +1031,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {selectedTables.length > 0 && (
               <button
                 onClick={() => setSelectedTables([])}
-                className="p-1.5 rounded-md border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600 transition"
+                className="p-1.5 rounded-md border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400 transition"
                 title="Deseleziona Tutto"
               >
                   <X className="h-4 w-4" />
@@ -1062,8 +1062,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 onClick={() => onToggleRoomClosed(activeRoom.id, !isClosed)}
                 className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
                   isClosed
-                    ? 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                    : 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                    ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
+                    : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25'
                 }`}
                 title={isClosed ? `Riapri Sala: ${activeRoom.name}` : `Chiudi Sala: ${activeRoom.name}`}
               >
@@ -1076,7 +1076,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
-            className="p-1.5 rounded-md border border-rose-100 text-rose-600 hover:bg-rose-50 transition"
+            className="p-1.5 rounded-md border border-rose-100 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
           >
              <Layout className="h-4 w-4 inline mr-1"/>
@@ -1095,7 +1095,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 onClick={handleToggleLock}
                 className={`p-1.5 rounded-md border transition ${
                     singleSelectedTable?.is_locked
-                    ? 'bg-amber-50 border-amber-200 text-amber-700'
+                    ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
                     : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                 }`}
                 title={singleSelectedTable?.is_locked ? "Sblocca Tavolo" : "Blocca Tavolo"}
@@ -1106,7 +1106,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {/* Temp Lock (Timer) */}
             <button
                 onClick={handleTempLock}
-                className="p-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 transition flex items-center gap-1"
+                className="p-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-300 hover:border-amber-200 dark:hover:border-amber-500/30 transition flex items-center gap-1"
                 title="Blocca per 15 minuti"
             >
                 <Clock size={16} /> <span className="text-xs font-semibold hidden sm:inline">15m</span>
@@ -1151,8 +1151,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     })}
                     className={`flex items-center gap-1 px-2 py-2 rounded-lg border transition-colors ${
                         (singleSelectedTable.notes || singleSelectedTable.width_cm || singleSelectedTable.length_cm)
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc] hover:bg-indigo-100 dark:hover:bg-[#4f46e5]/25'
+                            : 'bg-white dark:bg-[var(--color-surface)] border-slate-200 dark:border-slate-500/30 text-slate-600 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-[#4f46e5]/15 hover:text-indigo-600 dark:hover:text-[#818cf8] hover:border-indigo-200 dark:hover:border-[#4f46e5]/30'
                     }`}
                     title="Dettagli tavolo (dimensioni, note)"
                 >
@@ -1196,7 +1196,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 font-medium text-sm transition"
+                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 hover:bg-amber-100 dark:hover:bg-amber-500/25 font-medium text-sm transition"
                     title={`Dividi tavoli: ${singleSelectedTable.name}`}
                 >
                 <Scissors size={16} /> Dividi
@@ -1214,8 +1214,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         }}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm ${
                             allHidden
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
+                                : 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-500/30'
                         }`}
                         title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
                     >
@@ -1230,7 +1230,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                  <button
                  onClick={() => setDeleteTablesConfirm([...selectedTables])}
-                 className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-700 font-medium text-sm transition"
+                 className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-rose-600 text-[#ffffff] hover:bg-rose-700 font-medium text-sm transition"
                 >
                     <Trash2 size={16} /> Elimina
                 </button>
@@ -1283,7 +1283,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           )}
 
           {rooms.find(r => r.id === activeRoomId)?.is_closed && (
-              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
+              <div className="absolute top-4 right-4 bg-amber-500 text-[#ffffff] px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
                   <DoorClosed size={12} /> Sala Chiusa
               </div>
           )}
@@ -1306,15 +1306,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 >
                     <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-emerald-50 border border-emerald-200 rounded-sm"></div> Libero
+                        <div className="w-3 h-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-sm"></div> Libero
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-rose-50 border border-rose-200 rounded-sm relative">
+                        <div className="w-3 h-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-sm relative">
                             <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
                         </div> Occupato (In corso)
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-amber-50 border border-amber-200 rounded-sm"></div> Riservato (Prossime 2h)
+                        <div className="w-3 h-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-sm"></div> Riservato (Prossime 2h)
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
                         <Lock size={12} /> Tavolo Bloccato
@@ -1329,14 +1329,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Alert Modal */}
       {alertModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAlertModal(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-6 text-center">
               <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${
-                alertModal.type === 'error' ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'
+                alertModal.type === 'error' ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30' : 'bg-amber-50 dark:bg-amber-500/15 border-amber-100 dark:border-amber-500/30'
               }`}>
                 <AlertTriangle className={`h-5 w-5 ${
-                  alertModal.type === 'error' ? 'text-rose-600' : 'text-amber-600'
+                  alertModal.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
                 }`} />
               </div>
               <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">Attenzione</h3>
@@ -1392,9 +1392,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         title="Riattiva tutti i tavoli"
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
-        icon={<Eye className="h-5 w-5 text-emerald-600" />}
-        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition"
+        icon={<Eye className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-100 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {
@@ -1405,45 +1405,42 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Table Details Modal (dimensions + notes) */}
       {detailsModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Info className="h-5 w-5 text-indigo-600" />
-                <h3 className="text-lg font-semibold text-slate-800">Dettagli Tavolo {detailsModal.table.name}</h3>
-              </div>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setDetailsModal(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Dettagli Tavolo {detailsModal.table.name}</h3>
               <button
                 onClick={() => setDetailsModal(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
-                  <Ruler className="h-3.5 w-3.5 text-slate-400" /> Dimensioni (cm)
+                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                  <Ruler className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Dimensioni (cm)
                 </label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 block mb-1">Larghezza</label>
+                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Larghezza</label>
                     <input
                       type="number"
                       min="0"
                       placeholder="es. 80"
-                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
                       value={detailsModal.widthCm}
                       onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
                     />
                   </div>
-                  <span className="text-slate-400 mt-5">×</span>
+                  <span className="text-slate-400 dark:text-slate-500 mt-5">×</span>
                   <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 block mb-1">Lunghezza</label>
+                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Lunghezza</label>
                     <input
                       type="number"
                       min="0"
                       placeholder="es. 120"
-                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
                       value={detailsModal.lengthCm}
                       onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
                     />
@@ -1451,21 +1448,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
-                  <StickyNote className="h-3.5 w-3.5 text-slate-400" /> Note
+                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Note
                 </label>
                 <textarea
-                  className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
                   placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
                   value={detailsModal.notes}
                   onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
                 />
               </div>
             </div>
-            <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
+            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
               <button
                 onClick={() => setDetailsModal(null)}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-white font-medium"
+                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
               >
                 Annulla
               </button>
@@ -1483,7 +1480,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   });
                   setDetailsModal(null);
                 }}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
               >
                 Salva
               </button>

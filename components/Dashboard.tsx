@@ -25,12 +25,12 @@ const CATEGORY_LABELS: Record<TodoCategory, string> = {
 };
 
 const CATEGORY_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-100 text-slate-600',
-  [TodoCategory.RESERVATION]: 'bg-indigo-100 text-indigo-600',
-  [TodoCategory.INVENTORY]: 'bg-amber-100 text-amber-600',
-  [TodoCategory.STAFF]: 'bg-emerald-100 text-emerald-600',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-100 text-orange-600',
-  [TodoCategory.EVENT]: 'bg-purple-100 text-purple-600',
+  [TodoCategory.GENERAL]: 'bg-slate-100 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400',
+  [TodoCategory.RESERVATION]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-600 dark:text-[#818cf8]',
+  [TodoCategory.INVENTORY]: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400',
+  [TodoCategory.STAFF]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+  [TodoCategory.MAINTENANCE]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400',
+  [TodoCategory.EVENT]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400',
 };
 
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
@@ -57,11 +57,11 @@ const TEAM_LABELS: Record<UserRole, string> = {
 };
 
 const TEAM_COLORS: Record<UserRole, string> = {
-  [UserRole.OWNER]: 'bg-purple-100 text-purple-700',
-  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 text-indigo-700',
-  [UserRole.MANAGER]: 'bg-blue-100 text-blue-700',
-  [UserRole.WAITER]: 'bg-emerald-100 text-emerald-700',
-  [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',
+  [UserRole.OWNER]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300',
+  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]',
+  [UserRole.MANAGER]: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300',
+  [UserRole.WAITER]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
+  [UserRole.KITCHEN]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300',
 };
 
 // Mirrors the server-side hierarchy in auth/permissions.ts: an actor can
@@ -114,9 +114,9 @@ const SHOPPING_CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
 };
 
 const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
-  'CUCINA': 'bg-orange-100 text-orange-700 border-orange-200',
-  'BAR': 'bg-amber-100 text-amber-700 border-amber-200',
-  'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
+  'CUCINA': 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-500/30',
+  'BAR': 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30',
+  'ALTRO': 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30'
 };
 
 // Room name → lucide icon. Scalable: extend the map for new rooms or fall back to MapPin.
@@ -1030,9 +1030,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
         const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
         const serviceLabel = inLunch
-          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
           : inDinner
-          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700' }
+          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
           : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
         return (
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
@@ -1051,13 +1051,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {todaysTodos.length > 0 && (
                 <button
                   onClick={() => todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
-                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-500/10 transition-colors flex-shrink-0 self-end"
+                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex-shrink-0 self-end"
                   aria-label={`${todaysTodos.length} attività di oggi`}
                   title="Attività di oggi"
                 >
                   <ListTodo className="h-7 w-7" />
                   <span className="hidden md:inline text-sm font-semibold">Attività di oggi</span>
-                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-sky-500 text-white">
+                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-violet-500 text-[#ffffff]">
                     {todaysTodos.length}
                   </span>
                 </button>
@@ -1375,7 +1375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {reservationNotes.map(({ reservation, table, room, allergens }) => {
                 const isLunch = reservation.shift === Shift.LUNCH;
                 const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
-                const circleBg = isLunch ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700';
+                const circleBg = isLunch ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]';
                 const isExpanded = expandedNoteIds.has(reservation.id);
                 const noteText = reservation.notes || '';
                 const isTruncatable = noteText.length > 80;
@@ -1400,9 +1400,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         </div>
                       </div>
                       {!table && (
-                        <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 border border-amber-200">
-                          <AlertTriangle className="h-3 w-3 text-amber-600" />
-                          <span className="text-[10px] font-medium text-amber-700 whitespace-nowrap">Non assegnato</span>
+                        <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30">
+                          <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                          <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 whitespace-nowrap">Non assegnato</span>
                         </div>
                       )}
                     </div>
@@ -1411,7 +1411,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     {allergens.length > 0 && (
                       <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                         {allergens.map(a => (
-                          <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100">
+                          <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30">
                             {a}
                           </span>
                         ))}
@@ -1710,12 +1710,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           {/* Overdue Alert */}
           {overdueTodos.length > 0 && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-lg">
+            <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 rounded-lg">
               <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
-                <p className="tabular text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
+                <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                <p className="tabular text-sm font-medium text-rose-700 dark:text-rose-300">{overdueTodos.length} attività scadute</p>
               </div>
-              <p className="text-xs text-rose-600 pl-6">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
+              <p className="text-xs text-rose-600 dark:text-rose-400 pl-6">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
             </div>
           )}
 
@@ -1743,7 +1743,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       todo.completed
                         ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
                         : isOverdue
-                        ? 'bg-rose-50 border-rose-100'
+                        ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30'
                         : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -1753,7 +1753,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         onClick={() => handleToggleTodo(todo.id)}
                         className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
                           todo.completed
-                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                            ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
                             : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                         }`}
                       >
@@ -1795,7 +1795,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </span>
                           )}
                           {todo.dueDate && (
-                            <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 font-medium' : ''}`}>
+                            <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : ''}`}>
                               <Clock className="h-3 w-3 flex-shrink-0" />
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
@@ -1811,15 +1811,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           {todo.priority !== TodoPriority.LOW && (
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
                               todo.priority === TodoPriority.HIGH
-                                ? 'bg-rose-50 text-rose-600 border-rose-100'
-                                : 'bg-amber-50 text-amber-600 border-amber-100'
+                                ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-500/30'
+                                : 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/30'
                             }`}>
                               <Flag className="h-3 w-3" />
                               {todo.priority === TodoPriority.HIGH ? 'Alta' : 'Media'}
                             </span>
                           )}
                           {todo.banquetReminderHours != null && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 text-orange-700 border border-orange-100">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-100 dark:border-orange-500/30">
                               {todo.banquetReminderHours}h prima
                             </span>
                           )}
@@ -1979,7 +1979,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                               onClick={() => toggleShoppingItem(item.id)}
                               className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
                                 item.checked
-                                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                                  ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
                                   : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                               }`}
                             >
@@ -2226,8 +2226,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {showLunchPersonale && renderShiftCard(
                   'lunch',
                   'Pranzo',
-                  <Sun className="h-4 w-4 text-amber-700" />,
-                  'bg-amber-100',
+                  <Sun className="h-4 w-4 text-amber-700 dark:text-amber-300" />,
+                  'bg-amber-100 dark:bg-amber-500/20',
                   'bg-amber-50 dark:bg-amber-500/10',
                   'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
                   'bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20',
@@ -2235,8 +2235,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {showDinnerPersonale && renderShiftCard(
                   'dinner',
                   'Cena',
-                  <Sunset className="h-4 w-4 text-blue-600" />,
-                  'bg-blue-100',
+                  <Sunset className="h-4 w-4 text-blue-600 dark:text-blue-400" />,
+                  'bg-blue-100 dark:bg-blue-500/20',
                   'bg-blue-50 dark:bg-blue-500/10',
                   'border-blue-300/70 ring-1 ring-blue-200/60 dark:ring-blue-400/20',
                   'bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/20',
@@ -2249,20 +2249,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* My Tasks Modal */}
       {showMyTasksModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between bg-[var(--color-fg)]">
-              <div className="flex items-center gap-3 text-[var(--color-fg-on-brand)]">
-                <div className="p-2 bg-white/10 rounded-md">
-                  <UserCircle className="h-5 w-5" />
-                </div>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => setShowMyTasksModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-center gap-3">
+                <UserCircle className="h-5 w-5 text-[var(--color-fg-muted)]" />
                 <div>
-                  <h3 className="text-base font-semibold">Le Mie Attività</h3>
-                  <p className="tabular text-xs text-white/70">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
+                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Le Mie Attività</h3>
+                  <p className="tabular text-xs text-[var(--color-fg-muted)]">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
                 </div>
               </div>
-              <button onClick={() => setShowMyTasksModal(false)} className="p-1.5 rounded-md hover:bg-white/10 transition-colors">
-                <X className="h-4 w-4 text-white" />
+              <button onClick={() => setShowMyTasksModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
@@ -2277,7 +2275,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   {myTodos.map(todo => {
                     const isOverdue = todo.dueDate && todo.dueDate < todayStr;
                     return (
-                      <div key={todo.id} className={`p-3 rounded-md border ${isOverdue ? 'border-rose-100 bg-rose-50' : 'border-[var(--color-line)] bg-[var(--color-surface)]'} transition-colors`}>
+                      <div key={todo.id} className={`p-3 rounded-md border ${isOverdue ? 'border-rose-100 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15' : 'border-[var(--color-line)] bg-[var(--color-surface)]'} transition-colors`}>
                         <div className="flex items-start gap-3">
                           <button
                             onClick={() => handleToggleTodo(todo.id)}
@@ -2297,7 +2295,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                                 {CATEGORY_LABELS[todo.category]}
                               </span>
                               {isAssignedToMe(todo) && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-500/30">
                                   <UserCircle className="h-3 w-3" /> Personale
                                 </span>
                               )}
@@ -2307,7 +2305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                                 </span>
                               )}
                               {todo.dueDate && (
-                                <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-[var(--color-fg-muted)]'}`}>
+                                <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-[var(--color-fg-muted)]'}`}>
                                   <Clock className="h-3 w-3" />
                                   {isOverdue ? 'Scaduto: ' : ''}
                                   {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
@@ -2322,10 +2320,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               )}
             </div>
-            <div className="p-4 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
               <button
                 onClick={() => setShowMyTasksModal(false)}
-                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
+                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
               >
                 Chiudi
               </button>
@@ -2336,11 +2334,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { setShowTodoModal(false); resetTodoForm(); }}>
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-sm)] border border-[var(--color-line)] w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between flex-shrink-0">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"><X className="h-4 w-4" /></button>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => { setShowTodoModal(false); resetTodoForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)] flex-shrink-0">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1">
               <div>
@@ -2402,9 +2400,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2 flex-shrink-0">
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim() || isSavingTodo} className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end flex-shrink-0">
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim() || isSavingTodo} className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
                 {isSavingTodo && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingTodo ? 'Salva' : 'Aggiungi'}
               </button>

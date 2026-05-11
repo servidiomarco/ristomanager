@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import { UserRole } from '../types';
 
 interface FeaturePermissions {
@@ -142,22 +143,20 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
-          <div className="flex justify-between items-center">
-            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Gestione Permessi Ruoli</h2>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+          <div>
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Gestione Permessi Ruoli</h3>
+            <p className="text-xs text-[var(--color-fg-muted)] mt-1">Configura i permessi per ogni ruolo utente</p>
           </div>
-          <p className="text-xs text-[var(--color-fg-muted)] mt-1">Configura i permessi per ogni ruolo utente</p>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Content */}
@@ -167,7 +166,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-fg)]"></div>
             </div>
           ) : error ? (
-            <div className="bg-rose-50 border border-rose-100 text-rose-700 px-3 py-2 rounded-md text-sm">
+            <div className="bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 px-3 py-2 rounded-md text-sm">
               {error}
             </div>
           ) : (
@@ -190,7 +189,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
               </div>
 
               {selectedRole === 'OWNER' && (
-                <div className="bg-amber-50 border border-amber-100 text-amber-800 px-3 py-2 rounded-md mb-6">
+                <div className="bg-amber-50 border border-amber-100 text-amber-800 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-200 px-3 py-2 rounded-md mb-6">
                   <div className="flex items-center gap-2">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -238,7 +237,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
 
               {/* Success Message */}
               {successMessage && (
-                <div className="mt-6 bg-emerald-50 border border-emerald-100 text-emerald-700 px-3 py-2 rounded-md flex items-center gap-2 text-sm">
+                <div className="mt-6 bg-emerald-50 border border-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 px-3 py-2 rounded-md flex items-center gap-2 text-sm">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
@@ -250,7 +249,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         </div>
 
         {/* Footer */}
-        <div className="border-t border-[var(--color-line)] px-5 py-3 flex gap-2 justify-end">
+        <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
           <button
             onClick={onClose}
             className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"

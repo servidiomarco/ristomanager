@@ -173,15 +173,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
   const getRoleColor = (role: UserRole): string => {
     switch (role) {
       case UserRole.OWNER:
-        return 'bg-violet-50 text-violet-700 border border-violet-100';
+        return 'bg-violet-50 text-violet-700 border border-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30';
       case UserRole.GENERAL_MANAGER:
-        return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
+        return 'bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-[#4f46e5]/15 dark:text-[#a5b4fc] dark:border-[#4f46e5]/30';
       case UserRole.MANAGER:
-        return 'bg-blue-50 text-blue-700 border border-blue-100';
+        return 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
       case UserRole.WAITER:
-        return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
+        return 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
       case UserRole.KITCHEN:
-        return 'bg-amber-50 text-amber-700 border border-amber-100';
+        return 'bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
     }
   };
 
@@ -189,13 +189,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
     <>
         {/* Header */}
         {isModal && (
-          <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-            <h2 className="text-[18px] sm:text-[20px] font-semibold text-[var(--color-fg)] tracking-tight">Gestione Utenti</h2>
+          <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Gestione Utenti</h3>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         )}
@@ -204,7 +204,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
         <div className={isModal ? "flex-1 overflow-y-auto px-5 py-4" : ""}>
           {/* Error */}
           {error && (
-            <div className="mb-4 px-3 py-2 bg-rose-50 border border-rose-100 rounded-md text-rose-700 text-sm flex items-center gap-2">
+            <div className="mb-4 px-3 py-2 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 rounded-md text-rose-700 text-sm flex items-center gap-2">
               <AlertCircle className="h-4 w-4" />
               {error}
             </div>
@@ -289,7 +289,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                 )}
 
                 {formError && (
-                  <div className="px-3 py-2 bg-rose-50 border border-rose-100 rounded-md text-rose-700 text-sm flex items-center gap-2">
+                  <div className="px-3 py-2 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 rounded-md text-rose-700 text-sm flex items-center gap-2">
                     <AlertCircle className="h-4 w-4" />
                     {formError}
                   </div>
@@ -326,60 +326,57 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
               <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {users.map((user) => (
                 <div
                   key={user.id}
-                  className={`px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg flex items-center gap-4 hover:bg-[var(--color-surface-hover)] transition ${
+                  className={`bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm p-4 flex flex-col gap-3 hover:shadow-md transition-shadow ${
                     !user.is_active ? 'opacity-50' : ''
                   }`}
                 >
-                  {/* Avatar */}
-                  <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-medium flex items-center justify-center text-sm">
-                    {user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-[var(--color-fg)] truncate">{user.full_name}</p>
-                      {!user.is_active && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] text-[11px] font-medium rounded-full border border-[var(--color-line)]">
-                          Disattivato
-                        </span>
-                      )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-semibold flex items-center justify-center text-sm flex-shrink-0">
+                        {user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-[var(--color-fg)] truncate">{user.full_name}</p>
+                        <p className="text-xs text-[var(--color-fg-muted)] truncate">{user.email}</p>
+                      </div>
                     </div>
-                    <p className="text-xs text-[var(--color-fg-muted)] truncate">{user.email}</p>
+                    {user.id !== currentUser?.id && (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleEdit(user)}
+                          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                          title="Modifica"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(user)}
+                          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/15 dark:hover:text-rose-400"
+                          title="Elimina"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                    {user.id === currentUser?.id && (
+                      <span className="text-xs text-[var(--color-fg-subtle)] italic flex-shrink-0">Tu</span>
+                    )}
                   </div>
-
-                  {/* Role Badge */}
-                  <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${getRoleColor(user.role)}`}>
-                    {getRoleIcon(user.role)}
-                    {getRoleName(user.role)}
-                  </div>
-
-                  {/* Actions */}
-                  {user.id !== currentUser?.id && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleEdit(user)}
-                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                        title="Modifica"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(user)}
-                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
-                        title="Elimina"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                  <div className="flex items-center gap-2">
+                    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${getRoleColor(user.role)}`}>
+                      {getRoleIcon(user.role)}
+                      {getRoleName(user.role)}
                     </div>
-                  )}
-                  {user.id === currentUser?.id && (
-                    <span className="text-xs text-[var(--color-fg-subtle)] italic">Tu</span>
-                  )}
+                    {!user.is_active && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] text-[11px] font-medium rounded-full border border-[var(--color-line)]">
+                        Disattivato
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -388,7 +385,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
 
         {/* Footer */}
         {!showAddForm && (
-          <div className={isModal ? "px-5 py-3 border-t border-[var(--color-line)] flex justify-end" : "lg:hidden flex justify-end"}>
+          <div className={isModal ? "p-4 border-t border-[var(--color-line)] flex justify-end" : "lg:hidden flex justify-end"}>
             <button
               onClick={() => setShowAddForm(true)}
               className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
@@ -404,8 +401,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
   return (
     <>
       {isModal ? (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-3xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             {content}
           </div>
         </div>
@@ -427,21 +424,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
 
       {/* Error Modal */}
       {deleteError && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-5 py-6 text-center">
-              <div className="mx-auto w-12 h-12 bg-rose-50 border border-rose-100 rounded-full flex items-center justify-center mb-4">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setDeleteError('')}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+              <div className="mx-auto w-12 h-12 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 rounded-full flex items-center justify-center mb-4">
                 <AlertCircle className="h-5 w-5 text-rose-600" />
               </div>
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">Errore</h3>
-              <p className="text-sm text-[var(--color-fg-muted)] mb-6">{deleteError}</p>
-              <button
-                onClick={() => setDeleteError('')}
-                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
-              >
-                OK
-              </button>
-            </div>
+              <h3 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2 text-center">Errore</h3>
+              <p className="text-[13px] text-[var(--color-fg-muted)] mb-4 text-center">{deleteError}</p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setDeleteError('')}
+                  className="w-full px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+                >
+                  OK
+                </button>
+              </div>
           </div>
         </div>
       )}

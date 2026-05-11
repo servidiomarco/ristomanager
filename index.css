@@ -136,8 +136,8 @@
   --color-surface-hover: #1e293b;
   --color-surface-sunken: #0b1220;
 
-  --color-line: #1e293b;
-  --color-line-strong: #334155;
+  --color-line: #334155;
+  --color-line-strong: #475569;
 
   --color-fg: #f9fafb;
   --color-fg-muted: #94a3b8;
@@ -149,7 +149,7 @@
   --color-sidebar-fg-strong: #f1f5f9;
   --color-sidebar-active-bg: #1e293b;
   --color-sidebar-active-fg: #ffffff;
-  --color-sidebar-line: #1e293b;
+  --color-sidebar-line: #293548;
   --color-sidebar-eyebrow: #64748b;
 
   /* Re-map the legacy palette for dark mode so bg-white / text-slate-900 etc.
