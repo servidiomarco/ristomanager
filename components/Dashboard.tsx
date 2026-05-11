@@ -92,6 +92,8 @@ interface DashboardProps {
   onNavigateToBanquets: () => void;
   onNavigateToReservations?: () => void;
   onNavigateToInventario?: () => void;
+  autoOpenNewShoppingItem?: boolean;
+  onAutoOpenNewShoppingItemHandled?: () => void;
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
   onDateChange?: (date: Date) => void;
@@ -161,7 +163,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -258,6 +260,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [shoppingHistory, setShoppingHistory] = useState<string[]>([]);
   const [showShoppingSuggestions, setShowShoppingSuggestions] = useState(false);
   const shoppingInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!autoOpenNewShoppingItem) return;
+    const t = setTimeout(() => {
+      const el = shoppingInputRef.current;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+      }
+      onAutoOpenNewShoppingItemHandled?.();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled]);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -1001,8 +1016,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
-      {/* Alerts — placed first, above the greeting */}
-  
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();

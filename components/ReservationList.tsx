@@ -3090,9 +3090,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            setMergeMode(!mergeMode);
                                             if (mergeMode) {
+                                                setMergeMode(false);
                                                 setSelectedTablesForMerge([]);
+                                            } else {
+                                                setMergeMode(true);
+                                                if (formData.table_id) {
+                                                    setSelectedTablesForMerge([formData.table_id]);
+                                                }
                                             }
                                         }}
                                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors font-medium text-xs border ${
@@ -3109,7 +3114,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     {/* Show selected tables count and total capacity */}
                                     {selectedTablesForMerge.length >= 1 && (
                                         <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-3 py-1.5 rounded-full font-medium">
-                                            {selectedTablesForMerge.length} tavoli = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
+                                            {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
                                         </div>
                                     )}
 
@@ -3260,7 +3265,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         className={`
                                                             relative p-2 sm:p-3 rounded-md border text-center transition-colors group
                                                             ${isSelectedForMerge
-                                                                ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
+                                                                ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500 z-10'
                                                                 : isSelected
                                                                     ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
                                                                     : isOccupied
@@ -3301,8 +3306,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </div>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <div className="absolute -top-2 -right-2 bg-[var(--color-fg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
-                                                                <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full m-1" />
+                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 rounded-full p-1 shadow-[var(--shadow-xs)] z-20 flex items-center justify-center">
+                                                                <Combine size={10} className="text-white" />
                                                             </div>
                                                         )}
                                                     </button>
