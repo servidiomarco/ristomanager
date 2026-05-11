@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
   const [autoOpenNewStaff, setAutoOpenNewStaff] = useState(false);
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
-  const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
+  const [autoOpenNewShoppingItem, setAutoOpenNewShoppingItem] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
@@ -1256,6 +1256,8 @@ const App: React.FC = () => {
             onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
             onNavigateToReservations={() => { setSidebarCollapsed(true); setView(ViewState.RESERVATIONS); }}
             onNavigateToInventario={() => { setSidebarCollapsed(false); setView(ViewState.INVENTARIO); }}
+            autoOpenNewShoppingItem={autoOpenNewShoppingItem}
+            onAutoOpenNewShoppingItemHandled={() => setAutoOpenNewShoppingItem(false)}
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
             onDateChange={setGlobalDate}
@@ -1373,11 +1375,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.INVENTARIO && (
-          <Inventory
-            showToast={addToast}
-            autoOpenNew={autoOpenNewProduct}
-            onAutoOpenNewHandled={() => setAutoOpenNewProduct(false)}
-          />
+          <Inventory showToast={addToast} />
         )}
 
         {view === ViewState.SETTINGS && (
@@ -1582,7 +1580,7 @@ const App: React.FC = () => {
                 {[
                   { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
-                  { key: 'product', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); setShowCreateSheet(false); } },
+                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
                   { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button
