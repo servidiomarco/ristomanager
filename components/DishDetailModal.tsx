@@ -18,9 +18,9 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
   }, [photoFullscreen]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="relative bg-slate-100 flex items-center justify-center" style={{ minHeight: '50vh' }}>
@@ -40,7 +40,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="absolute top-3 right-3 p-2 rounded-full bg-white/90 hover:bg-white text-slate-600 hover:text-slate-800 shadow-sm transition-colors"
+            className="absolute top-3 right-3 p-1.5 rounded-lg bg-[var(--color-surface)]/90 hover:bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] shadow-sm transition-colors"
             title="Chiudi"
           >
             <X className="h-5 w-5" />
@@ -76,7 +76,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
                 {dish.allergens.map(a => (
                   <span
                     key={a}
-                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200"
+                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30"
                   >
                     {a}
                   </span>

@@ -22,8 +22,8 @@ const STAFF_CATEGORY_LABELS: Record<StaffCategory, string> = {
 };
 
 const STAFF_CATEGORY_COLORS: Record<StaffCategory, string> = {
-  [StaffCategory.SALA]: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  [StaffCategory.CUCINA]: 'bg-amber-50 text-amber-700 border-amber-100'
+  [StaffCategory.SALA]: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-500/30',
+  [StaffCategory.CUCINA]: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-100 dark:border-amber-500/30'
 };
 
 const STAFF_TYPE_LABELS: Record<StaffType, string> = {
@@ -33,9 +33,9 @@ const STAFF_TYPE_LABELS: Record<StaffType, string> = {
 };
 
 const STAFF_TYPE_COLORS: Record<StaffType, string> = {
-  [StaffType.FISSO]: 'bg-blue-50 text-blue-700 border border-blue-100',
-  [StaffType.STAGIONALE]: 'bg-amber-50 text-amber-700 border border-amber-100',
-  [StaffType.EXTRA]: 'bg-violet-50 text-violet-700 border border-violet-100'
+  [StaffType.FISSO]: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-500/30',
+  [StaffType.STAGIONALE]: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30',
+  [StaffType.EXTRA]: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-100 dark:border-violet-500/30'
 };
 
 const TIME_OFF_LABELS: Record<TimeOffType, string> = {
@@ -47,23 +47,23 @@ const TIME_OFF_LABELS: Record<TimeOffType, string> = {
 
 const TIME_OFF_COLORS: Record<TimeOffType, string> = {
   [TimeOffType.RIPOSO]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]',
-  [TimeOffType.VACANZA]: 'bg-cyan-50 text-cyan-700 border border-cyan-100',
-  [TimeOffType.MALATTIA]: 'bg-rose-50 text-rose-700 border border-rose-100',
-  [TimeOffType.PERMESSO]: 'bg-violet-50 text-violet-700 border border-violet-100'
+  [TimeOffType.VACANZA]: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-100 dark:border-cyan-500/30',
+  [TimeOffType.MALATTIA]: 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30',
+  [TimeOffType.PERMESSO]: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-100 dark:border-violet-500/30'
 };
 
 const TIME_OFF_DAY_BG: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'border-slate-300 bg-slate-100',
-  [TimeOffType.VACANZA]: 'border-cyan-300 bg-cyan-50',
-  [TimeOffType.MALATTIA]: 'border-rose-300 bg-rose-50',
-  [TimeOffType.PERMESSO]: 'border-violet-300 bg-violet-50'
+  [TimeOffType.RIPOSO]: 'border-slate-300 dark:border-slate-500/40 bg-slate-100 dark:bg-slate-500/20',
+  [TimeOffType.VACANZA]: 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15',
+  [TimeOffType.MALATTIA]: 'border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/15',
+  [TimeOffType.PERMESSO]: 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15'
 };
 
 const TIME_OFF_LEGEND_DOT: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'bg-slate-300',
-  [TimeOffType.VACANZA]: 'bg-cyan-300',
-  [TimeOffType.MALATTIA]: 'bg-rose-300',
-  [TimeOffType.PERMESSO]: 'bg-violet-300'
+  [TimeOffType.RIPOSO]: 'bg-slate-300 dark:bg-slate-500/40',
+  [TimeOffType.VACANZA]: 'bg-cyan-300 dark:bg-cyan-500/40',
+  [TimeOffType.MALATTIA]: 'bg-rose-300 dark:bg-rose-500/40',
+  [TimeOffType.PERMESSO]: 'bg-violet-300 dark:bg-violet-500/40'
 };
 
 // Indices match JS Date.getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
@@ -525,7 +525,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               placeholder="Cerca dipendente..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              className="w-full pl-9 pr-3 py-2.5 bg-[var(--color-surface-2)] dark:bg-white/[0.04] border border-[var(--color-line-strong)] rounded-full text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
           </div>
 
@@ -533,24 +533,24 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setCategoryFilter('ALL')}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
-                categoryFilter === 'ALL' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.SALA)}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
-                categoryFilter === StaffCategory.SALA ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.SALA ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Sala
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.CUCINA)}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
-                categoryFilter === StaffCategory.CUCINA ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.CUCINA ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Cucina
@@ -561,8 +561,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setTypeFilter('ALL')}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition ${
-                typeFilter === 'ALL' ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                typeFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
@@ -571,8 +571,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               <button
                 key={key}
                 onClick={() => setTypeFilter(key as StaffType)}
-                className={`px-3 py-1 text-xs font-medium rounded-full transition ${
-                  typeFilter === key ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+                className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                  typeFilter === key ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
                 }`}
               >
                 {label}
@@ -747,7 +747,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     </button>
                     <button
                       onClick={() => setDeleteStaffConfirm(selectedStaff)}
-                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -856,10 +856,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                       : isFullDayOff
                         ? TIME_OFF_DAY_BG[dayTimeOff!.type]
                         : isWeeklyRest && !lunchShift && !dinnerShift
-                          ? 'border-slate-300 bg-slate-100'
+                          ? 'border-slate-300 dark:border-slate-500/40 bg-slate-100 dark:bg-slate-500/20'
                           : isToday
-                            ? 'border-indigo-300 bg-indigo-50'
-                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50';
+                            ? 'border-indigo-300 dark:border-[#4f46e5]/40 bg-indigo-50 dark:bg-[#4f46e5]/15'
+                            : 'border-slate-100 dark:border-slate-500/30 hover:border-slate-200 dark:hover:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15';
 
                     return (
                       <div
@@ -867,7 +867,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         onClick={() => handleOpenAddShift(day)}
                         className={`min-h-[72px] p-1.5 rounded-lg border cursor-pointer transition-all flex flex-col ${dayBgClass}`}
                       >
-                        <div className={`text-xs font-semibold mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
+                        <div className={`text-xs font-semibold mb-1 ${isToday ? 'text-indigo-600 dark:text-[#818cf8]' : 'text-slate-700 dark:text-slate-300'}`}>
                           {day.getDate()}
                         </div>
 
@@ -876,7 +876,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                             {TIME_OFF_LABELS[dayTimeOff!.type]}
                           </div>
                         ) : isWeeklyRest && !showLunch && !showDinner ? (
-                          <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 text-slate-700">
+                          <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 dark:bg-slate-500/25 text-slate-700 dark:text-slate-300">
                             Riposo
                           </div>
                         ) : (
@@ -894,9 +894,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   lunchPresent
                                     ? lunchImplicit
-                                      ? 'bg-amber-100 text-amber-700 border border-dashed border-amber-300'
-                                      : 'bg-amber-200 text-amber-800'
-                                    : 'bg-slate-100 text-slate-400 line-through'
+                                      ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-dashed border-amber-300 dark:border-amber-500/40'
+                                      : 'bg-amber-200 dark:bg-amber-500/25 text-amber-800 dark:text-amber-200'
+                                    : 'bg-slate-100 dark:bg-slate-500/20 text-slate-400 dark:text-slate-500 line-through'
                                 }`}
                                 title={
                                   lunchImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Pranzo`
@@ -921,9 +921,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   dinnerPresent
                                     ? dinnerImplicit
-                                      ? 'bg-indigo-100 text-indigo-700 border border-dashed border-indigo-300'
-                                      : 'bg-indigo-200 text-indigo-800'
-                                    : 'bg-slate-100 text-slate-400 line-through'
+                                      ? 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc] border border-dashed border-indigo-300 dark:border-[#4f46e5]/40'
+                                      : 'bg-indigo-200 dark:bg-[#4f46e5]/25 text-indigo-800 dark:text-[#c7d2fe]'
+                                    : 'bg-slate-100 dark:bg-slate-500/20 text-slate-400 dark:text-slate-500 line-through'
                                 }`}
                                 title={
                                   dinnerImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Cena`
@@ -944,27 +944,27 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 </div>
 
                 {/* Legend */}
-                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500">
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500 dark:text-slate-400">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-amber-200 rounded-sm flex items-center justify-center">
-                      <Sun className="h-2 w-2 text-amber-800" />
+                    <div className="w-3 h-3 bg-amber-200 dark:bg-amber-500/25 rounded-sm flex items-center justify-center">
+                      <Sun className="h-2 w-2 text-amber-800 dark:text-amber-200" />
                     </div>
                     Presente Pranzo
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-indigo-200 rounded-sm flex items-center justify-center">
-                      <Moon className="h-2 w-2 text-indigo-800" />
+                    <div className="w-3 h-3 bg-indigo-200 dark:bg-[#4f46e5]/25 rounded-sm flex items-center justify-center">
+                      <Moon className="h-2 w-2 text-indigo-800 dark:text-[#c7d2fe]" />
                     </div>
                     Presente Cena
                   </div>
                   {hasAutoShifts(selectedStaff) && (
                     <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 bg-amber-100 rounded-sm border border-dashed border-amber-300" />
+                      <div className="w-3 h-3 bg-amber-100 dark:bg-amber-500/20 rounded-sm border border-dashed border-amber-300 dark:border-amber-500/40" />
                       Auto ({STAFF_TYPE_LABELS[selectedStaff.staffType]})
                     </div>
                   )}
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-slate-100 rounded-sm border border-slate-200" />
+                    <div className="w-3 h-3 bg-slate-100 dark:bg-slate-500/20 rounded-sm border border-slate-200 dark:border-slate-500/30" />
                     Assente
                   </div>
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
@@ -1007,7 +1007,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                               : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
                             setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
                           }}
-                          className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                          className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -1030,17 +1030,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
       {/* Add/Edit Staff Modal */}
       {showStaffModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setShowStaffModal(false); resetStaffForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-lg h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
                 {editingStaff ? 'Modifica Dipendente' : 'Nuovo Dipendente'}
               </h3>
-              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
-                <X className="h-4 w-4" />
+              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="px-5 py-4 space-y-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome *</label>
@@ -1168,12 +1168,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 <textarea
                   value={staffForm.notes}
                   onChange={(e) => setStaffForm({ ...staffForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-500/40 p-2.5 focus:ring-2 focus:ring-indigo-500 dark:focus:ring-[#818cf8] outline-none h-20 resize-none"
                   placeholder="Note aggiuntive..."
                 />
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => { setShowStaffModal(false); resetStaffForm(); }}
                 className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
@@ -1195,15 +1195,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
       {/* Add Shift Modal */}
       {showShiftModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Aggiungi Turno</h3>
-              <button onClick={() => setShowShiftModal(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
-                <X className="h-4 w-4" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowShiftModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-sm h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aggiungi Turno</h3>
+              <button onClick={() => setShowShiftModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="px-5 py-4 space-y-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
@@ -1222,7 +1222,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     onClick={() => setShiftForm({ ...shiftForm, lunch: !shiftForm.lunch })}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.lunch
-                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'
                         : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -1235,7 +1235,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     onClick={() => setShiftForm({ ...shiftForm, dinner: !shiftForm.dinner })}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.dinner
-                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                        ? 'border-indigo-200 dark:border-[#4f46e5]/30 bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc]'
                         : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -1256,7 +1256,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 />
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowShiftModal(false)}
                 className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
@@ -1278,15 +1278,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
       {/* Add Time Off Modal */}
       {showTimeOffModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-sm">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Registra Assenza</h3>
-              <button onClick={() => setShowTimeOffModal(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
-                <X className="h-4 w-4" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowTimeOffModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-sm h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Registra Assenza</h3>
+              <button onClick={() => setShowTimeOffModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="px-5 py-4 space-y-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo</label>
                 <select
@@ -1345,7 +1345,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 />
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowTimeOffModal(false)}
                 className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"

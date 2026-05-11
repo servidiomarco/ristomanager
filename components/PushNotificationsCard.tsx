@@ -99,13 +99,13 @@ export const PushNotificationsCard: React.FC = () => {
                 </div>
 
                 {!supported && (
-                    <p className="mt-3 text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-md px-2.5 py-1.5">
+                    <p className="mt-3 text-xs text-rose-700 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 rounded-md px-2.5 py-1.5">
                         Il tuo browser non supporta le notifiche push.
                     </p>
                 )}
 
                 {supported && permission === 'denied' && (
-                    <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2.5 py-1.5">
+                    <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/30 rounded-md px-2.5 py-1.5">
                         Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.
                     </p>
                 )}
@@ -131,8 +131,8 @@ export const PushNotificationsCard: React.FC = () => {
 
                 {feedback && (
                     <p className={`mt-3 text-xs rounded-md px-2.5 py-1.5 border ${
-                        feedback.kind === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                        : feedback.kind === 'error' ? 'bg-rose-50 text-rose-700 border-rose-100'
+                        feedback.kind === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+                        : feedback.kind === 'error' ? 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
                         : 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
                     }`}>
                         {feedback.message}

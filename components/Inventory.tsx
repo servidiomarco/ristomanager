@@ -24,13 +24,16 @@ import {
   postInventoryMovement,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { toTitleCase } from '../utils/text';
 import {
   Loader2, Plus, Minus, Pencil, Trash2, X, Settings, Boxes,
-  ChefHat, Wine, GlassWater, AlertTriangle, Tag,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search,
 } from 'lucide-react';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  autoOpenNewProduct?: boolean;
+  onAutoOpenNewProductHandled?: () => void;
 }
 
 const AREA_LABEL: Record<InventoryArea, string> = {
@@ -48,7 +51,7 @@ const AREA_ICON: Record<InventoryArea, React.ReactNode> = {
 // Compose a stable key for a (product, location) entry in the stock map.
 const stockKey = (productId: number, locationId: number): string => `${productId}:${locationId}`;
 
-export const Inventory: React.FC<Props> = ({ showToast }) => {
+export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAutoOpenNewProductHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('inventory:full');
 
@@ -334,6 +337,13 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
     setProductForm({ name: '', unit: '', notes: '', category_id: presetCategory });
     setProductModalOpen(true);
   };
+  useEffect(() => {
+    if (autoOpenNewProduct) {
+      openCreateProduct();
+      onAutoOpenNewProductHandled?.();
+    }
+  }, [autoOpenNewProduct]);
+
   const openEditProduct = (p: InventoryProduct) => {
     setProductEditing(p);
     setProductForm({
@@ -396,92 +406,84 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
   const isTotale = activeLocationId == null;
 
   return (
-    <div className="p-4 lg:p-8 max-w-6xl mx-auto pb-24 lg:pb-8">
-      {/* Header */}
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">Inventario</h2>
-          <p className="text-sm text-[var(--color-fg-muted)] mt-0.5">
-            Gestisci la merce per Cucina, Sala e Bar.
-          </p>
+    <div className="p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 space-y-3">
+      {/* Filters row: area pills + location pills + management buttons */}
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full flex-shrink-0">
+          {(Object.values(InventoryArea) as InventoryArea[]).map(area => (
+            <button
+              key={area}
+              onClick={() => setActiveArea(area)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition ${
+                activeArea === area
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                  : 'text-[var(--color-fg-muted)]'
+              }`}
+            >
+              {AREA_ICON[area]}
+              {AREA_LABEL[area]}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {/* Area tabs */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(Object.values(InventoryArea) as InventoryArea[]).map(area => (
+        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full flex-shrink-0">
           <button
-            key={area}
-            onClick={() => setActiveArea(area)}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[14px] font-medium border transition-colors ${
-              activeArea === area
-                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:border-[var(--color-fg)]'
+            onClick={() => setActiveLocationId(null)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
+              isTotale
+                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                : 'text-[var(--color-fg-muted)]'
             }`}
           >
-            {AREA_ICON[area]}
-            {AREA_LABEL[area]}
+            Totale
           </button>
-        ))}
-      </div>
+          {locations.map(loc => (
+            <button
+              key={loc.id}
+              onClick={() => setActiveLocationId(loc.id)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
+                activeLocationId === loc.id
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                  : 'text-[var(--color-fg-muted)]'
+              }`}
+            >
+              {toTitleCase(loc.name)}
+            </button>
+          ))}
+        </div>
 
-      {/* Location tabs (always show "Totale", then each location, then management buttons) */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setActiveLocationId(null)}
-          className={`px-3 py-1.5 rounded-md text-[13px] font-medium border transition-colors ${
-            isTotale
-              ? 'bg-[var(--color-surface-3)] text-[var(--color-fg)] border-[var(--color-fg)]'
-              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
-          }`}
-        >
-          Totale
-        </button>
-        {locations.map(loc => (
-          <button
-            key={loc.id}
-            onClick={() => setActiveLocationId(loc.id)}
-            className={`px-3 py-1.5 rounded-md text-[13px] font-medium border transition-colors ${
-              activeLocationId === loc.id
-                ? 'bg-[var(--color-surface-3)] text-[var(--color-fg)] border-[var(--color-fg)]'
-                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
-            }`}
-          >
-            {loc.name}
-          </button>
-        ))}
         {canEdit && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
             <button
               onClick={() => setCategoriesModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg)]"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
               title="Gestione categorie"
             >
-              <Tag className="h-4 w-4" />
+              <Tag className="h-3.5 w-3.5" />
               Gestione categorie
             </button>
             <button
               onClick={() => setLocationsModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg)]"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
               title="Gestione aree"
             >
-              <Settings className="h-4 w-4" />
+              <Settings className="h-3.5 w-3.5" />
               Gestione aree
             </button>
           </div>
         )}
       </div>
 
-      {/* Category filter pills — always shows "Tutte"; "Senza categoria" appears
-          only if there's at least one uncategorized product. */}
+      {/* Category filter pills */}
       {(categories.length > 0 || products.some(p => p.category_id == null)) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="overflow-x-auto scrollbar-hide">
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
           <button
             onClick={() => setCategoryFilter(null)}
-            className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
               categoryFilter === null
-                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                : 'text-[var(--color-fg-muted)]'
             }`}
           >
             Tutte
@@ -490,10 +492,10 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
             <button
               key={cat.id}
               onClick={() => setCategoryFilter(cat.id)}
-              className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
                 categoryFilter === cat.id
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                  : 'text-[var(--color-fg-muted)]'
               }`}
             >
               {cat.name}
@@ -502,31 +504,55 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
           {products.some(p => p.category_id == null) && (
             <button
               onClick={() => setCategoryFilter(-1)}
-              className={`px-4 py-2.5 rounded-full text-sm font-medium border transition-colors ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
                 categoryFilter === -1
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                  : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Senza categoria
             </button>
           )}
+          </div>
         </div>
       )}
 
-      {/* Search + add product */}
-      <div className="mb-4 flex flex-col sm:flex-row gap-2">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Cerca prodotto..."
-          className="flex-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]"
-        />
+      {/* Search + mobile add + mobile management */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cerca prodotto..."
+              className="w-full h-9 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] pl-9 pr-3 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+            />
+          </div>
+          {canEdit && (
+            <div className="flex md:hidden items-center gap-1.5">
+              <button
+                onClick={() => setCategoriesModalOpen(true)}
+                className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                title="Gestione categorie"
+              >
+                <Tag className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setLocationsModalOpen(true)}
+                className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                title="Gestione aree"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
         {canEdit && (
           <button
             onClick={openCreateProduct}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[14px] font-medium hover:opacity-90"
+            className="md:hidden w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
           >
             <Plus className="h-4 w-4" />
             Aggiungi prodotto
@@ -541,7 +567,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
         </div>
       )}
       {!isLoading && error && (
-        <div className="p-4 rounded-lg bg-rose-50 text-rose-700 border border-rose-100">
+        <div className="p-4 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
           <AlertTriangle className="inline h-4 w-4 mr-2" />
           {error}
         </div>
@@ -680,15 +706,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Locations modal ----- */}
       {locationsModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setLocationsModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setLocationsModalOpen(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aree — {AREA_LABEL[activeArea]}</h3>
-              <button onClick={() => setLocationsModalOpen(false)} className="p-1 hover:bg-[var(--color-surface-hover)] rounded">
-                <X className="h-5 w-5 text-[var(--color-fg-muted)]" />
+              <button onClick={() => setLocationsModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
               {locations.length === 0 && (
                 <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
                   Nessuna area. Aggiungine una qui sotto.
@@ -705,8 +731,8 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                         className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
                         autoFocus
                       />
-                      <button onClick={handleSaveLocationEdit} className="px-3 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium">Salva</button>
-                      <button onClick={() => { setEditingLocationId(null); setEditingLocationName(''); }} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
+                      <button onClick={handleSaveLocationEdit} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
+                      <button onClick={() => { setEditingLocationId(null); setEditingLocationName(''); }} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
                     </>
                   ) : (
                     <>
@@ -740,7 +766,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                 <button
                   onClick={handleAddLocation}
                   disabled={!locationDraftName.trim()}
-                  className="px-4 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium disabled:opacity-50"
+                  className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium disabled:opacity-50 hover:opacity-90"
                 >
                   <Plus className="h-4 w-4 inline" /> Aggiungi
                 </button>
@@ -752,15 +778,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Categories modal ----- */}
       {categoriesModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCategoriesModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setCategoriesModalOpen(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Categorie — {AREA_LABEL[activeArea]}</h3>
-              <button onClick={() => setCategoriesModalOpen(false)} className="p-1 hover:bg-[var(--color-surface-hover)] rounded">
-                <X className="h-5 w-5 text-[var(--color-fg-muted)]" />
+              <button onClick={() => setCategoriesModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
               {categories.length === 0 && (
                 <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
                   Nessuna categoria. Aggiungine una qui sotto.
@@ -778,8 +804,8 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                         className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
                         autoFocus
                       />
-                      <button onClick={handleSaveCategoryEdit} className="px-3 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium">Salva</button>
-                      <button onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
+                      <button onClick={handleSaveCategoryEdit} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
+                      <button onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
                     </>
                   ) : (
                     <>
@@ -813,7 +839,7 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
                 <button
                   onClick={handleAddCategory}
                   disabled={!categoryDraftName.trim()}
-                  className="px-4 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium disabled:opacity-50"
+                  className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium disabled:opacity-50 hover:opacity-90"
                 >
                   <Plus className="h-4 w-4 inline" /> Aggiungi
                 </button>
@@ -825,15 +851,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Confirm delete category ----- */}
       {confirmDeleteCategoryId != null && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteCategoryId(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare la categoria?</h4>
             <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
               I prodotti associati resteranno, ma diventeranno "Senza categoria".
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteCategoryId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
-              <button onClick={() => handleDeleteCategory(confirmDeleteCategoryId)} className="px-3 py-2 rounded-md bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700">Elimina</button>
+              <button onClick={() => setConfirmDeleteCategoryId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={() => handleDeleteCategory(confirmDeleteCategoryId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
             </div>
           </div>
         </div>
@@ -841,15 +867,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Confirm delete location ----- */}
       {confirmDeleteLocationId != null && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteLocationId(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare l'area?</h4>
             <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
               Tutte le quantità in quest'area verranno cancellate. L'azione non è reversibile.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteLocationId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
-              <button onClick={() => handleDeleteLocation(confirmDeleteLocationId)} className="px-3 py-2 rounded-md bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700">Elimina</button>
+              <button onClick={() => setConfirmDeleteLocationId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={() => handleDeleteLocation(confirmDeleteLocationId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
             </div>
           </div>
         </div>
@@ -857,17 +883,17 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Product modal ----- */}
       {productModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setProductModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setProductModalOpen(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
                 {productEditing ? 'Modifica prodotto' : `Nuovo prodotto — ${AREA_LABEL[activeArea]}`}
               </h3>
-              <button onClick={() => setProductModalOpen(false)} className="p-1 hover:bg-[var(--color-surface-hover)] rounded">
-                <X className="h-5 w-5 text-[var(--color-fg-muted)]" />
+              <button onClick={() => setProductModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
               <div>
                 <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Nome *</label>
                 <input
@@ -918,8 +944,8 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
               </div>
             </div>
             <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-              <button onClick={() => setProductModalOpen(false)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
-              <button onClick={handleSaveProduct} className="px-4 py-2 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium">Salva</button>
+              <button onClick={() => setProductModalOpen(false)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={handleSaveProduct} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
             </div>
           </div>
         </div>
@@ -927,15 +953,15 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
 
       {/* ----- Confirm delete product ----- */}
       {confirmDeleteProductId != null && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteProductId(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il prodotto?</h4>
             <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
               Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteProductId(null)} className="px-3 py-2 rounded-md border border-[var(--color-line)] text-[13px]">Annulla</button>
-              <button onClick={() => handleDeleteProduct(confirmDeleteProductId)} className="px-3 py-2 rounded-md bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700">Elimina</button>
+              <button onClick={() => setConfirmDeleteProductId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={() => handleDeleteProduct(confirmDeleteProductId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
             </div>
           </div>
         </div>

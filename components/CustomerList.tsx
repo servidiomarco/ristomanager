@@ -209,18 +209,18 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Cerca per nome, telefono, email, città..."
-          className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
+          className="w-full h-9 pl-9 pr-3 text-sm rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:outline-none focus:border-[var(--color-fg)]"
         />
       </div>
 
       {error && (
-        <div className="p-3 mb-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-100">{error}</div>
+        <div className="p-3 mb-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">{error}</div>
       )}
 
       {isLoading ? (
         <div className="p-12 text-center text-sm text-slate-400">Caricamento...</div>
       ) : filtered.length === 0 ? (
-        <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="p-12 text-center bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm">
           <BookUser className="h-10 w-10 text-slate-300 mx-auto mb-3" />
           <p className="text-slate-500 text-sm">
             {search ? 'Nessun cliente corrisponde alla ricerca.' : 'La rubrica è vuota.'}
@@ -233,7 +233,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
             return (
               <div
                 key={c.id}
-                className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col gap-2 hover:shadow-md transition-shadow"
+                className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm p-4 flex flex-col gap-2 hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between gap-2">
                   <button
@@ -257,7 +257,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteId(c.id)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/15"
                         title="Elimina"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -312,20 +312,20 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
 
       {/* Edit/Create form modal */}
       {formOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={() => !isSaving && setFormOpen(false)}>
+        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-0 sm:p-4" onClick={() => !isSaving && setFormOpen(false)}>
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-lg h-full sm:max-h-[90vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-slate-100">
-              <h2 className="font-bold text-slate-800">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h2 className="text-[16px] font-semibold text-[var(--color-fg)]">
                 {form.id ? 'Modifica cliente' : 'Nuovo cliente'}
               </h2>
               <button
                 type="button"
                 onClick={() => setFormOpen(false)}
                 disabled={isSaving}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -403,19 +403,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                   />
                 </div>
               </div>
-              <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex gap-2">
+              <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
                 <button
                   type="button"
                   onClick={() => setFormOpen(false)}
                   disabled={isSaving}
-                  className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                 >
                   Annulla
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving || !form.name.trim() || !form.phone.trim()}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {isSaving ? 'Salvataggio...' : (form.id ? 'Salva modifiche' : 'Aggiungi alla rubrica')}
@@ -428,29 +428,27 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
 
       {/* Delete confirmation */}
       {confirmDeleteId !== null && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
+        <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden"
+            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5"
             onClick={e => e.stopPropagation()}
           >
-            <div className="p-5">
-              <h3 className="font-bold text-slate-800 mb-2">Eliminare il cliente?</h3>
-              <p className="text-sm text-slate-600">
-                I banchetti collegati manterranno la storia ma non saranno più associati al cliente.
-              </p>
-            </div>
-            <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex gap-2">
+            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il cliente?</h4>
+            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
+              I banchetti collegati manterranno la storia ma non saranno più associati al cliente.
+            </p>
+            <div className="flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => setConfirmDeleteId(null)}
-                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
               >
                 Annulla
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(confirmDeleteId)}
-                className="flex-1 px-3 py-2 rounded-lg bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700"
+                className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700"
               >
                 Elimina
               </button>
@@ -461,20 +459,20 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
 
       {/* Detail panel */}
       {detailCustomer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={() => setDetailCustomer(null)}>
+        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => setDetailCustomer(null)}>
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-slate-100">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2 min-w-0">
-                <BookUser className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-                <h2 className="font-bold text-slate-800 truncate">{detailCustomer.name}</h2>
+                <BookUser className="h-5 w-5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{detailCustomer.name}</h2>
               </div>
               <button
                 type="button"
                 onClick={() => setDetailCustomer(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -520,13 +518,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                 return (
                   <>
                     <div className="border-t border-slate-100 pt-3 grid grid-cols-3 gap-2 text-center">
-                      <div className="bg-indigo-50 rounded-lg py-2">
-                        <div className="text-xl font-bold text-indigo-700">{s.reservations.length}</div>
-                        <div className="text-[11px] tracking-wide text-indigo-600">Prenot.</div>
+                      <div className="bg-indigo-50 dark:bg-[#4f46e5]/15 rounded-lg py-2">
+                        <div className="text-xl font-bold text-indigo-700 dark:text-[#a5b4fc]">{s.reservations.length}</div>
+                        <div className="text-[11px] tracking-wide text-indigo-600 dark:text-[#818cf8]">Prenot.</div>
                       </div>
-                      <div className="bg-emerald-50 rounded-lg py-2">
-                        <div className="text-xl font-bold text-emerald-700">{s.banquets.length}</div>
-                        <div className="text-[11px] tracking-wide text-emerald-600">Banch.</div>
+                      <div className="bg-emerald-50 dark:bg-emerald-500/15 rounded-lg py-2">
+                        <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{s.banquets.length}</div>
+                        <div className="text-[11px] tracking-wide text-emerald-600 dark:text-emerald-400">Banch.</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg py-2">
                         <div className="text-xs font-bold text-slate-700 mt-1">{formatLastVisit(s.lastVisit) || '—'}</div>
@@ -581,7 +579,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                             .map(b => (
                               <li
                                 key={b.id}
-                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100"
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30"
                               >
                                 <Calendar className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
                                 <div className="flex-1 min-w-0 text-xs">
@@ -602,11 +600,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
               })()}
             </div>
             {canEdit && (
-              <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex gap-2">
+              <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
                 <button
                   type="button"
                   onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                 >
                   <Pencil className="h-4 w-4" />
                   Modifica

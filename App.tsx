@@ -60,6 +60,7 @@ const App: React.FC = () => {
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
   const [autoOpenNewStaff, setAutoOpenNewStaff] = useState(false);
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
+  const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
@@ -1101,7 +1102,7 @@ const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setAutoOpenNewReservation(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 h-9 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-transparent bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 h-9 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
                 >
                   <Plus className="h-4 w-4" />
                   Nuova prenotazione
@@ -1159,13 +1160,23 @@ const App: React.FC = () => {
                   Aggiungi Utente
                 </button>
               )}
+              {view === ViewState.INVENTARIO && hasPermission('inventory:full') && (
+                <button
+                  type="button"
+                  onClick={() => setAutoOpenNewProduct(true)}
+                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Aggiungi Prodotto
+                </button>
+              )}
 
               {/* Connection state — full pill on md+, status dot only on mobile */}
               <div
                 className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
                   isConnected
                     ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] bg-[var(--color-surface)]'
-                    : 'border-rose-200 text-rose-700 bg-rose-50 animate-pulse'
+                    : 'border-rose-200 text-rose-700 bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:bg-rose-500/15 animate-pulse'
                 }`}
                 role="status"
                 aria-live={isConnected ? 'polite' : 'assertive'}
@@ -1372,7 +1383,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.INVENTARIO && (
-          <Inventory showToast={addToast} />
+          <Inventory showToast={addToast} autoOpenNewProduct={autoOpenNewProduct} onAutoOpenNewProductHandled={() => setAutoOpenNewProduct(false)} />
         )}
 
         {view === ViewState.SETTINGS && (
@@ -1502,7 +1513,7 @@ const App: React.FC = () => {
                       <p className="text-[13px] text-[var(--color-fg-muted)]">Gateway di pagamento</p>
                     </div>
                   </div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
                     <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
                     Attivo (Simulato)
                   </div>
@@ -1707,7 +1718,7 @@ const App: React.FC = () => {
               <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
                 <button
                   onClick={() => { setShowMoreMenu(false); logout(); }}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-rose-600 hover:bg-rose-50 transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
                   <span className="text-sm font-medium">Esci</span>

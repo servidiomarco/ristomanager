@@ -32,15 +32,15 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
     : [];
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between p-5 border-b border-slate-100">
+        <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
           <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-bold text-slate-800 truncate">{banquet.name}</h2>
+            <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{banquet.name}</h2>
             <div className="flex items-center gap-2 flex-wrap mt-1.5">
               {banquet.event_date && (
                 <span className="inline-flex items-center gap-1 text-xs text-slate-600">
@@ -49,7 +49,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 </span>
               )}
               {banquet.shift === Shift.LUNCH && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
                   <Sun className="h-3 w-3" /> Pranzo
                 </span>
               )}
@@ -78,7 +78,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={() => printBanquet(banquet, dishes, { showPrice: canViewBanquetPrice })}
-              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               title="Stampa"
             >
               <Printer className="h-4 w-4" />
@@ -86,7 +86,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               title="Chiudi"
             >
               <X className="h-5 w-5" />
@@ -178,20 +178,20 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 Note operative
               </h3>
               {banquet.notes_courses && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Portate (Cucina)</h4>
+                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Portate (Cucina)</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_courses}</p>
                 </div>
               )}
               {banquet.notes_service && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Servizio (Sala)</h4>
+                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Servizio (Sala)</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_service}</p>
                 </div>
               )}
               {banquet.notes_mise_en_place && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 mb-1">Mise en Place</h4>
+                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
+                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Mise en Place</h4>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_mise_en_place}</p>
                 </div>
               )}

@@ -578,7 +578,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <input
                   type="search"
                   placeholder="Cerca piatto per nome o categoria..."
-                  className="w-full h-full pl-9 pr-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
+                  className="w-full h-full pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -641,7 +641,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         <td className="px-6 py-3">
                         <div className="flex flex-wrap gap-1">
                             {dish.allergens.length > 0 ? dish.allergens.map(a => (
-                                <span key={a} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-100">
+                                <span key={a} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30">
                                     {a}
                                 </span>
                             )) : <span className="text-xs text-[var(--color-fg-subtle)]">-</span>}
@@ -667,7 +667,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </button>
                             <button
                                 onClick={() => setDeleteDishConfirm(dish)}
-                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400"
                                 title="Elimina"
                             >
                                 <Trash2 className="h-4 w-4" />
@@ -693,7 +693,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 const timeStatus = computeBanquetTimeStatus(menu);
                 const cardAccent = timeStatus === 'PAST'
                   ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
-                  : 'border-l-4 border-l-emerald-400 bg-emerald-50/30';
+                  : 'border-l-4 border-l-emerald-400 dark:border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-500/10';
                 return (
                   <div key={menu.id} className={`rounded-lg border border-[var(--color-line)] flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow ${cardAccent}`}>
                       <div className="p-4 flex-1">
@@ -715,7 +715,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   {canManageBanquetPayments && (
                                   <button
                                       onClick={() => setPaymentsBanquet(menu)}
-                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 hover:text-emerald-600"
+                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400"
                                       title="Pagamenti"
                                   >
                                       <Wallet className="h-4 w-4" />
@@ -755,7 +755,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                               <button
                                                   type="button"
                                                   onClick={() => { setCardMenuOpenId(null); setDeleteBanquetConfirm(menu); }}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition-colors"
                                               >
                                                   <Trash2 className="h-3.5 w-3.5" />
                                                   Elimina
@@ -774,29 +774,29 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 </div>
                               )}
                               {menu.shift === Shift.LUNCH && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-2 py-0.5 rounded-full">
                                   <Sun className="h-3 w-3" /> Pranzo
                                 </span>
                               )}
                               {menu.shift === Shift.DINNER && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border border-indigo-100 dark:border-[#4f46e5]/30 px-2 py-0.5 rounded-full">
                                   <Sunset className="h-3 w-3" /> Cena
                                 </span>
                               )}
                               {canManageBanquetPayments && (() => {
                                 const status = computeBanquetPaymentStatus(menu);
                                 if (status === 'PAID') return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full">
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-500/30 px-2 py-0.5 rounded-full">
                                     <Check className="h-3 w-3" /> Pagato
                                   </span>
                                 );
                                 if (status === 'PARTIAL') return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full">
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-2 py-0.5 rounded-full">
                                     <Wallet className="h-3 w-3" /> Acconto
                                   </span>
                                 );
                                 return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full">
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-2 py-0.5 rounded-full">
                                     <Wallet className="h-3 w-3" /> Da pagare
                                   </span>
                                 );
@@ -842,15 +842,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Dish Modal */}
       {isDishFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDishFormOpen(false); }}>
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-              <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{isEditingDish ? 'Modifica Piatto' : 'Aggiungi Nuovo Piatto'}</h2>
-              <button type="button" onClick={() => setIsDishFormOpen(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-                <X className="h-4 w-4" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDishFormOpen(false); }}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingDish ? 'Modifica Piatto' : 'Aggiungi Nuovo Piatto'}</h3>
+              <button type="button" onClick={() => setIsDishFormOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleAddDishSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
+            <form id="dish-form" onSubmit={handleAddDishSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome</label>
                 <input 
@@ -940,7 +940,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       JPG, PNG o WebP — viene ridimensionata automaticamente a max 800×800px (~150–200 KB), ottimizzata per il web.
                     </p>
                     {photoUploadError && (
-                      <p className="text-[11px] text-rose-600">{photoUploadError}</p>
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400">{photoUploadError}</p>
                     )}
                   </div>
                   {newDish.photo_url ? (
@@ -970,7 +970,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 onClick={() => toggleAllergen(allergen)}
                                 className={`px-3 py-1 rounded-full text-xs font-medium border transition flex items-center gap-1 ${
                                     isSelected
-                                    ? 'bg-rose-50 border-rose-100 text-rose-700'
+                                    ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'
                                     : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                                 }`}
                             >
@@ -982,36 +982,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                  </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2 sm:justify-end pt-4 border-t border-[var(--color-line)]">
+            </form>
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setIsDishFormOpen(false)}
-                  className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
+                  className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                 >
                   Annulla
                 </button>
                 <button
                   type="submit"
+                  form="dish-form"
                   disabled={isSavingDish}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSavingDish && <Loader2 className="h-4 w-4 animate-spin" />}
                   Salva Piatto
                 </button>
               </div>
-            </form>
           </div>
         </div>
       )}
 
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-2 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeBanquetForm(); }}>
-          <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-none overflow-hidden flex flex-col h-full">
-            <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex items-center justify-between">
-              <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h2>
-              <button onClick={closeBanquetForm} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
-                <X className="h-4 w-4" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeBanquetForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-none overflow-hidden flex flex-col h-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h3>
+              <button onClick={closeBanquetForm} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
             <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -1154,7 +1155,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           setSelectedBanquetCustomer(null);
                           setNewBanquet(prev => ({ ...prev, customer_id: null }));
                         }}
-                        className="p-1.5 text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 rounded-md"
+                        className="p-1.5 text-[var(--color-fg-muted)] hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 rounded-md"
                         title="Rimuovi cliente"
                       >
                         <X className="h-4 w-4" />
@@ -1255,20 +1256,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         isSelected
                                           ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
                                           : isOccupied
-                                            ? 'border-rose-200 bg-rose-50 opacity-90 cursor-not-allowed'
+                                            ? 'border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 opacity-90 cursor-not-allowed'
                                             : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
                                       }`}
                                     >
-                                      <div className={`text-xs sm:text-sm font-semibold truncate ${isOccupied ? 'text-rose-700' : 'text-[var(--color-fg)]'}`}>
+                                      <div className={`text-xs sm:text-sm font-semibold truncate ${isOccupied ? 'text-rose-700 dark:text-rose-300' : 'text-[var(--color-fg)]'}`}>
                                         {t.name}
                                       </div>
-                                      <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700' : 'text-[var(--color-fg-muted)]'}`}>
+                                      <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-300' : 'text-[var(--color-fg-muted)]'}`}>
                                         <Users size={8} className="sm:hidden" />
                                         <Users size={10} className="hidden sm:block" />
                                         {t.seats}
                                       </div>
                                       {isOccupied && occ && (
-                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-rose-600 text-white text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
+                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-rose-600 text-[#ffffff] text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
                                           {occ.label}
                                         </div>
                                       )}
@@ -1291,7 +1292,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <div className="flex flex-wrap gap-4 text-[10px] text-[var(--color-fg-muted)] px-1">
                       <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
                       <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 rounded"></div> Occupato</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded"></div> Occupato</div>
                     </div>
 
                     {(newBanquet.table_ids || []).length > 0 && (
@@ -1400,7 +1401,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <button
                             type="button"
                             onClick={() => removeCourse(courseIndex)}
-                            className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600"
+                            className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400"
                             title="Elimina uscita"
                           >
                             <X className="h-4 w-4" />
@@ -1515,7 +1516,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
             </form>
             {banquetFormErrors.length > 0 && (
-              <div className="px-5 py-3 border-t border-rose-200 bg-rose-50 text-rose-800">
+              <div className="px-5 py-3 border-t border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 text-rose-800 dark:text-rose-300">
                 <div className="text-sm font-semibold mb-1">Compila i campi obbligatori:</div>
                 <ul className="text-sm list-disc list-inside space-y-0.5">
                   {banquetFormErrors.map(field => (
@@ -1524,11 +1525,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </ul>
               </div>
             )}
-            <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
                 <button
                   type="button"
                   onClick={closeBanquetForm}
-                  className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
+                  className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                 >
                   Annulla
                 </button>
@@ -1536,7 +1537,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   onClick={handleAddBanquetSubmit}
                   type="submit"
                   disabled={isSavingBanquet}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
                   {isEditingBanquet ? 'Salva Modifiche' : 'Crea Menu'}
@@ -1737,7 +1738,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
               const timeStatus = computeBanquetTimeStatus(menu);
               const accent = timeStatus === 'PAST'
                 ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
-                : 'border-l-4 border-l-emerald-400 bg-emerald-50/30';
+                : 'border-l-4 border-l-emerald-400 dark:border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-500/10';
               return (
                 <div
                   key={menu.id}
@@ -1749,29 +1750,29 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-[var(--color-fg)] truncate">{menu.name}</p>
                         {menu.shift === Shift.LUNCH && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-1.5 py-0.5 rounded-full">
                             <Sun className="h-3 w-3" /> Pranzo
                           </span>
                         )}
                         {menu.shift === Shift.DINNER && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border border-indigo-100 dark:border-[#4f46e5]/30 px-1.5 py-0.5 rounded-full">
                             <Sunset className="h-3 w-3" /> Cena
                           </span>
                         )}
                         {canManageBanquetPayments && (() => {
                           const status = computeBanquetPaymentStatus(menu);
                           if (status === 'PAID') return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded-full">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full">
                               <Check className="h-3 w-3" /> Pagato
                             </span>
                           );
                           if (status === 'PARTIAL') return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-1.5 py-0.5 rounded-full">
                               <Wallet className="h-3 w-3" /> Acconto
                             </span>
                           );
                           return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100 px-1.5 py-0.5 rounded-full">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-1.5 py-0.5 rounded-full">
                               <Wallet className="h-3 w-3" /> Da pagare
                             </span>
                           );
@@ -1787,7 +1788,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                           </span>
                         )}
                         {hasNotes && (
-                          <span className="inline-flex items-center gap-1 text-amber-700">
+                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
                             <StickyNote className="h-3.5 w-3.5" />
                             <span>Con note</span>
                           </span>

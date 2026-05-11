@@ -815,10 +815,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
-    waiting: { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
-    arrived: { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
-    freed:   { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200' },
-    noshow:  { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' },
+    waiting: { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
+    arrived: { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
+    freed:   { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
+    noshow:  { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
   };
 
   const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
@@ -1277,10 +1277,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const getStatusColor = (status: PaymentStatus) => {
     switch (status) {
-      case PaymentStatus.PAID_FULL: return 'bg-emerald-50 text-emerald-700 border-emerald-100';
-      case PaymentStatus.PAID_DEPOSIT: return 'bg-blue-50 text-blue-700 border-blue-100';
-      case PaymentStatus.PENDING: return 'bg-amber-50 text-amber-700 border-amber-100';
-      case PaymentStatus.REFUNDED: return 'bg-rose-50 text-rose-700 border-rose-100';
+      case PaymentStatus.PAID_FULL: return 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
+      case PaymentStatus.PAID_DEPOSIT: return 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
+      case PaymentStatus.PENDING: return 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
+      case PaymentStatus.REFUNDED: return 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30';
       default: return 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]';
     }
   };
@@ -1358,11 +1358,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       const shapeClasses = `flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
           ${isArrived
-              ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200'
+              ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300 dark:ring-orange-500/30'
               : reservation
-                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200'
+                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300 dark:ring-rose-500/30'
                   : banquet
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200'
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc] dark:ring-[#4f46e5]/40'
                       : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
           }
           ${isHidden ? 'opacity-40 grayscale' : ''}
@@ -1411,7 +1411,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 }}
             >
                 {isHidden && (
-                    <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
+                    <div className="absolute -top-2 -left-2 bg-slate-500 text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff]">
                         <EyeOff size={8} />
                     </div>
                 )}
@@ -1433,11 +1433,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {reservation && (
                 <div
                     style={{ top: pillTopPx }}
-                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-white text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-rose-600'}`}
+                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
                     title={reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined}
                 >
                     {reservation.created_by_user_name ? (
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white text-[var(--color-fg)] text-[10px] font-bold border border-[var(--color-line)] flex-shrink-0">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[10px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
                     ) : (
@@ -1449,7 +1449,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {banquet && (
                 <div
                     style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-white text-sm sm:text-base font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-indigo-600"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-sm sm:text-base font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff]"
                 >
                     <BookOpen size={14} className="flex-shrink-0" />
                     <span className="truncate">{banquet.name}</span>
@@ -1490,7 +1490,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <div
         key={res.id}
         className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
-          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' ? 'bg-rose-50/40 hover:bg-rose-50' : 'hover:bg-[var(--color-surface-hover)]'}
+          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
           ${isFlashing ? 'animate-flash-row' : ''}
           ${group.key === 'freed' ? 'opacity-60' : ''}
         `}
@@ -1528,20 +1528,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </span>
             )}
             {group.key === 'noshow' && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                 <UserX className="h-2.5 w-2.5" /> No show
               </span>
             )}
           </div>
 
           {/* Row 2: Customer name */}
-          <p className="text-base font-medium text-[var(--color-fg)] leading-6 truncate">
+          <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate">
             {toTitleCase(res.customer_name)}
           </p>
 
           {/* Row 3: Actions */}
           {canEdit && (
-            <div className="flex items-center gap-1.5 mt-1.5">
+            <div className="flex items-center gap-2.5 mt-1.5">
               {(() => {
                 const state = getReservationState(res);
                 const meta = RESERVATION_STATE_META[state];
@@ -1549,7 +1549,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
                     className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
                     title="Cambia stato">
-                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
                     {meta.label}
                     <ChevronDown className="h-3 w-3 opacity-60" />
                   </button>
@@ -1562,11 +1561,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               )}
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                 <Edit2 className="h-3.5 w-3.5" />
               </button>
               <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -1574,7 +1573,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         </div>
 
         {/* Covers count */}
-        <div className="flex items-start pt-2 pr-1 flex-shrink-0">
+        <div className="flex items-start pt-2 pr-3 flex-shrink-0">
           <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
             <Users className="h-3.5 w-3.5" />
             <span className="text-base font-medium tabular">{res.guests}</span>
@@ -1582,23 +1581,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         </div>
 
         {/* Table strip — full height */}
-        <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 ${
+        <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
           table
-            ? group.key === 'freed' ? 'bg-slate-100'
-              : group.key === 'arrived' ? 'bg-emerald-50'
-              : group.key === 'noshow' ? 'bg-rose-50'
-              : 'bg-[#dbeafe]'
+            ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+              : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+              : group.key === 'noshow' ? 'bg-rose-50 dark:bg-rose-500/15'
+              : 'bg-[#dbeafe] dark:bg-blue-500/15'
             : 'bg-[var(--color-surface-3)]'
         }`}>
           {table ? (
             <>
               <span className={`text-base font-bold leading-6 ${
-                group.key === 'freed' ? 'text-slate-500'
-                  : group.key === 'arrived' ? 'text-emerald-700'
-                  : group.key === 'noshow' ? 'text-rose-700'
-                  : 'text-[#193cb8]'
+                group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                  : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                  : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-[#193cb8] dark:text-blue-300'
               }`}>{table.name}</span>
-              {tableRoom && <span className="text-xs text-[#4d4d4d] text-center leading-4">{tableRoom.name}</span>}
+              {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
             </>
           ) : (
             <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
@@ -1650,12 +1649,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </span>
             )}
             {menu && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-medium">
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 dark:bg-[#4f46e5]/15 dark:border-[#4f46e5]/30 dark:text-[#a5b4fc] text-[10px] font-medium">
                 <BookOpen className="h-2.5 w-2.5" /> {menu.name}
               </span>
             )}
             {allergenText && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-[10px] font-medium">
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-medium">
                 <AlertTriangle className="h-2.5 w-2.5" /> {allergenText}
               </span>
             )}
@@ -1678,7 +1677,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {/* Actions */}
           {canEdit && (
-            <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+            <div className="flex items-center gap-2.5 pt-1 flex-wrap">
               {(() => {
                 const state = getReservationState(res);
                 const meta = RESERVATION_STATE_META[state];
@@ -1686,7 +1685,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <button onClick={() => setStateChangeReservation(res)}
                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
                     title="Cambia stato">
-                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
                     Stato: {meta.label}
                     <ChevronDown className="h-3 w-3 opacity-60" />
                   </button>
@@ -1694,16 +1692,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               })()}
               {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                 <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:hover:bg-slate-500/25 transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
                 </button>
               )}
               <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
                 <Edit2 className="h-3.5 w-3.5" /> Modifica
               </button>
               <button onClick={() => { handleDeleteClick(res.id, res.customer_name); closeDetailDrawer(); }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors">
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors">
                 <Trash2 className="h-3.5 w-3.5" /> Annulla
               </button>
             </div>
@@ -1723,7 +1721,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <div className="px-3 pt-3 pb-2 flex items-center gap-1.5">
         <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-          <input type="text" placeholder="Cerca per nome o tavolo..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
+          <input type="text" placeholder="Cerca per nome o tavolo..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
             value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           {searchTerm && (
             <button type="button" onClick={() => setSearchTerm('')}
@@ -1749,7 +1747,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           }`}>
           <Filter className="h-3.5 w-3.5" />
           {activeFilterCount > 0 && (
-            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
               {activeFilterCount}
             </span>
           )}
@@ -1971,7 +1969,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </button>
               {canEdit && (
                 <button type="button" onClick={() => setUnhideAllConfirm(true)}
-                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/25 transition-colors"
                   title="Riattiva tutti i tavoli nascosti per questo turno">
                   <RotateCcw size={14} />
                   <span>Riattiva tutti</span>
@@ -1992,9 +1990,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             {unassignedCountForDayShift > 0 && (
               <button type="button" onClick={() => setShowUnassignedModal(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors"
                 title="Tocca per vedere le prenotazioni senza tavolo">
-                <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
                 <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
                 <span className="text-xs">senza tavolo</span>
                 <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
@@ -2021,8 +2019,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
           {unassignedCountForDayShift > 0 && (
             <button type="button" onClick={() => setShowUnassignedModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 transition-colors w-fit">
-              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors w-fit">
+              <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
               <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
               <span className="text-xs">senza tavolo</span>
             </button>
@@ -2091,10 +2089,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
                           }`}>
                           <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
-                            isArrived ? 'bg-orange-50 border-orange-300 text-orange-700'
-                              : reservation ? 'bg-rose-50 border-rose-300 text-rose-700'
-                              : banquet ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                              : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700'
+                            isArrived ? 'bg-orange-50 border-orange-300 text-orange-700 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300'
+                              : reservation ? 'bg-rose-50 border-rose-300 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300'
+                              : banquet ? 'bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc]'
+                              : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300'
                           }`}>
                             <span className="text-center leading-tight break-all">{displayName}</span>
                           </div>
@@ -2103,7 +2101,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <>
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
-                                  {isArrived && <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>}
+                                  {isArrived && <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30">Arrivato</span>}
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
@@ -2125,7 +2123,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               </>
                             ) : (
                               <>
-                                <div className="font-medium text-emerald-700">Libero</div>
+                                <div className="font-medium text-emerald-700 dark:text-emerald-400">Libero</div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
                                   {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
@@ -2169,9 +2167,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   onClick={(e) => e.stopPropagation()}>
                   <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
                   <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-rose-50 border border-rose-300 rounded-sm"></div> Occupato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-orange-50 border border-orange-300 rounded-sm"></div> Arrivato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-indigo-50 border border-indigo-300 rounded-sm"></div> Banchetto</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-rose-50 border border-rose-300 dark:bg-rose-500/15 dark:border-rose-500/40 rounded-sm"></div> Occupato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-orange-50 border border-orange-300 dark:bg-orange-500/15 dark:border-orange-500/40 rounded-sm"></div> Arrivato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-indigo-50 border border-indigo-300 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 rounded-sm"></div> Banchetto</div>
                   <div className="border-t border-[var(--color-line)] mt-1 pt-2">
                     <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
                     <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)</div>
@@ -2270,7 +2268,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="px-4 pt-3 pb-2 flex items-center gap-1.5">
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-                <input type="text" placeholder="Cerca..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] text-sm"
+                <input type="text" placeholder="Cerca..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
                   value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 {searchTerm && (
                   <button type="button" onClick={() => setSearchTerm('')}
@@ -2296,7 +2294,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 }`}>
                 <Filter className="h-3.5 w-3.5" />
                 {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
                     {activeFilterCount}
                   </span>
                 )}
@@ -2351,7 +2349,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             return (
                               <div key={res.id}
-                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
                                 onMouseEnter={() => setHoveredReservationId(res.id)}
                                 onMouseLeave={() => setHoveredReservationId(null)}
                                 onClick={() => handleRowClick(res)}>
@@ -2385,20 +2383,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       </span>
                                     )}
                                     {group.key === 'noshow' && (
-                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                                         <UserX className="h-2.5 w-2.5" /> No show
                                       </span>
                                     )}
                                   </div>
 
                                   {/* Row 2: Customer name */}
-                                  <p className="text-base font-medium text-[var(--color-fg)] leading-6 truncate mt-0.5">
+                                  <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate mt-0.5">
                                     {toTitleCase(res.customer_name)}
                                   </p>
 
                                   {/* Row 3: Actions */}
                                   {canEdit && (
-                                    <div className="flex items-center gap-1.5 mt-2">
+                                    <div className="flex items-center gap-2.5 mt-2">
                                       {(() => {
                                         const state = getReservationState(res);
                                         const meta = RESERVATION_STATE_META[state];
@@ -2406,7 +2404,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                           <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
                                             className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
                                             title="Cambia stato">
-                                            <span className={`w-1.5 h-1.5 rounded-full ${meta.dotClass}`} />
                                             {meta.label}
                                             <ChevronDown className="h-3 w-3 opacity-60" />
                                           </button>
@@ -2419,11 +2416,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </button>
                                       )}
                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                                        className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                                         <Edit2 className="h-3.5 w-3.5" />
                                       </button>
                                       <button onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" aria-label="Annulla">
+                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
                                         <Trash2 className="h-3.5 w-3.5" />
                                       </button>
                                     </div>
@@ -2431,7 +2428,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
 
                                 {/* Covers count */}
-                                <div className="flex items-start pt-3 pr-1 flex-shrink-0">
+                                <div className="flex items-start pt-3 pr-3 flex-shrink-0">
                                   <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
                                     <Users className="h-3.5 w-3.5" />
                                     <span className="text-base font-medium tabular">{res.guests}</span>
@@ -2439,21 +2436,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
 
                                 {/* Table strip */}
-                                <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-lg ${
+                                <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
                                   table
-                                    ? group.key === 'freed' ? 'bg-slate-100'
-                                      : group.key === 'arrived' ? 'bg-emerald-50'
-                                      : 'bg-[#dbeafe]'
+                                    ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+                                      : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+                                      : 'bg-[#dbeafe] dark:bg-blue-500/15'
                                     : 'bg-[var(--color-surface-3)]'
                                 }`}>
                                   {table ? (
                                     <>
                                       <span className={`text-base font-bold leading-6 ${
-                                        group.key === 'freed' ? 'text-slate-500'
-                                          : group.key === 'arrived' ? 'text-emerald-700'
-                                          : 'text-[#193cb8]'
+                                        group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                                          : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                                          : 'text-[#193cb8] dark:text-blue-300'
                                       }`}>{table.name}</span>
-                                      {tableRoom && <span className="text-xs text-[#4d4d4d] text-center leading-4">{tableRoom.name}</span>}
+                                      {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
                                     </>
                                   ) : (
                                     <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
@@ -2570,34 +2567,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {/* Reservation Modal */}
       {isFormOpen && (
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}>
-            <div className="bg-[var(--color-surface)] rounded-none sm:rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full sm:max-w-5xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                <div className="px-5 py-3.5 border-b border-[var(--color-line)] flex justify-between items-center">
-                    <h2 className="text-base sm:text-lg font-semibold tracking-tight text-[var(--color-fg)]">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h2>
-                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+            <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-5xl overflow-hidden flex flex-col h-full sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h3>
+                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
                         <X className="h-5 w-5" />
                     </button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
                     {matchedCustomerNoShows > 0 && (
-                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
-                            <UserX className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-rose-50 border border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30 rounded-xl flex items-start gap-3">
+                            <UserX className="h-5 w-5 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-rose-900">
+                                <p className="text-sm font-semibold text-rose-900 dark:text-rose-200">
                                     Attenzione: cliente con {matchedCustomerNoShows} no-show
                                 </p>
-                                <p className="text-xs text-rose-700 mt-0.5">
+                                <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
                                     Questo cliente non si è presentato {matchedCustomerNoShows === 1 ? 'una volta' : `${matchedCustomerNoShows} volte`} in passato.
                                 </p>
                             </div>
                         </div>
                     )}
                     {!isEditing && draftBanner && (
-                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
-                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl flex items-start gap-3">
+                            <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-amber-900">Bozza non salvata trovata</p>
-                                <p className="text-xs text-amber-700 mt-0.5">
+                                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Bozza non salvata trovata</p>
+                                <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
                                     Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
                                 </p>
                             </div>
@@ -2605,14 +2602,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRestoreDraft}
-                                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700"
+                                    className="px-3 py-1.5 bg-amber-600 text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-amber-700"
                                 >
                                     Riprendi
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleDiscardDraft}
-                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100"
+                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100 dark:bg-[var(--color-surface-3)] dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-[var(--color-surface-hover)]"
                                 >
                                     Scarta
                                 </button>
@@ -2622,151 +2619,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
                         {/* Left Column: Details (5 cols) */}
                         <div className="lg:col-span-5 space-y-5 sm:space-y-6">
-                            <div className="flex items-center gap-3 pb-3 border-b border-[var(--color-line)]">
-                                <Users className="h-4 w-4 text-[var(--color-fg-muted)]" />
-                                <div>
-                                    <h3 className="text-sm font-semibold text-[var(--color-fg)]">Dettagli Prenotazione</h3>
-                                    <p className="text-sm text-[var(--color-fg-muted)]">Compila i dati del cliente</p>
-                                </div>
-                            </div>
-
-                            {/* Customer Name with Voice Input */}
+                            {/* Guests */}
                             <div>
-                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Nome Cliente</label>
-                                <div className="flex gap-2">
-                                    <div className="flex-1 relative">
-                                        <input
-                                            required
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                            value={formData.customer_name}
-                                            onChange={e => {
-                                                lastSuggestQueryRef.current = '';
-                                                setMatchedCustomerNoShows(0);
-                                                setFormData({...formData, customer_name: e.target.value});
-                                            }}
-                                            onFocus={() => setActiveSuggestField('name')}
-                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
-                                            placeholder="Mario Rossi"
-                                            autoComplete="off"
-                                        />
-                                        {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
-                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
-                                                {customerSuggestions.map(c => (
-                                                    <li key={c.id}>
-                                                        <button
-                                                            type="button"
-                                                            onMouseDown={e => e.preventDefault()}
-                                                            onClick={() => applyCustomerSuggestion(c)}
-                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
-                                                        >
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
-                                                                {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
-                                                                        <UserX className="h-2.5 w-2.5" />
-                                                                        {c.no_show_count} no-show
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
-                                                                {c.phone && <span>{c.phone}</span>}
-                                                                {c.email && <span className="truncate">{c.email}</span>}
-                                                            </div>
-                                                        </button>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
+                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Numero Ospiti</label>
+                                <div className="flex items-center gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => setIsCustomerPickerOpen(true)}
-                                        className="p-3 sm:p-4 rounded-xl bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-all flex items-center justify-center"
-                                        title="Rubrica clienti"
+                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
                                     >
-                                        <BookUser className="h-5 w-5" />
+                                        −
                                     </button>
-                                    {isVoiceSupported() && (
-                                        <button
-                                            type="button"
-                                            onClick={handleVoiceInput}
-                                            disabled={isListening}
-                                            className={`p-2 rounded-md transition-colors flex items-center justify-center border ${
-                                                isListening
-                                                    ? 'bg-rose-50 text-rose-600 border-rose-100 animate-pulse'
-                                                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                                            }`}
-                                            title="Dettatura vocale - Es: 'Prenotazione per Mario Rossi domani sera alle 20 per 4 persone'"
-                                        >
-                                            <Mic className="h-4 w-4" />
-                                        </button>
-                                    )}
-                                </div>
-                                {isVoiceSupported() && (
-                                    <p className="text-xs text-[var(--color-fg-subtle)] mt-1">
-                                        Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Phone & Email */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono</label>
-                                    <div className="relative">
-                                        <input
-                                            type="tel"
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                            value={formData.phone || ''}
-                                            onChange={e => {
-                                                lastSuggestQueryRef.current = '';
-                                                setMatchedCustomerNoShows(0);
-                                                setFormData({...formData, phone: e.target.value});
-                                            }}
-                                            onFocus={() => setActiveSuggestField('phone')}
-                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'phone' ? null : prev), 150)}
-                                            placeholder="+39 333..."
-                                            autoComplete="off"
-                                        />
-                                        {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
-                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
-                                                {customerSuggestions.map(c => (
-                                                    <li key={c.id}>
-                                                        <button
-                                                            type="button"
-                                                            onMouseDown={e => e.preventDefault()}
-                                                            onClick={() => applyCustomerSuggestion(c)}
-                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
-                                                        >
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
-                                                                {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700">
-                                                                        <UserX className="h-2.5 w-2.5" />
-                                                                        {c.no_show_count} no-show
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
-                                                                {c.phone && <span>{c.phone}</span>}
-                                                                {c.email && <span className="truncate">{c.email}</span>}
-                                                            </div>
-                                                        </button>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Email</label>
                                     <input
-                                        type="email"
-                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.email || ''}
-                                        onChange={e => setFormData({...formData, email: e.target.value})}
-                                        placeholder="cliente@email.com"
+                                        type="number"
+                                        min="1"
+                                        required
+                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                        value={formData.guests || ''}
+                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
+                                    >
+                                        +
+                                    </button>
                                 </div>
                             </div>
 
@@ -2846,32 +2724,143 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                             </div>
 
-                            {/* Guests */}
+                            {/* Customer Name with Voice Input */}
                             <div>
-                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Numero Ospiti</label>
+                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Nome Cliente</label>
                                 <div className="flex items-center gap-2">
+                                    <div className="flex-1 relative">
+                                        <input
+                                            required
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.customer_name}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
+                                                setFormData({...formData, customer_name: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('name')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
+                                            placeholder="Mario Rossi"
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                     <button
                                         type="button"
-                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                                        onClick={() => setIsCustomerPickerOpen(true)}
+                                        className="p-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex items-center justify-center flex-shrink-0"
+                                        title="Rubrica clienti"
                                     >
-                                        −
+                                        <BookUser className="h-4 w-4" />
                                     </button>
+                                    {isVoiceSupported() && (
+                                        <button
+                                            type="button"
+                                            onClick={handleVoiceInput}
+                                            disabled={isListening}
+                                            className={`p-2 rounded-md transition-colors flex items-center justify-center flex-shrink-0 border ${
+                                                isListening
+                                                    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 animate-pulse'
+                                                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                                            }`}
+                                            title="Dettatura vocale"
+                                        >
+                                            <Mic className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+                                {isVoiceSupported() && (
+                                    <p className="text-xs text-[var(--color-fg-subtle)] mt-1">
+                                        Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Phone & Email */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono</label>
+                                    <div className="relative">
+                                        <input
+                                            type="tel"
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.phone || ''}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
+                                                setFormData({...formData, phone: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('phone')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'phone' ? null : prev), 150)}
+                                            placeholder="+39 333..."
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Email</label>
                                     <input
-                                        type="number"
-                                        min="1"
-                                        required
-                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.guests || ''}
-                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
+                                        type="email"
+                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                        value={formData.email || ''}
+                                        onChange={e => setFormData({...formData, email: e.target.value})}
+                                        placeholder="cliente@email.com"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
-                                    >
-                                        +
-                                    </button>
                                 </div>
                             </div>
 
@@ -2948,14 +2937,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             }}
                                                             className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
                                                                 isSelected
-                                                                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                                    ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300'
                                                                     : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                                                             }`}
                                                         >
                                                             <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                isSelected ? 'bg-amber-600 border-amber-600' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+                                                                isSelected ? 'bg-amber-600 border-amber-600 dark:bg-amber-500 dark:border-amber-500' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
                                                             }`}>
-                                                                {isSelected && <Check className="text-white w-2.5 h-2.5" />}
+                                                                {isSelected && <Check className="text-[#ffffff] w-2.5 h-2.5" />}
                                                             </div>
                                                             <span className="text-sm font-medium truncate">{allergen}</span>
                                                         </button>
@@ -2965,13 +2954,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             {selectedAllergens.length > 0 && (
                                                 <div className="flex flex-wrap gap-1.5 pt-2">
                                                     {selectedAllergens.map(allergen => (
-                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-xs font-medium">
+                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 rounded-full text-xs font-medium">
                                                             <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
                                                             {allergen}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
-                                                                className="hover:text-amber-900"
+                                                                className="hover:text-amber-900 dark:hover:text-amber-200"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -3063,12 +3052,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <h3 className="text-sm font-semibold text-[var(--color-fg)]">Seleziona Tavolo</h3>
                                     <p className="text-sm text-[var(--color-fg-muted)]">
                                         {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} - {' '}
-                                        <span className="font-medium text-emerald-700">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
+                                        <span className="font-medium text-emerald-700 dark:text-emerald-400">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
                                     </p>
                                 </div>
                                 {selectedTableObj && (
                                     <div className="flex items-center gap-1">
-                                        <span className="inline-flex items-center px-3 py-1 text-emerald-700 bg-emerald-50 rounded-l-full text-xs font-medium border border-r-0 border-emerald-100">
+                                        <span className="inline-flex items-center px-3 py-1 text-emerald-700 bg-emerald-50 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 rounded-l-full text-xs font-medium border border-r-0 border-emerald-100">
                                             T. {selectedTableObj.name}
                                         </span>
                                         <button
@@ -3077,7 +3066,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setFormData({...formData, table_id: undefined});
                                                 showToast('Tavolo rimosso dalla prenotazione', 'info');
                                             }}
-                                            className="px-2 py-1 text-rose-600 bg-rose-50 rounded-r-full text-xs font-medium border border-rose-100 hover:bg-rose-100 transition-colors"
+                                            className="px-2 py-1 text-rose-600 bg-rose-50 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 dark:hover:bg-rose-500/25 rounded-r-full text-xs font-medium border border-rose-100 hover:bg-rose-100 transition-colors"
                                             title="Rimuovi tavolo"
                                         >
                                             <X className="h-3.5 w-3.5" />
@@ -3092,7 +3081,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         type="button"
                                         onClick={handleAutoAssign}
-                                        className="inline-flex items-center gap-2 rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                                        className="inline-flex items-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
                                     >
                                         <Wand2 className="h-4 w-4" /> Assegna Automatico
                                     </button>
@@ -3106,13 +3095,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setSelectedTablesForMerge([]);
                                             }
                                         }}
-                                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-full transition-colors font-medium text-sm border ${
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors font-medium text-xs border ${
                                             mergeMode
                                                 ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                                : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                                         }`}
                                     >
-                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
+                                        <Combine className="h-3.5 w-3.5" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
                                     </button>
                                 </div>
 
@@ -3170,7 +3159,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante la divisione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-amber-100 bg-amber-50 text-amber-700 text-sm font-medium hover:bg-amber-100 transition-colors"
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-amber-100 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 text-sm font-medium hover:bg-amber-100 transition-colors"
                                         >
                                             <Scissors className="h-4 w-4" /> Dividi
                                         </button>
@@ -3199,6 +3188,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                              {room.name}
                                          </button>
                                      ))}
+                                 </div>
+                             </div>
+
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--color-fg-muted)] mb-3 px-1">
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 rounded"></div> Occupato</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></div> Capienza Insufficiente</div>
+                                 <div className="flex items-center gap-1.5">
+                                     <div className="w-3 h-3 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] rounded-full flex items-center justify-center">
+                                         <Combine size={6} />
+                                     </div>
+                                     Tavolo Unito
                                  </div>
                              </div>
 
@@ -3240,7 +3242,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     <button
                                                         key={table.id}
                                                         type="button"
-                                                        disabled={isOccupied}
+                                                        disabled={isOccupied || (!fitsGuests && !mergeMode)}
                                                         onClick={(e) => {
                                                             if (mergeMode || e.ctrlKey || e.metaKey) {
                                                                 // Multi-select mode for merging
@@ -3262,10 +3264,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                 : isSelected
                                                                     ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
                                                                     : isOccupied
-                                                                        ? 'border-rose-200 bg-rose-50 opacity-90 cursor-not-allowed'
+                                                                        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/15 opacity-90 cursor-not-allowed'
                                                                         : fitsGuests
                                                                             ? 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                                                                            : 'border-[var(--color-line)] bg-[var(--color-surface-3)] opacity-50'
+                                                                            : 'border-[var(--color-line)] bg-[var(--color-surface-3)] opacity-50 cursor-not-allowed'
                                                             }
                                                         `}
                                                     >
@@ -3277,17 +3279,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </div>
                                                         )}
 
-                                                        <div className={`text-xs sm:text-sm font-semibold truncate ${isSelectedForMerge || isSelected ? 'text-[var(--color-fg)]' : isOccupied ? 'text-rose-700' : 'text-[var(--color-fg)]'}`}>
+                                                        <div className={`text-xs sm:text-sm font-semibold truncate ${isSelectedForMerge || isSelected ? 'text-[var(--color-fg)]' : isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg)]'}`}>
                                                             {table.name}
                                                         </div>
-                                                        <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700' : 'text-[var(--color-fg-muted)]'}`}>
+                                                        <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
                                                             {table.seats}
                                                         </div>
                                                         {isOccupied && occupier && (
                                                             <div
-                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-white text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10 ${occupierIsBanquet ? 'bg-indigo-600' : 'bg-rose-600'}`}
+                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-[#ffffff] text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10 ${occupierIsBanquet ? 'bg-[#4f46e5]' : 'bg-[#e11d48]'}`}
                                                                 title={occupierIsBanquet ? `Banchetto: ${occupierLabel}` : `Prenotazione: ${occupierLabel}`}
                                                             >
                                                                 {occupierLabel}
@@ -3315,54 +3317,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 )}
                              </div>
-                             <div className="mt-3 flex flex-col gap-2 px-1">
-                                 <div className="flex flex-wrap gap-4 text-[10px] text-[var(--color-fg-muted)]">
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Multi-selezione</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 rounded"></div> Occupato</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></div> Capienza Insufficiente</div>
-                                     <div className="flex items-center gap-1.5">
-                                         <div className="w-3 h-3 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] rounded-full flex items-center justify-center">
-                                             <Combine size={6} />
-                                         </div>
-                                         Tavolo Unito
-                                     </div>
+                             {mergeMode && (
+                                 <div className="mt-3 px-1 text-[11px] text-[var(--color-fg)] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-1 rounded-md">
+                                     Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
                                  </div>
-                                 {mergeMode ? (
-                                     <div className="text-[11px] text-[var(--color-fg)] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-1 rounded-md">
-                                         Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
-                                     </div>
-                                 ) : (
-                                     <div className="text-[11px] text-[var(--color-fg-subtle)] italic">
-                                         Usa il pulsante "Unisci Tavoli" per combinare più tavoli per grandi gruppi
-                                     </div>
-                                 )}
-                             </div>
+                             )}
                         </div>
                     </form>
                 </div>
 
-                <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">
+                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">
                     <button
                         type="button"
                         onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}
-                        className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                     >
                         Annulla
                     </button>
                     {mergeMode && selectedTablesForMerge.length > 0 && (
-                        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-100 px-3 py-1.5 rounded-full text-center">
+                        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-full text-center">
                             Conferma l'unione tavoli prima di salvare
                         </span>
                     )}
                     <button
                         onClick={handleSubmit}
                         disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
-                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-opacity ${
+                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
                             (mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation
                                 ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] cursor-not-allowed border border-[var(--color-line)]'
-                                : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90'
+                                : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
                         }`}
                     >
                         {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -3375,10 +3358,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       {/* Confirmation Modal */}
       {confirmModal?.isOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4">
-            <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="px-5 py-3.5 border-b border-[var(--color-line)]">
-                    <h3 className="text-base font-semibold tracking-tight text-[var(--color-fg)] flex items-center gap-2">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={confirmModal.onCancel}>
+            <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
                         {confirmModal.title}
                     </h3>
                 </div>
@@ -3414,16 +3397,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                 </div>
 
-                <div className="px-5 py-3 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end gap-2">
+                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end gap-2">
                     <button
                         onClick={confirmModal.onCancel}
-                        className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                     >
                         Annulla
                     </button>
                     <button
                         onClick={confirmModal.onConfirm}
-                        className="w-full sm:w-auto rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
                     >
                         Procedi Comunque
                     </button>
@@ -3447,8 +3430,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
         icon={<Eye className="h-5 w-5 text-emerald-600" />}
-        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition"
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {
@@ -3474,21 +3457,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const current = getReservationState(res);
         const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow'];
         return (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4" onClick={() => setStateChangeReservation(null)}>
-            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <div className="px-5 py-4 border-b border-[var(--color-line)]">
-                <div className="flex items-start justify-between gap-3">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] px-4" onClick={() => setStateChangeReservation(null)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[var(--color-line)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
-                    <h3 className="text-base font-semibold text-[var(--color-fg)]">Cambia stato</h3>
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Cambia stato</h3>
                     <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
                       {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
                     </p>
                   </div>
                   <button onClick={() => setStateChangeReservation(null)}
-                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
                     <X className="h-5 w-5" />
                   </button>
-                </div>
               </div>
               <div className="p-3 space-y-1.5">
                 {options.map(opt => {
@@ -3535,18 +3516,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+            <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setShowUnassignedModal(false)}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800">Prenotazioni senza tavolo</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Prenotazioni senza tavolo</h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
                       {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
                   <button
                     onClick={() => setShowUnassignedModal(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -3555,14 +3536,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="flex-1 overflow-y-auto p-3">
                   {unassigned.length === 0 ? (
                     <div className="text-center py-10 px-4">
-                      <div className="mx-auto w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mb-3">
+                      <div className="mx-auto w-12 h-12 bg-emerald-100 dark:bg-emerald-500/15 rounded-full flex items-center justify-center mb-3">
                         <Check className="h-6 w-6 text-emerald-600" />
                       </div>
-                      <p className="text-sm font-semibold text-slate-700">Tutte le prenotazioni hanno un tavolo</p>
-                      <p className="text-xs text-slate-500 mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
+                      <p className="text-sm font-semibold text-[var(--color-fg)]">Tutte le prenotazioni hanno un tavolo</p>
+                      <p className="text-xs text-[var(--color-fg-muted)] mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
                     </div>
                   ) : (
-                    <ul className="divide-y divide-slate-100">
+                    <ul className="divide-y divide-[var(--color-line)]">
                       {unassigned.map(r => (
                         <li key={r.id}>
                           <button
@@ -3570,14 +3551,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 setShowUnassignedModal(false);
                                 handleEditClick(r);
                             }}
-                            className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                            className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
                                 {r.created_by_user_name && (
                                   <span
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold flex-shrink-0"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
                                     title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
                                     aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
                                   >
@@ -3585,13 +3566,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                                 {r.phone && <span className="truncate">{r.phone}</span>}
                               </div>
                             </div>
-                            <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                            <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                           </button>
                         </li>
                       ))}
@@ -3599,10 +3580,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
 
-                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                <div className="p-4 border-t border-[var(--color-line)]">
                   <button
                     onClick={() => setShowUnassignedModal(false)}
-                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                   >
                     Chiudi
                   </button>
@@ -3634,19 +3615,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const isHidden = hiddenTableIds.has(table.id);
 
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+            <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAssignTableModal(null)}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
                       <span className="truncate">Assegna Tavolo {table.name}</span>
                       {isHidden && (
-                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] px-1.5 py-0.5 rounded">
                           <EyeOff size={10} /> Nascosto
                         </span>
                       )}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 flex items-center gap-1.5">
                       <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
@@ -3659,8 +3640,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }}
                         className={`p-2 rounded-lg transition-colors ${
                           isHidden
-                            ? 'text-emerald-600 hover:bg-emerald-50'
-                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                            ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-500/15'
+                            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                         }`}
                         title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
                       >
@@ -3669,7 +3650,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <button
                       onClick={() => setAssignTableModal(null)}
-                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                      className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                     >
                       <X className="h-5 w-5" />
                     </button>
@@ -3698,16 +3679,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }
                         setAssignTableModal(null);
                     }}
-                    className="w-full text-left px-3 py-3 mb-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors flex items-center gap-3"
+                    className="w-full text-left px-3 py-3 mb-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 dark:border-emerald-500/30 rounded-lg transition-colors flex items-center gap-3"
                   >
                     <div className="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <UserCheck className="h-5 w-5 text-white" />
+                      <UserCheck className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-emerald-900">Walk-in</div>
-                      <div className="text-xs text-emerald-700 mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
+                      <div className="font-semibold text-emerald-900 dark:text-emerald-200">Walk-in</div>
+                      <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                    <ChevronRight className="h-4 w-4 text-emerald-400 dark:text-emerald-500 flex-shrink-0" />
                   </button>
 
                   <button
@@ -3716,42 +3697,42 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         handleOpenNew();
                         setFormData(prev => ({ ...prev, table_id: table.id }));
                     }}
-                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex items-center gap-3"
+                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 dark:bg-[#4f46e5]/15 dark:hover:bg-[#4f46e5]/25 dark:border-[#4f46e5]/30 rounded-lg transition-colors flex items-center gap-3"
                   >
-                    <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <Plus className="h-5 w-5 text-white" />
+                    <div className="w-9 h-9 bg-[#4f46e5] rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Plus className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-indigo-900">Nuova prenotazione</div>
-                      <div className="text-xs text-indigo-700 mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
+                      <div className="font-semibold text-indigo-900 dark:text-[#c7d2fe]">Nuova prenotazione</div>
+                      <div className="text-xs text-indigo-700 dark:text-[#a5b4fc] mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                    <ChevronRight className="h-4 w-4 text-indigo-400 dark:text-[#818cf8] flex-shrink-0" />
                   </button>
 
                   {unassigned.length === 0 ? (
                     <div className="text-center py-6 px-4">
-                      <p className="text-xs text-slate-500">Nessuna prenotazione senza tavolo per questo turno.</p>
+                      <p className="text-xs text-[var(--color-fg-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
                     </div>
                   ) : (
                     <>
-                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-slate-500">
+                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--color-fg-muted)]">
                         Oppure assegna a una prenotazione esistente
                       </div>
-                      <ul className="divide-y divide-slate-100">
+                      <ul className="divide-y divide-[var(--color-line)]">
                         {unassigned.map(r => {
                           const insufficient = (r.guests || 0) > table.seats;
                           return (
                             <li key={r.id}>
                               <button
                                 onClick={() => assign(r)}
-                                className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                                className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
                               >
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                    <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
                                     {r.created_by_user_name && (
                                       <span
-                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold flex-shrink-0"
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
                                         title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
                                         aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
                                       >
@@ -3759,18 +3740,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       </span>
                                     )}
                                     {insufficient && (
-                                      <span className="text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                                      <span className="text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
                                         Capienza insufficiente
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                     <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                                     {r.phone && <span className="truncate">{r.phone}</span>}
                                   </div>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                                <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                               </button>
                             </li>
                           );
@@ -3780,10 +3761,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
 
-                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                <div className="p-4 border-t border-[var(--color-line)]">
                   <button
                     onClick={() => setAssignTableModal(null)}
-                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                   >
                     Annulla
                   </button>

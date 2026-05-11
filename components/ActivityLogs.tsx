@@ -31,10 +31,10 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
 };
 
 const ACTION_COLORS: Record<ActivityAction, string> = {
-  [ActivityAction.CREATE]: 'bg-emerald-50 text-emerald-700 border border-emerald-100',
-  [ActivityAction.UPDATE]: 'bg-blue-50 text-blue-700 border border-blue-100',
-  [ActivityAction.DELETE]: 'bg-rose-50 text-rose-700 border border-rose-100',
-  [ActivityAction.LOGIN]: 'bg-violet-50 text-violet-700 border border-violet-100',
+  [ActivityAction.CREATE]: 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
+  [ActivityAction.UPDATE]: 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
+  [ActivityAction.DELETE]: 'bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
+  [ActivityAction.LOGIN]: 'bg-violet-50 text-violet-700 border border-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30',
   [ActivityAction.LOGOUT]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]'
 };
 
@@ -131,12 +131,12 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] w-full max-w-6xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-line)]">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
           <div>
-            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Log Attività</h2>
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Log Attività</h3>
             <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
               {total} {total === 1 ? 'operazione registrata' : 'operazioni registrate'}
             </p>
@@ -144,16 +144,16 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
           <div className="flex items-center gap-1">
             <button
               onClick={fetchLogs}
-              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               title="Aggiorna"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
             >
-              <X className="w-4 h-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -313,8 +313,8 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
                         log.status === 'SUCCESS'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                          : 'bg-rose-50 text-rose-700 border-rose-100'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+                          : 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
                       }`}>
                         <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
                         {log.status === 'SUCCESS' ? 'OK' : 'Errore'}

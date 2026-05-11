@@ -93,20 +93,20 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-slate-100">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
           <div className="flex items-center gap-2">
             <BookUser className="h-5 w-5 text-indigo-600" />
-            <h2 className="font-bold text-slate-800">Rubrica Clienti</h2>
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Rubrica Clienti</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
           >
             <X className="h-5 w-5" />
           </button>
@@ -114,7 +114,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
 
         {!showCreate && (
           <>
-            <div className="p-3 border-b border-slate-100">
+            <div className="p-3 border-b border-[var(--color-line)]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <input
@@ -123,7 +123,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   placeholder="Cerca per nome, telefono, email..."
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
+                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
                 />
               </div>
             </div>
@@ -133,7 +133,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
                 <div className="p-6 text-center text-sm text-slate-400">Caricamento...</div>
               )}
               {error && !isLoading && (
-                <div className="p-4 text-sm text-rose-600 bg-rose-50 border-b border-rose-100">{error}</div>
+                <div className="p-4 text-sm text-rose-600 bg-rose-50 border-b border-rose-100 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30">{error}</div>
               )}
               {!isLoading && !error && sortedCustomers.length === 0 && (
                 <div className="p-6 text-center text-sm text-slate-500">
@@ -170,14 +170,14 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
             </div>
 
             {canCreate && (
-              <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+              <div className="p-4 border-t border-[var(--color-line)]">
                 <button
                   type="button"
                   onClick={() => {
                     setDraft({ name: query.trim(), phone: '', email: '' });
                     setShowCreate(true);
                   }}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
                 >
                   <UserPlus className="h-4 w-4" />
                   Nuovo cliente
@@ -222,18 +222,18 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
               </div>
               {error && <p className="text-sm text-rose-600">{error}</p>}
             </div>
-            <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex gap-2">
+            <div className="p-4 border-t border-[var(--color-line)] flex gap-2">
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                className="flex-1 px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
               >
                 Annulla
               </button>
               <button
                 type="submit"
                 disabled={isSaving || !draft.name.trim() || !draft.phone.trim()}
-                className="flex-1 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSaving ? 'Salvataggio...' : 'Salva e seleziona'}
               </button>

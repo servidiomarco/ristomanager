@@ -27,8 +27,8 @@ const TYPE_LABEL: Record<BanquetPaymentType, string> = {
 };
 
 const TYPE_BADGE: Record<BanquetPaymentType, string> = {
-  [BanquetPaymentType.DEPOSIT]: 'bg-amber-100 text-amber-700',
-  [BanquetPaymentType.BALANCE]: 'bg-emerald-100 text-emerald-700',
+  [BanquetPaymentType.DEPOSIT]: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
+  [BanquetPaymentType.BALANCE]: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300',
   [BanquetPaymentType.OTHER]: 'bg-slate-100 text-slate-700'
 };
 
@@ -141,20 +141,20 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between p-5 border-b border-slate-100">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
           <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-bold text-slate-800 truncate">Pagamenti</h2>
-            <p className="text-sm text-slate-500 truncate">{banquet.name}</p>
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">Pagamenti</h3>
+            <p className="text-sm text-[var(--color-fg-muted)] truncate">{banquet.name}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+            className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
             title="Chiudi"
           >
             <X className="h-5 w-5" />
@@ -174,16 +174,16 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 </div>
               )}
             </div>
-            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
-              <div className="text-[11px] tracking-wide font-semibold text-emerald-700">Già pagato</div>
-              <div className="text-xl font-bold text-emerald-800 mt-1">{formatEuro(totalPaid)}</div>
-              <div className="text-[11px] text-emerald-700 mt-0.5">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 p-3">
+              <div className="text-[11px] tracking-wide font-semibold text-emerald-700 dark:text-emerald-300">Già pagato</div>
+              <div className="text-xl font-bold text-emerald-800 dark:text-emerald-200 mt-1">{formatEuro(totalPaid)}</div>
+              <div className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
                 {payments.length} {payments.length === 1 ? 'pagamento' : 'pagamenti'}
               </div>
             </div>
-            <div className={`rounded-lg border p-3 ${remaining != null && remaining > 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
-              <div className={`text-[11px] tracking-wide font-semibold ${remaining != null && remaining > 0 ? 'text-rose-700' : 'text-slate-500'}`}>Residuo</div>
-              <div className={`text-xl font-bold mt-1 ${remaining != null && remaining > 0 ? 'text-rose-800' : 'text-slate-800'}`}>
+            <div className={`rounded-lg border p-3 ${remaining != null && remaining > 0 ? 'bg-rose-50 border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30' : 'bg-slate-50 border-slate-100'}`}>
+              <div className={`text-[11px] tracking-wide font-semibold ${remaining != null && remaining > 0 ? 'text-rose-700 dark:text-rose-300' : 'text-slate-500'}`}>Residuo</div>
+              <div className={`text-xl font-bold mt-1 ${remaining != null && remaining > 0 ? 'text-rose-800 dark:text-rose-200' : 'text-slate-800'}`}>
                 {remaining != null ? formatEuro(remaining) : '—'}
               </div>
               {remaining != null && remaining <= 0 && totalDue > 0 && (
@@ -193,7 +193,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-800">
+            <div className="rounded-lg bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 p-3 text-sm text-rose-800">
               {error}
             </div>
           )}
@@ -247,7 +247,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                       <button
                         type="button"
                         onClick={() => handleDelete(p.id)}
-                        className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex-shrink-0"
+                        className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/15 flex-shrink-0"
                         title="Elimina"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -322,7 +322,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 />
               </div>
               {formError && (
-                <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-2 py-1.5">
+                <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 rounded-md px-2 py-1.5">
                   {formError}
                 </div>
               )}
@@ -338,7 +338,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="rounded-full px-4 py-2 bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                  className="rounded-full px-4 py-2 bg-indigo-600 text-white dark:text-[var(--color-fg-on-brand)] text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   Registra

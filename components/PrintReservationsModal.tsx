@@ -96,15 +96,15 @@ export const PrintReservationsModal: React.FC<Props> = ({
   return (
     <>
       {/* Modal — visible on screen, hidden in print */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] p-4 no-print">
-        <div className="bg-[var(--color-surface)] rounded-xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] max-w-4xl w-full max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-line)]">
-            <h2 className="text-[15px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] p-4 no-print" onClick={onClose}>
+        <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
               <Printer className="h-4 w-4 text-[var(--color-fg-muted)]" />
               Stampa Prenotazioni
-            </h2>
-            <button onClick={onClose} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]" aria-label="Chiudi">
-              <X className="h-4 w-4" />
+            </h3>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+              <X className="h-5 w-5" />
             </button>
           </div>
 
@@ -187,7 +187,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--color-line)]">
+          <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
             <button
               onClick={onClose}
               className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
