@@ -31,6 +31,8 @@ import {
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
 const AREA_LABEL: Record<InventoryArea, string> = {
@@ -48,7 +50,7 @@ const AREA_ICON: Record<InventoryArea, React.ReactNode> = {
 // Compose a stable key for a (product, location) entry in the stock map.
 const stockKey = (productId: number, locationId: number): string => `${productId}:${locationId}`;
 
-export const Inventory: React.FC<Props> = ({ showToast }) => {
+export const Inventory: React.FC<Props> = ({ showToast, autoOpenNew, onAutoOpenNewHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('inventory:full');
 
@@ -344,6 +346,13 @@ export const Inventory: React.FC<Props> = ({ showToast }) => {
     });
     setProductModalOpen(true);
   };
+
+  useEffect(() => {
+    if (autoOpenNew && canEdit) {
+      openCreateProduct();
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew, canEdit, onAutoOpenNewHandled]);
 
   const handleSaveProduct = async () => {
     const name = productForm.name.trim();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -60,6 +60,7 @@ const App: React.FC = () => {
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
   const [autoOpenNewStaff, setAutoOpenNewStaff] = useState(false);
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
+  const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
@@ -1372,7 +1373,11 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.INVENTARIO && (
-          <Inventory showToast={addToast} />
+          <Inventory
+            showToast={addToast}
+            autoOpenNew={autoOpenNewProduct}
+            onAutoOpenNewHandled={() => setAutoOpenNewProduct(false)}
+          />
         )}
 
         {view === ViewState.SETTINGS && (
@@ -1577,7 +1582,7 @@ const App: React.FC = () => {
                 {[
                   { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
-                  { key: 'dish', icon: <UtensilsCrossed className="h-7 w-7" />, label: 'Piatto', action: () => { setView(ViewState.MENU); setMenuInitialTab('DISHES'); setAutoOpenNewDish(true); setShowCreateSheet(false); } },
+                  { key: 'product', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); setShowCreateSheet(false); } },
                   { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button
