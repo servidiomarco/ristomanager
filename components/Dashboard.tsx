@@ -1016,35 +1016,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
-      {/* Alerts — placed first, above the greeting */}
-      {myTodos.length > 0 && (
-        <div className="flex items-start gap-3 bg-violet-100 border border-violet-200 dark:bg-violet-500/15 dark:border-violet-500/30 rounded-xl p-3 sm:p-4">
-          <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-200 text-violet-700 dark:bg-violet-500/30 dark:text-violet-200">
-            <UserCircle className="h-4 w-4" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-sm text-violet-900 dark:text-violet-100">
-              Hai <span className="tabular">{myTodos.length}</span> {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}
-            </h3>
-            <p className="text-xs text-violet-700 dark:text-violet-300 mt-0.5">
-              {myTodos.filter(isAssignedToMe).length > 0 && (
-                <span><span className="tabular">{myTodos.filter(isAssignedToMe).length}</span> personali</span>
-              )}
-              {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
-              {myTodos.filter(isAssignedToMyTeam).length > 0 && (
-                <span><span className="tabular">{myTodos.filter(isAssignedToMyTeam).length}</span> del team {user?.role && TEAM_LABELS[user.role]}</span>
-              )}
-            </p>
-          </div>
-          <button
-            onClick={() => setShowMyTasksModal(true)}
-            className="text-xs font-medium text-violet-900 hover:text-violet-700 dark:text-violet-100 dark:hover:text-violet-300 underline underline-offset-4 whitespace-nowrap self-center"
-          >
-            Visualizza
-          </button>
-        </div>
-      )}
-
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
