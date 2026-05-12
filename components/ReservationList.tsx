@@ -2238,27 +2238,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
 
               {/* Shift toggle — icon only */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0">
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-[120px]">
                 <button onClick={() => setSelectedShift(Shift.LUNCH)}
-                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
                     selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
                   }`} aria-label="Pranzo">
                   <Sun className="h-4 w-4" />
                 </button>
                 <button onClick={() => setSelectedShift(Shift.DINNER)}
-                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
                     selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
                   }`} aria-label="Cena">
                   <Sunset className="h-4 w-4" />
                 </button>
               </div>
-
-              {/* Print */}
-              <button type="button" onClick={() => setIsPrintModalOpen(true)}
-                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                aria-label="Stampa">
-                <Printer className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
 
@@ -2298,6 +2291,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {activeFilterCount}
                   </span>
                 )}
+              </button>
+
+              {/* Print */}
+              <button type="button" onClick={() => setIsPrintModalOpen(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Stampa">
+                <Printer className="h-3.5 w-3.5" />
               </button>
             </div>
 
