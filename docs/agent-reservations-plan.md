@@ -10,11 +10,18 @@ server Express. Niente Next.js separato — ridurrebbe solo la coesione.
 
 ## Flusso end-to-end
 
+Carrier scelto: **Vonage** (lo stesso provider già usato per WhatsApp inbound),
+collegato a ElevenLabs via **SIP trunk**. Niente Twilio in produzione — riduce
+fornitori e fatturazione, e i numeri italiani su Vonage sono più economici.
+
 ```
 PSTN call
     │
     ▼
-Numero Twilio (importato in ElevenLabs)
+Numero Vonage (DID italiano)
+    │
+    ▼  SIP/RTP outbound trunk
+Endpoint SIP ElevenLabs (sip:<agent-id>@sip.elevenlabs.io)
     │
     ▼
 Agent ElevenLabs (it-IT, voce italiana)
@@ -35,6 +42,18 @@ Post-call webhook (transcript + summary)
     ▼
 Conferma WhatsApp via Vonage (path esistente)
 ```
+
+### Perché SIP trunk e non WebSocket bridge
+
+Vonage Voice API offre anche un percorso "WebSocket connect" (NCCO `connect`
+verso un endpoint custom che fa da bridge audio). È più flessibile ma:
+
+- richiede un servizio sempre attivo che fa proxy dell'audio bidirezionale,
+- aggiunge un hop di rete e quindi latenza (peggiora la conversazione),
+- raddoppia i punti di rottura (Vonage ↔ bridge ↔ ElevenLabs).
+
+Il SIP trunk va da carrier direttamente a ElevenLabs senza nostro codice nel
+percorso media: latenza minima, niente infra da operare.
 
 ## Tools esposti all'agent
 
@@ -58,7 +77,8 @@ endpoint URL + secret).
   - Conferma sempre data+ora ad alta voce prima di chiamare `create_reservation`
   - Chiudi con riepilogo + "ti arriverà conferma su WhatsApp"
   - Se `check_availability` ritorna `available=false`, proponi `suggested_times[]`
-- **Inbound phone**: numero Twilio importato (Twilio resta il carrier)
+- **Inbound phone**: numero Vonage italiano, instradato via SIP trunk verso
+  ElevenLabs (vedi sezione "Setup SIP trunk Vonage → ElevenLabs")
 - **Post-call webhook**: enabled, punta a `/webhook/elevenlabs/post-call`
 
 ## Sicurezza webhook
@@ -175,71 +195,103 @@ ELEVENLABS_AGENT_ID=<id agent, solo logging/tracing>
 ## Costo stimato
 
 - ElevenLabs Conversational AI: ~$0.10-0.15/min (voce italiana)
-- Twilio inbound: ~$0.013/min + ~$1/mese numero
-- 100 chiamate/mese × 4 min ≈ 400 min × $0.16 ≈ **€60/mese + Twilio ≈ $6**
+- Vonage DID italiano: ~€1.50/mese + inbound ~€0.008/min
+- 100 chiamate/mese × 4 min ≈ 400 min × $0.16 ≈ **€60/mese + Vonage ≈ €5**
 
 Break-even vs personale telefonico: ovviamente sì.
 
 ## Deliverables (in ordine di PR consigliato)
 
 **Track A — Operativo (parallelo al codice)**
-- A1. Avvia porting numero ristorante → Twilio (LOA + bolletta)
-- A2. Acquisire numero Twilio italiano temporaneo per dev/test (~$1/mese)
-- A3. Creare account/agent ElevenLabs, configurare voce standard italiana
+- A1. Aprire ticket porting del numero esistente del ristorante verso Vonage
+  (richiede LOA + ultima bolletta dell'operatore attuale).
+- A2. Nel frattempo, acquistare un numero Vonage italiano temporaneo per dev/test (~€1.50/mese).
+- A3. Creare account/agent ElevenLabs, configurare voce standard italiana.
+- A4. Su ElevenLabs Conversational AI, ricavare l'endpoint SIP dell'agent
+  (`sip:<agent-id>@sip.elevenlabs.io`) e abilitare l'inbound SIP.
+- A5. Su Vonage: creare un SIP trunk verso quell'endpoint e legare il DID al trunk.
 
 **Track B — Codice**
 1. **PR #1 — Schema + service** (`db.ts`, `types.ts`, `services/elevenlabsService.ts`)
-   con HMAC verify + helpers, senza endpoint vivi.
-2. **PR #2 — `check_availability` endpoint** (Phase 1, read-only). Test con numero Twilio temporaneo.
+   con HMAC verify + helpers, senza endpoint vivi. **(già fatto)**
+2. **PR #2 — `check_availability` endpoint** (Phase 1, read-only). Test con DID Vonage temporaneo via SIP trunk.
 3. **PR #3 — `create_reservation` + post-call webhook + WhatsApp recap** (Phase 2, con `requires_review`).
-4. **PR #4 — Twilio Function routing orario di servizio** (deploy su Twilio Functions, non in questo repo).
+4. **PR #4 — Routing fascia oraria di servizio** (vedi sotto: NCCO Vonage o regola di forwarding).
 5. **PR #5 — UI badge "VOICE" + filtro nel CRM** (lift `requires_review` quando metriche OK).
 
 ## File da creare/modificare
 
 | File | Azione |
 |------|--------|
-| `services/elevenlabsService.ts` | **NUOVO** |
+| `services/elevenlabsService.ts` | **NUOVO** (già scaffoldato) |
 | `server.ts` | Aggiungere sezione endpoint `/webhook/elevenlabs/*` |
-| `db.ts` | Aggiungere migration `source` + tabella `voice_calls` |
-| `types.ts` | Aggiungere `ReservationSource` enum + campo su `Reservation` |
+| `db.ts` | Aggiungere migration `source` + tabella `voice_calls` (già fatto) |
+| `types.ts` | Aggiungere `ReservationSource` enum + campo su `Reservation` (già fatto) |
 | `.env` | 2 nuove vars |
-| `docs/voice-agent-setup.md` | **NUOVO** — istruzioni operative (Twilio + ElevenLabs dashboard) |
+| `docs/voice-agent-setup.md` | **NUOVO** — istruzioni operative (Vonage SIP + ElevenLabs dashboard) |
 
 ## Decisioni prese
 
-1. **Numero**: porting del numero esistente del ristorante verso Twilio. Lead time 2-4 settimane in Italia, va avviato per primo.
-2. **Voce**: standard italiana ElevenLabs (no voice-cloning).
-3. **Scope**: solo prenotazioni. Niente FAQ/knowledge base nella v1.
-4. **Conferma**: WhatsApp automatica post-call (riutilizza `sendVonageWhatsApp`).
-5. **Orari attivi**: solo **fuori orario di servizio**. Durante il servizio le chiamate vanno alla sala come oggi.
+1. **Carrier**: **Vonage**, lo stesso provider già usato per WhatsApp. Porting del numero esistente del ristorante verso Vonage. Lead time 2-4 settimane in Italia, va avviato per primo.
+2. **Bridge**: **SIP trunk** Vonage → ElevenLabs (no WebSocket bridge — vedi sezione "Perché SIP trunk").
+3. **Voce**: standard italiana ElevenLabs (no voice-cloning).
+4. **Scope**: solo prenotazioni. Niente FAQ/knowledge base nella v1.
+5. **Conferma**: WhatsApp automatica post-call (riutilizza `sendVonageWhatsApp`).
+6. **Orari attivi**: solo **fuori orario di servizio**. Durante il servizio le chiamate vanno alla sala come oggi.
 
 ### Implicazioni delle decisioni
 
-**Routing orari di servizio (decisione 5)**
+**Routing orari di servizio (decisione 6)**
 
-Il routing orario va fatto a livello Twilio (TwiML), non ElevenLabs. Logica:
+Con Vonage il routing orario può essere fatto in due modi:
 
-```
-Chiamata in entrata su numero portato
-  │
-  ├── ora corrente in [12:00-15:00] OR [19:00-23:00] (Europe/Rome)?
-  │   ├── SÌ → forward al cellulare/fisso del ristorante (come oggi)
-  │   └── NO → forward all'agent ElevenLabs
-```
+a) **NCCO dinamico** (richiede un nostro endpoint webhook `answer_url`):
+   ```
+   Chiamata in entrata sul DID Vonage
+     │
+     ▼
+   Vonage POST a /webhook/vonage-voice/answer
+     │
+     ├── ora corrente in [12:00-15:00] OR [19:00-23:00] (Europe/Rome)?
+     │   ├── SÌ → NCCO `connect` al cellulare/fisso del ristorante
+     │   └── NO → NCCO `connect` al SIP URI di ElevenLabs
+   ```
+   Implementazione: nuovo endpoint Express `/webhook/vonage-voice/answer` che
+   risponde con JSON NCCO. Logica oraria in TypeScript, timezone Europe/Rome,
+   orari come costante (futuro: tabella `restaurant_hours`).
 
-Implementazione: Twilio Function (Node) o TwiML Bin che valuta `Date()` con timezone
-Europe/Rome e fa `<Dial>` al numero corretto. Gli orari restano configurabili come
-costante nella Function — eventualmente li leggiamo da una tabella `restaurant_hours`
-in futuro.
+b) **Time-based routing nativo Vonage**: se la console offre regole di forwarding
+   per fascia oraria si può fare zero-code. Da verificare nel piano contrattato —
+   storicamente Vonage non lo offre per i DID standard, quindi (a) è la default.
 
 **Porting (decisione 1)**
 
-Va avviato **prima del coding**: serve il numero attivo su Twilio per testare end-to-end.
-Step paralleli al lavoro tecnico:
-- Aprire ticket porting con Twilio (LOA firmata, ultima bolletta operatore attuale)
+Va avviato **prima del coding** end-to-end: serve il numero attivo su Vonage
+per testare con il vero traffico. Step paralleli al lavoro tecnico:
+- Aprire ticket porting con Vonage (LOA firmata, ultima bolletta operatore attuale)
 - Verificare che l'operatore attuale non abbia clausole anti-porting
-- Durante il porting, tenere temporaneamente un numero Twilio italiano nuovo per dev/test
+- Durante il porting, tenere temporaneamente un DID Vonage italiano nuovo per dev/test
+
+## Setup SIP trunk Vonage → ElevenLabs
+
+Operazioni nella console Vonage (Voice → SIP trunks):
+
+1. Creare un **outbound SIP trunk** con:
+   - URI: `sip:<agent-id>@sip.elevenlabs.io` (ricavato dal dashboard ElevenLabs
+     → Conversational AI → Inbound → "SIP URI")
+   - Codec: G.711 µ-law / A-law (default ElevenLabs)
+   - Auth: secret/username se ElevenLabs lo richiede (vedi loro docs SIP)
+2. Sul DID italiano: routing → "Forward inbound calls via SIP trunk →
+   <nome trunk>" (oppure NCCO `connect.endpoint.type=sip`).
+3. Test: chiamare il DID → deve atterrare sull'agent ElevenLabs entro 2-3 secondi.
+4. Verificare in ElevenLabs Conversational AI → Calls che la chiamata appaia,
+   con caller_id valorizzato (numero del chiamante).
+
+Lato ElevenLabs:
+- Abilitare "Inbound SIP" sull'agent.
+- Configurare i tool con gli URL del nostro server (`/webhook/elevenlabs/*`) e
+  il secret HMAC (`ELEVENLABS_WEBHOOK_SECRET`).
+- Configurare il "Post-call webhook" → `https://<host>/webhook/elevenlabs/post-call`.
 
 **WhatsApp post-call (decisione 4)**
 
