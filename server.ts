@@ -18,6 +18,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
+import { verifyElevenLabsSignature, findAvailability } from './services/elevenlabsService.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -37,7 +38,13 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // 2 MB body limit accommodates inlined dish photos as base64 data URLs
 // (resized client-side to ~200KB). Default 100KB would reject them.
-app.use(express.json({ limit: '2mb' }));
+// `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)
+// can validate against the exact bytes sent by the caller — JSON.stringify
+// would reorder keys and break the signature.
+app.use(express.json({
+    limit: '2mb',
+    verify: (req: any, _res, buf) => { req.rawBody = buf; }
+}));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -114,6 +121,68 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
 app.post('/webhook/vonage-status', (req, res) => {
     console.log('[Vonage] Message status:', JSON.stringify(req.body, null, 2));
     res.status(200).send();
+});
+
+// ============================================
+// ELEVENLABS VOICE-AGENT WEBHOOKS
+// ============================================
+// Tools the Restaurant Host agent can call mid-conversation. Each request
+// is signed with HMAC-SHA256 (Stripe-style header); the secret lives in
+// ELEVENLABS_WEBHOOK_SECRET. If the secret is unset we skip verification
+// and log a warning — useful during early dev, never run that way in prod.
+
+const ELEVENLABS_WEBHOOK_SECRET = process.env.ELEVENLABS_WEBHOOK_SECRET || '';
+if (!ELEVENLABS_WEBHOOK_SECRET) {
+    console.warn('[ElevenLabs] ELEVENLABS_WEBHOOK_SECRET is not set — webhook HMAC verification is DISABLED. Do not deploy like this.');
+}
+
+function authorizeElevenLabs(req: express.Request, res: express.Response): boolean {
+    if (!ELEVENLABS_WEBHOOK_SECRET) return true;
+    if (verifyElevenLabsSignature(req as any, ELEVENLABS_WEBHOOK_SECRET)) return true;
+    console.warn('[ElevenLabs] HMAC verification failed for', req.path);
+    res.status(401).json({ error: 'invalid_signature' });
+    return false;
+}
+
+// Tool 1 — check_availability
+// Body shape (per ElevenLabs tools spec): { parameters: { date, shift, guests }, conversation_id?, agent_id? }
+// We also accept flat top-level fields as a fallback.
+app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const rawDate = String(p.date ?? '').trim();
+    const rawShift = String(p.shift ?? '').trim().toUpperCase();
+    const guests = Number(p.guests);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    }
+    if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
+        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+    }
+    if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
+        return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
+    }
+
+    try {
+        const result = await findAvailability({
+            date: rawDate,
+            shift: rawShift as Shift,
+            guests: Math.trunc(guests)
+        });
+        console.log('[ElevenLabs] check-availability', { date: rawDate, shift: rawShift, guests, result });
+        res.json(result);
+    } catch (err) {
+        console.error('[ElevenLabs] check-availability error', err);
+        res.status(500).json({
+            available: false,
+            free_tables_count: 0,
+            message: 'Si è verificato un errore tecnico, posso richiamarla?'
+        });
+    }
 });
 
 // ============================================
