@@ -53,8 +53,11 @@ const pool = new Pool({
 
 // Without this handler, an error event from an idle client crashes the worker
 // (Node treats unhandled "error" events on EventEmitters as uncaught).
+// Log only the error message to keep noise down during DB outages —
+// dumping the full pg client object burns through Railway's log
+// rate limit and drops real signal.
 pool.on('error', (err) => {
-    console.error('Postgres pool idle client error:', err);
+    console.error('Postgres pool idle client error:', err?.message || err);
 });
 
 // Retry transient connection errors once. Most ETIMEDOUT / ECONNRESET /
@@ -319,7 +322,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 banquet_menu_id INTEGER REFERENCES banquet_menus(id),
                 enable_reminder BOOLEAN DEFAULT true,
                 reminder_sent BOOLEAN DEFAULT false,
-                arrival_status VARCHAR(50) DEFAULT 'WAITING'
+                arrival_status VARCHAR(50) DEFAULT 'WAITING',
+                reservation_status VARCHAR(50) DEFAULT 'CONFIRMED'
             );
         `);
 
@@ -357,6 +361,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_phone ON voice_calls(phone);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_reservation ON voice_calls(reservation_id) WHERE reservation_id IS NOT NULL;`);
+
+        // Add reservation_status column to existing tables if it doesn't exist
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'reservations' AND column_name = 'reservation_status'
+                ) THEN
+                    ALTER TABLE reservations ADD COLUMN reservation_status VARCHAR(50) DEFAULT 'CONFIRMED';
+                END IF;
+            END $$;
+        `);
 
         // ============================================
         // ACTIVITY LOGS TABLE
@@ -398,7 +415,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -407,13 +424,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
+        // Per-user landing preference: which view to open after login.
+        // NULL = fall back to the first accessible view (legacy behavior).
+        await client.query(`
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS preferred_landing_view VARCHAR(50);
+        `);
+
+        // Track who created each reservation (added after users table exists for the FK)
+        await client.query(`
+            ALTER TABLE reservations
+            ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        `);
+
         // ============================================
         // ROLE PERMISSIONS TABLE
         // ============================================
         await client.query(`
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id SERIAL PRIMARY KEY,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
                 permission VARCHAR(100) NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(role, permission)
@@ -449,6 +479,18 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ['OWNER', 'reports:view'], ['OWNER', 'reports:full'],
                 ['OWNER', 'logs:view'], ['OWNER', 'logs:full'],
                 ['OWNER', 'staff:view'], ['OWNER', 'staff:full'],
+                ['OWNER', 'banquet:view_price'],
+                ['OWNER', 'banquet:manage_payments'],
+                // GENERAL_MANAGER
+                ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+                ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+                ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+                ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+                ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+                ['GENERAL_MANAGER', 'logs:view'],
+                ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+                ['GENERAL_MANAGER', 'banquet:view_price'],
+                ['GENERAL_MANAGER', 'banquet:manage_payments'],
                 // MANAGER
                 ['MANAGER', 'dashboard:view'], ['MANAGER', 'dashboard:full'],
                 ['MANAGER', 'floorplan:view'], ['MANAGER', 'floorplan:update_status'], ['MANAGER', 'floorplan:full'],
@@ -502,6 +544,73 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
         console.log('Staff permissions migration completed');
+
+        // Add GENERAL_MANAGER role to existing databases (CHECK constraint migration)
+        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check`);
+        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+
+        // Seed GENERAL_MANAGER default permissions if missing
+        const generalManagerPermissions = [
+            ['GENERAL_MANAGER', 'dashboard:view'], ['GENERAL_MANAGER', 'dashboard:full'],
+            ['GENERAL_MANAGER', 'floorplan:view'], ['GENERAL_MANAGER', 'floorplan:update_status'], ['GENERAL_MANAGER', 'floorplan:full'],
+            ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
+            ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
+            ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
+            ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+            ['GENERAL_MANAGER', 'logs:view']
+        ];
+        for (const [role, permission] of generalManagerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // Add banquet:view_price for OWNER + GENERAL_MANAGER
+        const banquetPricePermissions = [
+            ['OWNER', 'banquet:view_price'],
+            ['GENERAL_MANAGER', 'banquet:view_price']
+        ];
+        for (const [role, permission] of banquetPricePermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('GENERAL_MANAGER role and banquet:view_price migration completed');
+
+        // Add banquet:manage_payments for OWNER + GENERAL_MANAGER
+        const banquetPaymentPermissions = [
+            ['OWNER', 'banquet:manage_payments'],
+            ['GENERAL_MANAGER', 'banquet:manage_payments']
+        ];
+        for (const [role, permission] of banquetPaymentPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('banquet:manage_payments migration completed');
+
+        // ============================================
+        // BANQUET PAYMENTS TABLE
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS banquet_payments (
+                id SERIAL PRIMARY KEY,
+                banquet_id INTEGER NOT NULL REFERENCES banquet_menus(id) ON DELETE CASCADE,
+                amount DECIMAL(10, 2) NOT NULL,
+                payment_date DATE NOT NULL,
+                payment_type VARCHAR(20) NOT NULL,
+                payment_method VARCHAR(20) NOT NULL,
+                notes TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_banquet_payments_banquet_id ON banquet_payments(banquet_id);`);
 
         // ============================================
         // TODOS TABLE
@@ -654,10 +763,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
                 type VARCHAR(20) NOT NULL CHECK (type IN ('RIPOSO', 'VACANZA', 'MALATTIA', 'PERMESSO')),
+                shift VARCHAR(10) CHECK (shift IN ('LUNCH', 'DINNER')),
                 notes TEXT,
                 approved BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
+        `);
+
+        // Add shift column to existing tables (NULL = full day, 'LUNCH'/'DINNER' = single shift)
+        await client.query(`
+            ALTER TABLE staff_time_off ADD COLUMN IF NOT EXISTS shift VARCHAR(10) CHECK (shift IN ('LUNCH', 'DINNER'));
         `);
 
         await client.query(`
@@ -666,6 +781,232 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_staff_time_off_dates ON staff_time_off(start_date, end_date);
         `);
+
+        // ============================================
+        // CUSTOMERS TABLE (rubrica)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS customers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                email VARCHAR(255),
+                address TEXT,
+                city VARCHAR(100),
+                postal_code VARCHAR(20),
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(LOWER(name));`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);`);
+
+        // Track whether a customer was created by the backfill so we can prune
+        // legacy auto-imported entries that don't meet the current rules
+        // (phone or email required) without touching customers added manually.
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS auto_imported BOOLEAN NOT NULL DEFAULT FALSE;`);
+
+        // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
+        // because deleting a customer should not destroy the banquet history.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);
+
+        // Tables assigned to a banquet (multi-table). Used by the floor plan and
+        // by overbooking checks against reservations on the same date+shift.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS table_ids INTEGER[];`);
+
+        // Customer permissions for roles
+        const customerPermissions = [
+            ['OWNER', 'customers:view'], ['OWNER', 'customers:full'],
+            ['GENERAL_MANAGER', 'customers:view'], ['GENERAL_MANAGER', 'customers:full'],
+            ['MANAGER', 'customers:view'], ['MANAGER', 'customers:full'],
+            ['WAITER', 'customers:view'],
+        ];
+        for (const [role, permission] of customerPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // Drop auto-imported customers without a phone number — the rubrica
+        // only stores entries we can call back. Manually-created customers
+        // (auto_imported = FALSE) are left alone.
+        await client.query(`
+            DELETE FROM customers
+             WHERE auto_imported = TRUE
+               AND phone IS NULL;
+        `);
+
+        // Normalise existing names to Title Case. INITCAP treats apostrophes,
+        // hyphens and spaces as word separators — so "MARIO ROSSI",
+        // "mario rossi" and "d'angelo" all land on "Mario Rossi" / "D'Angelo".
+        // Idempotent: only rows that aren't already title-cased get touched.
+        await client.query(`
+            UPDATE customers
+               SET name = INITCAP(name)
+             WHERE name <> INITCAP(name);
+        `);
+
+        // One-time backfill: seed the rubrica from reservations the first time
+        // this migration runs. Restricted to reservations that carry a phone
+        // — that's the only identifier we use in the rubrica. Deduplicated
+        // on phone.
+        const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
+        if (customerCount.rows[0].c === 0) {
+            await client.query(`
+                INSERT INTO customers (name, phone, email, auto_imported)
+                SELECT name, phone, email, TRUE
+                FROM (
+                    SELECT
+                        INITCAP(TRIM(customer_name)) AS name,
+                        NULLIF(TRIM(phone), '') AS phone,
+                        NULLIF(TRIM(email), '') AS email,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY NULLIF(TRIM(phone), '')
+                            ORDER BY id DESC
+                        ) AS rn
+                    FROM reservations
+                    WHERE customer_name IS NOT NULL
+                      AND TRIM(customer_name) <> ''
+                      AND NULLIF(TRIM(phone), '') IS NOT NULL
+                ) deduped
+                WHERE rn = 1;
+            `);
+
+            // Link existing banquet_menus.customer_id by matching the banquet's
+            // most recent reservation to the customer we just inserted.
+            await client.query(`
+                UPDATE banquet_menus bm
+                SET customer_id = sub.customer_id
+                FROM (
+                    SELECT DISTINCT ON (r.banquet_menu_id)
+                        r.banquet_menu_id,
+                        c.id AS customer_id
+                    FROM reservations r
+                    JOIN customers c
+                      ON c.phone IS NOT DISTINCT FROM NULLIF(TRIM(r.phone), '')
+                     AND LOWER(c.name) = LOWER(INITCAP(TRIM(r.customer_name)))
+                    WHERE r.banquet_menu_id IS NOT NULL
+                    ORDER BY r.banquet_menu_id, r.id DESC
+                ) sub
+                WHERE bm.id = sub.banquet_menu_id AND bm.customer_id IS NULL;
+            `);
+            console.log('Customers rubrica backfilled from reservations');
+        }
+
+        // ============================================
+        // INVENTORY TABLES
+        // ============================================
+        // Areas (CUCINA / SALA / BAR) are fixed enums on each row, not a table.
+        // Locations within an area are user-managed (e.g. "Cella 1" / "Cella 2"
+        // for CUCINA). Stock = quantity per (product, location). Movements
+        // capture every carico / scarico for the audit trail.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_locations (
+                id SERIAL PRIMARY KEY,
+                area VARCHAR(20) NOT NULL CHECK (area IN ('CUCINA', 'SALA', 'BAR')),
+                name VARCHAR(100) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(area, name)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_locations_area ON inventory_locations(area, sort_order);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_categories (
+                id SERIAL PRIMARY KEY,
+                area VARCHAR(20) NOT NULL CHECK (area IN ('CUCINA', 'SALA', 'BAR')),
+                name VARCHAR(100) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(area, name)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_categories_area ON inventory_categories(area, sort_order);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_products (
+                id SERIAL PRIMARY KEY,
+                area VARCHAR(20) NOT NULL CHECK (area IN ('CUCINA', 'SALA', 'BAR')),
+                name VARCHAR(255) NOT NULL,
+                unit VARCHAR(20),
+                notes TEXT,
+                category_id INTEGER REFERENCES inventory_categories(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Backfill: existing installs may not have category_id yet.
+        await client.query(`ALTER TABLE inventory_products ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES inventory_categories(id) ON DELETE SET NULL;`);
+        // Migration: replace UNIQUE(area, name) with a per-category unique key
+        // so the same product name (e.g. "GNOCCHI") can live in multiple
+        // categories (PRIMI vs CELIACO). COALESCE(..., 0) keeps NULL-category
+        // products unique on name as well.
+        await client.query(`ALTER TABLE inventory_products DROP CONSTRAINT IF EXISTS inventory_products_area_name_key;`);
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_products_area_cat_name ON inventory_products (area, COALESCE(category_id, 0), name);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_products_area ON inventory_products(area, name);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_products_category ON inventory_products(category_id);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_stock (
+                product_id INTEGER NOT NULL REFERENCES inventory_products(id) ON DELETE CASCADE,
+                location_id INTEGER NOT NULL REFERENCES inventory_locations(id) ON DELETE CASCADE,
+                quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (product_id, location_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_stock_location ON inventory_stock(location_id);`);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS inventory_movements (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES inventory_products(id) ON DELETE CASCADE,
+                location_id INTEGER NOT NULL REFERENCES inventory_locations(id) ON DELETE CASCADE,
+                delta NUMERIC(12, 3) NOT NULL,
+                reason VARCHAR(20) NOT NULL CHECK (reason IN ('CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO')),
+                notes TEXT,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                user_name VARCHAR(255),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON inventory_movements(product_id, created_at DESC);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_inventory_movements_location ON inventory_movements(location_id, created_at DESC);`);
+
+        // Inventory permissions: view = read, full = create/edit products,
+        // locations and post movements.
+        const inventoryPermissions = [
+            ['OWNER', 'inventory:view'], ['OWNER', 'inventory:full'],
+            ['GENERAL_MANAGER', 'inventory:view'], ['GENERAL_MANAGER', 'inventory:full'],
+            ['MANAGER', 'inventory:view'], ['MANAGER', 'inventory:full'],
+            ['WAITER', 'inventory:view'],
+            ['KITCHEN', 'inventory:view'], ['KITCHEN', 'inventory:full'],
+        ];
+        for (const [role, permission] of inventoryPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
+        // ============================================
+        // PUSH SUBSCRIPTIONS TABLE (Web Push)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                user_agent TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);`);
 
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');

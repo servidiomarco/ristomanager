@@ -6,10 +6,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UserManagementProps {
-  onClose: () => void;
+  // When provided, the component renders as a modal with a close button.
+  // When omitted, it renders as an inline page (no overlay).
+  onClose?: () => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
-export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
+export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpenNew, onAutoOpenNewHandled }) => {
+  const isModal = typeof onClose === 'function';
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,6 +40,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    if (autoOpenNew) {
+      setShowAddForm(true);
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
 
   const fetchUsers = async () => {
     try {
@@ -136,6 +148,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
     switch (role) {
       case UserRole.OWNER:
         return <Shield className="h-4 w-4" />;
+      case UserRole.GENERAL_MANAGER:
+        return <Shield className="h-4 w-4" />;
       case UserRole.MANAGER:
         return <UserIcon className="h-4 w-4" />;
       case UserRole.WAITER:
@@ -148,6 +162,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   const getRoleName = (role: UserRole): string => {
     const names: Record<UserRole, string> = {
       [UserRole.OWNER]: 'Proprietario',
+      [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'
@@ -158,95 +173,99 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
   const getRoleColor = (role: UserRole): string => {
     switch (role) {
       case UserRole.OWNER:
-        return 'bg-purple-100 text-purple-700';
+        return 'bg-violet-50 text-violet-700 border border-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30';
+      case UserRole.GENERAL_MANAGER:
+        return 'bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-[#4f46e5]/15 dark:text-[#a5b4fc] dark:border-[#4f46e5]/30';
       case UserRole.MANAGER:
-        return 'bg-blue-100 text-blue-700';
+        return 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
       case UserRole.WAITER:
-        return 'bg-emerald-100 text-emerald-700';
+        return 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
       case UserRole.KITCHEN:
-        return 'bg-orange-100 text-orange-700';
+        return 'bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+  const content = (
+    <>
         {/* Header */}
-        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Gestione Utenti</h2>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        {isModal && (
+          <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Gestione Utenti</h3>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className={isModal ? "flex-1 overflow-y-auto px-5 py-4" : ""}>
           {/* Error */}
           {error && (
-            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-center gap-2">
-              <AlertCircle className="h-5 w-5" />
+            <div className="mb-4 px-3 py-2 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 rounded-md text-rose-700 text-sm flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
               {error}
             </div>
           )}
 
           {/* Add/Edit Form */}
           {showAddForm && (
-            <div className="mb-6 p-6 bg-slate-50 rounded-xl">
-              <h3 className="text-lg font-semibold text-slate-800 mb-4">
+            <div className="mb-6 p-5 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-lg">
+              <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-4">
                 {editingUser ? 'Modifica Utente' : 'Nuovo Utente'}
               </h3>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Nome Completo
                     </label>
                     <input
                       type="text"
                       value={formData.full_name}
                       onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Email
                     </label>
                     <input
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Password {editingUser && <span className="text-slate-400">(lascia vuoto per mantenere)</span>}
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
+                      Password {editingUser && <span className="normal-case tracking-normal text-[var(--color-fg-subtle)]">(lascia vuoto per mantenere)</span>}
                     </label>
                     <input
                       type="password"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                       required={!editingUser}
                       minLength={6}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
                       Ruolo
                     </label>
                     <select
                       value={formData.role}
                       onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     >
                       <option value={UserRole.OWNER}>Proprietario</option>
+                      <option value={UserRole.GENERAL_MANAGER}>General Manager</option>
                       <option value={UserRole.MANAGER}>Manager</option>
                       <option value={UserRole.WAITER}>Cameriere</option>
                       <option value={UserRole.KITCHEN}>Cucina</option>
@@ -261,26 +280,26 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                       id="is_active"
                       checked={formData.is_active}
                       onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-[var(--color-line)]"
                     />
-                    <label htmlFor="is_active" className="text-sm text-slate-700">
+                    <label htmlFor="is_active" className="text-sm text-[var(--color-fg)]">
                       Utente attivo
                     </label>
                   </div>
                 )}
 
                 {formError && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
+                  <div className="px-3 py-2 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 rounded-md text-rose-700 text-sm flex items-center gap-2">
                     <AlertCircle className="h-4 w-4" />
                     {formError}
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                    className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center gap-2"
                   >
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -292,7 +311,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
                   <button
                     type="button"
                     onClick={resetForm}
-                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-medium transition-colors"
+                    className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
                   >
                     Annulla
                   </button>
@@ -304,63 +323,60 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
           {/* Users List */}
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+              <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {users.map((user) => (
                 <div
                   key={user.id}
-                  className={`p-4 bg-white border border-slate-200 rounded-xl flex items-center gap-4 ${
+                  className={`bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm p-4 flex flex-col gap-3 hover:shadow-md transition-shadow ${
                     !user.is_active ? 'opacity-50' : ''
                   }`}
                 >
-                  {/* Avatar */}
-                  <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">
-                    {user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-slate-800 truncate">{user.full_name}</p>
-                      {!user.is_active && (
-                        <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded-full">
-                          Disattivato
-                        </span>
-                      )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-semibold flex items-center justify-center text-sm flex-shrink-0">
+                        {user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-[var(--color-fg)] truncate">{user.full_name}</p>
+                        <p className="text-xs text-[var(--color-fg-muted)] truncate">{user.email}</p>
+                      </div>
                     </div>
-                    <p className="text-sm text-slate-500 truncate">{user.email}</p>
+                    {user.id !== currentUser?.id && (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleEdit(user)}
+                          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                          title="Modifica"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(user)}
+                          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/15 dark:hover:text-rose-400"
+                          title="Elimina"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                    {user.id === currentUser?.id && (
+                      <span className="text-xs text-[var(--color-fg-subtle)] italic flex-shrink-0">Tu</span>
+                    )}
                   </div>
-
-                  {/* Role Badge */}
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${getRoleColor(user.role)}`}>
-                    {getRoleIcon(user.role)}
-                    {getRoleName(user.role)}
-                  </div>
-
-                  {/* Actions */}
-                  {user.id !== currentUser?.id && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleEdit(user)}
-                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                        title="Modifica"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(user)}
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Elimina"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                  <div className="flex items-center gap-2">
+                    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${getRoleColor(user.role)}`}>
+                      {getRoleIcon(user.role)}
+                      {getRoleName(user.role)}
                     </div>
-                  )}
-                  {user.id === currentUser?.id && (
-                    <span className="text-xs text-slate-400 italic">Tu</span>
-                  )}
+                    {!user.is_active && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] text-[11px] font-medium rounded-full border border-[var(--color-line)]">
+                        Disattivato
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -369,17 +385,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
 
         {/* Footer */}
         {!showAddForm && (
-          <div className="p-6 border-t border-slate-200">
+          <div className={isModal ? "p-4 border-t border-[var(--color-line)] flex justify-end" : "lg:hidden flex justify-end"}>
             <button
               onClick={() => setShowAddForm(true)}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
             >
-              <Plus className="h-5 w-5" />
+              <Plus className="h-4 w-4" />
               Aggiungi Utente
             </button>
           </div>
         )}
-      </div>
+    </>
+  );
+
+  return (
+    <>
+      {isModal ? (
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={onClose}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-3xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            {content}
+          </div>
+        </div>
+      ) : (
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+          {content}
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
@@ -393,24 +424,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose }) => {
 
       {/* Error Modal */}
       {deleteError && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertCircle className="h-8 w-8 text-red-600" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setDeleteError('')}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+              <div className="mx-auto w-12 h-12 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="h-5 w-5 text-rose-600" />
               </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Errore</h3>
-              <p className="text-slate-600 mb-6">{deleteError}</p>
-              <button
-                onClick={() => setDeleteError('')}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
-              >
-                OK
-              </button>
-            </div>
+              <h3 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2 text-center">Errore</h3>
+              <p className="text-[13px] text-[var(--color-fg-muted)] mb-4 text-center">{deleteError}</p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setDeleteError('')}
+                  className="w-full px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+                >
+                  OK
+                </button>
+              </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };

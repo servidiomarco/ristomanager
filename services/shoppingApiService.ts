@@ -88,6 +88,15 @@ class ShoppingApiService {
   }
 
   /**
+   * Get all shopping items (no date filter)
+   */
+  async getAllItems(): Promise<ShoppingItem[]> {
+    return apiRequest<ShoppingItem[]>(`${API_URL}/shopping`, {
+      headers: getHeaders(false)
+    });
+  }
+
+  /**
    * Create a new shopping item
    */
   async createItem(item: { name: string; category: ShoppingCategory; date: string }): Promise<ShoppingItem> {
@@ -95,6 +104,17 @@ class ShoppingApiService {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(item),
+    });
+  }
+
+  /**
+   * Update name and/or category of a shopping item
+   */
+  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory }): Promise<ShoppingItem> {
+    return apiRequest<ShoppingItem>(`${API_URL}/shopping/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(updates),
     });
   }
 
@@ -119,10 +139,13 @@ class ShoppingApiService {
   }
 
   /**
-   * Clear all checked items for a specific date
+   * Clear all checked items, optionally scoped to a specific date
    */
-  async clearChecked(date: string): Promise<void> {
-    return apiRequest<void>(`${API_URL}/shopping/clear-checked?date=${date}`, {
+  async clearChecked(date?: string): Promise<void> {
+    const url = date
+      ? `${API_URL}/shopping/clear-checked?date=${date}`
+      : `${API_URL}/shopping/clear-checked`;
+    return apiRequest<void>(url, {
       method: 'DELETE',
       headers: getHeaders(false),
     }, false);

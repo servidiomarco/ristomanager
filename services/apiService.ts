@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, TableMerge, TableHiddenOverride, Shift } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -68,7 +68,10 @@ const apiRequest = async <T>(
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
     const baseMessage = errorData.error || `Request failed with status ${response.status}`;
     const message = errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage;
-    throw new Error(message);
+    const error = new Error(message) as Error & { status?: number; data?: any };
+    error.status = response.status;
+    error.data = errorData;
+    throw error;
   }
 
   if (expectJson) {
@@ -297,6 +300,192 @@ export const deleteBanquetMenu = async (id: number): Promise<void> => {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);
+};
+
+// ============================================
+// BANQUET PAYMENTS
+// ============================================
+
+export const getBanquetPayments = async (banquetId: number): Promise<BanquetPayment[]> => {
+  return apiRequest<BanquetPayment[]>(`${API_URL}/banquet-menus/${banquetId}/payments`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createBanquetPayment = async (
+  banquetId: number,
+  payment: Omit<BanquetPayment, 'id' | 'banquet_id' | 'created_at' | 'created_by_user_id' | 'created_by_user_name'>
+): Promise<BanquetPayment> => {
+  return apiRequest<BanquetPayment>(`${API_URL}/banquet-menus/${banquetId}/payments`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payment),
+  });
+};
+
+export const deleteBanquetPayment = async (banquetId: number, paymentId: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/banquet-menus/${banquetId}/payments/${paymentId}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// CUSTOMERS (rubrica)
+// ============================================
+
+export const getCustomers = async (search?: string): Promise<Customer[]> => {
+  const url = search && search.trim()
+    ? `${API_URL}/customers?q=${encodeURIComponent(search.trim())}`
+    : `${API_URL}/customers`;
+  return apiRequest<Customer[]>(url, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createCustomer = async (customer: Omit<Customer, 'id'>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const updateCustomer = async (id: number, customer: Partial<Customer>): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(customer),
+  });
+};
+
+export const deleteCustomer = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/customers/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+// ============================================
+// INVENTORY
+// ============================================
+
+export const getInventoryLocations = async (area?: InventoryArea): Promise<InventoryLocation[]> => {
+  const url = area ? `${API_URL}/inventory/locations?area=${area}` : `${API_URL}/inventory/locations`;
+  return apiRequest<InventoryLocation[]>(url, { headers: getHeaders(false) });
+};
+
+export const createInventoryLocation = async (loc: { area: InventoryArea; name: string; sort_order?: number }): Promise<InventoryLocation> => {
+  return apiRequest<InventoryLocation>(`${API_URL}/inventory/locations`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(loc),
+  });
+};
+
+export const updateInventoryLocation = async (id: number, loc: { name: string; sort_order?: number }): Promise<InventoryLocation> => {
+  return apiRequest<InventoryLocation>(`${API_URL}/inventory/locations/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(loc),
+  });
+};
+
+export const deleteInventoryLocation = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/inventory/locations/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+export const getInventoryCategories = async (area?: InventoryArea): Promise<InventoryCategory[]> => {
+  const url = area ? `${API_URL}/inventory/categories?area=${area}` : `${API_URL}/inventory/categories`;
+  return apiRequest<InventoryCategory[]>(url, { headers: getHeaders(false) });
+};
+
+export const createInventoryCategory = async (cat: { area: InventoryArea; name: string; sort_order?: number }): Promise<InventoryCategory> => {
+  return apiRequest<InventoryCategory>(`${API_URL}/inventory/categories`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(cat),
+  });
+};
+
+export const updateInventoryCategory = async (id: number, cat: { name: string; sort_order?: number }): Promise<InventoryCategory> => {
+  return apiRequest<InventoryCategory>(`${API_URL}/inventory/categories/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(cat),
+  });
+};
+
+export const deleteInventoryCategory = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/inventory/categories/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+export const getInventoryProducts = async (area?: InventoryArea): Promise<InventoryProduct[]> => {
+  const url = area ? `${API_URL}/inventory/products?area=${area}` : `${API_URL}/inventory/products`;
+  return apiRequest<InventoryProduct[]>(url, { headers: getHeaders(false) });
+};
+
+export const createInventoryProduct = async (prod: { area: InventoryArea; name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
+  return apiRequest<InventoryProduct>(`${API_URL}/inventory/products`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(prod),
+  });
+};
+
+export const updateInventoryProduct = async (id: number, prod: { name: string; unit?: string | null; notes?: string | null; category_id?: number | null }): Promise<InventoryProduct> => {
+  return apiRequest<InventoryProduct>(`${API_URL}/inventory/products/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(prod),
+  });
+};
+
+export const deleteInventoryProduct = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/inventory/products/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
+export const getInventoryStock = async (area?: InventoryArea): Promise<InventoryStockRow[]> => {
+  const url = area ? `${API_URL}/inventory/stock?area=${area}` : `${API_URL}/inventory/stock`;
+  return apiRequest<InventoryStockRow[]>(url, { headers: getHeaders(false) });
+};
+
+export interface LowStockItem {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  unit: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  total_quantity: number;
+}
+
+export const getLowStockInventory = async (area?: InventoryArea): Promise<{ threshold: number; items: LowStockItem[] }> => {
+  const url = area ? `${API_URL}/inventory/low-stock?area=${area}` : `${API_URL}/inventory/low-stock`;
+  return apiRequest<{ threshold: number; items: LowStockItem[] }>(url, { headers: getHeaders(false) });
+};
+
+export const postInventoryMovement = async (move: {
+  product_id: number;
+  location_id: number;
+  delta: number;
+  reason: InventoryMovementReason;
+  notes?: string | null;
+}): Promise<{ movement: InventoryMovement; stock: InventoryStockRow }> => {
+  return apiRequest<{ movement: InventoryMovement; stock: InventoryStockRow }>(`${API_URL}/inventory/movements`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(move),
+  });
 };
 
 export const sendWhatsAppConfirmation = async (reservationId: number): Promise<{ success: boolean; message: string }> => {

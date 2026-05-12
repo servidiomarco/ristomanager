@@ -120,6 +120,41 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+// PUT /auth/me/preferences - Update current user's own preferences
+// Self-service: any authenticated user can update *their own* preferences only.
+// Currently exposes preferred_landing_view; pass null to clear it.
+router.put('/me/preferences', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { preferred_landing_view } = req.body as { preferred_landing_view?: string | null };
+
+    // Validate against the known view enum so we don't store junk that the
+    // client would silently ignore on next login.
+    const allowedViews = ['DASHBOARD', 'FLOOR_PLAN', 'MENU', 'RESERVATIONS', 'STAFF', 'CLIENTI', 'INVENTARIO', 'USERS', 'SETTINGS'];
+    if (preferred_landing_view !== null && preferred_landing_view !== undefined && !allowedViews.includes(preferred_landing_view)) {
+      return res.status(400).json({ error: 'Invalid preferred_landing_view' });
+    }
+
+    const updated = await AuthService.updatePreferredLanding(
+      req.user.userId,
+      preferred_landing_view ?? null
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const permissions = await RolePermissionService.getPermissionsForRole(updated.role);
+    res.json({ ...updated, permissions });
+  } catch (error) {
+    console.error('Update preferences error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ============================================
 // USER MANAGEMENT ROUTES (Owner only)
 // ============================================
@@ -136,6 +171,24 @@ router.get('/users', authenticate, authorize(UserRole.OWNER), async (req: Reques
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+
+// GET /auth/users/assignable - Minimal active-user list for task assignment pickers.
+// Available to managers and above so they can assign todos to specific people.
+// The list is scoped to the requester's rank: a manager only sees peers and below.
+router.get(
+  '/users/assignable',
+  authenticate,
+  authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER),
+  async (req: Request, res: Response) => {
+    try {
+      const users = await AuthService.getAssignableUsers(req.user!.role);
+      res.json(users);
+    } catch (error: any) {
+      console.error('Get assignable users error:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
 
 // POST /auth/users - Create new user
 router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {

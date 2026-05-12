@@ -64,7 +64,12 @@ const renderNoteBlock = (title: string, content?: string): string => {
   `;
 };
 
-export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
+export interface PrintBanquetOptions {
+  showPrice?: boolean;
+}
+
+export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBanquetOptions = {}): void => {
+  const showPrice = options.showPrice !== false;
   const eventDate = formatDate(menu.event_date);
   const price = formatEuro(menu.price_per_person);
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
@@ -84,12 +89,16 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
           .map(id => dishes.find(d => d.id === id))
           .filter((d): d is Dish => !!d);
         if (items.length === 0) return '';
+        const noteHtml = course.notes && course.notes.trim()
+          ? `<p class="course-note">${escapeHtml(course.notes)}</p>`
+          : '';
         return `
           <section class="category">
             <h3>${escapeHtml(course.name)}</h3>
             <ul>
               ${items.map(d => `<li>${escapeHtml(d.name)}</li>`).join('')}
             </ul>
+            ${noteHtml}
           </section>
         `;
       })
@@ -119,45 +128,51 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     color: #1e293b;
     margin: 0;
-    padding: 32px;
+    padding: 24px;
     background: #fff;
     line-height: 1.45;
+    font-size: 15px;
   }
   header {
-    border-bottom: 2px solid #4f46e5;
-    padding-bottom: 16px;
-    margin-bottom: 24px;
-  }
-  h1 { margin: 0 0 6px; font-size: 28px; color: #1e1b4b; }
-  .date { color: #4f46e5; font-size: 14px; font-weight: 600; text-transform: capitalize; }
-  .description { color: #475569; margin: 16px 0 0; font-size: 14px; }
-  .pricing {
     display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
     gap: 24px;
-    margin: 24px 0;
-    padding: 16px;
-    background: #f1f5f9;
-    border-radius: 8px;
+    border-bottom: 2px solid #4f46e5;
+    padding-bottom: 14px;
+    margin-bottom: 20px;
   }
-  .pricing .item .label {
+  .header-main { flex: 1; min-width: 0; }
+  .header-meta {
+    display: flex;
+    gap: 18px;
+    flex-shrink: 0;
+    align-items: flex-start;
+  }
+  .meta-item { display: flex; flex-direction: column; text-align: right; }
+  .meta-item .meta-label {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #64748b;
     font-weight: 600;
+    margin-bottom: 2px;
   }
-  .pricing .item .value {
-    font-size: 22px;
+  .meta-item .meta-value {
+    font-size: 20px;
     font-weight: 700;
     color: #1e1b4b;
+    line-height: 1.1;
   }
-  .pricing .item .unit { font-size: 12px; color: #64748b; font-weight: 400; }
+  h1 { margin: 0 0 6px; font-size: 32px; color: #1e1b4b; }
+  .date { color: #4f46e5; font-size: 16px; font-weight: 600; text-transform: capitalize; }
+  .description { color: #475569; margin: 12px 0 0; font-size: 15px; }
   .badge {
     display: inline-block;
     margin-left: 10px;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 999px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -166,16 +181,16 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
   .badge.lunch { background: #fef3c7; color: #b45309; }
   .badge.dinner { background: #e0e7ff; color: #4338ca; }
   h2 {
-    font-size: 16px;
+    font-size: 17px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #64748b;
-    margin: 0 0 12px;
+    margin: 0 0 10px;
   }
-  .notes-section { margin-top: 28px; }
+  .notes-section { margin-top: 20px; }
   .note-block {
-    margin-bottom: 16px;
-    padding: 12px 14px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
     background: #fffbeb;
     border-left: 3px solid #f59e0b;
     border-radius: 4px;
@@ -183,67 +198,76 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[]): void => {
   }
   .note-block h3 {
     margin: 0 0 6px;
-    font-size: 13px;
+    font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #b45309;
   }
   .note-block .note-content {
-    font-size: 13px;
+    font-size: 15px;
     color: #1e293b;
     white-space: pre-wrap;
   }
-  .category { margin-bottom: 18px; page-break-inside: avoid; }
+  .category { margin-bottom: 14px; page-break-inside: avoid; }
   .category h3 {
     margin: 0 0 6px;
-    font-size: 15px;
+    font-size: 18px;
     color: #4f46e5;
     border-bottom: 1px dashed #cbd5e1;
     padding-bottom: 4px;
   }
-  .category ul { margin: 0; padding-left: 18px; }
-  .category li { margin: 4px 0; font-size: 14px; }
+  .category ul { margin: 0; padding-left: 22px; }
+  .category li { margin: 4px 0; font-size: 16px; }
+  .course-note {
+    margin: 8px 0 0;
+    font-size: 14px;
+    font-style: italic;
+    color: #475569;
+    white-space: pre-wrap;
+  }
   footer {
-    margin-top: 40px;
-    padding-top: 12px;
+    margin-top: 24px;
+    padding-top: 10px;
     border-top: 1px solid #e2e8f0;
     color: #94a3b8;
     font-size: 11px;
     text-align: center;
   }
   @media print {
-    body { padding: 16mm; }
+    body { padding: 12mm; }
     header { break-after: avoid; }
   }
 </style>
 </head>
 <body>
   <header>
-    <h1>
-      ${escapeHtml(menu.name)}
-      ${menu.shift === Shift.LUNCH ? '<span class="badge lunch">Pranzo</span>' : ''}
-      ${menu.shift === Shift.DINNER ? '<span class="badge dinner">Cena</span>' : ''}
-    </h1>
-    ${eventDate ? `<div class="date">${escapeHtml(eventDate)}${shift ? ` &middot; ${escapeHtml(shift)}` : ''}</div>` : ''}
-    ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
-  </header>
-
-  <div class="pricing">
-    <div class="item">
-      <div class="label">Prezzo per persona</div>
-      <div class="value">${price}<span class="unit"> / persona</span></div>
+    <div class="header-main">
+      <h1>
+        ${escapeHtml(menu.name)}
+        ${menu.shift === Shift.LUNCH ? '<span class="badge lunch">Pranzo</span>' : ''}
+        ${menu.shift === Shift.DINNER ? '<span class="badge dinner">Cena</span>' : ''}
+      </h1>
+      ${eventDate ? `<div class="date">${escapeHtml(eventDate)}${shift ? ` &middot; ${escapeHtml(shift)}` : ''}</div>` : ''}
+      ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
     </div>
-    ${guests != null ? `
-    <div class="item">
-      <div class="label">Coperti</div>
-      <div class="value">${guests}<span class="unit"> ospiti</span></div>
-    </div>` : ''}
-    ${deposit ? `
-    <div class="item">
-      <div class="label">Acconto</div>
-      <div class="value">${deposit}</div>
-    </div>` : ''}
-  </div>
+    <div class="header-meta">
+      ${guests != null ? `
+      <div class="meta-item">
+        <span class="meta-label">Coperti</span>
+        <span class="meta-value">${guests}</span>
+      </div>` : ''}
+      ${showPrice ? `
+      <div class="meta-item">
+        <span class="meta-label">Per persona</span>
+        <span class="meta-value">${price}</span>
+      </div>
+      ${deposit ? `
+      <div class="meta-item">
+        <span class="meta-label">Acconto</span>
+        <span class="meta-value">${deposit}</span>
+      </div>` : ''}` : ''}
+    </div>
+  </header>
 
   <h2>Composizione del menù</h2>
   ${dishesHtml || '<p style="color:#94a3b8;font-size:14px;">Nessun piatto selezionato.</p>'}

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, LogOut, Eye, EyeOff } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
+import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
@@ -10,6 +11,7 @@ import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { useAuth } from '../contexts/AuthContext';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -35,6 +37,16 @@ const formatDateTime = (isoString: string): string => {
   }
   // Fallback to original behavior
   return new Date(isoString).toLocaleString();
+};
+
+// Two-letter initials from a full name (falls back to '?' on empty)
+const getInitials = (name?: string | null): string => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = parts[0][0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : '';
+  return (first + last).toUpperCase();
 };
 
 // Helper to format only time
@@ -69,6 +81,18 @@ interface ReservationListProps {
   onUpdateTable: (table: Table) => Promise<void>;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   canEdit?: boolean;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
+  modalOnly?: boolean;
+  onModalClose?: () => void;
+  // Pre-fill search term when navigating in from the global header search
+  initialSearchTerm?: string;
+  onInitialSearchTermHandled?: () => void;
+  // Global date/shift from App header (desktop)
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  onDateChange?: (date: Date) => void;
+  onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -83,12 +107,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onSplitTable,
   onUpdateTable,
   showToast,
-  canEdit = true
+  canEdit = true,
+  autoOpenNew = false,
+  onAutoOpenNewHandled,
+  modalOnly = false,
+  onModalClose,
+  initialSearchTerm,
+  onInitialSearchTermHandled,
+  globalDate,
+  globalShiftFilter: globalShiftFilterProp,
+  onDateChange,
+  onShiftFilterChange,
 }) => {
+  const { hasPermission } = useAuth();
+  const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
-  const [selectedDate, setSelectedDate] = useState<string>(formatLocalDateTime(new Date()));
-  const [selectedShift, setSelectedShift] = useState<Shift | 'ALL'>('ALL');
+  const [selectedDate, setSelectedDateLocal] = useState<string>(() => {
+    if (globalDate) return formatLocalDate(globalDate) + 'T' + (new Date().getHours() < 17 ? '13:00' : '20:00');
+    return formatLocalDateTime(new Date());
+  });
+  const setSelectedDate = (val: string) => {
+    setSelectedDateLocal(val);
+    const [datePart] = val.split('T');
+    if (datePart && onDateChange) {
+      const [y, m, d] = datePart.split('-').map(Number);
+      if (y && m && d) onDateChange(new Date(y, m - 1, d));
+    }
+  };
+  const [selectedShift, setSelectedShiftLocal] = useState<Shift | 'ALL'>(() => {
+    if (globalShiftFilterProp === 'LUNCH') return Shift.LUNCH;
+    if (globalShiftFilterProp === 'DINNER') return Shift.DINNER;
+    return 'ALL';
+  });
+  const setSelectedShift = (val: Shift | 'ALL') => {
+    setSelectedShiftLocal(val);
+    if (onShiftFilterChange) {
+      if (val === Shift.LUNCH) onShiftFilterChange('LUNCH');
+      else if (val === Shift.DINNER) onShiftFilterChange('DINNER');
+    }
+  };
+
+  // Sync from global header changes
+  useEffect(() => {
+    if (globalDate) {
+      const time = selectedDate.split('T')[1] || '12:00';
+      const newDateStr = formatLocalDate(globalDate) + 'T' + time;
+      if (newDateStr.split('T')[0] !== selectedDate.split('T')[0]) {
+        setSelectedDateLocal(newDateStr);
+      }
+    }
+  }, [globalDate]);
+  useEffect(() => {
+    if (globalShiftFilterProp === 'LUNCH') setSelectedShiftLocal(Shift.LUNCH);
+    else if (globalShiftFilterProp === 'DINNER') setSelectedShiftLocal(Shift.DINNER);
+  }, [globalShiftFilterProp]);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterArrivalStatus, setFilterArrivalStatus] = useState<ArrivalStatus | 'ALL'>('ALL');
   const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
@@ -97,7 +170,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterNoTable, setFilterNoTable] = useState(false);
   const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? '');
+  // Apply prefill from global header search, then notify the parent to clear it
+  // so it doesn't re-apply on remount.
+  useEffect(() => {
+    if (initialSearchTerm !== undefined) {
+      setSearchTerm(initialSearchTerm);
+      onInitialSearchTermHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearchTerm]);
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -153,6 +235,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSavingReservation, setIsSavingReservation] = useState(false);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
@@ -161,9 +244,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
+  const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
+  const cardMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (cardMenuOpenId === null) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (cardMenuRef.current && !cardMenuRef.current.contains(e.target as Node)) {
+        setCardMenuOpenId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [cardMenuOpenId]);
+
+  // Split-view state
+  const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
+  const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
+  const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
+  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note'; text: string; x: number; y: number } | null>(null);
+
+  // Desktop breakpoint for split-view (>= 1024px)
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
 
   // Draft restore banner — only shown while creating a new reservation
   const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
@@ -220,6 +343,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onSelectSuggestion?: (table: Table) => void;
   } | null>(null);
 
+  // Customer picker (rubrica) modal
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
+
+  // Inline customer autocomplete (name & phone fields in the reservation form)
+  const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
+  const [activeSuggestField, setActiveSuggestField] = useState<'name' | 'phone' | null>(null);
+  const [matchedCustomerNoShows, setMatchedCustomerNoShows] = useState<number>(0);
+  // Tracks which value we last queried for, so the dropdown closes on selection
+  // (we set this to the just-selected name/phone to skip re-querying for it).
+  const lastSuggestQueryRef = useRef<string>('');
+
   // Time slot options
   const LUNCH_TIMES = ['13:00', '13:30', '14:00'];
   const DINNER_TIMES = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
@@ -237,6 +371,57 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       reminder_sent: false,
       arrival_status: ArrivalStatus.WAITING
   });
+
+  // Debounced customer lookup for the active autocomplete field
+  useEffect(() => {
+    if (!activeSuggestField) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    const raw = activeSuggestField === 'name'
+      ? (formData.customer_name || '')
+      : (formData.phone || '');
+    const query = raw.trim();
+    if (query.length < 2 || query === lastSuggestQueryRef.current) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const data = await getCustomers(query);
+        if (!cancelled) setCustomerSuggestions(data.slice(0, 6));
+      } catch {
+        if (!cancelled) setCustomerSuggestions([]);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [activeSuggestField, formData.customer_name, formData.phone]);
+
+  // Auto-detect exact phone match against fetched suggestions, so the no-show
+  // warning surfaces even when the user types/pastes a known number directly.
+  useEffect(() => {
+    const digits = (s: string | null | undefined) => (s || '').replace(/\D/g, '');
+    const typedPhone = digits(formData.phone);
+    if (typedPhone.length < 6 || customerSuggestions.length === 0) return;
+    const exact = customerSuggestions.find(c => digits(c.phone) === typedPhone);
+    if (exact && (exact.no_show_count || 0) > 0) {
+      setMatchedCustomerNoShows(exact.no_show_count || 0);
+    }
+  }, [customerSuggestions, formData.phone]);
+
+  const applyCustomerSuggestion = (c: Customer) => {
+    lastSuggestQueryRef.current = activeSuggestField === 'phone' ? (c.phone || '') : c.name;
+    setFormData(prev => ({
+      ...prev,
+      customer_name: c.name,
+      phone: c.phone || prev.phone || '',
+      email: c.email || prev.email || '',
+    }));
+    setMatchedCustomerNoShows(c.no_show_count || 0);
+    setActiveSuggestField(null);
+    setCustomerSuggestions([]);
+  };
 
   // Per-shift table merges. Use the form's date+shift while the modal is open;
   // otherwise scope to the page's selectedDate/selectedShift (fallback if 'ALL').
@@ -283,6 +468,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         });
         showToast(`Tavolo ${table.name} nascosto per questo turno`, 'success');
       }
+    } catch (err: any) {
+      showToast(err?.message || 'Operazione non riuscita', 'error');
+    }
+  };
+
+  const handleUnhideAllTables = async () => {
+    if (hiddenTableIds.size === 0) return;
+    const ids = [...hiddenTableIds];
+    try {
+      await Promise.all(ids.map(id => deleteTableHidden(focalDate, focalShift, id)));
+      setHiddenTableIds(new Set());
+      setShowHidden(false);
+      showToast(`${ids.length} ${ids.length === 1 ? 'tavolo riattivato' : 'tavoli riattivati'} per questo turno`, 'success');
     } catch (err: any) {
       showToast(err?.message || 'Operazione non riuscita', 'error');
     }
@@ -436,6 +634,72 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setSortBy('time-asc');
   };
 
+  // --- Grouped reservation list for split-view ---
+  // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
+  type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
+  const groupedReservations = useMemo((): ReservationGroup[] => {
+    const dateFiltered = reservations.filter(r => {
+      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      const trimmedSearch = searchTerm.trim().toLowerCase();
+      let matchesSearch = true;
+      if (trimmedSearch) {
+        const nameHit = !!r.customer_name && r.customer_name.toLowerCase().includes(trimmedSearch);
+        const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
+        const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
+        matchesSearch = nameHit || tableHit;
+      }
+      return matchesDate && matchesShift && matchesSearch;
+    });
+
+    const waiting: Reservation[] = [];
+    const arrived: Reservation[] = [];
+    const freed: Reservation[] = [];
+    const noshow: Reservation[] = [];
+
+    for (const r of dateFiltered) {
+      const isNoShow = (r.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
+      if (isNoShow) {
+        noshow.push(r);
+        continue;
+      }
+      const status = r.arrival_status || ArrivalStatus.WAITING;
+      if (status === ArrivalStatus.DEPARTED) {
+        freed.push(r);
+      } else if (status === ArrivalStatus.ARRIVED) {
+        arrived.push(r);
+      } else {
+        waiting.push(r);
+      }
+    }
+
+    waiting.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
+    noshow.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+
+    return [
+      { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
+      { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
+      { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
+      { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
+    ].filter(g => g.items.length > 0);
+  }, [reservations, selectedDate, selectedShift, searchTerm, displayTables]);
+
+  const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
+
+  const selectedReservation = selectedReservationId
+    ? reservations.find(r => r.id === selectedReservationId) ?? null
+    : null;
+
+  // Flash animation for newly arriving reservations
+  useEffect(() => {
+    if (newReservationFlashId !== null) {
+      const timer = setTimeout(() => setNewReservationFlashId(null), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [newReservationFlashId]);
+
   // Date Navigation Helpers
   const selectedDateObj = new Date(selectedDate);
   const todayStr = formatLocalDate(new Date());
@@ -476,6 +740,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       day: 'numeric',
       month: 'long',
       year: 'numeric'
+    });
+  };
+
+  const formatSelectedDateShort = (date: Date) => {
+    return date.toLocaleDateString('it-IT', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
     });
   };
 
@@ -532,29 +804,47 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  const handleToggleArrivalStatus = (res: Reservation) => {
-      const currentStatus = res.arrival_status || ArrivalStatus.WAITING;
-      // DEPARTED → WAITING (reopen), ARRIVED → WAITING, WAITING → ARRIVED
-      const newStatus = currentStatus === ArrivalStatus.ARRIVED ? ArrivalStatus.WAITING : ArrivalStatus.ARRIVED;
-      const finalStatus = currentStatus === ArrivalStatus.DEPARTED ? ArrivalStatus.WAITING : newStatus;
-      onUpdateReservation({ ...res, arrival_status: finalStatus });
-      showToast(
-          finalStatus === ArrivalStatus.ARRIVED
-              ? `${toTitleCase(res.customer_name)} è arrivato`
-              : `${toTitleCase(res.customer_name)} è in attesa`,
-          'success'
-      );
+  type ReservationStateKey = 'waiting' | 'arrived' | 'freed' | 'noshow';
+
+  const getReservationState = (res: Reservation): ReservationStateKey => {
+    if ((res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW) return 'noshow';
+    const a = res.arrival_status || ArrivalStatus.WAITING;
+    if (a === ArrivalStatus.DEPARTED) return 'freed';
+    if (a === ArrivalStatus.ARRIVED) return 'arrived';
+    return 'waiting';
   };
 
-  const handleFreeTable = (res: Reservation) => {
-      onUpdateReservation({ ...res, arrival_status: ArrivalStatus.DEPARTED });
-      const tableName = tables.find(t => t.id === res.table_id)?.name;
-      showToast(
-          tableName
-              ? `Tavolo ${tableName} liberato (${toTitleCase(res.customer_name)})`
-              : `Prenotazione di ${toTitleCase(res.customer_name)} chiusa`,
-          'success'
-      );
+  const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
+    waiting: { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
+    arrived: { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
+    freed:   { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
+    noshow:  { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
+  };
+
+  const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
+
+  const handleSetReservationState = (res: Reservation, state: ReservationStateKey) => {
+    const update: Partial<Reservation> = {};
+    switch (state) {
+      case 'waiting':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'arrived':
+        update.arrival_status = ArrivalStatus.ARRIVED;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'freed':
+        update.arrival_status = ArrivalStatus.DEPARTED;
+        update.reservation_status = ReservationStatus.CONFIRMED;
+        break;
+      case 'noshow':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.NO_SHOW;
+        break;
+    }
+    onUpdateReservation({ ...res, ...update });
+    showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
   };
 
   // Voice input handler
@@ -696,6 +986,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setShowAllergensSection(false);
       setShowNotesSection(false);
       setModalRoomFilter('ALL');
+      setMatchedCustomerNoShows(0);
       setIsEditing(false);
       setIsFormOpen(true);
 
@@ -706,6 +997,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }>(DRAFT_KEYS.RESERVATION_NEW);
       setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
   };
+
+  // Auto-open new reservation form when triggered from outside (e.g. Dashboard CTA)
+  useEffect(() => {
+    if (autoOpenNew) {
+      handleOpenNew();
+      onAutoOpenNewHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenNew]);
+
+  // In modal-only mode, notify parent when the form closes
+  const wasFormOpenRef = useRef(false);
+  useEffect(() => {
+    if (modalOnly && wasFormOpenRef.current && !isFormOpen) {
+      onModalClose?.();
+    }
+    wasFormOpenRef.current = isFormOpen;
+  }, [isFormOpen, modalOnly, onModalClose]);
 
   const handleRestoreDraft = () => {
       const existing = loadDraft<{
@@ -760,35 +1069,80 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // --- Helper Logic ---
 
+  const getBanquetForTable = (table_id: number, checkDate: string, checkShift: Shift): BanquetMenu | null => {
+    for (const b of banquetMenus) {
+      if (b.event_date !== checkDate) continue;
+      if (b.shift !== checkShift) continue;
+      const ids = Array.isArray(b.table_ids) ? b.table_ids : [];
+      if (ids.includes(table_id)) return b;
+    }
+    return null;
+  };
+
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
-    return reservations.some(r =>
+    const occupiedByReservation = reservations.some(r =>
         r.table_id === table_id &&
         r.reservation_time.split('T')[0] === checkDate &&
         r.shift === checkShift &&
         r.id !== formData.id &&
         r.arrival_status !== ArrivalStatus.DEPARTED
     );
+    if (occupiedByReservation) return true;
+    return !!getBanquetForTable(table_id, checkDate, checkShift);
   };
 
   const getReservationForTable = (table_id: number) => {
       return reservations.find(r =>
           r.table_id === table_id &&
           r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
-          r.shift === selectedShift &&
+          (selectedShift === 'ALL' || r.shift === selectedShift) &&
           r.arrival_status !== ArrivalStatus.DEPARTED
       );
   }
 
-  const getReservationForTableInForm = (table_id: number) => {
+  // Returns either a reservation OR a banquet that occupies this table for the
+  // currently selected date+shift in the map view. Used by Map view to render
+  // banquet-occupied tables with their own visual state.
+  const getOccupierForTable = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
+      const date = selectedDate.split('T')[0];
+      const res = getReservationForTable(table_id);
+      if (res) return { kind: 'reservation', data: res };
+      if (selectedShift === 'ALL') {
+          const banquetLunch = getBanquetForTable(table_id, date, Shift.LUNCH);
+          if (banquetLunch) return { kind: 'banquet', data: banquetLunch };
+          const banquetDinner = getBanquetForTable(table_id, date, Shift.DINNER);
+          if (banquetDinner) return { kind: 'banquet', data: banquetDinner };
+          return null;
+      }
+      const banquet = getBanquetForTable(table_id, date, selectedShift);
+      if (banquet) return { kind: 'banquet', data: banquet };
+      return null;
+  };
+
+  // Returns either a reservation OR a banquet that occupies this table for the
+  // form's date+shift. The picker uses the result to mark the table as occupied
+  // and to display the occupier's name in the red pill.
+  const getOccupierForTableInForm = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
       if (!formData.reservation_time || !formData.shift) return null;
-      return reservations.find(r =>
+      const date = formData.reservation_time.split('T')[0];
+      const res = reservations.find(r =>
           r.table_id === table_id &&
-          r.reservation_time.split('T')[0] === formData.reservation_time!.split('T')[0] &&
+          r.reservation_time.split('T')[0] === date &&
           r.shift === formData.shift &&
           r.id !== formData.id &&
           r.arrival_status !== ArrivalStatus.DEPARTED
       );
-  }
+      if (res) return { kind: 'reservation', data: res };
+      const banquet = getBanquetForTable(table_id, date, formData.shift);
+      if (banquet) return { kind: 'banquet', data: banquet };
+      return null;
+  };
+
+  // Backwards-compatible: returns only the reservation (or null) for legacy callers.
+  const getReservationForTableInForm = (table_id: number): Reservation | null => {
+      const occ = getOccupierForTableInForm(table_id);
+      return occ && occ.kind === 'reservation' ? occ.data : null;
+  };
 
   const handleTableSelection = (table: Table) => {
       const guests = formData.guests || 1;
@@ -804,6 +1158,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   other.merged_with && other.merged_with.length > 0 &&
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
               ))
+              .filter(t => !hiddenTableIds.has(t.id))
               .sort((a, b) => a.seats - b.seats);
 
           if (suitableTables.length > 0) {
@@ -884,9 +1239,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
+      if (isSavingReservation) return;
 
       // Combine allergens, quick notes, and additional notes
       const allergensText = selectedAllergens.length > 0
@@ -903,24 +1259,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           notes: combinedNotes || undefined
       };
 
-      if (isEditing) {
-          onUpdateReservation(dataToSave as Reservation);
-      } else {
-          onAddReservation(dataToSave as Omit<Reservation, 'id'>);
-          clearDraft(DRAFT_KEYS.RESERVATION_NEW);
-      }
+      try {
+          setIsSavingReservation(true);
+          if (isEditing) {
+              await onUpdateReservation(dataToSave as Reservation);
+          } else {
+              await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+              clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+          }
 
-      setDraftBanner(null);
-      setIsFormOpen(false);
+          setDraftBanner(null);
+          setIsFormOpen(false);
+      } finally {
+          setIsSavingReservation(false);
+      }
   };
 
   const getStatusColor = (status: PaymentStatus) => {
     switch (status) {
-      case PaymentStatus.PAID_FULL: return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case PaymentStatus.PAID_DEPOSIT: return 'bg-blue-100 text-blue-700 border-blue-200';
-      case PaymentStatus.PENDING: return 'bg-amber-100 text-amber-700 border-amber-200';
-      case PaymentStatus.REFUNDED: return 'bg-red-100 text-red-700 border-red-200';
-      default: return 'bg-gray-100';
+      case PaymentStatus.PAID_FULL: return 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
+      case PaymentStatus.PAID_DEPOSIT: return 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
+      case PaymentStatus.PENDING: return 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
+      case PaymentStatus.REFUNDED: return 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30';
+      default: return 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]';
     }
   };
 
@@ -938,10 +1299,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     );
   };
 
-  // Get visible tables (not merged into another table)
+  // Get visible tables (not merged into another table, not hidden for this shift)
   const visibleTables = displayTables.filter(t =>
     (modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter) &&
-    !isTableMergedIntoAnother(t.id)
+    !isTableMergedIntoAnother(t.id) &&
+    !hiddenTableIds.has(t.id)
   );
 
   const totalTablesInFilter = visibleTables.length;
@@ -962,929 +1324,1277 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Render logic for Map Table
   const renderMapTable = (table: Table) => {
-      const reservation = getReservationForTable(table.id);
-      const isOccupied = !!reservation;
-      const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
+      const occupier = getOccupierForTable(table.id);
+      const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
+      const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+      const isOccupied = !!occupier;
+      const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
       const isHidden = hiddenTableIds.has(table.id);
       const trimmedSearch = searchTerm.trim().toLowerCase();
       const isSearchMatch = !!(trimmedSearch && (
         (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+        (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
         table.name.toLowerCase().includes(trimmedSearch)
       ));
 
-      // Responsive table sizes - smaller on mobile and tablets
-      const baseSize = window.innerWidth < 768 ? 45 : 80; // 45px on mobile/tablet, 80px on desktop
-      const baseWidth = window.innerWidth < 768 ? 60 : 100; // For rectangles
+      // Uniform table sizes on the map. The seat count is shown inside the
+      // card, so we don't need to scale rectangles by capacity.
+      const baseSize = window.innerWidth < 768 ? 50 : 100;
 
-      let shapeStyles = {};
+      let widthPx: number;
+      let heightPx: number;
+      let borderRadius: string;
       if (table.shape === TableShape.CIRCLE) {
-          shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
-      } else if (table.shape === TableShape.SQUARE) {
-          shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '50%';
       } else {
-          const width = Math.max(baseWidth, table.seats * (window.innerWidth < 768 ? 8 : 15));
-          shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
       }
+
+      // Anchor the reservation pill below the rotated bounding box so it
+      // always sits horizontally below the visible table at any rotation.
+      const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+      const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+      const pillTopPx = heightPx / 2 + rotatedHalfH + 6;
+
+      const shapeClasses = `flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
+          ${isArrived
+              ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300 dark:ring-orange-500/30'
+              : reservation
+                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300 dark:ring-rose-500/30'
+                  : banquet
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc] dark:ring-[#4f46e5]/40'
+                      : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+          }
+          ${isHidden ? 'opacity-40 grayscale' : ''}
+      `;
+
+      const isHighlighted = selectedReservation?.table_id === table.id && detailDrawerOpen;
+      const hoveredRes = hoveredReservationId ? reservations.find(r => r.id === hoveredReservationId) : null;
+      const isHoverMatch = hoveredRes?.table_id === table.id;
+
+      const tooltipText = isHidden
+          ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
+          : reservation
+              ? `Occupato da: ${toTitleCase(reservation.customer_name)}`
+              : banquet
+                  ? `Banchetto: ${banquet.name}`
+                  : 'Libero — clicca per assegnare una prenotazione';
 
       return (
         <div
             key={table.id}
-            className={`absolute flex flex-col items-center justify-center border-2 shadow-sm transition-all select-none
-                ${isArrived
-                    ? 'bg-orange-100 border-orange-500 text-orange-900 shadow-orange-200 z-10 ring-2 ring-orange-200'
-                    : isOccupied
-                        ? 'bg-red-100 border-red-500 text-red-900 shadow-red-200 z-10 ring-2 ring-red-200'
-                        : 'bg-white border-emerald-300 text-emerald-700 hover:shadow-md hover:-translate-y-1'
-                }
-                ${isSearchMatch ? 'animate-glow-pulse z-20' : ''}
-                ${isHidden ? 'opacity-40 grayscale' : ''}
-            `}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isHighlighted ? 'z-30' : ''}`}
             style={{
                 left: table.x,
                 top: table.y,
-                ...shapeStyles,
-                transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined
+                width: `${widthPx}px`,
+                height: `${heightPx}px`,
             }}
-            title={isHidden
-                ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
-                : (isOccupied ? `Occupato da: ${toTitleCase(reservation.customer_name)}` : 'Libero — clicca per assegnare una prenotazione')}
+            title={tooltipText}
             onClick={() => {
-                if (isOccupied) {
+                if (reservation) {
                     handleEditClick(reservation);
+                } else if (banquet) {
+                    // Banquet-occupied tables are not assignable from this view.
                 } else if (canEdit) {
                     setAssignTableModal(table);
                 }
             }}
         >
-            {isHidden && (
-                <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                    <EyeOff size={8} />
+            <div
+                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
+                style={{
+                    width: `${widthPx}px`,
+                    height: `${heightPx}px`,
+                    borderRadius,
+                    transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+                }}
+            >
+                {isHidden && (
+                    <div className="absolute -top-2 -left-2 bg-slate-500 text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff]">
+                        <EyeOff size={8} />
+                    </div>
+                )}
+                <span className="font-bold text-lg sm:text-xl tracking-tight truncate px-1 max-w-full leading-tight">{table.name}</span>
+                {reservation ? (
+                    <span className="flex items-center gap-1 text-lg sm:text-xl font-bold leading-tight">
+                        <Users size={18} /> {reservation.guests}
+                    </span>
+                ) : banquet ? (
+                    <span className="flex items-center gap-1 text-xs sm:text-sm font-semibold">
+                        <BookOpen size={14} />
+                    </span>
+                ) : (
+                    <span className="text-xs sm:text-sm flex items-center gap-1 opacity-80">
+                        <Armchair size={12} /> {table.seats}
+                    </span>
+                )}
+            </div>
+            {reservation && (
+                <div
+                    style={{ top: pillTopPx }}
+                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
+                    title={reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined}
+                >
+                    {reservation.created_by_user_name ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[10px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            {getInitials(reservation.created_by_user_name)}
+                        </span>
+                    ) : (
+                        <span className="pl-2" />
+                    )}
+                    <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
                 </div>
             )}
-            <span className="font-bold text-base sm:text-lg truncate px-1 max-w-full">{table.name}</span>
-            {isOccupied ? (
-                <span className="flex items-center gap-1 text-base sm:text-lg font-bold">
-                    <Users size={16} /> {reservation.guests}
-                </span>
-            ) : (
-                <span className="text-[10px] flex items-center gap-1 opacity-80">
-                    <Armchair size={10} /> {table.seats}
-                </span>
-            )}
-            {isOccupied && (
-                <div className={`absolute -bottom-6 sm:-bottom-7 left-1/2 -translate-x-1/2 text-white text-sm sm:text-base font-semibold px-3 py-1 rounded-full whitespace-nowrap shadow-md max-w-[180px] truncate border-2 border-white ${isArrived ? 'bg-orange-600' : 'bg-red-600'}`}>
-                    {toTitleCase(reservation.customer_name)}
+            {banquet && (
+                <div
+                    style={{ top: pillTopPx }}
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-sm sm:text-base font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff]"
+                >
+                    <BookOpen size={14} className="flex-shrink-0" />
+                    <span className="truncate">{banquet.name}</span>
                 </div>
             )}
         </div>
       );
   };
 
-  return (
-    <div className={`${viewMode === 'MAP' ? 'p-4 sm:p-6 pt-4' : 'max-w-7xl mx-auto p-6 pt-4'} space-y-4`}>
-      {headerSlot && createPortal(
-        <>
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <h1 className="text-base sm:text-lg font-bold text-slate-800 truncate">Gestione Prenotazioni</h1>
-            <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium transition-all duration-300 ${
-              isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700 animate-pulse'
-            }`}>
-              {isConnected ? '🟢 Live' : '🔴 Offline'}
+  // --- Helpers for reservation rows ---
+  const handleRowClick = (res: Reservation) => {
+    if (selectedReservationId === res.id) {
+      setSelectedReservationId(null);
+      setDetailDrawerOpen(false);
+    } else {
+      setSelectedReservationId(res.id);
+      setDetailDrawerOpen(true);
+    }
+  };
+
+  const closeDetailDrawer = () => {
+    setSelectedReservationId(null);
+    setDetailDrawerOpen(false);
+  };
+
+  const renderReservationRow = (res: Reservation, group: ReservationGroup) => {
+    const table = displayTables.find(t => t.id === res.table_id);
+    const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
+    const isSelected = selectedReservationId === res.id;
+    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
+    const isFlashing = newReservationFlashId === res.id;
+    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+
+    return (
+      <div
+        key={res.id}
+        className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
+          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
+          ${isFlashing ? 'animate-flash-row' : ''}
+          ${group.key === 'freed' ? 'opacity-60' : ''}
+        `}
+        onMouseEnter={() => setHoveredReservationId(res.id)}
+        onMouseLeave={() => setHoveredReservationId(null)}
+        onClick={() => handleRowClick(res)}
+      >
+        {/* Left content */}
+        <div className="flex-1 min-w-0 px-3 py-2">
+          {/* Row 1: Time + indicator icons */}
+          <div className="flex items-center gap-1.5 h-5">
+            <span className="text-xs text-[var(--color-fg)] tabular">
+              {formatTime(res.reservation_time)}
             </span>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            {canEdit && (
-              <button
-                onClick={handleOpenNew}
-                className="hidden sm:flex items-center gap-2 bg-indigo-600 text-white px-3 sm:px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-all text-sm font-medium"
-              >
-                <Plus className="h-5 w-5" />
-                <span>Nuova</span>
+            {allergenText && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
+                className="flex-shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
               </button>
             )}
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`p-2 rounded-lg transition-all ${viewMode === 'LIST' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
-                title="Vista Elenco"
-              >
-                <List className="h-5 w-5" />
+            {noteText && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                className="flex-shrink-0">
+                <StickyNote className="h-3.5 w-3.5 text-amber-500" />
               </button>
-              <button
-                onClick={() => setViewMode('MAP')}
-                className={`p-2 rounded-lg transition-all ${viewMode === 'MAP' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
-                title="Vista Mappa Sala"
-              >
-                <MapIcon className="h-5 w-5" />
+            )}
+            {res.payment_status !== PaymentStatus.PENDING && (
+              <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+              </span>
+            )}
+            {menu && (
+              <span className="flex-shrink-0" title={menu.name}>
+                <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+              </span>
+            )}
+            {group.key === 'noshow' && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                <UserX className="h-2.5 w-2.5" /> No show
+              </span>
+            )}
+          </div>
+
+          {/* Row 2: Customer name */}
+          <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate">
+            {toTitleCase(res.customer_name)}
+          </p>
+
+          {/* Row 3: Actions */}
+          {canEdit && (
+            <div className="flex items-center gap-2.5 mt-1.5">
+              {(() => {
+                const state = getReservationState(res);
+                const meta = RESERVATION_STATE_META[state];
+                return (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+                    className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                    title="Cambia stato">
+                    {meta.label}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </button>
+                );
+              })()}
+              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                  <MapPin className="h-3.5 w-3.5" /> Tavolo
+                </button>
+              )}
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
-          </div>
-        </>,
-        headerSlot
-      )}
+          )}
+        </div>
 
-      {/* Floating Action Button — Nuova (mobile only) */}
-      {canEdit && (
-        <button
-          onClick={handleOpenNew}
-          className="sm:hidden fixed bottom-24 right-4 z-40 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl shadow-indigo-300 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center"
-          title="Nuova prenotazione"
-          aria-label="Nuova prenotazione"
-        >
-          <Plus className="h-7 w-7" />
+        {/* Covers count */}
+        <div className="flex items-start pt-2 pr-3 flex-shrink-0">
+          <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+            <Users className="h-3.5 w-3.5" />
+            <span className="text-base font-medium tabular">{res.guests}</span>
+          </div>
+        </div>
+
+        {/* Table strip — full height */}
+        <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
+          table
+            ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+              : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+              : group.key === 'noshow' ? 'bg-rose-50 dark:bg-rose-500/15'
+              : 'bg-[#dbeafe] dark:bg-blue-500/15'
+            : 'bg-[var(--color-surface-3)]'
+        }`}>
+          {table ? (
+            <>
+              <span className={`text-base font-bold leading-6 ${
+                group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                  : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                  : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-[#193cb8] dark:text-blue-300'
+              }`}>{table.name}</span>
+              {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
+            </>
+          ) : (
+            <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- Detail drawer content ---
+  const renderDetailDrawer = (res: Reservation) => {
+    const table = displayTables.find(t => t.id === res.table_id);
+    const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
+    const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
+    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+
+    return (
+      <div className="bg-[var(--color-surface)] border-t border-[var(--color-line)] shadow-[0_-4px_12px_rgba(0,0,0,0.08)] rounded-t-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+        {/* Drag handle */}
+        <div className="flex justify-center pt-2 pb-1">
+          <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+        </div>
+
+        <div className="px-4 pb-4 space-y-3 max-h-[50vh] lg:max-h-none overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name)}</h3>
+              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
+                <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
+                {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
+              </div>
+            </div>
+            <button type="button" onClick={closeDetailDrawer} className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Info badges */}
+          <div className="flex flex-wrap gap-1.5">
+            {res.payment_status !== PaymentStatus.PENDING && (
+              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${getStatusColor(res.payment_status)}`}>
+                <CreditCard className="h-2.5 w-2.5" />
+                {res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}
+              </span>
+            )}
+            {menu && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 dark:bg-[#4f46e5]/15 dark:border-[#4f46e5]/30 dark:text-[#a5b4fc] text-[10px] font-medium">
+                <BookOpen className="h-2.5 w-2.5" /> {menu.name}
+              </span>
+            )}
+            {allergenText && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-medium">
+                <AlertTriangle className="h-2.5 w-2.5" /> {allergenText}
+              </span>
+            )}
+          </div>
+
+          {/* Contact info */}
+          {(res.phone || res.email) && (
+            <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+              {res.phone && <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" /> {res.phone}</span>}
+              {res.email && <span className="flex items-center gap-1 truncate"><Mail className="h-3 w-3 flex-shrink-0" /> {res.email}</span>}
+            </div>
+          )}
+
+          {/* Notes */}
+          {noteText && (
+            <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] rounded-md px-3 py-2">
+              <StickyNote className="h-3 w-3 inline mr-1" />{noteText}
+            </div>
+          )}
+
+          {/* Actions */}
+          {canEdit && (
+            <div className="flex items-center gap-2.5 pt-1 flex-wrap">
+              {(() => {
+                const state = getReservationState(res);
+                const meta = RESERVATION_STATE_META[state];
+                return (
+                  <button onClick={() => setStateChangeReservation(res)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                    title="Cambia stato">
+                    Stato: {meta.label}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </button>
+                );
+              })()}
+              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:hover:bg-slate-500/25 transition-colors">
+                  <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
+                </button>
+              )}
+              <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                <Edit2 className="h-3.5 w-3.5" /> Modifica
+              </button>
+              <button onClick={() => { handleDeleteClick(res.id, res.customer_name); closeDetailDrawer(); }}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors">
+                <Trash2 className="h-3.5 w-3.5" /> Annulla
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- Desktop header controls (date/shift moved to App header) ---
+  const renderHeaderControls = () => null;
+
+  // --- Grouped list panel (shared between desktop left column and mobile list view) ---
+  const renderGroupedList = () => (
+    <>
+      {/* Search + filter + sort row */}
+      <div className="px-3 pt-3 pb-2 flex items-center gap-1.5">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
+          <input type="text" placeholder="Cerca per nome o tavolo..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
+            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          {searchTerm && (
+            <button type="button" onClick={() => setSearchTerm('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Sort — opens modal */}
+        <button type="button" onClick={() => setShowSortModal(true)}
+          className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+          aria-label="Ordina">
+          <ArrowUpDown className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
         </button>
-      )}
 
-      {/* Search & Filters Bar */}
-      <div className="flex flex-wrap items-stretch gap-3 bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200">
-            <div className="relative flex-1 min-w-[200px] h-11">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
-                <input
-                    type="text"
-                    placeholder="Cerca per nome o tavolo..."
-                    className="w-full h-full pl-10 pr-10 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                    <button
-                        type="button"
-                        onClick={() => setSearchTerm('')}
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
-                        title="Cancella ricerca"
-                        aria-label="Cancella ricerca"
-                    >
-                        <X className="h-4 w-4" />
-                    </button>
-                )}
-            </div>
+        {/* Filter — opens modal */}
+        <button type="button" onClick={() => setShowFiltersPanel(true)}
+          className={`relative h-9 w-9 rounded-full border transition-colors flex items-center justify-center flex-shrink-0 ${
+            activeFilterCount > 0
+              ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+              : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+          }`}>
+          <Filter className="h-3.5 w-3.5" />
+          {activeFilterCount > 0 && (
+            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
 
-            <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 px-1 h-11 w-full sm:w-auto">
-                {!isToday && (
-                    <button
-                        onClick={goToToday}
-                        className="px-3 h-9 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                    >
-                        Oggi
-                    </button>
-                )}
-
-                <button
-                    onClick={goToPreviousDay}
-                    className="h-9 w-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
-                    aria-label="Giorno precedente"
-                >
-                    <ChevronLeft className="h-5 w-5 text-slate-600" />
-                </button>
-
-                <div className="relative h-9 flex items-center">
-                    <div className="flex items-center gap-2 px-3 sm:px-4 h-9 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                        <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-                        <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
-                            {formatSelectedDate(selectedDateObj)}
-                        </span>
-                    </div>
-                    <input
-                        ref={dateInputRef}
-                        type="date"
-                        value={selectedDateStr}
-                        onChange={handleDateInputChange}
-                        onClick={(e) => {
-                            const input = e.currentTarget;
-                            try {
-                                if (typeof input.showPicker === 'function') input.showPicker();
-                            } catch {
-                                // ignore — fall back to native focus
-                            }
-                        }}
-                        aria-label="Seleziona data"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                </div>
-
-                <button
-                    onClick={goToNextDay}
-                    className="h-9 w-9 flex items-center justify-center hover:bg-slate-100 rounded-lg transition-colors"
-                    aria-label="Giorno successivo"
-                >
-                    <ChevronRight className="h-5 w-5 text-slate-600" />
-                </button>
-            </div>
-
-            {/* Clock + Shift Toggle - share a row, justified on mobile */}
-            <div className="flex items-stretch justify-between sm:justify-start gap-3 w-full sm:w-auto">
-                <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 h-11">
-                    <Clock className="h-5 w-5 text-indigo-600" />
-                    <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
-                        {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                </div>
-
-                <div className="bg-slate-100 rounded-xl flex items-center gap-1 px-1 h-11">
-                    <button
-                        onClick={() => setSelectedShift(Shift.LUNCH)}
-                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        <Sun className="h-4 w-4" /> Pranzo
-                    </button>
-                    <button
-                        onClick={() => setSelectedShift(Shift.DINNER)}
-                        className={`flex items-center justify-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all ${selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        <Moon className="h-4 w-4" /> Cena
-                    </button>
-                </div>
-            </div>
-
-            {viewMode === 'LIST' && (
-                <div className="flex items-stretch gap-2 w-full sm:w-auto">
-                    <div className="relative h-11">
-                        <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                            className="appearance-none h-11 pl-10 pr-9 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
-                            aria-label="Ordina prenotazioni"
-                        >
-                            <option value="time-asc">Orario ↑</option>
-                            <option value="time-desc">Orario ↓</option>
-                            <option value="name-asc">Nome A–Z</option>
-                            <option value="name-desc">Nome Z–A</option>
-                            <option value="guests-asc">Coperti ↑</option>
-                            <option value="guests-desc">Coperti ↓</option>
-                        </select>
-                        <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setShowFiltersPanel(o => !o)}
-                        className={`relative h-11 px-4 rounded-xl border text-sm font-medium transition-colors flex items-center gap-2 ${
-                            showFiltersPanel || activeFilterCount > 0
-                                ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                        aria-expanded={showFiltersPanel}
-                    >
-                        <Filter className="h-4 w-4" />
-                        Filtri
-                        {activeFilterCount > 0 && (
-                            <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold">
-                                {activeFilterCount}
-                            </span>
-                        )}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setIsPrintModalOpen(true)}
-                        className="ml-auto sm:ml-0 h-11 px-3 sm:px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                        title="Stampa lista prenotazioni"
-                        aria-label="Stampa lista prenotazioni"
-                    >
-                        <Printer className="h-4 w-4" />
-                        <span className="hidden sm:inline">Stampa</span>
-                    </button>
-                </div>
-            )}
+        {/* Print — desktop only (next to search/filter/sort) */}
+        <button type="button" onClick={() => setIsPrintModalOpen(true)}
+          className="hidden lg:flex h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors items-center justify-center flex-shrink-0"
+          aria-label="Stampa">
+          <Printer className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Filters Panel */}
-      {viewMode === 'LIST' && showFiltersPanel && (
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-indigo-500" />
-                      Filtri
-                  </h3>
-                  {activeFilterCount > 0 && (
-                      <button
-                          type="button"
-                          onClick={resetFilters}
-                          className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors"
-                      >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          Reimposta
-                      </button>
-                  )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Stato pagamento</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {[
-                              { value: 'ALL', label: 'Tutti' },
-                              { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                              { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                              { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
-                              { value: PaymentStatus.REFUNDED, label: 'Rimborsato' },
-                          ].map(opt => (
-                              <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setFilterStatus(opt.value)}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                      filterStatus === opt.value
-                                          ? 'bg-indigo-600 text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                  }`}
-                              >
-                                  {opt.label}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Stato arrivo</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {[
-                              { value: 'ALL', label: 'Tutti' },
-                              { value: ArrivalStatus.WAITING, label: 'In attesa' },
-                              { value: ArrivalStatus.ARRIVED, label: 'Arrivato' },
-                              { value: ArrivalStatus.DEPARTED, label: 'Liberato' },
-                          ].map(opt => (
-                              <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setFilterArrivalStatus(opt.value as ArrivalStatus | 'ALL')}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                      filterArrivalStatus === opt.value
-                                          ? 'bg-indigo-600 text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                  }`}
-                              >
-                                  {opt.label}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Coperti</label>
-                      <div className="flex flex-wrap gap-1.5">
-                          {(['ALL', '1-2', '3-4', '5-6', '7+'] as const).map(range => (
-                              <button
-                                  key={range}
-                                  type="button"
-                                  onClick={() => setFilterGuestRange(range)}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                      filterGuestRange === range
-                                          ? 'bg-indigo-600 text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                  }`}
-                              >
-                                  {range === 'ALL' ? 'Tutti' : range}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  <div className="md:col-span-2 lg:col-span-3">
-                      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5 block">Altri filtri</label>
-                      <div className="flex flex-wrap gap-2">
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterHasAllergens}
-                                  onChange={(e) => setFilterHasAllergens(e.target.checked)}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                                  Solo con allergeni
-                              </span>
-                          </label>
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterHasNotes}
-                                  onChange={(e) => setFilterHasNotes(e.target.checked)}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
-                                  <StickyNote className="h-3.5 w-3.5 text-slate-500" />
-                                  Solo con note
-                              </span>
-                          </label>
-                          <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
-                              <input
-                                  type="checkbox"
-                                  checked={filterNoTable}
-                                  onChange={(e) => setFilterNoTable(e.target.checked)}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
-                                  <Armchair className="h-3.5 w-3.5 text-rose-500" />
-                                  Senza tavolo
-                              </span>
-                          </label>
-                      </div>
-                  </div>
-              </div>
+      {/* Grouped reservation list */}
+      {totalGroupedCount === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-4">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
+            {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
           </div>
+          <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
+          <p className="text-xs text-[var(--color-fg-muted)] mt-1">
+            Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
+          </p>
+          {canEdit && (
+            <button onClick={handleOpenNew}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
+              <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          {groupedReservations.map(group => (
+            <div key={group.key}>
+              {/* Group header */}
+              <button type="button" onClick={() => toggleGroup(group.key)}
+                className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10">
+                <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
+                <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
+                <span className="text-xs text-[var(--color-fg-muted)] font-medium">
+                  {group.items.length} {group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · {group.items.reduce((s, r) => s + (r.guests || 0), 0)} coperti
+                </span>
+                <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
+              </button>
+              {/* Group items */}
+              {expandedGroups.has(group.key) && (
+                <div>
+                  {group.items.map(res => renderReservationRow(res, group))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
-      {/* --- LIST VIEW --- */}
-      {viewMode === 'LIST' && (
-          <div className="grid gap-4 animate-in fade-in duration-300">
-            {filteredReservations.length === 0 ? (
-                <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-300">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
-                    {selectedShift === Shift.LUNCH ? <Sun className="h-8 w-8 text-amber-400" /> : selectedShift === Shift.DINNER ? <Moon className="h-8 w-8 text-indigo-400" /> : <Calendar className="h-8 w-8 text-slate-400" />}
-                    </div>
-                    <h3 className="text-lg font-medium text-slate-900">Nessuna prenotazione</h3>
-                    <p className="text-slate-500">
-                        Non ci sono prenotazioni{selectedShift === 'ALL' ? '' : ` per il turno di <b>${selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}</b>`} in questa data.
-                    </p>
-                    <button
-                        onClick={handleOpenNew}
-                        className="mt-4 px-4 py-2 bg-white border border-slate-200 shadow-sm rounded-lg text-indigo-600 font-medium hover:bg-slate-50 transition-colors"
-                    >
-                        Aggiungine una ora
-                    </button>
+      {/* Sort modal — slides up within list column on desktop */}
+      {showSortModal && (
+        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-2">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+            </div>
+            <div className="px-3">
+              {[
+                { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
+                { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
+                { value: 'name-asc' as const, label: 'Nome A → Z' },
+                { value: 'name-desc' as const, label: 'Nome Z → A' },
+                { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
+                { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+              ].map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
+                    sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                  }`}>
+                  {opt.label}
+                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter modal — slides up within list column on desktop */}
+      {showFiltersPanel && (
+        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+              {activeFilterCount > 0 && (
+                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                  <RotateCcw className="h-3.5 w-3.5" /> Reimposta
+                </button>
+              )}
+            </div>
+            <div className="px-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'ALL', label: 'Tutti' },
+                    { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                    { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                    { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                        filterStatus === opt.value
+                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                      }`}>{opt.label}</button>
+                  ))}
                 </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Allergeni
+                  </button>
+                  <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Con note
+                  </button>
+                  <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    Senza tavolo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // --- Map panel (shared between desktop right column and mobile map view) ---
+  const renderMapPanel = () => {
+    const tablesInRoom = displayTables
+      .filter(t => t.room_id === activeMapRoomId)
+      .filter(t => !displayTables.some(other =>
+        other.merged_with && other.merged_with.length > 0 &&
+        other.merged_with.map(id => Number(id)).includes(Number(t.id))
+      ))
+      .filter(t => showHidden || !hiddenTableIds.has(t.id));
+
+    const occupiedTablesCount = tablesInRoom.filter(t => getOccupierForTable(t.id)).length;
+    const totalTablesInRoom = tablesInRoom.length;
+    const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
+
+    const reservationsForDayShift = reservations.filter(r => {
+      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      return matchesDate && matchesShift;
+    });
+    const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
+    const reservationCountForDayShift = reservationsForDayShift.length;
+    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
+
+    const PADDING = 40;
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const baseSize = isMobile ? 45 : 80;
+    const baseWidth = isMobile ? 60 : 100;
+    const seatMultiplier = isMobile ? 8 : 15;
+    let maxRight = 0;
+    let maxBottom = 0;
+    for (const t of tablesInRoom) {
+      let w: number, h: number;
+      if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) { w = baseSize; h = baseSize; }
+      else { w = Math.max(baseWidth, t.seats * seatMultiplier); h = baseSize; }
+      maxRight = Math.max(maxRight, t.x + w);
+      maxBottom = Math.max(maxBottom, t.y + h);
+    }
+    const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
+    const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
+    const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
+      ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
+      : 1;
+
+    return (
+      <div className="flex flex-col h-full">
+        {/* Room tabs + stats */}
+        <div className="flex items-center gap-3 px-3 py-2 border-b border-[var(--color-line)]">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+            {rooms.filter(r => !r.is_closed).map(room => (
+              <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
+                className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
+                  activeMapRoomId === room.id
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                }`}>
+                {room.name}
+              </button>
+            ))}
+          </div>
+          {hiddenTableIds.size > 0 && (
+            <>
+              <button type="button" onClick={() => setShowHidden(v => !v)}
+                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                  showHidden
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                }`}
+                title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
+                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
+              </button>
+              {canEdit && (
+                <button type="button" onClick={() => setUnhideAllConfirm(true)}
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/25 transition-colors"
+                  title="Riattiva tutti i tavoli nascosti per questo turno">
+                  <RotateCcw size={14} />
+                  <span>Riattiva tutti</span>
+                </button>
+              )}
+            </>
+          )}
+          <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+              <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+              <span className="text-[var(--color-fg-muted)]">coperti</span>
+            </div>
+            <span className="text-[var(--color-fg-subtle)]">·</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+              <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+            </div>
+            {unassignedCountForDayShift > 0 && (
+              <button type="button" onClick={() => setShowUnassignedModal(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors"
+                title="Tocca per vedere le prenotazioni senza tavolo">
+                <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+                <span className="text-xs">senza tavolo</span>
+                <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
+              </button>
+            )}
+            <span className="text-[var(--color-fg-subtle)]">·</span>
+            <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+              <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile stats */}
+        <div className="md:hidden px-3 py-2 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
+            <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
+            <span className="text-[var(--color-fg-muted)]">coperti</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
+            <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
+          </div>
+          {unassignedCountForDayShift > 0 && (
+            <button type="button" onClick={() => setShowUnassignedModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors w-fit">
+              <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
+              <span className="text-xs">senza tavolo</span>
+            </button>
+          )}
+          <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
+            <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
+            <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+          </div>
+        </div>
+
+        {/* Map canvas */}
+        {isPhone ? (
+          <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative m-3">
+            {isLoadingMerges && (
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                </div>
+              </div>
+            )}
+            {tablesInRoom.length === 0 ? (
+              <div className="text-center py-10 px-4 text-sm text-[var(--color-fg-muted)]">
+                Nessun tavolo in questa sala.
+              </div>
             ) : (
-                filteredReservations.map(res => {
-                    const table = displayTables.find(t => t.id === res.table_id);
-                    const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
-                    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-                    const isDeparted = arrivalStatus === ArrivalStatus.DEPARTED;
-                    const borderColor = isDeparted
-                        ? 'border-l-slate-400'
-                        : arrivalStatus === ArrivalStatus.ARRIVED ? 'border-l-orange-500' : 'border-l-emerald-500';
-                    const cardOpacity = isDeparted ? 'opacity-70' : '';
-
-                    const tableBadgeColor = isDeparted
-                        ? 'bg-slate-100 border-slate-300 text-slate-500'
-                        : arrivalStatus === ArrivalStatus.ARRIVED
-                            ? 'bg-orange-50 border-orange-300 text-orange-700'
-                            : 'bg-emerald-50 border-emerald-300 text-emerald-700';
-                    const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
-
+              <ul className="divide-y divide-[var(--color-line)]">
+                {[...tablesInRoom]
+                  .sort((a, b) => {
+                    const oa = getOccupierForTable(a.id);
+                    const ob = getOccupierForTable(b.id);
+                    if (!!oa !== !!ob) return oa ? -1 : 1;
+                    const ra = oa?.kind === 'reservation' ? oa.data : null;
+                    const rb = ob?.kind === 'reservation' ? ob.data : null;
+                    if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
+                    if (ra && !rb) return -1;
+                    if (!ra && rb) return 1;
+                    return a.name.localeCompare(b.name, 'it', { numeric: true });
+                  })
+                  .map(table => {
+                    const occupier = getOccupierForTable(table.id);
+                    const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
+                    const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+                    const isOccupied = !!occupier;
+                    const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                    const trimmedSearch = searchTerm.trim().toLowerCase();
+                    const isSearchMatch = !!(trimmedSearch && (
+                      (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
+                      (banquet && banquet.name.toLowerCase().includes(trimmedSearch)) ||
+                      table.name.toLowerCase().includes(trimmedSearch)
+                    ));
+                    const mergedNames = (table.merged_with && table.merged_with.length > 0)
+                      ? table.merged_with.map(id => tables.find(t => Number(t.id) === Number(id))?.name).filter((n): n is string => !!n)
+                      : [];
+                    const displayName = mergedNames.length > 0 ? `${table.name}+${mergedNames.join('+')}` : table.name;
+                    const isMerged = mergedNames.length > 0;
                     return (
-                        <div key={res.id} className={`bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 ${borderColor} ${cardOpacity} shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-3 sm:gap-4`}>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-                                    <h3 className="font-bold text-lg text-slate-800">{toTitleCase(res.customer_name)}</h3>
-                                    {isDeparted && (
-                                        <span className="text-xs font-bold px-2 py-0.5 rounded border bg-slate-100 border-slate-300 text-slate-500">
-                                            LIBERATO
-                                        </span>
-                                    )}
-                                    {/* Payment status - only show if paid */}
-                                    {res.payment_status !== PaymentStatus.PENDING && (
-                                        <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getStatusColor(res.payment_status)}`}>
-                                            {res.payment_status === PaymentStatus.PAID_FULL ? 'SALDATO' : 'ACCONTO'}
-                                        </span>
-                                    )}
+                      <li key={table.id}>
+                        <button
+                          onClick={() => {
+                            if (reservation) handleEditClick(reservation);
+                            else if (banquet) { /* not assignable */ }
+                            else if (canEdit) setAssignTableModal(table);
+                          }}
+                          className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
+                            isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
+                          }`}>
+                          <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
+                            isArrived ? 'bg-orange-50 border-orange-300 text-orange-700 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300'
+                              : reservation ? 'bg-rose-50 border-rose-300 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300'
+                              : banquet ? 'bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc]'
+                              : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300'
+                          }`}>
+                            <span className="text-center leading-tight break-all">{displayName}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {reservation ? (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
+                                  {isArrived && <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30">Arrivato</span>}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-slate-500">
-                                    {/* Time with lateness indicator */}
-                                    {(() => {
-                                        const minutesLate = getMinutesLate(res.reservation_time);
-                                        const isToday = res.reservation_time.split('T')[0] === new Date().toISOString().split('T')[0];
-                                        const clockColor = isToday && minutesLate >= 30 ? 'text-red-500'
-                                            : isToday && minutesLate >= 15 ? 'text-orange-500'
-                                            : 'text-slate-400';
-                                        return (
-                                            <div className={`flex items-center gap-1 ${clockColor}`}>
-                                                <Clock className="h-4 w-4" />
-                                                <span className="font-medium">{formatTime(res.reservation_time)}</span>
-                                                {isToday && minutesLate >= 15 && (
-                                                    <span className="text-xs ml-1">({minutesLate} min)</span>
-                                                )}
-                                            </div>
-                                        );
-                                    })()}
-                                    <div className="flex items-center gap-1">
-                                        <Users className="h-4 w-4" /> {res.guests} Ospiti
-                                    </div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
                                 </div>
-                                {menu && (
-                                    <div className="mt-2 text-sm bg-slate-50 inline-block px-3 py-1 rounded border border-slate-200 text-slate-700">
-                                        🍽️ Menu Banchetto: <b>{menu.name}</b> (€{menu.price_per_person}/pax)
-                                    </div>
-                                )}
-                                {res.notes && <p className="text-xs text-slate-400 mt-2 italic">{res.notes}</p>}
-
-                                {/* Actions - Only shown in edit mode */}
-                                {canEdit && (
-                                    <div className="flex items-center gap-2 mt-3">
-                                        <button
-                                            onClick={() => handleToggleArrivalStatus(res)}
-                                            className={`p-2 rounded-lg transition-colors ${
-                                                isDeparted
-                                                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                                                    : arrivalStatus === ArrivalStatus.ARRIVED
-                                                        ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
-                                                        : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                                            }`}
-                                            title={isDeparted ? 'Riapri prenotazione' : arrivalStatus === ArrivalStatus.ARRIVED ? 'Arrivato' : 'In attesa'}
-                                        >
-                                            <UserCheck className="h-5 w-5" />
-                                        </button>
-
-                                        {arrivalStatus === ArrivalStatus.ARRIVED && res.table_id && (
-                                            <button
-                                                onClick={() => handleFreeTable(res)}
-                                                className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
-                                                title="Libera tavolo (fine pasto)"
-                                            >
-                                                <LogOut className="h-5 w-5" />
-                                            </button>
-                                        )}
-
-                                        <button
-                                            onClick={() => handleEditClick(res)}
-                                            className="p-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                                            title="Modifica"
-                                        >
-                                            <Edit2 className="h-5 w-5" />
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteClick(res.id, res.customer_name)}
-                                            className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
-                                            title="Elimina"
-                                        >
-                                            <Trash2 className="h-5 w-5" />
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Right: table+room badge, color matches arrival status */}
-                            <div className="flex-shrink-0 self-stretch">
-                                {isLoadingMerges && res.table_id ? (
-                                    <div className="h-full flex flex-col items-center justify-center min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-slate-200 bg-slate-50">
-                                        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-                                    </div>
-                                ) : table ? (
-                                    <div className={`h-full flex flex-col items-center justify-center gap-2 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 ${tableBadgeColor}`}>
-                                        <span className="text-xl sm:text-2xl font-bold leading-none">T. {table.name}</span>
-                                        {tableRoomName && (
-                                            <span className="text-xs sm:text-sm font-medium truncate max-w-full">{tableRoomName}</span>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleEditClick(res)}
-                                        className="h-full flex flex-col items-center justify-center gap-1.5 min-w-[88px] sm:min-w-[100px] px-3 py-4 sm:py-5 rounded-xl border-2 border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:border-rose-400 transition-colors cursor-pointer"
-                                        title="Assegna un tavolo"
-                                    >
-                                        <AlertCircle className="h-6 w-6" />
-                                        <span className="text-[10px] font-semibold text-center leading-tight">Assegna Tavolo</span>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
+                              </>
+                            ) : banquet ? (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
+                                  <span className="font-medium text-indigo-700 truncate">{banquet.name}</span>
+                                  <span className="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  {typeof banquet.guests === 'number' && <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>}
+                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="font-medium text-emerald-700 dark:text-emerald-400">Libero</div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
+                                  {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                        </button>
+                      </li>
                     );
-                })
+                  })}
+              </ul>
             )}
           </div>
+        ) : (
+          <div ref={setMapCanvasNode}
+            className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden m-3"
+            style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px' }}>
+            {isLoadingMerges && (
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                </div>
+              </div>
+            )}
+            <div style={{ width: extentWidth, height: extentHeight, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
+              {tablesInRoom.map(renderMapTable)}
+            </div>
+
+            {/* Legend */}
+            <div className="absolute bottom-4 right-4 z-10 select-none">
+              <button type="button" onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
+                aria-expanded={isLegendOpen}>
+                <Info size={14} className="text-[var(--color-fg-muted)]" /> Legenda
+              </button>
+              {isLegendOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                  onClick={(e) => e.stopPropagation()}>
+                  <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-rose-50 border border-rose-300 dark:bg-rose-500/15 dark:border-rose-500/40 rounded-sm"></div> Occupato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-orange-50 border border-orange-300 dark:bg-orange-500/15 dark:border-orange-500/40 rounded-sm"></div> Arrivato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-indigo-50 border border-indigo-300 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 rounded-sm"></div> Banchetto</div>
+                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                    <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
+                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)</div>
+                  </div>
+                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
+                    <div className="text-sm font-semibold text-[var(--color-fg)]">Coperti</div>
+                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className={modalOnly ? 'contents' : 'h-[calc(100vh-56px)] flex flex-col'}>
+      {!modalOnly && (
+      <React.Fragment>
+
+      {/* ===== DESKTOP: Two-column split view (>= 1024px) ===== */}
+      {isDesktop ? (
+        <div className="flex flex-col h-full">
+          {/* Split view */}
+          <div className="flex flex-1 min-h-0">
+            {/* Left column — Reservation list (25%) */}
+            <div className="w-[25%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
+              {renderGroupedList()}
+            </div>
+
+            {/* Right column — Floor map (75%) */}
+            <div className="flex-1 min-w-0 bg-[var(--color-surface)]">
+              {renderMapPanel()}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* ===== MOBILE / TABLET: List only (< 1024px) ===== */
+        <div className="flex flex-col h-full">
+          {/* Row 1: Date - Shift - Print */}
+          <div className="px-4 py-2.5 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
+            <div className="flex items-center gap-2">
+              {/* Date pill */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-0">
+                {!isToday && (
+                  <button onClick={goToToday} className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0">
+                    Oggi
+                  </button>
+                )}
+                <button onClick={goToPreviousDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno precedente">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="relative flex-1 flex justify-center min-w-0">
+                  <div className="flex items-center justify-center px-2 py-1.5 pointer-events-none">
+                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">{formatSelectedDateShort(selectedDateObj)}</span>
+                  </div>
+                  <input ref={dateInputRef} type="date" value={selectedDateStr} onChange={handleDateInputChange}
+                    onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch {} }}
+                    aria-label="Seleziona data" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
+                <button onClick={goToNextDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno successivo">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Shift toggle — icon only */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-[120px]">
+                <button onClick={() => setSelectedShift(Shift.LUNCH)}
+                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
+                    selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
+                  }`} aria-label="Pranzo">
+                  <Sun className="h-4 w-4" />
+                </button>
+                <button onClick={() => setSelectedShift(Shift.DINNER)}
+                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
+                    selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
+                  }`} aria-label="Cena">
+                  <Sunset className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Content: Card-based list */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {/* Search + filter + sort row */}
+            <div className="px-4 pt-3 pb-2 flex items-center gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
+                <input type="text" placeholder="Cerca..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
+                  value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                {searchTerm && (
+                  <button type="button" onClick={() => setSearchTerm('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Sort — opens modal */}
+              <button type="button" onClick={() => setShowSortModal(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Ordina">
+                <ArrowUpDown className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+              </button>
+
+              {/* Filter — opens modal */}
+              <button type="button" onClick={() => setShowFiltersPanel(true)}
+                className={`relative h-9 w-9 rounded-full border transition-colors flex items-center justify-center flex-shrink-0 ${
+                  activeFilterCount > 0
+                    ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                }`}>
+                <Filter className="h-3.5 w-3.5" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Print */}
+              <button type="button" onClick={() => setIsPrintModalOpen(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Stampa">
+                <Printer className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {totalGroupedCount === 0 ? (
+              <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
+                  {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
+                </div>
+                <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
+                <p className="text-xs text-[var(--color-fg-muted)] mt-1">Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}.</p>
+                {canEdit && (
+                  <button onClick={handleOpenNew}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
+                    <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="px-4 pb-4 space-y-2">
+                {groupedReservations.map(group => {
+                  const groupCovers = group.items.reduce((s, r) => s + (r.guests || 0), 0);
+                  return (
+                    <div key={group.key}>
+                      {/* Group header */}
+                      <button type="button" onClick={() => toggleGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-1 py-3 transition-colors">
+                        <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
+                        <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
+                        <span className="text-xs text-[var(--color-fg-muted)]">{group.items.length} · {groupCovers} coperti</span>
+                        <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
+                      </button>
+
+                      {/* Cards */}
+                      {expandedGroups.has(group.key) && (
+                        <div className="space-y-2">
+                          {group.items.map(res => {
+                            const table = displayTables.find(t => t.id === res.table_id);
+                            const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
+                            const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+                            const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
+                            const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
+                            const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+                            const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
+
+                            const circleColor = group.key === 'freed' ? 'bg-slate-400'
+                              : group.key === 'arrived' ? 'bg-emerald-500'
+                              : group.key === 'noshow' ? 'bg-rose-500'
+                              : 'bg-blue-500';
+
+                            return (
+                              <div key={res.id}
+                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                onMouseEnter={() => setHoveredReservationId(res.id)}
+                                onMouseLeave={() => setHoveredReservationId(null)}
+                                onClick={() => handleRowClick(res)}>
+                                {/* Left content */}
+                                <div className="flex-1 min-w-0 p-3">
+                                  {/* Row 1: Time + indicator icons */}
+                                  <div className="flex items-center gap-1.5 h-5">
+                                    <span className="text-xs text-[var(--color-fg)] tabular">
+                                      {formatTime(res.reservation_time)}
+                                    </span>
+                                    {allergenText && (
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
+                                        className="flex-shrink-0">
+                                        <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                                      </button>
+                                    )}
+                                    {noteText && (
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                                        className="flex-shrink-0">
+                                        <StickyNote className="h-3.5 w-3.5 text-amber-500" />
+                                      </button>
+                                    )}
+                                    {res.payment_status !== PaymentStatus.PENDING && (
+                                      <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                                        <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+                                      </span>
+                                    )}
+                                    {menu && (
+                                      <span className="flex-shrink-0" title={menu.name}>
+                                        <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+                                      </span>
+                                    )}
+                                    {group.key === 'noshow' && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                        <UserX className="h-2.5 w-2.5" /> No show
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Row 2: Customer name */}
+                                  <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate mt-0.5">
+                                    {toTitleCase(res.customer_name)}
+                                  </p>
+
+                                  {/* Row 3: Actions */}
+                                  {canEdit && (
+                                    <div className="flex items-center gap-2.5 mt-2">
+                                      {(() => {
+                                        const state = getReservationState(res);
+                                        const meta = RESERVATION_STATE_META[state];
+                                        return (
+                                          <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+                                            className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                                            title="Cambia stato">
+                                            {meta.label}
+                                            <ChevronDown className="h-3 w-3 opacity-60" />
+                                          </button>
+                                        );
+                                      })()}
+                                      {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                                        <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                          <MapPin className="h-3.5 w-3.5" /> Tavolo
+                                        </button>
+                                      )}
+                                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                                        <Edit2 className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
+                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Covers count */}
+                                <div className="flex items-start pt-3 pr-3 flex-shrink-0">
+                                  <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+                                    <Users className="h-3.5 w-3.5" />
+                                    <span className="text-base font-medium tabular">{res.guests}</span>
+                                  </div>
+                                </div>
+
+                                {/* Table strip */}
+                                <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
+                                  table
+                                    ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+                                      : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+                                      : 'bg-[#dbeafe] dark:bg-blue-500/15'
+                                    : 'bg-[var(--color-surface-3)]'
+                                }`}>
+                                  {table ? (
+                                    <>
+                                      <span className={`text-base font-bold leading-6 ${
+                                        group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                                          : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                                          : 'text-[#193cb8] dark:text-blue-300'
+                                      }`}>{table.name}</span>
+                                      {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Sort modal — slide up (mobile/tablet) */}
+          {showSortModal && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-2">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+                </div>
+                <div className="px-3">
+                  {[
+                    { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
+                    { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
+                    { value: 'name-asc' as const, label: 'Nome A → Z' },
+                    { value: 'name-desc' as const, label: 'Nome Z → A' },
+                    { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
+                    { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button"
+                      onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
+                      className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-lg transition-colors ${
+                        sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                      }`}>
+                      {opt.label}
+                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Filter modal — slide up (mobile/tablet) */}
+          {showFiltersPanel && (
+            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                </div>
+                <div className="px-5 pb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                      <RotateCcw className="h-3.5 w-3.5" /> Reimposta
+                    </button>
+                  )}
+                </div>
+                <div className="px-5 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: 'Tutti' },
+                        { value: PaymentStatus.PENDING, label: 'Sospeso' },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
+                        { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            filterStatus === opt.value
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Allergeni
+                      </button>
+                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Con note
+                      </button>
+                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        Senza tavolo
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
       )}
 
-      {/* --- MAP VIEW --- */}
-      {viewMode === 'MAP' && (() => {
-          const tablesInRoom = displayTables
-              .filter(t => t.room_id === activeMapRoomId)
-              .filter(t => !displayTables.some(other =>
-                  other.merged_with && other.merged_with.length > 0 &&
-                  other.merged_with.map(id => Number(id)).includes(Number(t.id))
-              ))
-              // Hide per-shift unless user toggled "show hidden".
-              .filter(t => showHidden || !hiddenTableIds.has(t.id));
-          const occupiedTablesCount = tablesInRoom.filter(t => getReservationForTable(t.id)).length;
-          const totalTablesInRoom = tablesInRoom.length;
-          const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
-
-          // Total guests (coperti) for the selected day + shift
-          const reservationsForDayShift = reservations.filter(r => {
-              const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
-              const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
-              return matchesDate && matchesShift;
-          });
-          const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
-          const reservationCountForDayShift = reservationsForDayShift.length;
-          const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
-
-          // Compute the natural bounding box of the room and a scale factor
-          // so the room fits the available canvas width/height on tablet+desktop.
-          // On mobile (<768px) we keep scale=1 and rely on overflow scrolling.
-          const PADDING = 40;
-          const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-          const baseSize = isMobile ? 45 : 80;
-          const baseWidth = isMobile ? 60 : 100;
-          const seatMultiplier = isMobile ? 8 : 15;
-          let maxRight = 0;
-          let maxBottom = 0;
-          for (const t of tablesInRoom) {
-              let w: number, h: number;
-              if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) {
-                  w = baseSize; h = baseSize;
-              } else {
-                  w = Math.max(baseWidth, t.seats * seatMultiplier);
-                  h = baseSize;
-              }
-              maxRight = Math.max(maxRight, t.x + w);
-              maxBottom = Math.max(maxBottom, t.y + h);
-          }
-          const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
-          const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
-          const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
-              ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
-              : 1;
-
-          return (
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-180px)] animate-in fade-in duration-300">
-                  {/* Combined room selector + stats row */}
-                  <div className="flex items-center gap-3 mb-3 border-b border-slate-100 pb-2">
-                      <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-                          {rooms.filter(r => !r.is_closed).map(room => (
-                              <button
-                                  key={room.id}
-                                  onClick={() => setActiveMapRoomId(room.id)}
-                                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
-                                      activeMapRoomId === room.id
-                                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                                  }`}
-                              >
-                                  {room.name}
-                              </button>
-                          ))}
-                      </div>
-                      {hiddenTableIds.size > 0 && (
-                          <button
-                              type="button"
-                              onClick={() => setShowHidden(v => !v)}
-                              className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-                                  showHidden
-                                      ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800'
-                                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                              }`}
-                              title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}
-                          >
-                              {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                              <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
-                          </button>
-                      )}
-                      <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
-                          <div className="flex items-center gap-1.5">
-                              <Users size={14} className="text-indigo-500 flex-shrink-0" />
-                              <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
-                              <span className="text-slate-500">coperti</span>
-                          </div>
-                          <span className="text-slate-300">·</span>
-                          <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-slate-700">{reservationCountForDayShift}</span>
-                              <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                          </div>
-                          {unassignedCountForDayShift > 0 && (
-                              <button
-                                  type="button"
-                                  onClick={() => setShowUnassignedModal(true)}
-                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm"
-                                  title="Tocca per vedere le prenotazioni senza tavolo"
-                              >
-                                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
-                                  <span className="text-sm font-bold">{unassignedCountForDayShift}</span>
-                                  <span className="text-xs">senza tavolo</span>
-                                  <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
-                              </button>
-                          )}
-                          <span className="text-slate-300">·</span>
-                          <div className="flex items-center gap-1.5 text-slate-500">
-                              <span className="font-semibold text-slate-700">{occupiedTablesCount}</span>
-                              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* Mobile/tablet stats bar (shown below room tabs when md breakpoint is too narrow) */}
-                  <div className="md:hidden mb-3 px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div className="flex items-center gap-1.5">
-                          <Users size={14} className="text-indigo-500 flex-shrink-0" />
-                          <span className="font-bold text-slate-800">{totalGuestsForDayShift}</span>
-                          <span className="text-slate-500">coperti</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-slate-700">{reservationCountForDayShift}</span>
-                          <span className="text-slate-500">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-                      </div>
-                      {unassignedCountForDayShift > 0 && (
-                          <button
-                              type="button"
-                              onClick={() => setShowUnassignedModal(true)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded-full hover:bg-amber-200 hover:border-amber-400 transition-colors shadow-sm w-fit"
-                              title="Tocca per vedere le prenotazioni senza tavolo"
-                          >
-                              <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
-                              <span className="text-sm font-bold">{unassignedCountForDayShift}</span>
-                              <span className="text-xs">senza tavolo</span>
-                              <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
-                          </button>
-                      )}
-                      <div className="flex items-center gap-1.5 text-slate-500 justify-self-end">
-                          <span className="font-semibold text-slate-700">{occupiedTablesCount}</span>
-                          <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-                      </div>
-                  </div>
-
-                  {isPhone ? (
-                      /* Mobile (smartphone) list view */
-                      <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white relative">
-                          {isLoadingMerges && (
-                              <div className="absolute inset-0 z-30 bg-white/70 backdrop-blur-[1px] flex items-center justify-center">
-                                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                                      <span className="text-sm text-slate-600">Caricamento tavoli…</span>
-                                  </div>
-                              </div>
-                          )}
-                          {tablesInRoom.length === 0 ? (
-                              <div className="text-center py-10 px-4 text-sm text-slate-500">
-                                  Nessun tavolo in questa sala.
-                              </div>
-                          ) : (
-                              <ul className="divide-y divide-slate-100">
-                                  {[...tablesInRoom]
-                                      .sort((a, b) => {
-                                          const ra = getReservationForTable(a.id);
-                                          const rb = getReservationForTable(b.id);
-                                          if (!!ra !== !!rb) return ra ? -1 : 1;
-                                          if (ra && rb) return ra.reservation_time.localeCompare(rb.reservation_time);
-                                          return a.name.localeCompare(b.name, 'it', { numeric: true });
-                                      })
-                                      .map(table => {
-                                          const reservation = getReservationForTable(table.id);
-                                          const isOccupied = !!reservation;
-                                          const isArrived = isOccupied && reservation.arrival_status === ArrivalStatus.ARRIVED;
-                                          const trimmedSearch = searchTerm.trim().toLowerCase();
-                                          const isSearchMatch = !!(trimmedSearch && (
-                                            (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
-                                            table.name.toLowerCase().includes(trimmedSearch)
-                                          ));
-                                          const mergedNames = (table.merged_with && table.merged_with.length > 0)
-                                              ? table.merged_with
-                                                  .map(id => tables.find(t => Number(t.id) === Number(id))?.name)
-                                                  .filter((n): n is string => !!n)
-                                              : [];
-                                          const displayName = mergedNames.length > 0
-                                              ? `${table.name}+${mergedNames.join('+')}`
-                                              : table.name;
-                                          const isMerged = mergedNames.length > 0;
-                                          return (
-                                              <li key={table.id}>
-                                                  <button
-                                                      onClick={() => {
-                                                          if (isOccupied) {
-                                                              handleEditClick(reservation);
-                                                          } else if (canEdit) {
-                                                              setAssignTableModal(table);
-                                                          }
-                                                      }}
-                                                      className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
-                                                          isSearchMatch ? 'bg-indigo-50' : 'hover:bg-slate-50'
-                                                      }`}
-                                                  >
-                                                      <div className={`min-w-[4.5rem] h-16 px-2 rounded-xl flex items-center justify-center flex-shrink-0 border-2 font-bold ${isMerged ? 'text-base' : 'text-xl'} ${
-                                                          isArrived
-                                                              ? 'bg-orange-100 border-orange-500 text-orange-900'
-                                                              : isOccupied
-                                                                  ? 'bg-red-100 border-red-500 text-red-900'
-                                                                  : 'bg-white border-emerald-400 text-emerald-700'
-                                                      }`}>
-                                                          <span className="text-center leading-tight break-all">{displayName}</span>
-                                                      </div>
-                                                      <div className="flex-1 min-w-0">
-                                                          {isOccupied ? (
-                                                              <>
-                                                                  <div className="flex items-center gap-2">
-                                                                      <span className="font-semibold text-slate-800 truncate">{toTitleCase(reservation.customer_name)}</span>
-                                                                      {isArrived && (
-                                                                          <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded flex-shrink-0">Arrivato</span>
-                                                                      )}
-                                                                  </div>
-                                                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                                                                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
-                                                                      <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
-                                                                      <span className="flex items-center gap-1 text-slate-400"><Armchair className="h-3 w-3" /> {table.seats}</span>
-                                                                  </div>
-                                                              </>
-                                                          ) : (
-                                                              <>
-                                                                  <div className="font-semibold text-emerald-700">Libero</div>
-                                                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                                                                      <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
-                                                                      {canEdit && <span className="text-indigo-500 font-medium">Tocca per assegnare</span>}
-                                                                  </div>
-                                                              </>
-                                                          )}
-                                                      </div>
-                                                      <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
-                                                  </button>
-                                              </li>
-                                          );
-                                      })}
-                              </ul>
-                          )}
-                      </div>
-                  ) : (
-                      /* Desktop / tablet positioned canvas view */
-                      <div
-                        ref={setMapCanvasNode}
-                        className="flex-1 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 relative overflow-auto md:overflow-hidden"
-                        style={{
-                            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                            backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px'
-                        }}
-                      >
-                           {isLoadingMerges && (
-                               <div className="absolute inset-0 z-30 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center">
-                                   <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                                       <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                                       <span className="text-sm text-slate-600">Caricamento tavoli…</span>
-                                   </div>
-                               </div>
-                           )}
-                           <div
-                               style={{
-                                   width: extentWidth,
-                                   height: extentHeight,
-                                   transform: `scale(${scale})`,
-                                   transformOrigin: 'top left',
-                                   position: 'relative'
-                               }}
-                           >
-                               {tablesInRoom.map(renderMapTable)}
-                           </div>
-
-                           {/* Legend - collapsible */}
-                           <div className="absolute bottom-4 right-4 z-10 select-none">
-                               <button
-                                   type="button"
-                                   onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                                   className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
-                                   aria-expanded={isLegendOpen}
-                               >
-                                   <Info size={14} className="text-indigo-500" />
-                                   Legenda
-                               </button>
-                               {isLegendOpen && (
-                                   <div
-                                       className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
-                                       onClick={(e) => e.stopPropagation()}
-                                   >
-                                       <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
-                                       <div className="flex items-center gap-2 text-slate-600">
-                                           <div className="w-3 h-3 bg-white border border-emerald-400 rounded-sm"></div> Libero
-                                       </div>
-                                       <div className="flex items-center gap-2 text-slate-600">
-                                           <div className="w-3 h-3 bg-red-100 border border-red-500 rounded-sm"></div> Occupato
-                                       </div>
-                                       <div className="flex items-center gap-2 text-slate-600">
-                                           <div className="w-3 h-3 bg-orange-100 border border-orange-500 rounded-sm"></div> Arrivato
-                                       </div>
-                                       <div className="border-t border-slate-200 mt-1 pt-2">
-                                           <div className="font-semibold text-slate-700">Occupazione:</div>
-                                           <div className="text-sm">
-                                               <span className="font-bold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-bold">{occupancyPercentage}%</span>)
-                                           </div>
-                                       </div>
-                                       <div className="border-t border-slate-200 mt-1 pt-2">
-                                           <div className="font-semibold text-slate-700">Coperti:</div>
-                                           <div className="text-sm">
-                                               <span className="font-bold">{totalGuestsForDayShift}</span> in <span className="font-bold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}
-                                           </div>
-                                       </div>
-                                   </div>
-                               )}
-                           </div>
-                      </div>
-                  )}
-              </div>
-          );
-      })()}
-
+      </React.Fragment>
+      )}
       {/* Reservation Modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-0 sm:p-4">
-            <div className="bg-white rounded-none sm:rounded-2xl shadow-2xl w-full sm:max-w-5xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full sm:max-h-[90vh]">
-                <div className="p-3 sm:p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <h2 className="text-lg sm:text-xl font-bold text-slate-800">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h2>
-                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="text-slate-400 hover:text-slate-600">
-                        <X className="h-5 w-5 sm:h-6 sm:w-6" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}>
+            <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-5xl overflow-hidden flex flex-col h-full sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h3>
+                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                        <X className="h-5 w-5" />
                     </button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                    {!isEditing && draftBanner && (
-                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
-                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    {matchedCustomerNoShows > 0 && (
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-rose-50 border border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30 rounded-xl flex items-start gap-3">
+                            <UserX className="h-5 w-5 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-amber-900">Bozza non salvata trovata</p>
-                                <p className="text-xs text-amber-700 mt-0.5">
+                                <p className="text-sm font-semibold text-rose-900 dark:text-rose-200">
+                                    Attenzione: cliente con {matchedCustomerNoShows} no-show
+                                </p>
+                                <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+                                    Questo cliente non si è presentato {matchedCustomerNoShows === 1 ? 'una volta' : `${matchedCustomerNoShows} volte`} in passato.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    {!isEditing && draftBanner && (
+                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl flex items-start gap-3">
+                            <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Bozza non salvata trovata</p>
+                                <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
                                     Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
                                 </p>
                             </div>
@@ -1892,14 +2602,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRestoreDraft}
-                                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700"
+                                    className="px-3 py-1.5 bg-amber-600 text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-amber-700"
                                 >
                                     Riprendi
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleDiscardDraft}
-                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100"
+                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100 dark:bg-[var(--color-surface-3)] dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-[var(--color-surface-hover)]"
                                 >
                                     Scarta
                                 </button>
@@ -1909,45 +2619,185 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
                         {/* Left Column: Details (5 cols) */}
                         <div className="lg:col-span-5 space-y-5 sm:space-y-6">
-                            <div className="flex items-center gap-3 pb-3 border-b-2 border-slate-100">
-                                <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-                                    <Users className="h-5 w-5 text-indigo-600" />
+                            {/* Guests */}
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Numero Ospiti</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                                    >
+                                        −
+                                    </button>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        required
+                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                        value={formData.guests || ''}
+                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
+                                    >
+                                        +
+                                    </button>
                                 </div>
+                            </div>
+
+                            {/* Date & Shift */}
+                            <div className="space-y-4">
                                 <div>
-                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Dettagli Prenotazione</h3>
-                                    <p className="text-xs text-slate-500">Compila i dati del cliente</p>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Turno</label>
+                                    <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`});
+                                            }}
+                                            className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                                        >
+                                            <Sun className="h-3.5 w-3.5" /> Pranzo
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`});
+                                            }}
+                                            className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                                        >
+                                            <Sunset className="h-3.5 w-3.5" /> Cena
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="overflow-hidden">
+                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Data</label>
+                                        <input
+                                            type="date"
+                                            required
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
+                                            value={formData.reservation_time?.split('T')[0] || ''}
+                                            onChange={e => {
+                                                const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
+                                                setFormData({...formData, reservation_time: `${e.target.value}T${currentTime}`});
+                                            }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Ora</label>
+                                        <select
+                                            required
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
+                                            value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
+                                            onChange={e => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
+                                            }}
+                                        >
+                                            {formData.shift === Shift.LUNCH ? (
+                                                <>
+                                                    <option value="13:00">13:00</option>
+                                                    <option value="13:30">13:30</option>
+                                                    <option value="14:00">14:00</option>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <option value="19:30">19:30</option>
+                                                    <option value="20:00">20:00</option>
+                                                    <option value="20:30">20:30</option>
+                                                    <option value="21:00">21:00</option>
+                                                    <option value="21:30">21:30</option>
+                                                    <option value="22:00">22:00</option>
+                                                    <option value="22:30">22:30</option>
+                                                    <option value="23:00">23:00</option>
+                                                    <option value="23:30">23:30</option>
+                                                </>
+                                            )}
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Customer Name with Voice Input */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Nome Cliente</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        required
-                                        className="flex-1 rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
-                                        value={formData.customer_name}
-                                        onChange={e => setFormData({...formData, customer_name: e.target.value})}
-                                        placeholder="Mario Rossi"
-                                    />
+                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Nome Cliente</label>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex-1 relative">
+                                        <input
+                                            required
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.customer_name}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
+                                                setFormData({...formData, customer_name: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('name')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
+                                            placeholder="Mario Rossi"
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCustomerPickerOpen(true)}
+                                        className="p-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex items-center justify-center flex-shrink-0"
+                                        title="Rubrica clienti"
+                                    >
+                                        <BookUser className="h-4 w-4" />
+                                    </button>
                                     {isVoiceSupported() && (
                                         <button
                                             type="button"
                                             onClick={handleVoiceInput}
                                             disabled={isListening}
-                                            className={`p-3 sm:p-4 rounded-xl transition-all flex items-center justify-center ${
+                                            className={`p-2 rounded-md transition-colors flex items-center justify-center flex-shrink-0 border ${
                                                 isListening
-                                                    ? 'bg-red-100 text-red-600 animate-pulse'
-                                                    : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'
+                                                    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 animate-pulse'
+                                                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                                             }`}
-                                            title="Dettatura vocale - Es: 'Prenotazione per Mario Rossi domani sera alle 20 per 4 persone'"
+                                            title="Dettatura vocale"
                                         >
-                                            <Mic className="h-5 w-5" />
+                                            <Mic className="h-4 w-4" />
                                         </button>
                                     )}
                                 </div>
                                 {isVoiceSupported() && (
-                                    <p className="text-xs text-slate-400 mt-1">
+                                    <p className="text-xs text-[var(--color-fg-subtle)] mt-1">
                                         Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
                                     </p>
                                 )}
@@ -1956,136 +2806,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Phone & Email */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Telefono</label>
-                                    <input
-                                        type="tel"
-                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
-                                        value={formData.phone || ''}
-                                        onChange={e => setFormData({...formData, phone: e.target.value})}
-                                        placeholder="+39 333..."
-                                    />
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono</label>
+                                    <div className="relative">
+                                        <input
+                                            type="tel"
+                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            value={formData.phone || ''}
+                                            onChange={e => {
+                                                lastSuggestQueryRef.current = '';
+                                                setMatchedCustomerNoShows(0);
+                                                setFormData({...formData, phone: e.target.value});
+                                            }}
+                                            onFocus={() => setActiveSuggestField('phone')}
+                                            onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'phone' ? null : prev), 150)}
+                                            placeholder="+39 333..."
+                                            autoComplete="off"
+                                        />
+                                        {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
+                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                                {customerSuggestions.map(c => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onMouseDown={e => e.preventDefault()}
+                                                            onClick={() => applyCustomerSuggestion(c)}
+                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                {(c.no_show_count || 0) > 0 && (
+                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                        <UserX className="h-2.5 w-2.5" />
+                                                                        {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                                {c.phone && <span>{c.phone}</span>}
+                                                                {c.email && <span className="truncate">{c.email}</span>}
+                                                            </div>
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Email</label>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Email</label>
                                     <input
                                         type="email"
-                                        className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
+                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
                                         placeholder="cliente@email.com"
                                     />
-                                </div>
-                            </div>
-
-                            {/* Date & Shift */}
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Turno</label>
-                                    <div className="bg-slate-100 p-1.5 rounded-xl flex items-center gap-1.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`});
-                                            }}
-                                            className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-                                        >
-                                            <Sun className="h-5 w-5" /> Pranzo
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`});
-                                            }}
-                                            className={`flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-lg text-sm font-semibold transition-all ${formData.shift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-                                        >
-                                            <Moon className="h-5 w-5" /> Cena
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="overflow-hidden">
-                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Data</label>
-                                        <div className="relative">
-                                            <input
-                                                type="date"
-                                                required
-                                                className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all"
-                                                value={formData.reservation_time?.split('T')[0] || ''}
-                                                onChange={e => {
-                                                    const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
-                                                    setFormData({...formData, reservation_time: `${e.target.value}T${currentTime}`});
-                                                }}
-                                            />
-                                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Ora</label>
-                                        <div className="relative">
-                                            <select
-                                                required
-                                                className="w-full rounded-xl border-2 border-slate-200 p-3 pl-11 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all appearance-none"
-                                                value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
-                                                onChange={e => {
-                                                    const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                    setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
-                                                }}
-                                            >
-                                                {formData.shift === Shift.LUNCH ? (
-                                                    <>
-                                                        <option value="13:00">13:00</option>
-                                                        <option value="13:30">13:30</option>
-                                                        <option value="14:00">14:00</option>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <option value="19:30">19:30</option>
-                                                        <option value="20:00">20:00</option>
-                                                        <option value="20:30">20:30</option>
-                                                        <option value="21:00">21:00</option>
-                                                        <option value="21:30">21:30</option>
-                                                        <option value="22:00">22:00</option>
-                                                        <option value="22:30">22:30</option>
-                                                        <option value="23:00">23:00</option>
-                                                        <option value="23:30">23:30</option>
-                                                    </>
-                                                )}
-                                            </select>
-                                            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
-                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Guests */}
-                            <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Numero Ospiti</label>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
-                                        className="w-14 h-14 sm:w-16 sm:h-14 rounded-xl bg-slate-200 text-slate-700 font-bold text-2xl hover:bg-slate-300 transition-all flex items-center justify-center flex-shrink-0"
-                                    >
-                                        −
-                                    </button>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        required
-                                        className="flex-1 min-w-0 rounded-xl border-2 border-slate-200 p-3 text-center text-2xl font-bold focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white transition-all"
-                                        value={formData.guests || ''}
-                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
-                                        className="w-14 h-14 sm:w-16 sm:h-14 rounded-xl bg-indigo-500 text-white font-bold text-2xl hover:bg-indigo-600 transition-all flex items-center justify-center flex-shrink-0"
-                                    >
-                                        +
-                                    </button>
                                 </div>
                             </div>
 
@@ -2098,10 +2873,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 if (banquetsForDate.length === 0) return null;
                                 return (
                                     <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Banchetto</label>
+                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Banchetto</label>
                                         <div className="relative">
                                             <select
-                                                className="w-full rounded-xl border-2 border-slate-200 p-3 sm:p-4 pr-11 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white cursor-pointer transition-all appearance-none"
+                                                className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 pr-10 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors appearance-none"
                                                 value={formData.banquet_menu_id ?? ''}
                                                 onChange={e => setFormData({
                                                     ...formData,
@@ -2111,11 +2886,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 <option value="">Nessuno</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
-                                                        {m.name} — €{Number(m.price_per_person).toFixed(2)}/persona
+                                                        {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
                                                     </option>
                                                 ))}
                                             </select>
-                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" />
                                         </div>
                                     </div>
                                 );
@@ -2124,32 +2899,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Expandable Sections */}
                             <div className="space-y-3">
                                 {/* Allergens Button */}
-                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                <div className="rounded-md border border-[var(--color-line)] overflow-hidden">
                                     <button
                                         type="button"
                                         onClick={() => setShowAllergensSection(!showAllergensSection)}
-                                        className={`w-full flex items-center justify-between p-4 transition-all ${
-                                            showAllergensSection ? 'bg-red-50' : 'bg-white hover:bg-slate-50'
+                                        className={`w-full flex items-center justify-between p-3 transition-colors ${
+                                            showAllergensSection ? 'bg-[var(--color-surface-3)]' : 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                                                selectedAllergens.length > 0 ? 'bg-red-100' : 'bg-slate-100'
-                                            }`}>
-                                                <AlertTriangle className={`w-5 h-5 ${selectedAllergens.length > 0 ? 'text-red-600' : 'text-slate-500'}`} />
-                                            </div>
+                                            <AlertTriangle className={`h-4 w-4 ${selectedAllergens.length > 0 ? 'text-amber-600' : 'text-[var(--color-fg-muted)]'}`} />
                                             <div className="text-left">
-                                                <span className="font-semibold text-slate-800">Intolleranze</span>
+                                                <span className="text-sm font-medium text-[var(--color-fg)]">Intolleranze</span>
                                                 {selectedAllergens.length > 0 && (
-                                                    <p className="text-xs text-red-600 font-medium">{selectedAllergens.length} selezionate</p>
+                                                    <p className="text-xs text-[var(--color-fg-muted)]">{selectedAllergens.length} selezionate</p>
                                                 )}
                                             </div>
                                         </div>
-                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
                                     </button>
 
                                     {showAllergensSection && (
-                                        <div className="p-4 pt-0 space-y-3 border-t border-slate-100 bg-white">
+                                        <div className="p-3 pt-0 space-y-3 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
                                             <div className="grid grid-cols-2 gap-2 pt-3">
                                                 {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
                                                     const isSelected = selectedAllergens.includes(allergen);
@@ -2164,16 +2935,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                         : [...prev, allergen]
                                                                 );
                                                             }}
-                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                            className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
                                                                 isSelected
-                                                                    ? 'border-red-400 bg-red-50 text-red-700'
-                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                                    ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300'
+                                                                    : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                                                             }`}
                                                         >
-                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                                                                isSelected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'
+                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                                                                isSelected ? 'bg-amber-600 border-amber-600 dark:bg-amber-500 dark:border-amber-500' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
                                                             }`}>
-                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                                {isSelected && <Check className="text-[#ffffff] w-2.5 h-2.5" />}
                                                             </div>
                                                             <span className="text-sm font-medium truncate">{allergen}</span>
                                                         </button>
@@ -2183,12 +2954,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             {selectedAllergens.length > 0 && (
                                                 <div className="flex flex-wrap gap-1.5 pt-2">
                                                     {selectedAllergens.map(allergen => (
-                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 rounded-full text-xs font-medium">
+                                                            <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
                                                             {allergen}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
-                                                                className="hover:text-red-900"
+                                                                className="hover:text-amber-900 dark:hover:text-amber-200"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -2201,32 +2973,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
 
                                 {/* Notes Button */}
-                                <div className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                <div className="rounded-md border border-[var(--color-line)] overflow-hidden">
                                     <button
                                         type="button"
                                         onClick={() => setShowNotesSection(!showNotesSection)}
-                                        className={`w-full flex items-center justify-between p-4 transition-all ${
-                                            showNotesSection ? 'bg-amber-50' : 'bg-white hover:bg-slate-50'
+                                        className={`w-full flex items-center justify-between p-3 transition-colors ${
+                                            showNotesSection ? 'bg-[var(--color-surface-3)]' : 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                                                (selectedQuickNotes.length > 0 || formData.notes) ? 'bg-amber-100' : 'bg-slate-100'
-                                            }`}>
-                                                <StickyNote className={`w-5 h-5 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-amber-600' : 'text-slate-500'}`} />
-                                            </div>
+                                            <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]'}`} />
                                             <div className="text-left">
-                                                <span className="font-semibold text-slate-800">Note</span>
+                                                <span className="text-sm font-medium text-[var(--color-fg)]">Note</span>
                                                 {selectedQuickNotes.length > 0 && (
-                                                    <p className="text-xs text-amber-600 font-medium">{selectedQuickNotes.join(', ')}</p>
+                                                    <p className="text-xs text-[var(--color-fg-muted)]">{selectedQuickNotes.join(', ')}</p>
                                                 )}
                                             </div>
                                         </div>
-                                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
                                     </button>
 
                                     {showNotesSection && (
-                                        <div className="p-4 pt-0 space-y-4 border-t border-slate-100 bg-white">
+                                        <div className="p-3 pt-0 space-y-4 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
                                             {/* Quick Notes */}
                                             <div className="grid grid-cols-2 gap-2 pt-3">
                                                 {QUICK_NOTES.map(note => {
@@ -2242,16 +3010,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                         : [...prev, note]
                                                                 );
                                                             }}
-                                                            className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                                                            className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
                                                                 isSelected
-                                                                    ? 'border-amber-400 bg-amber-50 text-amber-700'
-                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] text-[var(--color-fg)]'
+                                                                    : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                                                             }`}
                                                         >
-                                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                                                                isSelected ? 'bg-amber-500 border-amber-500' : 'border-slate-300 bg-white'
+                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                                                                isSelected ? 'bg-[var(--color-fg)] border-[var(--color-fg)]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
                                                             }`}>
-                                                                {isSelected && <Check className="text-white w-3 h-3" />}
+                                                                {isSelected && <Check className="text-[var(--color-fg-on-brand)] w-2.5 h-2.5" />}
                                                             </div>
                                                             <span className="text-sm font-medium truncate">{note}</span>
                                                         </button>
@@ -2261,9 +3029,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                             {/* Free text notes */}
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-500 mb-2 uppercase">Altre note</label>
+                                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Altre note</label>
                                                 <textarea
-                                                    className="w-full rounded-xl border-2 border-slate-200 p-3 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none h-20 text-base bg-white resize-none transition-all"
+                                                    className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 focus:outline-none focus:border-[var(--color-fg)] h-20 text-sm bg-[var(--color-surface)] resize-none transition-colors"
                                                     placeholder="Richieste speciali..."
                                                     value={formData.notes || ''}
                                                     onChange={e => setFormData({...formData, notes: e.target.value})}
@@ -2276,22 +3044,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         </div>
 
                         {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
+                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-[var(--color-line)] pt-6 lg:pt-0 lg:pl-8">
                              {/* Section Header */}
-                             <div className="flex items-center gap-3 pb-4 mb-4 border-b-2 border-slate-100">
-                                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-                                    <MapPin className="h-5 w-5 text-emerald-600" />
-                                </div>
+                             <div className="flex items-center gap-3 pb-4 mb-4 border-b border-[var(--color-line)]">
+                                <MapPin className="h-4 w-4 text-[var(--color-fg-muted)]" />
                                 <div className="flex-1">
-                                    <h3 className="font-bold text-base sm:text-lg text-slate-900">Seleziona Tavolo</h3>
-                                    <p className="text-xs text-slate-500">
+                                    <h3 className="text-sm font-semibold text-[var(--color-fg)]">Seleziona Tavolo</h3>
+                                    <p className="text-sm text-[var(--color-fg-muted)]">
                                         {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} - {' '}
-                                        <span className="font-semibold text-emerald-600">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
+                                        <span className="font-medium text-emerald-700 dark:text-emerald-400">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
                                     </p>
                                 </div>
                                 {selectedTableObj && (
                                     <div className="flex items-center gap-1">
-                                        <span className="px-3 py-1.5 text-emerald-700 bg-emerald-50 rounded-l-xl text-sm font-semibold border-2 border-r-0 border-emerald-200">
+                                        <span className="inline-flex items-center px-3 py-1 text-emerald-700 bg-emerald-50 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 rounded-l-full text-xs font-medium border border-r-0 border-emerald-100">
                                             T. {selectedTableObj.name}
                                         </span>
                                         <button
@@ -2300,22 +3066,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setFormData({...formData, table_id: undefined});
                                                 showToast('Tavolo rimosso dalla prenotazione', 'info');
                                             }}
-                                            className="px-2 py-1.5 text-rose-600 bg-rose-50 rounded-r-xl text-sm font-semibold border-2 border-rose-200 hover:bg-rose-100 transition-colors"
+                                            className="px-2 py-1 text-rose-600 bg-rose-50 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 dark:hover:bg-rose-500/25 rounded-r-full text-xs font-medium border border-rose-100 hover:bg-rose-100 transition-colors"
                                             title="Rimuovi tavolo"
                                         >
-                                            <X className="h-4 w-4" />
+                                            <X className="h-3.5 w-3.5" />
                                         </button>
                                     </div>
                                 )}
                              </div>
 
                              {/* Auto-assign & Actions */}
-                             <div className="flex items-center justify-between gap-3 mb-4">
-                                <div className="flex items-center gap-2">
+                             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
                                     <button
                                         type="button"
                                         onClick={handleAutoAssign}
-                                        className="flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-200 transition-colors font-semibold text-sm"
+                                        className="inline-flex items-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
                                     >
                                         <Wand2 className="h-4 w-4" /> Assegna Automatico
                                     </button>
@@ -2324,26 +3090,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            setMergeMode(!mergeMode);
                                             if (mergeMode) {
+                                                setMergeMode(false);
                                                 setSelectedTablesForMerge([]);
+                                            } else {
+                                                setMergeMode(true);
+                                                if (formData.table_id) {
+                                                    setSelectedTablesForMerge([formData.table_id]);
+                                                }
                                             }
                                         }}
-                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-colors font-semibold text-sm ${
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors font-medium text-xs border ${
                                             mergeMode
-                                                ? 'bg-purple-600 text-white shadow-lg shadow-purple-200'
-                                                : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                                         }`}
                                     >
-                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
+                                        <Combine className="h-3.5 w-3.5" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
                                     </button>
                                 </div>
 
                                 <div className="flex gap-2 items-center">
                                     {/* Show selected tables count and total capacity */}
                                     {selectedTablesForMerge.length >= 1 && (
-                                        <div className="text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">
-                                            {selectedTablesForMerge.length} tavoli = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
+                                        <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-3 py-1.5 rounded-full font-medium">
+                                            {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
                                         </div>
                                     )}
 
@@ -2369,7 +3140,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante l\'unione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="flex items-center gap-1.5 bg-purple-600 text-white px-3 py-2 rounded-xl hover:bg-purple-700 transition-colors font-medium text-sm shadow-lg"
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
                                         >
                                             <Combine className="h-4 w-4" /> Conferma Unione
                                         </button>
@@ -2393,7 +3164,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante la divisione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="flex items-center gap-1.5 bg-amber-100 text-amber-700 px-3 py-2 rounded-xl hover:bg-amber-200 transition-colors font-medium text-sm"
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-amber-100 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 text-sm font-medium hover:bg-amber-100 transition-colors"
                                         >
                                             <Scissors className="h-4 w-4" /> Dividi
                                         </button>
@@ -2403,12 +3174,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                              {/* Room Tabs */}
                              <div className="mb-4">
-                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">Sale</p>
+                                 <p className="text-sm font-semibold text-[var(--color-fg)] mb-3">Sale</p>
                                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                                      <button
                                         type="button"
                                         onClick={() => setModalRoomFilter('ALL')}
-                                        className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === 'ALL' ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
                                      >
                                          Tutte le sale
                                      </button>
@@ -2417,7 +3188,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             key={room.id}
                                             type="button"
                                             onClick={() => setModalRoomFilter(room.id)}
-                                            className={`px-4 py-2.5 text-sm font-semibold rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${modalRoomFilter === room.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
                                          >
                                              {room.name}
                                          </button>
@@ -2425,18 +3196,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  </div>
                              </div>
 
-                             <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--color-fg-muted)] mb-3 px-1">
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 rounded"></div> Occupato</div>
+                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></div> Capienza Insufficiente</div>
+                                 <div className="flex items-center gap-1.5">
+                                     <div className="w-3 h-3 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] rounded-full flex items-center justify-center">
+                                         <Combine size={6} />
+                                     </div>
+                                     Tavolo Unito
+                                 </div>
+                             </div>
+
+                             <div className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
                                 {isLoadingMerges && (
-                                    <div className="absolute inset-0 z-20 bg-slate-50/70 backdrop-blur-[1px] flex items-center justify-center rounded-xl">
-                                        <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                                            <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                                            <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+                                    <div className="absolute inset-0 z-20 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                                        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                                            <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                                            <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                                         </div>
                                     </div>
                                 )}
                                 {displayedRooms.map(room => (
                                     <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                                        <h4 className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase mb-2 sticky top-0 bg-slate-50 py-1 z-10">{room.name}</h4>
+                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
                                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
                                                                                          {displayTables
                                                 .filter(t => t.room_id === room.id)
@@ -2444,9 +3228,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     other.merged_with && other.merged_with.length > 0 &&
                                                     other.merged_with.map(id => Number(id)).includes(Number(t.id))
                                                 ))
+                                                .filter(t => !hiddenTableIds.has(t.id))
                                                 .map(table => {
-                                                const occupiedReservation = getReservationForTableInForm(table.id);
-                                                const isOccupied = !!occupiedReservation;
+                                                const occupier = getOccupierForTableInForm(table.id);
+                                                const isOccupied = !!occupier;
+                                                const occupierIsBanquet = occupier?.kind === 'banquet';
+                                                const occupierLabel = occupier
+                                                  ? occupier.kind === 'reservation'
+                                                    ? toTitleCase(occupier.data.customer_name)
+                                                    : occupier.data.name
+                                                  : '';
                                                 const isSelected = formData.table_id === table.id;
                                                 const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
                                                 const fitsGuests = table.seats >= (formData.guests || 1);
@@ -2456,7 +3247,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     <button
                                                         key={table.id}
                                                         type="button"
-                                                        disabled={isOccupied}
+                                                        disabled={isOccupied || (!fitsGuests && !mergeMode)}
                                                         onClick={(e) => {
                                                             if (mergeMode || e.ctrlKey || e.metaKey) {
                                                                 // Multi-select mode for merging
@@ -2472,48 +3263,51 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             }
                                                         }}
                                                         className={`
-                                                            relative p-2 sm:p-3 rounded-lg sm:rounded-xl border-2 text-center transition-all group
+                                                            relative p-2 sm:p-3 rounded-md border text-center transition-colors group
                                                             ${isSelectedForMerge
-                                                                ? 'border-purple-600 bg-purple-50 ring-2 ring-purple-200 z-10'
+                                                                ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500 z-10'
                                                                 : isSelected
-                                                                    ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-200 z-10'
+                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
                                                                     : isOccupied
-                                                                        ? 'border-red-500 bg-red-100 opacity-90 cursor-not-allowed'
+                                                                        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/15 opacity-90 cursor-not-allowed'
                                                                         : fitsGuests
-                                                                            ? 'border-white bg-white shadow-sm hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5'
-                                                                            : 'border-slate-200 bg-slate-100 opacity-50'
+                                                                            ? 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                                                            : 'border-[var(--color-line)] bg-[var(--color-surface-3)] opacity-50 cursor-not-allowed'
                                                             }
                                                         `}
                                                     >
                                                         {/* Merged Table Badge */}
                                                         {isMerged && !isOccupied && (
-                                                            <div className="absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 bg-indigo-600 text-white text-[8px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white z-20">
+                                                            <div className="absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[8px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.5 rounded-full shadow-[var(--shadow-xs)] flex items-center gap-0.5 z-20">
                                                                 <Combine size={6} className="sm:hidden" />
                                                                 <Combine size={8} className="hidden sm:block" />
                                                             </div>
                                                         )}
 
-                                                        <div className={`text-xs sm:text-sm font-bold truncate ${isSelectedForMerge ? 'text-purple-700' : isSelected ? 'text-indigo-700' : isOccupied ? 'text-red-900' : 'text-slate-700'}`}>
+                                                        <div className={`text-xs sm:text-sm font-semibold truncate ${isSelectedForMerge || isSelected ? 'text-[var(--color-fg)]' : isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg)]'}`}>
                                                             {table.name}
                                                         </div>
-                                                        <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-red-800' : 'text-slate-500'}`}>
+                                                        <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
                                                             {table.seats}
                                                         </div>
-                                                        {isOccupied && occupiedReservation && (
-                                                            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap shadow-md max-w-[140px] truncate border-2 border-white z-10">
-                                                                {toTitleCase(occupiedReservation.customer_name)}
+                                                        {isOccupied && occupier && (
+                                                            <div
+                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-[#ffffff] text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10 ${occupierIsBanquet ? 'bg-[#4f46e5]' : 'bg-[#e11d48]'}`}
+                                                                title={occupierIsBanquet ? `Banchetto: ${occupierLabel}` : `Prenotazione: ${occupierLabel}`}
+                                                            >
+                                                                {occupierLabel}
                                                             </div>
                                                         )}
                                                         {isSelected && !isSelectedForMerge && (
-                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm z-20">
-                                                                <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
+                                                            <div className="absolute -top-2 -right-2 bg-[var(--color-fg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
+                                                                <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full m-1" />
                                                             </div>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <div className="absolute -top-2 -right-2 bg-purple-600 text-white rounded-full p-0.5 shadow-sm z-20">
-                                                                <div className="w-1.5 h-1.5 bg-white rounded-full m-1" />
+                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 rounded-full p-1 shadow-[var(--shadow-xs)] z-20 flex items-center justify-center">
+                                                                <Combine size={10} className="text-white" />
                                                             </div>
                                                         )}
                                                     </button>
@@ -2523,61 +3317,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 ))}
                                 {displayedRooms.length === 0 && (
-                                    <div className="text-center py-10 text-slate-400">
+                                    <div className="text-center py-10 text-[var(--color-fg-subtle)]">
                                         Nessuna sala trovata.
                                     </div>
                                 )}
                              </div>
-                             <div className="mt-3 flex flex-col gap-2 px-1">
-                                 <div className="flex flex-wrap gap-4 text-[10px] text-slate-500">
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-white border border-slate-200 shadow-sm rounded"></div> Libero</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-indigo-50 border-2 border-indigo-600 rounded"></div> Selezionato</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-purple-50 border-2 border-purple-600 rounded"></div> Multi-selezione</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-200 border border-slate-200 rounded"></div> Occupato</div>
-                                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-slate-100 border border-slate-200 rounded opacity-50"></div> Capienza Insufficiente</div>
-                                     <div className="flex items-center gap-1.5">
-                                         <div className="w-3 h-3 bg-indigo-600 text-white rounded-full flex items-center justify-center">
-                                             <Combine size={6} className="text-white" />
-                                         </div>
-                                         Tavolo Unito
-                                     </div>
+                             {mergeMode && (
+                                 <div className="mt-3 px-1 text-[11px] text-[var(--color-fg)] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-1 rounded-md">
+                                     Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
                                  </div>
-                                 {mergeMode ? (
-                                     <div className="text-[10px] text-purple-600 font-medium bg-purple-50 px-2 py-1 rounded-lg">
-                                         🔗 Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
-                                     </div>
-                                 ) : (
-                                     <div className="text-[10px] text-slate-400 italic">
-                                         💡 Usa il pulsante "Unisci Tavoli" per combinare più tavoli per grandi gruppi
-                                     </div>
-                                 )}
-                             </div>
+                             )}
                         </div>
                     </form>
                 </div>
 
-                <div className="p-3 sm:p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 sm:gap-3">
+                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">
                     <button
                         type="button"
                         onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}
-                        className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl border border-slate-300 text-slate-700 text-sm sm:text-base font-medium hover:bg-white transition-colors"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                     >
                         Annulla
                     </button>
                     {mergeMode && selectedTablesForMerge.length > 0 && (
-                        <span className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
-                            ⚠️ Conferma l'unione tavoli prima di salvare
+                        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-full text-center">
+                            Conferma l'unione tavoli prima di salvare
                         </span>
                     )}
                     <button
                         onClick={handleSubmit}
-                        disabled={mergeMode && selectedTablesForMerge.length > 0}
-                        className={`px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-sm sm:text-base font-medium transition-all ${
-                            mergeMode && selectedTablesForMerge.length > 0
-                                ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
+                        disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
+                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
+                            (mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation
+                                ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] cursor-not-allowed border border-[var(--color-line)]'
+                                : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
                         }`}
                     >
+                        {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                         {isEditing ? 'Salva' : 'Conferma'}
                     </button>
                 </div>
@@ -2587,37 +3363,37 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       {/* Confirmation Modal */}
       {confirmModal?.isOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="p-6 border-b border-slate-100">
-                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                        <span className="text-2xl">{confirmModal.title}</span>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={confirmModal.onCancel}>
+            <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+                        {confirmModal.title}
                     </h3>
                 </div>
 
-                <div className="p-6 space-y-4">
-                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+                <div className="px-5 py-4 space-y-4">
+                    <p className="text-sm text-[var(--color-fg)] leading-relaxed whitespace-pre-line">
                         {confirmModal.message}
                     </p>
 
                     {confirmModal.suggestions && confirmModal.suggestions.length > 0 && (
-                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-                            <p className="text-sm font-semibold text-indigo-900 mb-3">
-                                Tavoli disponibili con capienza adeguata:
+                        <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-lg p-3">
+                            <p className="text-sm font-semibold text-[var(--color-fg)] mb-3">
+                                Tavoli disponibili con capienza adeguata
                             </p>
                             <div className="space-y-2">
                                 {confirmModal.suggestions.map((suggestion, index) => (
                                     <button
                                         key={index}
                                         onClick={() => confirmModal.onSelectSuggestion?.(suggestion.table)}
-                                        className="w-full flex items-center justify-between gap-3 p-3 bg-white border-2 border-indigo-300 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-all group"
+                                        className="w-full flex items-center justify-between gap-3 p-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors group"
                                     >
-                                        <div className="flex items-center gap-2 text-indigo-700">
-                                            <Armchair size={16} className="text-indigo-500" />
+                                        <div className="flex items-center gap-2 text-[var(--color-fg)]">
+                                            <Armchair size={16} className="text-[var(--color-fg-muted)]" />
                                             <span className="text-sm font-medium">{suggestion.label}</span>
                                         </div>
-                                        <div className="text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Check size={18} />
+                                        <div className="text-[var(--color-fg-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Check size={16} />
                                         </div>
                                     </button>
                                 ))}
@@ -2626,16 +3402,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                 </div>
 
-                <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end gap-2">
                     <button
                         onClick={confirmModal.onCancel}
-                        className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-medium hover:bg-white transition-colors"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                     >
                         Annulla
                     </button>
                     <button
                         onClick={confirmModal.onConfirm}
-                        className="px-5 py-2.5 bg-amber-600 text-white rounded-xl font-medium hover:bg-amber-700 shadow-lg shadow-amber-200 transition-all"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
                     >
                         Procedi Comunque
                     </button>
@@ -2653,6 +3429,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         onConfirm={handleConfirmDelete}
       />
 
+      <ConfirmDeleteModal
+        isOpen={unhideAllConfirm}
+        title="Riattiva tutti i tavoli"
+        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
+        confirmLabel="Riattiva tutti"
+        icon={<Eye className="h-5 w-5 text-emerald-600" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
+        showIrreversibleWarning={false}
+        onCancel={() => setUnhideAllConfirm(false)}
+        onConfirm={async () => {
+          setUnhideAllConfirm(false);
+          await handleUnhideAllTables();
+        }}
+      />
+
       <PrintReservationsModal
         isOpen={isPrintModalOpen}
         onClose={() => setIsPrintModalOpen(false)}
@@ -2663,6 +3455,58 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         initialDate={selectedDate.split('T')[0]}
         initialShift={selectedShift}
       />
+
+      {/* State picker modal */}
+      {stateChangeReservation && (() => {
+        const res = stateChangeReservation;
+        const current = getReservationState(res);
+        const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow'];
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] px-4" onClick={() => setStateChangeReservation(null)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[var(--color-line)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+                  <div className="min-w-0">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Cambia stato</h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                      {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
+                    </p>
+                  </div>
+                  <button onClick={() => setStateChangeReservation(null)}
+                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                    <X className="h-5 w-5" />
+                  </button>
+              </div>
+              <div className="p-3 space-y-1.5">
+                {options.map(opt => {
+                  const meta = RESERVATION_STATE_META[opt];
+                  const isCurrent = opt === current;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        if (!isCurrent) handleSetReservationState(res, opt);
+                        setStateChangeReservation(null);
+                      }}
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                        isCurrent
+                          ? `${meta.chipClass} ring-2 ring-offset-1 ring-[var(--color-fg)]/20`
+                          : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <span className={`w-2 h-2 rounded-full ${meta.dotClass}`} />
+                        <span className="text-sm font-medium text-[var(--color-fg)]">{meta.label}</span>
+                      </span>
+                      {isCurrent && <Check className="h-4 w-4 text-[var(--color-fg-muted)]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Unassigned-reservations modal: opened from the map header badge */}
       {showUnassignedModal && (() => {
@@ -2677,18 +3521,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+            <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setShowUnassignedModal(false)}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800">Prenotazioni senza tavolo</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Prenotazioni senza tavolo</h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
                       {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
                   <button
                     onClick={() => setShowUnassignedModal(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -2697,14 +3541,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="flex-1 overflow-y-auto p-3">
                   {unassigned.length === 0 ? (
                     <div className="text-center py-10 px-4">
-                      <div className="mx-auto w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mb-3">
+                      <div className="mx-auto w-12 h-12 bg-emerald-100 dark:bg-emerald-500/15 rounded-full flex items-center justify-center mb-3">
                         <Check className="h-6 w-6 text-emerald-600" />
                       </div>
-                      <p className="text-sm font-semibold text-slate-700">Tutte le prenotazioni hanno un tavolo</p>
-                      <p className="text-xs text-slate-500 mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
+                      <p className="text-sm font-semibold text-[var(--color-fg)]">Tutte le prenotazioni hanno un tavolo</p>
+                      <p className="text-xs text-[var(--color-fg-muted)] mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
                     </div>
                   ) : (
-                    <ul className="divide-y divide-slate-100">
+                    <ul className="divide-y divide-[var(--color-line)]">
                       {unassigned.map(r => (
                         <li key={r.id}>
                           <button
@@ -2712,17 +3556,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 setShowUnassignedModal(false);
                                 handleEditClick(r);
                             }}
-                            className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                            className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
                           >
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-slate-800 truncate block">{toTitleCase(r.customer_name)}</span>
-                              <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
+                                {r.created_by_user_name && (
+                                  <span
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+                                    title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                    aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                  >
+                                    {getInitials(r.created_by_user_name)}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                                 {r.phone && <span className="truncate">{r.phone}</span>}
                               </div>
                             </div>
-                            <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                            <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                           </button>
                         </li>
                       ))}
@@ -2730,10 +3585,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
 
-                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                <div className="p-4 border-t border-[var(--color-line)]">
                   <button
                     onClick={() => setShowUnassignedModal(false)}
-                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                   >
                     Chiudi
                   </button>
@@ -2765,19 +3620,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const isHidden = hiddenTableIds.has(table.id);
 
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
+            <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAssignTableModal(null)}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
                       <span className="truncate">Assegna Tavolo {table.name}</span>
                       {isHidden && (
-                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] px-1.5 py-0.5 rounded">
                           <EyeOff size={10} /> Nascosto
                         </span>
                       )}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 flex items-center gap-1.5">
                       <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
@@ -2790,8 +3645,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }}
                         className={`p-2 rounded-lg transition-colors ${
                           isHidden
-                            ? 'text-emerald-600 hover:bg-emerald-50'
-                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                            ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-500/15'
+                            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
                         }`}
                         title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
                       >
@@ -2800,7 +3655,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <button
                       onClick={() => setAssignTableModal(null)}
-                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                      className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                     >
                       <X className="h-5 w-5" />
                     </button>
@@ -2809,57 +3664,99 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                 <div className="flex-1 overflow-y-auto p-3">
                   <button
+                    onClick={async () => {
+                        const walkIn: Omit<Reservation, 'id'> = {
+                            customer_name: 'Walk-in',
+                            guests: Math.min(2, table.seats || 2),
+                            reservation_time: formatLocalDateTime(new Date()),
+                            shift: effectiveShift,
+                            table_id: table.id,
+                            payment_status: PaymentStatus.PENDING,
+                            arrival_status: ArrivalStatus.ARRIVED,
+                            enable_reminder: false,
+                            reminder_sent: false,
+                        };
+                        try {
+                            await onAddReservation(walkIn);
+                            showToast(`Walk-in al tavolo ${table.name} registrato`, 'success');
+                        } catch {
+                            showToast('Errore nella registrazione del walk-in', 'error');
+                        }
+                        setAssignTableModal(null);
+                    }}
+                    className="w-full text-left px-3 py-3 mb-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 dark:border-emerald-500/30 rounded-lg transition-colors flex items-center gap-3"
+                  >
+                    <div className="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <UserCheck className="h-5 w-5 text-[#ffffff]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-emerald-900 dark:text-emerald-200">Walk-in</div>
+                      <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-emerald-400 dark:text-emerald-500 flex-shrink-0" />
+                  </button>
+
+                  <button
                     onClick={() => {
                         setAssignTableModal(null);
                         handleOpenNew();
                         setFormData(prev => ({ ...prev, table_id: table.id }));
                     }}
-                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex items-center gap-3"
+                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 dark:bg-[#4f46e5]/15 dark:hover:bg-[#4f46e5]/25 dark:border-[#4f46e5]/30 rounded-lg transition-colors flex items-center gap-3"
                   >
-                    <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <Plus className="h-5 w-5 text-white" />
+                    <div className="w-9 h-9 bg-[#4f46e5] rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Plus className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-indigo-900">Nuova prenotazione</div>
-                      <div className="text-xs text-indigo-700 mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
+                      <div className="font-semibold text-indigo-900 dark:text-[#c7d2fe]">Nuova prenotazione</div>
+                      <div className="text-xs text-indigo-700 dark:text-[#a5b4fc] mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                    <ChevronRight className="h-4 w-4 text-indigo-400 dark:text-[#818cf8] flex-shrink-0" />
                   </button>
 
                   {unassigned.length === 0 ? (
                     <div className="text-center py-6 px-4">
-                      <p className="text-xs text-slate-500">Nessuna prenotazione senza tavolo per questo turno.</p>
+                      <p className="text-xs text-[var(--color-fg-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
                     </div>
                   ) : (
                     <>
-                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--color-fg-muted)]">
                         Oppure assegna a una prenotazione esistente
                       </div>
-                      <ul className="divide-y divide-slate-100">
+                      <ul className="divide-y divide-[var(--color-line)]">
                         {unassigned.map(r => {
                           const insufficient = (r.guests || 0) > table.seats;
                           return (
                             <li key={r.id}>
                               <button
                                 onClick={() => assign(r)}
-                                className="w-full text-left px-3 py-3 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-3"
+                                className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
                               >
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-slate-800 truncate">{toTitleCase(r.customer_name)}</span>
+                                    <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
+                                    {r.created_by_user_name && (
+                                      <span
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+                                        title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                        aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
+                                      >
+                                        {getInitials(r.created_by_user_name)}
+                                      </span>
+                                    )}
                                     {insufficient && (
-                                      <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                                      <span className="text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
                                         Capienza insufficiente
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                     <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                                     {r.phone && <span className="truncate">{r.phone}</span>}
                                   </div>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                                <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                               </button>
                             </li>
                           );
@@ -2869,10 +3766,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
 
-                <div className="p-3 border-t border-slate-100 bg-slate-50">
+                <div className="p-4 border-t border-[var(--color-line)]">
                   <button
                     onClick={() => setAssignTableModal(null)}
-                    className="w-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white rounded-lg"
+                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                   >
                     Annulla
                   </button>
@@ -2881,6 +3778,51 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
           );
       })()}
+
+      <CustomerPickerModal
+        isOpen={isCustomerPickerOpen}
+        initialQuery={formData.customer_name || ''}
+        onClose={() => setIsCustomerPickerOpen(false)}
+        onSelect={(c: Customer) => {
+          setFormData(prev => ({
+            ...prev,
+            customer_name: c.name,
+            phone: c.phone || prev.phone || '',
+            email: c.email || prev.email || '',
+          }));
+        }}
+      />
+
+      {/* Tooltip for allergens / notes */}
+      {tooltipReservation && (
+        <div className="fixed inset-0 z-[9999]" onClick={() => setTooltipReservation(null)}>
+          <div
+            className="absolute bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl shadow-[var(--shadow-lg)] px-4 py-3 max-w-xs min-w-[200px]"
+            style={{
+              left: Math.min(tooltipReservation.x, window.innerWidth - 280),
+              top: tooltipReservation.y + 8,
+              ...(tooltipReservation.y + 150 > window.innerHeight ? { top: undefined, bottom: window.innerHeight - tooltipReservation.y + 8 } as any : {}),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                {tooltipReservation.type === 'allergen'
+                  ? <AlertTriangle className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                  : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                <span className="text-xs font-semibold text-[var(--color-fg)]">
+                  {tooltipReservation.type === 'allergen' ? 'Intolleranze' : 'Note'}
+                </span>
+              </div>
+              <button type="button" onClick={() => setTooltipReservation(null)}
+                className="p-0.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">{tooltipReservation.text}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

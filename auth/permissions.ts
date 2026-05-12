@@ -20,7 +20,13 @@ export type Permission =
   | 'reports:view'
   | 'reports:full'
   | 'logs:view'
-  | 'logs:full';
+  | 'logs:full'
+  | 'banquet:view_price'
+  | 'banquet:manage_payments'
+  | 'customers:view'
+  | 'customers:full'
+  | 'inventory:view'
+  | 'inventory:full';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -43,7 +49,35 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reports:view',
     'reports:full',
     'logs:view',
-    'logs:full'
+    'logs:full',
+    'banquet:view_price',
+    'banquet:manage_payments',
+    'customers:view',
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
+  ],
+  [UserRole.GENERAL_MANAGER]: [
+    'dashboard:view',
+    'dashboard:full',
+    'floorplan:view',
+    'floorplan:update_status',
+    'floorplan:full',
+    'menu:view',
+    'menu:full',
+    'reservations:view',
+    'reservations:full',
+    'staff:view',
+    'staff:full',
+    'reports:view',
+    'reports:full',
+    'logs:view',
+    'banquet:view_price',
+    'banquet:manage_payments',
+    'customers:view',
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -58,18 +92,26 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'staff:view',
     'staff:full',
     'reports:view',
-    'logs:view'
+    'logs:view',
+    'customers:view',
+    'customers:full',
+    'inventory:view',
+    'inventory:full'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
     'floorplan:view',
     'floorplan:update_status',
     'reservations:view',
-    'reservations:full'
+    'reservations:full',
+    'customers:view',
+    'inventory:view'
   ],
   [UserRole.KITCHEN]: [
     'menu:view',
-    'reservations:view'
+    'reservations:view',
+    'inventory:view',
+    'inventory:full'
   ]
 };
 
@@ -80,6 +122,9 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.MENU]: ['menu:view'],
   [ViewState.RESERVATIONS]: ['reservations:view'],
   [ViewState.STAFF]: ['staff:view'],
+  [ViewState.CLIENTI]: ['customers:view'],
+  [ViewState.INVENTARIO]: ['inventory:view'],
+  [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view']
 };
 
@@ -142,3 +187,27 @@ export class PermissionService {
     return this.hasPermission(role, 'settings:full');
   }
 }
+
+// Hierarchy used for task assignment: an actor can only assign work to
+// peers or subordinates, never up the ladder.
+// WAITER and KITCHEN sit at the same rank (lateral assignment is fine).
+const ROLE_RANK: Record<UserRole, number> = {
+  [UserRole.OWNER]: 4,
+  [UserRole.GENERAL_MANAGER]: 3,
+  [UserRole.MANAGER]: 2,
+  [UserRole.WAITER]: 1,
+  [UserRole.KITCHEN]: 1,
+};
+
+export const canAssignToRole = (actorRole: UserRole, targetRole: UserRole): boolean => {
+  const actor = ROLE_RANK[actorRole];
+  const target = ROLE_RANK[targetRole];
+  if (actor === undefined || target === undefined) return false;
+  return actor >= target;
+};
+
+export const getAssignableRoles = (actorRole: UserRole): UserRole[] => {
+  const actorRank = ROLE_RANK[actorRole];
+  if (actorRank === undefined) return [];
+  return (Object.values(UserRole) as UserRole[]).filter(r => ROLE_RANK[r] <= actorRank);
+};

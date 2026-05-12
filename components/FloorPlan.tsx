@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Moon, Calendar, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -25,6 +25,7 @@ interface FloorPlanProps {
   rooms: Room[];
   tables: Table[];
   reservations: Reservation[];
+  banquetMenus: BanquetMenu[];
   onUpdateTable: (updatedTable: Table) => void;
   onDeleteTable: (tableId: number) => void;
   onAddTable: (table: Omit<Table, 'id'>) => void;
@@ -34,12 +35,15 @@ interface FloorPlanProps {
   onDeleteRoom: (room_id: number) => void;
   onToggleRoomClosed: (room_id: number, is_closed: boolean) => void;
   canEdit?: boolean;
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
   rooms,
   tables,
   reservations,
+  banquetMenus,
   onUpdateTable,
   onDeleteTable,
   onAddTable,
@@ -48,7 +52,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onAddRoom,
   onDeleteRoom,
   onToggleRoomClosed,
-  canEdit = true
+  canEdit = true,
+  globalDate,
+  globalShiftFilter: globalShiftFilterProp,
 }) => {
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
 
@@ -61,9 +67,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
 
-  // Per-shift merge context
-  const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDate(new Date()));
-  const [selectedShift, setSelectedShift] = useState<Shift>(() => detectShiftFromNow());
+  // Per-shift merge context — synced from global header on desktop
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    globalDate ? formatLocalDate(globalDate) : formatLocalDate(new Date())
+  );
+  const [selectedShift, setSelectedShift] = useState<Shift>(() => {
+    if (globalShiftFilterProp === 'LUNCH') return Shift.LUNCH;
+    if (globalShiftFilterProp === 'DINNER') return Shift.DINNER;
+    return detectShiftFromNow();
+  });
+
+  useEffect(() => {
+    if (globalDate) setSelectedDate(formatLocalDate(globalDate));
+  }, [globalDate]);
+  useEffect(() => {
+    if (globalShiftFilterProp === 'LUNCH') setSelectedShift(Shift.LUNCH);
+    else if (globalShiftFilterProp === 'DINNER') setSelectedShift(Shift.DINNER);
+  }, [globalShiftFilterProp]);
   const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
@@ -102,6 +122,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           return next;
         });
       }
+    } catch (err: any) {
+      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+    }
+  };
+
+  const handleUnhideAll = async () => {
+    if (hiddenTableIds.size === 0) return;
+    const ids = [...hiddenTableIds];
+    try {
+      await Promise.all(ids.map(id => deleteTableHidden(selectedDate, selectedShift, id)));
+      setHiddenTableIds(new Set());
+      setShowHidden(false);
     } catch (err: any) {
       setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
     }
@@ -242,6 +274,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<Room | null>(null);
   const [detailsModal, setDetailsModal] = useState<{ table: Table; widthCm: string; lengthCm: string; notes: string } | null>(null);
   const [deleteTablesConfirm, setDeleteTablesConfirm] = useState<number[] | null>(null);
+  const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -328,6 +361,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       const interval = setInterval(() => setTick(t => t + 1), 1000);
       return () => clearInterval(interval);
   }, []);
+
+  // Map of tableId -> banquet occupying it for the currently selected date+shift.
+  // A table can only be in one banquet for a given date+shift (server enforces).
+  const banquetByTableId = useMemo(() => {
+    const map = new Map<number, BanquetMenu>();
+    for (const b of banquetMenus) {
+      if (b.event_date !== selectedDate) continue;
+      if (b.shift !== selectedShift) continue;
+      const ids = Array.isArray(b.table_ids) ? b.table_ids : [];
+      for (const tid of ids) {
+        if (!map.has(tid)) map.set(tid, b);
+      }
+    }
+    return map;
+  }, [banquetMenus, selectedDate, selectedShift]);
 
   // Helper to get Active Reservation details
   const getActiveReservation = (table: Table): Reservation | undefined => {
@@ -438,9 +486,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Translation is in unscaled coords; the scaled wrapper maps it to screen.
     // Translate must come first so the matrix's tx/ty entries match the
     // unrotated drag delta (rotation last preserves values[4]/values[5]).
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = e.clientX;
@@ -557,9 +603,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const deltaX = (touch.clientX - dragState.startX) / s;
     const deltaY = (touch.clientY - dragState.startY) / s;
 
-    const dragTable = tables.find(t => t.id === dragState.tableId);
-    const rotPart = dragTable?.rotation ? ` rotate(${dragTable.rotation}deg)` : '';
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)${rotPart}`;
+    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
     dragState.currentX = touch.clientX;
@@ -672,7 +716,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     const isSelected = selectedTables.includes(table.id);
-    const dynamicStatus = getDynamicTableStatus(table);
+    const banquet = banquetByTableId.get(table.id);
+    const dynamicStatus: TableStatus = banquet ? TableStatus.RESERVED : getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
     const isMerged = table.merged_with && table.merged_with.length > 0;
     const isHidden = hiddenTableIds.has(table.id);
@@ -687,13 +732,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     const statusColors = {
-      [TableStatus.FREE]: 'bg-white border-emerald-300 text-emerald-700',
-      [TableStatus.OCCUPIED]: 'bg-red-100 border-red-300 text-red-700',
-      [TableStatus.RESERVED]: 'bg-amber-100 border-amber-300 text-amber-700',
-      [TableStatus.DIRTY]: 'bg-gray-200 border-gray-400 text-gray-600'
+      [TableStatus.FREE]: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
+      [TableStatus.OCCUPIED]: 'bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300',
+      [TableStatus.RESERVED]: 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300',
+      [TableStatus.DIRTY]: 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg-muted)]'
     };
 
-    const baseClasses = `absolute flex flex-col items-center justify-center border-2 shadow-sm transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-4 ring-indigo-400/50 ring-offset-1 border-indigo-500' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-md'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
+    const shapeClasses = `flex flex-col items-center justify-center border transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-[var(--shadow-xs)]'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
 
     // Responsive table sizes - smaller on mobile and tablets (< 768px)
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -701,26 +746,41 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const baseWidth = isMobile ? 60 : 100;
     const seatMultiplier = isMobile ? 8 : 15;
 
-    let shapeStyles = {};
+    let widthPx: number;
+    let heightPx: number;
+    let borderRadius: string;
 
     if (table.shape === TableShape.CIRCLE) {
-      shapeStyles = { borderRadius: '50%', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '50%';
     } else if (table.shape === TableShape.SQUARE) {
-      shapeStyles = { borderRadius: '8px', width: `${baseSize}px`, height: `${baseSize}px` };
+      widthPx = baseSize;
+      heightPx = baseSize;
+      borderRadius = '8px';
     } else {
-      const width = Math.max(baseWidth, table.seats * seatMultiplier);
-      shapeStyles = { borderRadius: '8px', width: `${width}px`, height: `${baseSize}px` };
+      widthPx = Math.max(baseWidth, table.seats * seatMultiplier);
+      heightPx = baseSize;
+      borderRadius = '8px';
     }
+
+    const shapeStyles = { width: `${widthPx}px`, height: `${heightPx}px`, borderRadius };
+
+    // Distance from wrapper top to the bottom of the rotated bounding box —
+    // used to anchor the reservation pill below the visual table at any angle.
+    const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+    const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
+    const pillTopPx = heightPx / 2 + rotatedHalfH + 4;
 
     return (
       <div
         key={table.id}
-        className={baseClasses}
+        className="absolute"
         style={{
           left: table.x,
           top: table.y,
-          ...shapeStyles,
-          transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          width: shapeStyles.width,
+          height: shapeStyles.height,
           zIndex: isSelected ? 10 : 1
         }}
         onMouseDown={(e) => {
@@ -732,46 +792,72 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           handleTouchStart(e, table.id, element);
         }}
       >
-        <span className="font-bold text-sm flex items-center gap-1">
-            {table.is_locked && <Lock size={10} className="text-slate-400" />}
-            {table.name}
-        </span>
-        
-        {/* Show Reservation Name */}
-        {reservation && !timerDisplay && (
-            <span className="text-[10px] font-bold truncate max-w-[90%] bg-white/50 px-1 rounded">
-                {reservation.customer_name}
-            </span>
-        )}
+        <div
+          className={shapeClasses}
+          style={{
+            ...shapeStyles,
+            transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
+          }}
+        >
+          <span className="font-semibold text-sm flex items-center gap-1">
+              {table.is_locked && <Lock size={10} className="opacity-60" />}
+              {table.name}
+          </span>
 
-        <span className="text-xs flex items-center gap-1 opacity-80">
-           <Armchair size={10} /> {table.seats}
-        </span>
-        
-        {dynamicStatus === TableStatus.OCCUPIED && (
-             <div className="absolute -top-2 -right-2 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
-        )}
+          <span className="text-xs flex items-center gap-1 opacity-80">
+             <Armchair size={10} /> {table.seats}
+          </span>
 
-        {/* Timer Badge */}
-        {timerDisplay && (
-            <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <Timer size={8} /> {timerDisplay}
-            </div>
-        )}
+          {dynamicStatus === TableStatus.OCCUPIED && (
+               <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-[var(--color-surface)] animate-pulse"></div>
+          )}
 
-        {/* Merged Table Badge */}
-        {isMerged && !timerDisplay && (
-            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <Combine size={8} />
-            </div>
-        )}
+          {/* Timer Badge */}
+          {timerDisplay && (
+              <div className="absolute -top-2.5 -right-2 bg-amber-500 text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <Timer size={8} /> {timerDisplay}
+              </div>
+          )}
 
-        {/* Hidden-for-shift Badge */}
-        {isHidden && (
-            <div className="absolute -top-2 -left-2 bg-slate-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-white">
-                <EyeOff size={8} />
-            </div>
-        )}
+          {/* Merged Table Badge */}
+          {isMerged && !timerDisplay && (
+              <div className="absolute -top-2 -left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <Combine size={8} />
+              </div>
+          )}
+
+          {/* Hidden-for-shift Badge */}
+          {isHidden && (
+              <div className="absolute -top-2 -left-2 bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
+                  <EyeOff size={8} />
+              </div>
+          )}
+
+          {/* Banquet Badge */}
+          {banquet && !timerDisplay && (
+              <div className="absolute -top-2 -right-2 bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]" title={`Banchetto: ${banquet.name}`}>
+                  <BookOpen size={8} />
+              </div>
+          )}
+        </div>
+
+        {/* Banquet Name — takes precedence over reservation when table is in a banquet */}
+        {banquet && !timerDisplay ? (
+          <div
+            style={{ top: pillTopPx }}
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[#4f46e5] border border-[#4338ca] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[#ffffff] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+            title={banquet.name}
+          >
+            {banquet.name}
+          </div>
+        ) : reservation && !timerDisplay ? (
+          <div
+            style={{ top: pillTopPx }}
+            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[var(--color-surface)]/95 border border-[var(--color-line)] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+          >
+            {reservation.customer_name}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -786,45 +872,41 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="bg-white px-3 sm:px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center gap-3 z-20">
-        <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-indigo-500" />
+      {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
+      <div className="md:hidden bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
+        <div>
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-2 py-1.5 text-sm rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
           />
         </div>
-        <div className="inline-flex bg-slate-100 rounded-lg p-1">
+        <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
           <button
             onClick={() => setSelectedShift(Shift.LUNCH)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              selectedShift === Shift.LUNCH ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Sun size={14} /> Pranzo
+            <Sun className="h-4 w-4" /> Pranzo
           </button>
           <button
             onClick={() => setSelectedShift(Shift.DINNER)}
-            className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-              selectedShift === Shift.DINNER ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
             }`}
           >
-            <Moon size={14} /> Cena
+            <Sunset className="h-4 w-4" /> Cena
           </button>
         </div>
-        <span className="text-xs text-slate-400 hidden sm:inline">
-          Le unioni tavoli sono valide solo per questa data e turno.
-        </span>
         {hiddenTableIds.size > 0 && (
             <button
                 onClick={() => setShowHidden(s => !s)}
                 className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                     showHidden
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
+                        : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
                 }`}
                 title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
             >
@@ -834,8 +916,40 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         )}
       </div>
 
+      {/* Desktop: Merge scope note + hidden toggle */}
+      <div className="hidden md:flex items-center gap-3 px-1 z-20">
+        <span className="inline-flex items-center gap-1.5 text-xs text-[var(--color-fg-subtle)]">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+          Le unioni tavoli sono valide solo per questa data e turno.
+        </span>
+        {hiddenTableIds.size > 0 && (
+            <div className="ml-auto flex items-center gap-1.5">
+                <button
+                    onClick={() => setShowHidden(s => !s)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                        showHidden
+                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
+                            : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
+                    }`}
+                    title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+                >
+                    {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                    {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
+                </button>
+                <button
+                    onClick={() => setUnhideAllConfirm(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white dark:bg-[var(--color-surface)] text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors"
+                    title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
+                >
+                    <Eye size={14} />
+                    Riattiva tutti
+                </button>
+            </div>
+        )}
+      </div>
+
       {/* Toolbar */}
-      <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+      <div className="bg-[var(--color-surface)] p-3 sm:p-4 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
@@ -844,22 +958,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap border flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+              className={`rounded-full px-4 py-2.5 text-sm font-medium transition whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
                   ? room.is_closed
-                    ? 'bg-slate-600 text-white border-slate-600 shadow-md shadow-slate-200'
-                    : 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
+                    ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
+                    : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
                   : room.is_closed
-                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300 line-through'
-                    : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
+                    ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)] line-through'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
               }`}
               title={room.is_closed ? `${room.name} (Chiusa)` : room.name}
             >
-              {room.is_closed && <DoorClosed size={12} />}
+              {room.is_closed && <DoorClosed size={14} />}
               {room.name}
             </button>
           ))}
-          
+
           {/* Add Room UI - Only shown in edit mode */}
           {canEdit && (isAddingRoom ? (
               <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
@@ -868,19 +982,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       value={newRoomName}
                       onChange={e => setNewRoomName(e.target.value)}
                       placeholder="Nome sala..."
-                      className="px-3 py-2 w-32 rounded-lg border border-indigo-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
+                      className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-[var(--color-fg)]"
                       onKeyDown={e => e.key === 'Enter' && handleConfirmAddRoom()}
                   />
                   <button
                     onClick={handleConfirmAddRoom}
-                    className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm"
+                    className="p-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90"
                     title="Conferma"
                   >
                       <Check size={16}/>
                   </button>
                   <button
                     onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }}
-                    className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"
+                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
                     title="Annulla"
                   >
                       <X size={16}/>
@@ -889,7 +1003,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           ) : (
             <button
                 onClick={() => setIsAddingRoom(true)}
-                className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 border border-indigo-200 shrink-0 transition-colors"
+                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] border border-[var(--color-line)]"
                 title="Aggiungi Nuova Sala"
             >
                 <Plus size={16} />
@@ -899,15 +1013,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
-        <div className="flex items-center gap-3 border-l pl-4 border-slate-200 overflow-x-auto shrink-0">
-          <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Strumenti</span>
+        <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] overflow-x-auto shrink-0 w-full sm:w-auto">
+          <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Strumenti</span>
 
           <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
-            className={`p-2 rounded-lg border transition-all ${
+            className={`p-1.5 rounded-md border transition ${
                 isSelectionMode
-                ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
-                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                ? 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg)]'
+                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
             }`}
             title="Modalità Selezione Multipla"
           >
@@ -917,26 +1031,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {selectedTables.length > 0 && (
               <button
                 onClick={() => setSelectedTables([])}
-                className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-rose-500 transition-colors"
+                className="p-1.5 rounded-md border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400 transition"
                 title="Deseleziona Tutto"
               >
                   <X className="h-4 w-4" />
               </button>
           )}
 
-          <div className="h-8 w-px bg-slate-200 mx-1"></div>
+          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Rettangolo">
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Rettangolo">
             <div className="w-6 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Quadrato">
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Quadrato">
             <div className="w-4 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className="p-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600" title="Tondo">
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Tondo">
              <div className="w-4 h-4 border-2 border-current rounded-full" />
           </button>
 
-          <div className="h-8 w-px bg-slate-200 mx-1"></div>
+          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
           {/* Toggle Room Closed Button */}
           {(() => {
@@ -948,8 +1062,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 onClick={() => onToggleRoomClosed(activeRoom.id, !isClosed)}
                 className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
                   isClosed
-                    ? 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                    : 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                    ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
+                    : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25'
                 }`}
                 title={isClosed ? `Riapri Sala: ${activeRoom.name}` : `Chiudi Sala: ${activeRoom.name}`}
               >
@@ -962,7 +1076,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
-            className="p-2 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 transition-colors"
+            className="p-1.5 rounded-md border border-rose-100 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
           >
              <Layout className="h-4 w-4 inline mr-1"/>
@@ -973,53 +1087,53 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
-            <div className="flex items-center gap-2 border-l pl-4 border-slate-200 animate-in slide-in-from-right duration-200 shrink-0">
-            <span className="text-xs font-semibold text-slate-400 uppercase hidden xl:block">Modifica</span>
-            
+            <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
+            <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Modifica</span>
+
             {/* Lock/Unlock */}
-            <button 
+            <button
                 onClick={handleToggleLock}
-                className={`p-2 rounded-lg border transition-colors ${
-                    singleSelectedTable?.is_locked 
-                    ? 'bg-amber-50 border-amber-200 text-amber-600' 
-                    : 'bg-white border-slate-200 text-slate-600'
+                className={`p-1.5 rounded-md border transition ${
+                    singleSelectedTable?.is_locked
+                    ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
+                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                 }`}
                 title={singleSelectedTable?.is_locked ? "Sblocca Tavolo" : "Blocca Tavolo"}
             >
                 {singleSelectedTable?.is_locked ? <Unlock size={16} /> : <Lock size={16} />}
             </button>
-            
+
             {/* Temp Lock (Timer) */}
-            <button 
+            <button
                 onClick={handleTempLock}
-                className="p-2 rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200 transition-colors flex items-center gap-1"
+                className="p-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-300 hover:border-amber-200 dark:hover:border-amber-500/30 transition flex items-center gap-1"
                 title="Blocca per 15 minuti"
             >
-                <Clock size={16} /> <span className="text-xs font-bold hidden sm:inline">15m</span>
+                <Clock size={16} /> <span className="text-xs font-semibold hidden sm:inline">15m</span>
             </button>
 
             {/* Table Name Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 shadow-sm rounded-lg px-2 py-1">
-                    <CaseSensitive size={14} className="text-indigo-500" />
-                    <input 
+                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
+                    <CaseSensitive size={14} className="text-[var(--color-fg-muted)]" />
+                    <input
                         type="text"
-                        className="w-20 text-sm outline-none text-indigo-700 font-bold bg-transparent"
+                        className="w-20 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
                         value={singleSelectedTable.name}
                         onChange={(e) => handleNameChange(e.target.value)}
                     />
                 </div>
             )}
 
-            {/* Seats Edit - Updated Styling */}
+            {/* Seats Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 shadow-sm rounded-lg px-2 py-1">
-                    <Users size={14} className="text-indigo-500" />
+                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
+                    <Users size={14} className="text-[var(--color-fg-muted)]" />
                     <input
                         type="number"
                         min="1"
                         max="20"
-                        className="w-12 text-sm outline-none text-indigo-700 font-bold bg-transparent"
+                        className="w-12 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
                         value={singleSelectedTable.seats}
                         onChange={(e) => handleSeatsChange(parseInt(e.target.value) || 1)}
                     />
@@ -1037,8 +1151,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     })}
                     className={`flex items-center gap-1 px-2 py-2 rounded-lg border transition-colors ${
                         (singleSelectedTable.notes || singleSelectedTable.width_cm || singleSelectedTable.length_cm)
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc] hover:bg-indigo-100 dark:hover:bg-[#4f46e5]/25'
+                            : 'bg-white dark:bg-[var(--color-surface)] border-slate-200 dark:border-slate-500/30 text-slate-600 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-[#4f46e5]/15 hover:text-indigo-600 dark:hover:text-[#818cf8] hover:border-indigo-200 dark:hover:border-[#4f46e5]/30'
                     }`}
                     title="Dettagli tavolo (dimensioni, note)"
                 >
@@ -1052,12 +1166,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <button
                     onClick={(e) => handleRotate(e.shiftKey ? -15 : 15)}
                     onContextMenu={(e) => { e.preventDefault(); handleRotate(-15); }}
-                    className="flex items-center gap-1 px-2 py-2 rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
                     title={`Ruota +15° (Shift/click destro per -15°)${singleSelectedTable ? ` — attuale: ${singleSelectedTable.rotation || 0}°` : ''}`}
                 >
                     <RotateCw size={16} />
                     {singleSelectedTable && (singleSelectedTable.rotation || 0) !== 0 && (
-                        <span className="text-xs font-bold tabular-nums">{singleSelectedTable.rotation}°</span>
+                        <span className="text-xs font-semibold tabular-nums">{singleSelectedTable.rotation}°</span>
                     )}
                 </button>
             )}
@@ -1069,7 +1183,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 font-medium text-sm"
+                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 font-medium text-sm transition"
                 >
                 <Combine size={16} /> Unisci
                 </button>
@@ -1082,7 +1196,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 font-medium text-sm"
+                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 hover:bg-amber-100 dark:hover:bg-amber-500/25 font-medium text-sm transition"
                     title={`Dividi tavoli: ${singleSelectedTable.name}`}
                 >
                 <Scissors size={16} /> Dividi
@@ -1100,8 +1214,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         }}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm ${
                             allHidden
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
+                                : 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-500/30'
                         }`}
                         title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
                     >
@@ -1116,7 +1230,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                  <button
                  onClick={() => setDeleteTablesConfirm([...selectedTables])}
-                 className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 font-medium text-sm"
+                 className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-rose-600 text-[#ffffff] hover:bg-rose-700 font-medium text-sm transition"
                 >
                     <Trash2 size={16} /> Elimina
                 </button>
@@ -1128,10 +1242,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-slate-100 rounded-xl border-2 border-dashed border-slate-300 relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
-            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(rgba(148,163,184,0.4) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
         }}
       >
@@ -1148,28 +1262,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
 
           {isLoadingMerges && (
-              <div className="absolute inset-0 z-30 bg-slate-100/70 backdrop-blur-[1px] flex items-center justify-center">
-                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
-                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                      <span className="text-sm text-slate-600">Caricamento tavoli…</span>
+              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)]">
+                      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
+                      <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                   </div>
               </div>
           )}
 
           {currentTables.length === 0 && !isLoadingMerges && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-400 pointer-events-none">
-                  <p>Trascina o aggiungi tavoli in questa sala</p>
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--color-fg-muted)] pointer-events-none">
+                  <p className="text-sm">Trascina o aggiungi tavoli in questa sala</p>
               </div>
           )}
-          
+
           {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-medium shadow-lg pointer-events-none flex items-center gap-2">
+              <div className="absolute top-4 left-4 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-3 py-1 rounded-full text-xs font-medium pointer-events-none flex items-center gap-2">
                   <CheckSquare size={12} /> MODALITÀ SELEZIONE ATTIVA
               </div>
           )}
 
           {rooms.find(r => r.id === activeRoomId)?.is_closed && (
-              <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 uppercase tracking-wide">
+              <div className="absolute top-4 right-4 bg-amber-500 text-[#ffffff] px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
                   <DoorClosed size={12} /> Sala Chiusa
               </div>
           )}
@@ -1179,33 +1293,33 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="flex items-center gap-2 px-3 py-2 bg-white/90 backdrop-blur rounded-xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] text-xs font-semibold text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
                 aria-expanded={isLegendOpen}
             >
-                <Info size={14} className="text-indigo-500" />
+                <Info size={14} />
                 Legenda
             </button>
             {isLegendOpen && (
                 <div
-                    className="absolute bottom-full right-0 mb-2 w-56 bg-white/95 backdrop-blur p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                    className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)] p-3 rounded-md border border-[var(--color-line)] shadow-[var(--shadow-overlay)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="font-semibold text-slate-700 mb-1">Legenda Stato</div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-white border border-emerald-300 rounded-sm"></div> Libero
+                    <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-sm"></div> Libero
                     </div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-red-50 border border-red-300 rounded-sm relative">
-                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full"></div>
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-sm relative">
+                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
                         </div> Occupato (In corso)
                     </div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <div className="w-3 h-3 bg-amber-50 border border-amber-300 rounded-sm"></div> Riservato (Prossime 2h)
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div className="w-3 h-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-sm"></div> Riservato (Prossime 2h)
                     </div>
-                    <div className="flex items-center gap-2 text-slate-400 border-t pt-2 mt-1">
+                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
                         <Lock size={12} /> Tavolo Bloccato
                     </div>
-                    <div className="flex items-center gap-2 text-slate-400">
+                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)]">
                         <Timer size={12} /> Blocco Temporaneo
                     </div>
                 </div>
@@ -1215,21 +1329,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Alert Modal */}
       {alertModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 text-center">
-              <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
-                alertModal.type === 'error' ? 'bg-red-100' : 'bg-amber-100'
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAlertModal(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-6 text-center">
+              <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${
+                alertModal.type === 'error' ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30' : 'bg-amber-50 dark:bg-amber-500/15 border-amber-100 dark:border-amber-500/30'
               }`}>
-                <AlertTriangle className={`h-8 w-8 ${
-                  alertModal.type === 'error' ? 'text-red-600' : 'text-amber-600'
+                <AlertTriangle className={`h-5 w-5 ${
+                  alertModal.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
                 }`} />
               </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Attenzione</h3>
-              <p className="text-slate-600 mb-6">{alertModal.message}</p>
+              <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">Attenzione</h3>
+              <p className="text-sm text-[var(--color-fg-muted)] mb-6">{alertModal.message}</p>
               <button
                 onClick={() => setAlertModal(null)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
               >
                 OK
               </button>
@@ -1273,47 +1387,60 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         }}
       />
 
+      <ConfirmDeleteModal
+        isOpen={unhideAllConfirm}
+        title="Riattiva tutti i tavoli"
+        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
+        confirmLabel="Riattiva tutti"
+        icon={<Eye className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-100 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
+        showIrreversibleWarning={false}
+        onCancel={() => setUnhideAllConfirm(false)}
+        onConfirm={async () => {
+          setUnhideAllConfirm(false);
+          await handleUnhideAll();
+        }}
+      />
+
       {/* Table Details Modal (dimensions + notes) */}
       {detailsModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Info className="h-5 w-5 text-indigo-600" />
-                <h3 className="text-lg font-semibold text-slate-800">Dettagli Tavolo {detailsModal.table.name}</h3>
-              </div>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setDetailsModal(null)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Dettagli Tavolo {detailsModal.table.name}</h3>
               <button
                 onClick={() => setDetailsModal(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
-                  <Ruler className="h-3.5 w-3.5 text-slate-400" /> Dimensioni (cm)
+                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                  <Ruler className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Dimensioni (cm)
                 </label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 block mb-1">Larghezza</label>
+                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Larghezza</label>
                     <input
                       type="number"
                       min="0"
                       placeholder="es. 80"
-                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
                       value={detailsModal.widthCm}
                       onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
                     />
                   </div>
-                  <span className="text-slate-400 mt-5">×</span>
+                  <span className="text-slate-400 dark:text-slate-500 mt-5">×</span>
                   <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 block mb-1">Lunghezza</label>
+                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Lunghezza</label>
                     <input
                       type="number"
                       min="0"
                       placeholder="es. 120"
-                      className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
                       value={detailsModal.lengthCm}
                       onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
                     />
@@ -1321,21 +1448,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5">
-                  <StickyNote className="h-3.5 w-3.5 text-slate-400" /> Note
+                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Note
                 </label>
                 <textarea
-                  className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
                   placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
                   value={detailsModal.notes}
                   onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
                 />
               </div>
             </div>
-            <div className="flex gap-3 p-5 border-t border-slate-100 bg-slate-50">
+            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
               <button
                 onClick={() => setDetailsModal(null)}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-white font-medium"
+                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
               >
                 Annulla
               </button>
@@ -1353,7 +1480,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   });
                   setDetailsModal(null);
                 }}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
               >
                 Salva
               </button>

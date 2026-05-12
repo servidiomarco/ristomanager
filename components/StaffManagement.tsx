@@ -22,8 +22,8 @@ const STAFF_CATEGORY_LABELS: Record<StaffCategory, string> = {
 };
 
 const STAFF_CATEGORY_COLORS: Record<StaffCategory, string> = {
-  [StaffCategory.SALA]: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  [StaffCategory.CUCINA]: 'bg-orange-100 text-orange-700 border-orange-200'
+  [StaffCategory.SALA]: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-500/30',
+  [StaffCategory.CUCINA]: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-100 dark:border-amber-500/30'
 };
 
 const STAFF_TYPE_LABELS: Record<StaffType, string> = {
@@ -33,9 +33,9 @@ const STAFF_TYPE_LABELS: Record<StaffType, string> = {
 };
 
 const STAFF_TYPE_COLORS: Record<StaffType, string> = {
-  [StaffType.FISSO]: 'bg-blue-100 text-blue-700',
-  [StaffType.STAGIONALE]: 'bg-amber-100 text-amber-700',
-  [StaffType.EXTRA]: 'bg-purple-100 text-purple-700'
+  [StaffType.FISSO]: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-500/30',
+  [StaffType.STAGIONALE]: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30',
+  [StaffType.EXTRA]: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-100 dark:border-violet-500/30'
 };
 
 const TIME_OFF_LABELS: Record<TimeOffType, string> = {
@@ -46,24 +46,24 @@ const TIME_OFF_LABELS: Record<TimeOffType, string> = {
 };
 
 const TIME_OFF_COLORS: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'bg-slate-200 text-slate-700',
-  [TimeOffType.VACANZA]: 'bg-cyan-100 text-cyan-700',
-  [TimeOffType.MALATTIA]: 'bg-rose-100 text-rose-700',
-  [TimeOffType.PERMESSO]: 'bg-violet-100 text-violet-700'
+  [TimeOffType.RIPOSO]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]',
+  [TimeOffType.VACANZA]: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-100 dark:border-cyan-500/30',
+  [TimeOffType.MALATTIA]: 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30',
+  [TimeOffType.PERMESSO]: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-100 dark:border-violet-500/30'
 };
 
 const TIME_OFF_DAY_BG: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'border-slate-300 bg-slate-100',
-  [TimeOffType.VACANZA]: 'border-cyan-300 bg-cyan-50',
-  [TimeOffType.MALATTIA]: 'border-rose-300 bg-rose-50',
-  [TimeOffType.PERMESSO]: 'border-violet-300 bg-violet-50'
+  [TimeOffType.RIPOSO]: 'border-slate-300 dark:border-slate-500/40 bg-slate-100 dark:bg-slate-500/20',
+  [TimeOffType.VACANZA]: 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15',
+  [TimeOffType.MALATTIA]: 'border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/15',
+  [TimeOffType.PERMESSO]: 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15'
 };
 
 const TIME_OFF_LEGEND_DOT: Record<TimeOffType, string> = {
-  [TimeOffType.RIPOSO]: 'bg-slate-300',
-  [TimeOffType.VACANZA]: 'bg-cyan-300',
-  [TimeOffType.MALATTIA]: 'bg-rose-300',
-  [TimeOffType.PERMESSO]: 'bg-violet-300'
+  [TimeOffType.RIPOSO]: 'bg-slate-300 dark:bg-slate-500/40',
+  [TimeOffType.VACANZA]: 'bg-cyan-300 dark:bg-cyan-500/40',
+  [TimeOffType.MALATTIA]: 'bg-rose-300 dark:bg-rose-500/40',
+  [TimeOffType.PERMESSO]: 'bg-violet-300 dark:bg-violet-500/40'
 };
 
 // Indices match JS Date.getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
@@ -82,9 +82,11 @@ const toDateOnly = (date: string): string => date.substring(0, 10);
 
 interface StaffManagementProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
-export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) => {
+export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, autoOpenNew, onAutoOpenNewHandled }) => {
   // ============================================
   // STATE
   // ============================================
@@ -111,6 +113,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   const [showTimeOffModal, setShowTimeOffModal] = useState(false);
   const [deleteStaffConfirm, setDeleteStaffConfirm] = useState<StaffMember | null>(null);
   const [deleteTimeOffConfirm, setDeleteTimeOffConfirm] = useState<{ id: string; label: string } | null>(null);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+  const [isSavingShift, setIsSavingShift] = useState(false);
+  const [isSavingTimeOff, setIsSavingTimeOff] = useState(false);
 
   // Forms
   const [staffForm, setStaffForm] = useState<CreateStaffInput>({
@@ -141,6 +146,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     startDate: '',
     endDate: '',
     type: TimeOffType.RIPOSO,
+    shift: null,
     notes: '',
     approved: true
   });
@@ -178,6 +184,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (autoOpenNew) {
+      handleOpenAddStaff();
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
+
   // ============================================
   // FILTERED DATA
   // ============================================
@@ -199,6 +212,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
   const salaStaff = filteredStaff.filter(s => s.category === StaffCategory.SALA);
   const cucinaStaff = filteredStaff.filter(s => s.category === StaffCategory.CUCINA);
+
+  const STAFF_TYPE_ORDER: StaffType[] = [StaffType.FISSO, StaffType.STAGIONALE, StaffType.EXTRA];
+  const groupByType = (list: StaffMember[]): { type: StaffType; members: StaffMember[] }[] =>
+    STAFF_TYPE_ORDER
+      .map(type => ({ type, members: list.filter(s => s.staffType === type) }))
+      .filter(g => g.members.length > 0);
 
   // ============================================
   // CALENDAR HELPERS
@@ -249,15 +268,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
     );
   };
 
-  // FISSO staff are implicitly present on both shifts during their contract
-  // period unless there's a time-off entry or an explicit absent shift.
-  // If hireDate or contractEndDate are missing, that boundary is treated
-  // as open (a FISSO with no dates is assumed currently active).
+  // FISSO and STAGIONALE staff are implicitly present on both shifts during
+  // their contract period unless there's a time-off entry or an explicit
+  // absent shift. If hireDate or contractEndDate are missing, that boundary
+  // is treated as open (no date = currently active).
   const isWithinHirePeriod = (staff: StaffMember, dateStr: string): boolean => {
     if (staff.hireDate && dateStr < toDateOnly(staff.hireDate)) return false;
     if (staff.contractEndDate && dateStr > toDateOnly(staff.contractEndDate)) return false;
     return true;
   };
+
+  const hasAutoShifts = (staff: StaffMember): boolean =>
+    staff.staffType === StaffType.FISSO || staff.staffType === StaffType.STAGIONALE;
 
   // ============================================
   // HANDLERS
@@ -308,8 +330,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       showToast('Nome e cognome sono obbligatori', 'error');
       return;
     }
+    if (isSavingStaff) return;
 
     try {
+      setIsSavingStaff(true);
       if (editingStaff) {
         const updated = await staffApiService.updateStaffMember(editingStaff.id, staffForm);
         setStaffMembers(prev => prev.map(s => s.id === editingStaff.id ? updated : s));
@@ -323,6 +347,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       resetStaffForm();
     } catch (error) {
       showToast('Errore nel salvataggio', 'error');
+    } finally {
+      setIsSavingStaff(false);
     }
   };
 
@@ -365,12 +391,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
       return;
     }
+    if (isSavingShift) return;
 
     const shiftsToCreate: Shift[] = [];
     if (shiftForm.lunch) shiftsToCreate.push(Shift.LUNCH);
     if (shiftForm.dinner) shiftsToCreate.push(Shift.DINNER);
 
     try {
+      setIsSavingShift(true);
       const created = await Promise.all(
         shiftsToCreate.map(shift =>
           staffApiService.createShift({
@@ -396,6 +424,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       );
     } catch (error) {
       showToast('Errore nel salvataggio del turno', 'error');
+    } finally {
+      setIsSavingShift(false);
     }
   };
 
@@ -417,6 +447,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
       startDate: today,
       endDate: today,
       type: TimeOffType.RIPOSO,
+      shift: null,
       notes: '',
       approved: true
     });
@@ -424,13 +455,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   };
 
   const handleSaveTimeOff = async () => {
+    if (isSavingTimeOff) return;
     try {
+      setIsSavingTimeOff(true);
       const created = await staffApiService.createTimeOff(timeOffForm);
       setTimeOffs(prev => [...prev, created]);
       setShowTimeOffModal(false);
       showToast('Assenza registrata', 'success');
-    } catch (error) {
-      showToast('Errore nel salvataggio', 'error');
+    } catch (error: any) {
+      console.error('createTimeOff failed', error);
+      showToast(`Errore nel salvataggio: ${error?.message || 'sconosciuto'}`, 'error');
+    } finally {
+      setIsSavingTimeOff(false);
     }
   };
 
@@ -463,65 +499,58 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
       </div>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Personale</h1>
-          <p className="text-slate-500">Gestione dipendenti, turni e assenze</p>
-        </div>
-        <button
-          onClick={handleOpenAddStaff}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
-        >
-          <UserPlus className="h-5 w-5" />
-          Aggiungi Dipendente
-        </button>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      <button
+        onClick={handleOpenAddStaff}
+        className="w-full lg:hidden justify-center rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2"
+      >
+        <UserPlus className="h-4 w-4" />
+        Aggiungi Dipendente
+      </button>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex flex-wrap gap-4 items-center">
+      <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg p-4">
+        <div className="flex flex-wrap gap-3 items-center">
           {/* Search */}
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
             <input
               type="text"
               placeholder="Cerca dipendente..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+              className="w-full pl-9 pr-3 py-2.5 bg-[var(--color-surface-2)] dark:bg-white/[0.04] border border-[var(--color-line-strong)] rounded-full text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
           </div>
 
           {/* Category Filter */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setCategoryFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.SALA)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === StaffCategory.SALA ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.SALA ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Sala
             </button>
             <button
               onClick={() => setCategoryFilter(StaffCategory.CUCINA)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                categoryFilter === StaffCategory.CUCINA ? 'bg-orange-100 text-orange-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                categoryFilter === StaffCategory.CUCINA ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Cucina
@@ -529,11 +558,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
           </div>
 
           {/* Type Filter */}
-          <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
             <button
               onClick={() => setTypeFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                typeFilter === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                typeFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
               }`}
             >
               Tutti
@@ -542,8 +571,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               <button
                 key={key}
                 onClick={() => setTypeFilter(key as StaffType)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  typeFilter === key ? `${STAFF_TYPE_COLORS[key as StaffType]} shadow-sm` : 'text-slate-500 hover:text-slate-700'
+                className={`px-3 py-1.5 text-xs font-medium rounded-full transition ${
+                  typeFilter === key ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
                 }`}
               >
                 {label}
@@ -557,9 +586,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               type="checkbox"
               checked={showInactive}
               onChange={(e) => setShowInactive(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="w-4 h-4 rounded border-[var(--color-line)]"
             />
-            <span className="text-sm text-slate-600">Mostra inattivi</span>
+            <span className="text-sm text-[var(--color-fg-muted)]">Mostra inattivi</span>
           </label>
         </div>
       </div>
@@ -569,40 +598,48 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
         {/* Staff Lists */}
         <div className="lg:col-span-1 space-y-6">
           {/* Sala Section */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100">
+          <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-emerald-600" />
-                <h2 className="font-semibold text-emerald-800">Sala</h2>
-                <span className="ml-auto text-sm text-emerald-600 font-medium">{salaStaff.length}</span>
+                <Users className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                <h2 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Sala</h2>
+                <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{salaStaff.length}</span>
               </div>
             </div>
-            <div className="p-2 max-h-[300px] overflow-y-auto">
+            <div className="p-2 max-h-[400px] overflow-y-auto">
               {salaStaff.length === 0 ? (
-                <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
+                <p className="text-center text-[var(--color-fg-subtle)] py-4 text-sm">Nessun dipendente</p>
               ) : (
-                salaStaff.map(staff => (
-                  <div
-                    key={staff.id}
-                    onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
-                      selectedStaff?.id === staff.id
-                        ? 'bg-emerald-100 border border-emerald-200'
-                        : 'hover:bg-slate-50 border border-transparent'
-                    } ${!staff.isActive ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
-                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cameriere'}</p>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
-                        {STAFF_TYPE_LABELS[staff.staffType]}
+                groupByType(salaStaff).map(group => (
+                  <div key={group.type} className="mb-3 last:mb-0">
+                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[group.type]}`}>
+                        {STAFF_TYPE_LABELS[group.type]}
                       </span>
+                      <span className="text-[11px] text-[var(--color-fg-subtle)]">{group.members.length}</span>
+                      <div className="flex-1 h-px bg-[var(--color-line)]" />
                     </div>
+                    {group.members.map(staff => (
+                      <div
+                        key={staff.id}
+                        onClick={() => setSelectedStaff(staff)}
+                        className={`p-2.5 rounded-md cursor-pointer transition mb-1 ${
+                          selectedStaff?.id === staff.id
+                            ? 'bg-[var(--color-surface-3)] border border-[var(--color-line-strong)]'
+                            : 'hover:bg-[var(--color-surface-hover)] border border-transparent'
+                        } ${!staff.isActive ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-medium flex items-center justify-center text-sm">
+                            {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-[var(--color-fg)] truncate text-sm">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                            <p className="text-xs text-[var(--color-fg-muted)]">{staff.role || 'Cameriere'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))
               )}
@@ -610,40 +647,48 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
           </div>
 
           {/* Cucina Section */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
+          <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2">
-                <ChefHat className="h-5 w-5 text-orange-600" />
-                <h2 className="font-semibold text-orange-800">Cucina</h2>
-                <span className="ml-auto text-sm text-orange-600 font-medium">{cucinaStaff.length}</span>
+                <ChefHat className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                <h2 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Cucina</h2>
+                <span className="ml-auto text-xs text-[var(--color-fg-muted)] font-medium">{cucinaStaff.length}</span>
               </div>
             </div>
-            <div className="p-2 max-h-[300px] overflow-y-auto">
+            <div className="p-2 max-h-[400px] overflow-y-auto">
               {cucinaStaff.length === 0 ? (
-                <p className="text-center text-slate-400 py-4 text-sm">Nessun dipendente</p>
+                <p className="text-center text-[var(--color-fg-subtle)] py-4 text-sm">Nessun dipendente</p>
               ) : (
-                cucinaStaff.map(staff => (
-                  <div
-                    key={staff.id}
-                    onClick={() => setSelectedStaff(staff)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all mb-1 ${
-                      selectedStaff?.id === staff.id
-                        ? 'bg-orange-100 border border-orange-200'
-                        : 'hover:bg-slate-50 border border-transparent'
-                    } ${!staff.isActive ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-semibold">
-                        {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
-                        <p className="text-xs text-slate-500">{staff.role || 'Cuoco'}</p>
-                      </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${STAFF_TYPE_COLORS[staff.staffType]}`}>
-                        {STAFF_TYPE_LABELS[staff.staffType]}
+                groupByType(cucinaStaff).map(group => (
+                  <div key={group.type} className="mb-3 last:mb-0">
+                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[group.type]}`}>
+                        {STAFF_TYPE_LABELS[group.type]}
                       </span>
+                      <span className="text-[11px] text-[var(--color-fg-subtle)]">{group.members.length}</span>
+                      <div className="flex-1 h-px bg-[var(--color-line)]" />
                     </div>
+                    {group.members.map(staff => (
+                      <div
+                        key={staff.id}
+                        onClick={() => setSelectedStaff(staff)}
+                        className={`p-2.5 rounded-md cursor-pointer transition mb-1 ${
+                          selectedStaff?.id === staff.id
+                            ? 'bg-[var(--color-surface-3)] border border-[var(--color-line-strong)]'
+                            : 'hover:bg-[var(--color-surface-hover)] border border-transparent'
+                        } ${!staff.isActive ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg)] font-medium flex items-center justify-center text-sm">
+                            {staff.name[0]?.toUpperCase()}{staff.surname[0]?.toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-[var(--color-fg)] truncate text-sm">{toTitleCase(staff.name)} {toTitleCase(staff.surname)}</p>
+                            <p className="text-xs text-[var(--color-fg-muted)]">{staff.role || 'Cuoco'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))
               )}
@@ -654,74 +699,72 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
         {/* Staff Detail & Calendar */}
         <div className="lg:col-span-2">
           {selectedStaff ? (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
               {/* Staff Detail Header */}
-              <div className={`p-6 ${selectedStaff.category === StaffCategory.SALA ? 'bg-gradient-to-r from-emerald-50 to-teal-50' : 'bg-gradient-to-r from-orange-50 to-amber-50'}`}>
+              <div className="px-5 py-4 border-b border-[var(--color-line)]">
                 <div className="flex items-start gap-4">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold ${
-                    selectedStaff.category === StaffCategory.SALA ? 'bg-emerald-200 text-emerald-700' : 'bg-orange-200 text-orange-700'
-                  }`}>
+                  <div className="w-14 h-14 rounded-lg bg-[var(--color-surface-3)] text-[var(--color-fg)] flex items-center justify-center text-xl font-medium">
                     {selectedStaff.name[0]?.toUpperCase()}{selectedStaff.surname[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-slate-800">{toTitleCase(selectedStaff.name)} {toTitleCase(selectedStaff.surname)}</h2>
+                      <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{toTitleCase(selectedStaff.name)} {toTitleCase(selectedStaff.surname)}</h2>
                       {!selectedStaff.isActive && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Inattivo</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">Inattivo</span>
                       )}
                     </div>
-                    <p className="text-slate-600">{selectedStaff.role || (selectedStaff.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco')}</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <span className={`text-xs px-2 py-1 rounded-full border ${STAFF_CATEGORY_COLORS[selectedStaff.category]}`}>
+                    <p className="text-sm text-[var(--color-fg-muted)]">{selectedStaff.role || (selectedStaff.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco')}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${STAFF_CATEGORY_COLORS[selectedStaff.category]}`}>
                         {STAFF_CATEGORY_LABELS[selectedStaff.category]}
                       </span>
-                      <span className={`text-xs px-2 py-1 rounded-full ${STAFF_TYPE_COLORS[selectedStaff.staffType]}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${STAFF_TYPE_COLORS[selectedStaff.staffType]}`}>
                         {STAFF_TYPE_LABELS[selectedStaff.staffType]}
                       </span>
                       {selectedStaff.weeklyRestDay !== undefined && selectedStaff.weeklyRestDay !== null && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
                           Riposo: {WEEKDAY_LABELS[selectedStaff.weeklyRestDay]}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <button
                       onClick={() => handleOpenEditStaff(selectedStaff)}
-                      className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"
+                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
                     >
-                      <Edit2 className="h-5 w-5" />
+                      <Edit2 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => handleToggleStaffActive(selectedStaff)}
-                      className={`p-2 rounded-lg transition-colors ${
+                      className={`p-1.5 rounded-md hover:bg-[var(--color-surface-hover)] ${
                         selectedStaff.isActive
-                          ? 'text-slate-500 hover:text-amber-600 hover:bg-white'
-                          : 'text-emerald-600 hover:bg-white'
+                          ? 'text-[var(--color-fg-muted)] hover:text-amber-600'
+                          : 'text-emerald-600'
                       }`}
                     >
-                      {selectedStaff.isActive ? <AlertTriangle className="h-5 w-5" /> : <Check className="h-5 w-5" />}
+                      {selectedStaff.isActive ? <AlertTriangle className="h-4 w-4" /> : <Check className="h-4 w-4" />}
                     </button>
                     <button
                       onClick={() => setDeleteStaffConfirm(selectedStaff)}
-                      className="p-2 text-slate-500 hover:text-rose-600 hover:bg-white rounded-lg transition-colors"
+                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
                     >
-                      <Trash2 className="h-5 w-5" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
 
                 {/* Contact Info */}
-                <div className="flex gap-4 mt-4 text-sm">
+                <div className="flex gap-4 mt-3 text-sm">
                   {selectedStaff.phone && (
-                    <div className="flex items-center gap-1.5 text-slate-600">
-                      <Phone className="h-4 w-4" />
+                    <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                      <Phone className="h-3.5 w-3.5" />
                       {selectedStaff.phone}
                     </div>
                   )}
                   {selectedStaff.email && (
-                    <div className="flex items-center gap-1.5 text-slate-600">
-                      <Mail className="h-4 w-4" />
+                    <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                      <Mail className="h-3.5 w-3.5" />
                       {selectedStaff.email}
                     </div>
                   )}
@@ -729,45 +772,46 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               {/* Calendar Navigation */}
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-[var(--color-line)] flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <button onClick={goToPreviousMonth} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                    <ChevronLeft className="h-5 w-5 text-slate-600" />
+                  <button onClick={goToPreviousMonth} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="font-semibold text-slate-800 min-w-[150px] text-center capitalize">
+                  <span className="text-sm font-medium text-[var(--color-fg)] min-w-[150px] text-center capitalize">
                     {calendarDate.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}
                   </span>
-                  <button onClick={goToNextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                    <ChevronRight className="h-5 w-5 text-slate-600" />
+                  <button onClick={goToNextMonth} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]">
+                    <ChevronRight className="h-4 w-4" />
                   </button>
-                  <button onClick={goToCurrentMonth} className="ml-2 text-xs text-indigo-600 hover:underline">
+                  <button onClick={goToCurrentMonth} className="ml-2 text-xs text-[var(--color-fg)] hover:underline">
                     Oggi
                   </button>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleOpenAddTimeOff}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                    className="rounded-full px-3 py-1.5 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-xs font-medium hover:bg-[var(--color-surface-hover)] transition flex items-center gap-1"
                   >
-                    <Calendar className="h-4 w-4" />
+                    <Calendar className="h-3.5 w-3.5" />
                     Assenza
                   </button>
                   <button
                     onClick={() => handleOpenAddShift()}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors"
+                    className="rounded-full px-3 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition flex items-center gap-1"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-3.5 w-3.5" />
                     Turno
                   </button>
                 </div>
               </div>
 
               {/* Calendar Grid */}
-              <div className="p-4">
+              <div className="p-4 overflow-x-auto">
+                <div className="min-w-[560px]">
                 {/* Day Headers */}
                 <div className="grid grid-cols-7 gap-1 mb-2">
                   {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
-                    <div key={day} className="text-center text-xs font-medium text-slate-500 py-2">
+                    <div key={day} className="text-center text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] py-2">
                       {day}
                     </div>
                   ))}
@@ -784,32 +828,38 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     const lunchShift = dayShifts.find(s => s.shift === Shift.LUNCH);
                     const dinnerShift = dayShifts.find(s => s.shift === Shift.DINNER);
 
+                    // A time-off entry can be full-day (shift=null) or scoped to a single shift.
+                    const timeOffShift = dayTimeOff?.shift ?? null;
+                    const isFullDayOff = !!dayTimeOff && timeOffShift === null;
+                    const lunchOff = !!dayTimeOff && (timeOffShift === null || timeOffShift === Shift.LUNCH);
+                    const dinnerOff = !!dayTimeOff && (timeOffShift === null || timeOffShift === Shift.DINNER);
+
                     const isWeeklyRest = selectedStaff.weeklyRestDay !== undefined
                       && selectedStaff.weeklyRestDay !== null
                       && day.getDay() === selectedStaff.weeklyRestDay;
 
-                    const inHirePeriod = selectedStaff.staffType === StaffType.FISSO
+                    const inHirePeriod = hasAutoShifts(selectedStaff)
                       && !isWeeklyRest
                       && isWithinHirePeriod(selectedStaff, dateStr);
 
-                    // Show shift if explicit DB row exists OR FISSO implicit presence applies
-                    const showLunch = !!lunchShift || (inHirePeriod && !dayTimeOff);
+                    // Show shift if explicit DB row exists OR FISSO implicit presence applies (and not on time-off for that shift)
+                    const showLunch = !!lunchShift || (inHirePeriod && !lunchOff);
                     const lunchPresent = lunchShift ? lunchShift.present : inHirePeriod;
                     const lunchImplicit = !lunchShift && inHirePeriod;
 
-                    const showDinner = !!dinnerShift || (inHirePeriod && !dayTimeOff);
+                    const showDinner = !!dinnerShift || (inHirePeriod && !dinnerOff);
                     const dinnerPresent = dinnerShift ? dinnerShift.present : inHirePeriod;
                     const dinnerImplicit = !dinnerShift && inHirePeriod;
 
                     const dayBgClass = !isCurrentMonth
                       ? 'border-transparent bg-slate-50/50 opacity-40'
-                      : dayTimeOff
-                        ? TIME_OFF_DAY_BG[dayTimeOff.type]
+                      : isFullDayOff
+                        ? TIME_OFF_DAY_BG[dayTimeOff!.type]
                         : isWeeklyRest && !lunchShift && !dinnerShift
-                          ? 'border-slate-300 bg-slate-100'
+                          ? 'border-slate-300 dark:border-slate-500/40 bg-slate-100 dark:bg-slate-500/20'
                           : isToday
-                            ? 'border-indigo-300 bg-indigo-50'
-                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50';
+                            ? 'border-indigo-300 dark:border-[#4f46e5]/40 bg-indigo-50 dark:bg-[#4f46e5]/15'
+                            : 'border-slate-100 dark:border-slate-500/30 hover:border-slate-200 dark:hover:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15';
 
                     return (
                       <div
@@ -817,31 +867,39 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                         onClick={() => handleOpenAddShift(day)}
                         className={`min-h-[72px] p-1.5 rounded-lg border cursor-pointer transition-all flex flex-col ${dayBgClass}`}
                       >
-                        <div className={`text-xs font-semibold mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
+                        <div className={`text-xs font-semibold mb-1 ${isToday ? 'text-indigo-600 dark:text-[#818cf8]' : 'text-slate-700 dark:text-slate-300'}`}>
                           {day.getDate()}
                         </div>
 
-                        {dayTimeOff ? (
-                          <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff.type]}`}>
-                            {TIME_OFF_LABELS[dayTimeOff.type]}
+                        {isFullDayOff ? (
+                          <div className={`text-[9px] font-medium px-1 py-0.5 rounded text-center ${TIME_OFF_COLORS[dayTimeOff!.type]}`}>
+                            {TIME_OFF_LABELS[dayTimeOff!.type]}
                           </div>
                         ) : isWeeklyRest && !showLunch && !showDinner ? (
-                          <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 text-slate-700">
+                          <div className="text-[9px] font-medium px-1 py-0.5 rounded text-center bg-slate-200 dark:bg-slate-500/25 text-slate-700 dark:text-slate-300">
                             Riposo
                           </div>
                         ) : (
                           <div className="space-y-0.5">
-                            {showLunch && (
+                            {lunchOff && !lunchShift ? (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-medium px-1 py-0.5 rounded ${TIME_OFF_COLORS[dayTimeOff!.type]}`}
+                                title={`${TIME_OFF_LABELS[dayTimeOff!.type]} — Pranzo`}
+                              >
+                                <Sun className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">{TIME_OFF_LABELS[dayTimeOff!.type]}</span>
+                              </div>
+                            ) : showLunch && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   lunchPresent
                                     ? lunchImplicit
-                                      ? 'bg-amber-100 text-amber-700 border border-dashed border-amber-300'
-                                      : 'bg-amber-200 text-amber-800'
-                                    : 'bg-slate-100 text-slate-400 line-through'
+                                      ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-dashed border-amber-300 dark:border-amber-500/40'
+                                      : 'bg-amber-200 dark:bg-amber-500/25 text-amber-800 dark:text-amber-200'
+                                    : 'bg-slate-100 dark:bg-slate-500/20 text-slate-400 dark:text-slate-500 line-through'
                                 }`}
                                 title={
-                                  lunchImplicit ? 'Presenza automatica (Fisso) — Pranzo'
+                                  lunchImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Pranzo`
                                   : lunchPresent ? 'Presente a Pranzo'
                                   : 'Assente a Pranzo'
                                 }
@@ -850,17 +908,25 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                                 <span className="truncate">Pranzo</span>
                               </div>
                             )}
-                            {showDinner && (
+                            {dinnerOff && !dinnerShift ? (
+                              <div
+                                className={`flex items-center gap-1 text-[9px] font-medium px-1 py-0.5 rounded ${TIME_OFF_COLORS[dayTimeOff!.type]}`}
+                                title={`${TIME_OFF_LABELS[dayTimeOff!.type]} — Cena`}
+                              >
+                                <Moon className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">{TIME_OFF_LABELS[dayTimeOff!.type]}</span>
+                              </div>
+                            ) : showDinner && (
                               <div
                                 className={`flex items-center gap-1 text-[9px] font-semibold px-1 py-0.5 rounded ${
                                   dinnerPresent
                                     ? dinnerImplicit
-                                      ? 'bg-indigo-100 text-indigo-700 border border-dashed border-indigo-300'
-                                      : 'bg-indigo-200 text-indigo-800'
-                                    : 'bg-slate-100 text-slate-400 line-through'
+                                      ? 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc] border border-dashed border-indigo-300 dark:border-[#4f46e5]/40'
+                                      : 'bg-indigo-200 dark:bg-[#4f46e5]/25 text-indigo-800 dark:text-[#c7d2fe]'
+                                    : 'bg-slate-100 dark:bg-slate-500/20 text-slate-400 dark:text-slate-500 line-through'
                                 }`}
                                 title={
-                                  dinnerImplicit ? 'Presenza automatica (Fisso) — Cena'
+                                  dinnerImplicit ? `Presenza automatica (${STAFF_TYPE_LABELS[selectedStaff.staffType]}) — Cena`
                                   : dinnerPresent ? 'Presente a Cena'
                                   : 'Assente a Cena'
                                 }
@@ -875,29 +941,30 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                     );
                   })}
                 </div>
+                </div>
 
                 {/* Legend */}
-                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500">
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 justify-center text-xs text-slate-500 dark:text-slate-400">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-amber-200 rounded-sm flex items-center justify-center">
-                      <Sun className="h-2 w-2 text-amber-800" />
+                    <div className="w-3 h-3 bg-amber-200 dark:bg-amber-500/25 rounded-sm flex items-center justify-center">
+                      <Sun className="h-2 w-2 text-amber-800 dark:text-amber-200" />
                     </div>
                     Presente Pranzo
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-indigo-200 rounded-sm flex items-center justify-center">
-                      <Moon className="h-2 w-2 text-indigo-800" />
+                    <div className="w-3 h-3 bg-indigo-200 dark:bg-[#4f46e5]/25 rounded-sm flex items-center justify-center">
+                      <Moon className="h-2 w-2 text-indigo-800 dark:text-[#c7d2fe]" />
                     </div>
                     Presente Cena
                   </div>
-                  {selectedStaff.staffType === StaffType.FISSO && (
+                  {hasAutoShifts(selectedStaff) && (
                     <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 bg-amber-100 rounded-sm border border-dashed border-amber-300" />
-                      Auto (Fisso)
+                      <div className="w-3 h-3 bg-amber-100 dark:bg-amber-500/20 rounded-sm border border-dashed border-amber-300 dark:border-amber-500/40" />
+                      Auto ({STAFF_TYPE_LABELS[selectedStaff.staffType]})
                     </div>
                   )}
                   <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 bg-slate-100 rounded-sm border border-slate-200" />
+                    <div className="w-3 h-3 bg-slate-100 dark:bg-slate-500/20 rounded-sm border border-slate-200 dark:border-slate-500/30" />
                     Assente
                   </div>
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
@@ -912,15 +979,21 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               {/* Time Off List */}
               {timeOffs.filter(t => t.staffId === selectedStaff.id).length > 0 && (
                 <div className="px-4 pb-4">
-                  <h3 className="text-sm font-semibold text-slate-700 mb-2">Assenze Programmate</h3>
-                  <div className="space-y-2">
+                  <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Assenze Programmate</h3>
+                  <div className="space-y-1.5">
                     {timeOffs.filter(t => t.staffId === selectedStaff.id).map(timeOff => (
-                      <div key={timeOff.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
+                      <div key={timeOff.id} className="flex items-center justify-between p-2 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md">
                         <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${TIME_OFF_COLORS[timeOff.type]}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${TIME_OFF_COLORS[timeOff.type]}`}>
                             {TIME_OFF_LABELS[timeOff.type]}
                           </span>
-                          <span className="text-sm text-slate-600">
+                          {timeOff.shift && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
+                              {timeOff.shift === Shift.LUNCH ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
+                              {timeOff.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                            </span>
+                          )}
+                          <span className="text-sm text-[var(--color-fg-muted)]">
                             {new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             {timeOff.startDate !== timeOff.endDate && (
                               <> - {new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</>
@@ -934,7 +1007,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                               : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
                             setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
                           }}
-                          className="p-1 text-slate-400 hover:text-rose-500"
+                          className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -945,10 +1018,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center h-[500px]">
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] flex items-center justify-center h-[500px]">
               <div className="text-center">
-                <UserCircle className="h-16 w-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-500">Seleziona un dipendente per vedere i dettagli</p>
+                <UserCircle className="h-12 w-12 text-[var(--color-fg-subtle)] mx-auto mb-3" />
+                <p className="text-sm text-[var(--color-fg-muted)]">Seleziona un dipendente per vedere i dettagli</p>
               </div>
             </div>
           )}
@@ -957,47 +1030,47 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add/Edit Staff Modal */}
       {showStaffModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setShowStaffModal(false); resetStaffForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-lg h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
                 {editingStaff ? 'Modifica Dipendente' : 'Nuovo Dipendente'}
               </h3>
-              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+              <button onClick={() => { setShowStaffModal(false); resetStaffForm(); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Nome *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome *</label>
                   <input
                     type="text"
                     value={staffForm.name}
                     onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="Mario"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Cognome *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Cognome *</label>
                   <input
                     type="text"
                     value={staffForm.surname}
                     onChange={(e) => setStaffForm({ ...staffForm, surname: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="Rossi"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria *</label>
                   <select
                     value={staffForm.category}
                     onChange={(e) => setStaffForm({ ...staffForm, category: e.target.value as StaffCategory })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     {Object.entries(STAFF_CATEGORY_LABELS).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
@@ -1005,11 +1078,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Tipo *</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo *</label>
                   <select
                     value={staffForm.staffType}
                     onChange={(e) => setStaffForm({ ...staffForm, staffType: e.target.value as StaffType })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     {Object.entries(STAFF_TYPE_LABELS).map(([key, label]) => (
                       <option key={key} value={key}>{label}</option>
@@ -1019,69 +1092,69 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Ruolo</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Ruolo</label>
                 <input
                   type="text"
                   value={staffForm.role}
                   onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="es. Chef, Cameriere, Lavapiatti"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Telefono</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Telefono</label>
                   <input
                     type="tel"
                     value={staffForm.phone}
                     onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="+39 333 1234567"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Email</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Email</label>
                   <input
                     type="email"
                     value={staffForm.email}
                     onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                     placeholder="mario@esempio.com"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data Assunzione</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Assunzione</label>
                   <input
                     type="date"
                     value={staffForm.hireDate}
                     onChange={(e) => setStaffForm({ ...staffForm, hireDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Fine Contratto</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Fine Contratto</label>
                   <input
                     type="date"
                     value={staffForm.contractEndDate}
                     onChange={(e) => setStaffForm({ ...staffForm, contractEndDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Giorno di Riposo Settimanale</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Giorno di Riposo Settimanale</label>
                 <select
                   value={staffForm.weeklyRestDay ?? ''}
                   onChange={(e) => setStaffForm({
                     ...staffForm,
                     weeklyRestDay: e.target.value === '' ? null : Number(e.target.value)
                   })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   <option value="">Nessuno</option>
                   {WEEKDAY_LABELS.map((label, idx) => (
@@ -1091,26 +1164,28 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <textarea
                   value={staffForm.notes}
                   onChange={(e) => setStaffForm({ ...staffForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-500/40 p-2.5 focus:ring-2 focus:ring-indigo-500 dark:focus:ring-[#818cf8] outline-none h-20 resize-none"
                   placeholder="Note aggiuntive..."
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => { setShowStaffModal(false); resetStaffForm(); }}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveStaff}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                disabled={isSavingStaff}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingStaff && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingStaff ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
@@ -1120,78 +1195,80 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add Shift Modal */}
       {showShiftModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Aggiungi Turno</h3>
-              <button onClick={() => setShowShiftModal(false)} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowShiftModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-sm h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aggiungi Turno</h3>
+              <button onClick={() => setShowShiftModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Data</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
                 <input
                   type="date"
                   value={shiftForm.date}
                   onChange={(e) => setShiftForm({ ...shiftForm, date: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Turno</label>
-                <p className="text-[11px] text-slate-400 mb-2">Seleziona uno o entrambi i turni</p>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <p className="text-[11px] text-[var(--color-fg-subtle)] mb-2">Seleziona uno o entrambi i turni</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => setShiftForm({ ...shiftForm, lunch: !shiftForm.lunch })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.lunch
-                        ? 'border-amber-500 bg-amber-50 text-amber-700'
-                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                        : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
                     {shiftForm.lunch && <Check className="h-4 w-4" />}
-                    <Sun className="h-5 w-5" />
+                    <Sun className="h-4 w-4" />
                     Pranzo
                   </button>
                   <button
                     type="button"
                     onClick={() => setShiftForm({ ...shiftForm, dinner: !shiftForm.dinner })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 transition-colors ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium transition ${
                       shiftForm.dinner
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                        ? 'border-indigo-200 dark:border-[#4f46e5]/30 bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc]'
+                        : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
                     {shiftForm.dinner && <Check className="h-4 w-4" />}
-                    <Moon className="h-5 w-5" />
+                    <Moon className="h-4 w-4" />
                     Cena
                   </button>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={shiftForm.notes}
                   onChange={(e) => setShiftForm({ ...shiftForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="Note opzionali..."
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowShiftModal(false)}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveShift}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                disabled={isSavingShift}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingShift && <Loader2 className="h-4 w-4 animate-spin" />}
                 Aggiungi
               </button>
             </div>
@@ -1201,69 +1278,86 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast }) =
 
       {/* Add Time Off Modal */}
       {showTimeOffModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Registra Assenza</h3>
-              <button onClick={() => setShowTimeOffModal(false)} className="p-1 hover:bg-slate-100 rounded-lg">
-                <X className="h-5 w-5 text-slate-500" />
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowTimeOffModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-sm h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Registra Assenza</h3>
+              <button onClick={() => setShowTimeOffModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 flex-1 overflow-y-auto">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Tipo</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Tipo</label>
                 <select
                   value={timeOffForm.type}
                   onChange={(e) => setTimeOffForm({ ...timeOffForm, type: e.target.value as TimeOffType })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                 >
                   {Object.entries(TIME_OFF_LABELS).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <select
+                  value={timeOffForm.shift ?? 'ALL'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTimeOffForm({ ...timeOffForm, shift: v === 'ALL' ? null : (v as Shift) });
+                  }}
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                >
+                  <option value="ALL">Tutto il giorno</option>
+                  <option value={Shift.LUNCH}>Solo Pranzo</option>
+                  <option value={Shift.DINNER}>Solo Cena</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Da</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Da</label>
                   <input
                     type="date"
                     value={timeOffForm.startDate}
                     onChange={(e) => setTimeOffForm({ ...timeOffForm, startDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">A</label>
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">A</label>
                   <input
                     type="date"
                     value={timeOffForm.endDate}
                     onChange={(e) => setTimeOffForm({ ...timeOffForm, endDate: e.target.value })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Note</label>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note</label>
                 <input
                   type="text"
                   value={timeOffForm.notes}
                   onChange={(e) => setTimeOffForm({ ...timeOffForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   placeholder="Note opzionali..."
                 />
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row sm:justify-end gap-2">
               <button
                 onClick={() => setShowTimeOffModal(false)}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                className="w-full sm:w-auto rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
               >
                 Annulla
               </button>
               <button
                 onClick={handleSaveTimeOff}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                disabled={isSavingTimeOff}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSavingTimeOff && <Loader2 className="h-4 w-4 animate-spin" />}
                 Registra
               </button>
             </div>

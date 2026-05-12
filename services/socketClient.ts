@@ -11,7 +11,6 @@ type SocketChangeCallback = (socket: Socket | null, connected: boolean) => void;
 class SocketClient {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
   private changeCallbacks: Set<SocketChangeCallback> = new Set();
 
   private getToken(): string | null {
@@ -49,9 +48,10 @@ class SocketClient {
     this.socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: this.maxReconnectAttempts,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.5,
       timeout: 20000,
       auth: {
         token
@@ -94,11 +94,10 @@ class SocketClient {
     });
 
     this.socket.on('connect_error', (error) => {
-      console.error('❌ Connection error:', error.message);
       this.reconnectAttempts++;
-
-      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        console.error('Max reconnection attempts reached');
+      // Log only every 5 attempts to avoid console flooding during long outages
+      if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 5 === 0) {
+        console.error(`❌ Connection error (attempt ${this.reconnectAttempts}):`, error.message);
       }
     });
 
@@ -108,11 +107,9 @@ class SocketClient {
     });
 
     this.socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log(`🔄 Reconnection attempt ${attemptNumber}/${this.maxReconnectAttempts}`);
-    });
-
-    this.socket.on('reconnect_failed', () => {
-      console.error('❌ Reconnection failed after maximum attempts');
+      if (attemptNumber <= 3 || attemptNumber % 5 === 0) {
+        console.log(`🔄 Reconnection attempt ${attemptNumber}`);
+      }
     });
 
     // Connection acknowledged by server

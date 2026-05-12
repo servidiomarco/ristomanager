@@ -276,6 +276,18 @@ class AuthApiService {
     return response.json();
   }
 
+  // Minimal active-user list for assignment pickers; available to managers+.
+  async getAssignableUsers(): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
+    const response = await this.authFetch(`${API_URL}/auth/users/assignable`);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch assignable users' }));
+      throw new Error(error.error || 'Failed to fetch assignable users');
+    }
+
+    return response.json();
+  }
+
   async createUser(userData: {
     email: string;
     password: string;
@@ -326,6 +338,31 @@ class AuthApiService {
       const error = await response.json().catch(() => ({ error: 'Failed to delete user' }));
       throw new Error(error.error || 'Failed to delete user');
     }
+  }
+
+  // Update the current user's own preferences (self-service).
+  // Server returns the refreshed user; we mirror it into localStorage so
+  // subsequent reads see the new value without an extra /auth/me round-trip.
+  async updatePreferences(prefs: { preferred_landing_view?: string | null }): Promise<User> {
+    const response = await this.authFetch(`${API_URL}/auth/me/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs)
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update preferences' }));
+      throw new Error(error.error || 'Failed to update preferences');
+    }
+
+    const data = await response.json();
+    const user: User = { ...data };
+    delete (user as any).permissions;
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (data.permissions) {
+      localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(data.permissions));
+    }
+    return user;
   }
 }
 

@@ -1,15 +1,17 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, User, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { getLowStockInventory, LowStockItem } from '../services/apiService';
+import { printShoppingList, shareShoppingListWhatsApp } from '../utils/printShoppingList';
 import { staffApiService } from '../services/staffApiService';
 import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Armchair, StickyNote } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -23,12 +25,21 @@ const CATEGORY_LABELS: Record<TodoCategory, string> = {
 };
 
 const CATEGORY_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-100 text-slate-600',
-  [TodoCategory.RESERVATION]: 'bg-indigo-100 text-indigo-600',
-  [TodoCategory.INVENTORY]: 'bg-amber-100 text-amber-600',
-  [TodoCategory.STAFF]: 'bg-emerald-100 text-emerald-600',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-100 text-orange-600',
-  [TodoCategory.EVENT]: 'bg-purple-100 text-purple-600',
+  [TodoCategory.GENERAL]: 'bg-slate-100 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400',
+  [TodoCategory.RESERVATION]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-600 dark:text-[#818cf8]',
+  [TodoCategory.INVENTORY]: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400',
+  [TodoCategory.STAFF]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
+  [TodoCategory.MAINTENANCE]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400',
+  [TodoCategory.EVENT]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400',
+};
+
+const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
+  [TodoCategory.GENERAL]: 'bg-slate-400',
+  [TodoCategory.RESERVATION]: 'bg-indigo-500',
+  [TodoCategory.INVENTORY]: 'bg-amber-500',
+  [TodoCategory.STAFF]: 'bg-emerald-500',
+  [TodoCategory.MAINTENANCE]: 'bg-orange-500',
+  [TodoCategory.EVENT]: 'bg-purple-500',
 };
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
@@ -39,16 +50,37 @@ const PRIORITY_COLORS: Record<TodoPriority, string> = {
 
 const TEAM_LABELS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'Proprietario',
+  [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
   [UserRole.WAITER]: 'Camerieri',
   [UserRole.KITCHEN]: 'Cucina',
 };
 
 const TEAM_COLORS: Record<UserRole, string> = {
-  [UserRole.OWNER]: 'bg-purple-100 text-purple-700',
-  [UserRole.MANAGER]: 'bg-blue-100 text-blue-700',
-  [UserRole.WAITER]: 'bg-emerald-100 text-emerald-700',
-  [UserRole.KITCHEN]: 'bg-orange-100 text-orange-700',
+  [UserRole.OWNER]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300',
+  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]',
+  [UserRole.MANAGER]: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300',
+  [UserRole.WAITER]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
+  [UserRole.KITCHEN]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300',
+};
+
+// Mirrors the server-side hierarchy in auth/permissions.ts: an actor can
+// only assign tasks to roles at or below their rank. Kept inline because
+// the auth/ module is server-only.
+const ROLE_RANK: Record<UserRole, number> = {
+  [UserRole.OWNER]: 4,
+  [UserRole.GENERAL_MANAGER]: 3,
+  [UserRole.MANAGER]: 2,
+  [UserRole.WAITER]: 1,
+  [UserRole.KITCHEN]: 1,
+};
+
+const canAssignToRole = (actorRole: UserRole | undefined, targetRole: UserRole): boolean => {
+  if (!actorRole) return false;
+  const actor = ROLE_RANK[actorRole];
+  const target = ROLE_RANK[targetRole];
+  if (actor === undefined || target === undefined) return false;
+  return actor >= target;
 };
 
 interface DashboardProps {
@@ -58,6 +90,14 @@ interface DashboardProps {
   rooms: Room[];
   banquetMenus: BanquetMenu[];
   onNavigateToBanquets: () => void;
+  onNavigateToReservations?: () => void;
+  onNavigateToInventario?: () => void;
+  autoOpenNewShoppingItem?: boolean;
+  onAutoOpenNewShoppingItemHandled?: () => void;
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  onDateChange?: (date: Date) => void;
+  onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
 }
 
 // Shopping List Labels and Colors
@@ -74,25 +114,88 @@ const SHOPPING_CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
 };
 
 const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
-  'CUCINA': 'bg-orange-100 text-orange-700 border-orange-200',
-  'BAR': 'bg-amber-100 text-amber-700 border-amber-200',
-  'ALTRO': 'bg-slate-100 text-slate-700 border-slate-200'
+  'CUCINA': 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-500/30',
+  'BAR': 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30',
+  'ALTRO': 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30'
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets }) => {
+// Room name → lucide icon. Scalable: extend the map for new rooms or fall back to MapPin.
+const ROOM_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
+  veranda: Trees,
+  macine: Mountain,
+  fiume: Waves,
+  fuori: TreePine,
+  tettoia: Tent,
+  porticato: Columns3,
+};
+const getRoomIcon = (name: string): React.ComponentType<{ className?: string }> => {
+  const key = name.trim().toLowerCase();
+  return ROOM_ICON_BY_NAME[key] || MapPin;
+};
+
+const KPI_TONES = {
+  amber: {
+    bg: 'bg-amber-50 dark:bg-amber-500/10',
+    chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
+    value: 'text-[var(--color-fg)]',
+  },
+  blue: {
+    bg: 'bg-blue-50 dark:bg-blue-500/10',
+    chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
+    value: 'text-[var(--color-fg)]',
+  },
+  rose: {
+    bg: 'bg-rose-50 dark:bg-rose-500/10',
+    chip: 'bg-rose-100 text-rose-600 dark:bg-rose-500/25 dark:text-rose-300',
+    value: 'text-rose-600 dark:text-rose-300',
+  },
+} as const;
+
+const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; value: number | string }> = ({ tone, icon, value }) => {
+  const t = KPI_TONES[tone];
+  return (
+    <div className={`flex-1 min-w-0 rounded-xl ${t.bg} px-3 py-3 flex flex-col justify-between min-h-[78px] sm:min-h-[88px]`}>
+      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${t.chip}`}>
+        {icon}
+      </span>
+      <span className={`tabular text-[24px] sm:text-[28px] leading-none font-semibold self-end ${t.value}`}>{value}</span>
+    </div>
+  );
+};
+
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [chartShiftFilter, setChartShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
-  const [affluenceShiftFilter, setAffluenceShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>('ALL');
-  const [notesShift, setNotesShift] = useState<Shift>(() => new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
+
+  // On desktop, date/shift are driven by App-level props (header controls).
+  // On mobile, local state + inline controls.
+  const [localDate, setLocalDate] = useState<Date>(globalDate ?? new Date());
+  const [localShiftFilter, setLocalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(
+    globalShiftFilterProp ?? (new Date().getHours() < 17 ? 'LUNCH' : 'DINNER')
+  );
+
+  useEffect(() => { if (globalDate) setLocalDate(globalDate); }, [globalDate]);
+  useEffect(() => { if (globalShiftFilterProp) setLocalShiftFilter(globalShiftFilterProp); }, [globalShiftFilterProp]);
+
+  const selectedDate = globalDate ?? localDate;
+  const globalShiftFilter = globalShiftFilterProp ?? localShiftFilter;
+  const setSelectedDate = (valOrFn: Date | ((prev: Date) => Date)) => {
+    const next = typeof valOrFn === 'function' ? valOrFn(selectedDate) : valOrFn;
+    setLocalDate(next);
+    onDateChange?.(next);
+  };
+  const setGlobalShiftFilter = (v: 'ALL' | 'LUNCH' | 'DINNER') => {
+    setLocalShiftFilter(v);
+    onShiftFilterChange?.(v);
+  };
+
+  const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
   const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const dateInputRef = useRef<HTMLInputElement>(null);
 
-  // Tick the header clock once per minute (start of each minute)
   useEffect(() => {
     const now = new Date();
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
@@ -124,10 +227,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [todosLoading, setTodosLoading] = useState(true);
   const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
   const [showTodoModal, setShowTodoModal] = useState(false);
+  const [isSavingTodo, setIsSavingTodo] = useState(false);
   const [deleteTodoConfirm, setDeleteTodoConfirm] = useState<TodoItem | null>(null);
   const [showMyTasksModal, setShowMyTasksModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
-  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [staffUsers, setStaffUsers] = useState<Array<{ id: number; full_name: string; role: UserRole }>>([]);
   const [todoForm, setTodoForm] = useState({
     title: '',
     description: '',
@@ -138,11 +242,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     assignedToTeam: undefined as UserRole | undefined,
   });
 
+  // Low-stock inventory state
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
+  const [lowStockLoading, setLowStockLoading] = useState(true);
+
   // Shopping List State
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
   const [shoppingLoading, setShoppingLoading] = useState(true);
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
+  const [isAddingShoppingItem, setIsAddingShoppingItem] = useState(false);
+  const [editingShoppingId, setEditingShoppingId] = useState<string | null>(null);
+  const [editShoppingName, setEditShoppingName] = useState('');
+  const [editShoppingCategory, setEditShoppingCategory] = useState<ShoppingCategory>('CUCINA');
+  const [isSavingShoppingEdit, setIsSavingShoppingEdit] = useState(false);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<number>>(new Set());
+  const [shoppingHistory, setShoppingHistory] = useState<string[]>([]);
+  const [showShoppingSuggestions, setShowShoppingSuggestions] = useState(false);
+  const shoppingInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!autoOpenNewShoppingItem) return;
+    const t = setTimeout(() => {
+      const el = shoppingInputRef.current;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+      }
+      onAutoOpenNewShoppingItemHandled?.();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled]);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -153,16 +283,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Socket connection state - used to re-subscribe when socket reconnects
   const [socketConnected, setSocketConnected] = useState(socketClient.isConnected());
 
-  // Fetch shopping items from API
-  const fetchShopping = useCallback(async (dateStr: string) => {
+  // Fetch all shopping items (decoupled from selected date — they persist until deleted)
+  const fetchShopping = useCallback(async () => {
     try {
       setShoppingLoading(true);
-      const items = await shoppingApiService.getItemsByDate(dateStr);
+      const items = await shoppingApiService.getAllItems();
       setShoppingItems(items);
+      // Build autocomplete history from all past items (deduplicated)
+      const names = Array.from(new Set(items.map(i => i.name)));
+      setShoppingHistory(names);
     } catch (error) {
       console.error('Error fetching shopping items:', error);
     } finally {
       setShoppingLoading(false);
+    }
+  }, []);
+
+  // Fetch low-stock items across all inventory areas
+  const fetchLowStock = useCallback(async () => {
+    try {
+      setLowStockLoading(true);
+      const { items } = await getLowStockInventory();
+      setLowStockItems(items);
+    } catch (error) {
+      console.error('Error fetching low stock:', error);
+    } finally {
+      setLowStockLoading(false);
     }
   }, []);
 
@@ -185,19 +331,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  const addShoppingItem = async () => {
-    if (!newItemName.trim()) return;
+  const addShoppingItem = async (overrideName?: string) => {
+    const name = (overrideName ?? newItemName).trim();
+    if (!name || isAddingShoppingItem) return;
     try {
+      setIsAddingShoppingItem(true);
       // Don't add to state here - let the socket event handle it
       // This prevents duplicates on the creating device
       await shoppingApiService.createItem({
-        name: newItemName.trim(),
+        name,
         category: newItemCategory,
-        date: selectedDateStr
+        date: formatLocalDate(new Date())
       });
       setNewItemName('');
+      setShowShoppingSuggestions(false);
+      // Keep focus on input for rapid entry (Google Keep-style)
+      shoppingInputRef.current?.focus();
     } catch (error) {
       console.error('Error adding shopping item:', error);
+    } finally {
+      setIsAddingShoppingItem(false);
     }
   };
 
@@ -221,9 +374,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   };
 
+  const startEditShoppingItem = (item: ShoppingItem) => {
+    setEditingShoppingId(item.id);
+    setEditShoppingName(item.name);
+    setEditShoppingCategory(item.category);
+  };
+
+  const cancelEditShoppingItem = () => {
+    setEditingShoppingId(null);
+    setEditShoppingName('');
+  };
+
+  const saveEditShoppingItem = async () => {
+    if (!editingShoppingId || isSavingShoppingEdit) return;
+    const trimmed = editShoppingName.trim();
+    if (!trimmed) return;
+    try {
+      setIsSavingShoppingEdit(true);
+      const updated = await shoppingApiService.updateItem(editingShoppingId, {
+        name: trimmed,
+        category: editShoppingCategory,
+      });
+      setShoppingItems(prev => prev.map(item => item.id === updated.id ? updated : item));
+      setEditingShoppingId(null);
+      setEditShoppingName('');
+    } catch (error) {
+      console.error('Error updating shopping item:', error);
+    } finally {
+      setIsSavingShoppingEdit(false);
+    }
+  };
+
   const clearCheckedItems = async () => {
     try {
-      await shoppingApiService.clearChecked(selectedDateStr);
+      await shoppingApiService.clearChecked();
       setShoppingItems(prev => prev.filter(item => !item.checked));
     } catch (error) {
       console.error('Error clearing checked items:', error);
@@ -244,6 +428,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [shoppingItems]);
 
   const totalItems = shoppingItems.length;
+
+  // Autocomplete suggestions for shopping — show past items not already in current list
+  const shoppingSuggestions = useMemo(() => {
+    const query = newItemName.trim().toLowerCase();
+    if (!query) return [];
+    const currentNames = new Set(shoppingItems.map(i => i.name.toLowerCase()));
+    return shoppingHistory
+      .filter(name => name.toLowerCase().includes(query) && !currentNames.has(name.toLowerCase()))
+      .slice(0, 5);
+  }, [newItemName, shoppingHistory, shoppingItems]);
 
   // Staff presence calculation:
   // - Excludes staff with time-off covering the selected date
@@ -266,7 +460,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       );
       if (explicitShift) return explicitShift.present !== false;
 
-      if (staff.staffType !== StaffType.FISSO) return false;
+      if (staff.staffType !== StaffType.FISSO && staff.staffType !== StaffType.STAGIONALE) return false;
       if (staff.weeklyRestDay != null && staff.weeklyRestDay === dayOfWeek) return false;
       if (staff.hireDate && selectedDateStr < toDateOnly(staff.hireDate)) return false;
       if (staff.contractEndDate && selectedDateStr > toDateOnly(staff.contractEndDate)) return false;
@@ -287,13 +481,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       }
     };
   }, [staffMembers, staffShifts, staffTimeOffs, selectedDateStr]);
+
+  // Which shift is currently "live" — drives the pulsing dot. Refreshes every minute.
+  const [nowMinutes, setNowMinutes] = useState(() => {
+    const n = new Date();
+    return n.getHours() * 60 + n.getMinutes();
+  });
+  useEffect(() => {
+    const id = setInterval(() => {
+      const n = new Date();
+      setNowMinutes(n.getHours() * 60 + n.getMinutes());
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const liveShift: 'lunch' | 'dinner' | null = !isToday
+    ? null
+    : nowMinutes >= 11 * 60 + 30 && nowMinutes < 15 * 60 + 30
+      ? 'lunch'
+      : nowMinutes >= 18 * 60 + 30 && nowMinutes < 23 * 60 + 30
+        ? 'dinner'
+        : null;
+
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
-  // Fetch todos from API (filtered by selected date)
-  const fetchTodos = useCallback(async (dateStr: string) => {
+  // Fetch all todos (decoupled from selected date — they persist until deleted)
+  const fetchTodos = useCallback(async () => {
     try {
       setTodosLoading(true);
-      const fetchedTodos = await todoApiService.getTodosByDate(dateStr);
+      const fetchedTodos = await todoApiService.getTodos();
       setTodos(fetchedTodos);
     } catch (error) {
       console.error('Error fetching todos:', error);
@@ -302,17 +517,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  // Fetch todos when selectedDate changes
   useEffect(() => {
-    fetchTodos(selectedDateStr);
-  }, [selectedDateStr, fetchTodos]);
+    fetchTodos();
+  }, [fetchTodos]);
 
-  // Load staff users for assignment (once on mount)
+  // Load active users for the assignment picker (managers+ have access).
   useEffect(() => {
-    authApiService.getUsers().then(users => {
-      setStaffUsers(users.filter(u => u.is_active));
+    authApiService.getAssignableUsers().then(users => {
+      setStaffUsers(users);
     }).catch(() => {
-      // Ignore error if not authorized to view users
+      // Roles without assignment access (waiter/kitchen) just see an empty list.
     });
   }, []);
 
@@ -341,30 +555,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     if (!socket) return;
 
     const handleTodoCreated = (todo: TodoItem) => {
-      // Only add if it's for the currently selected date
-      if (todo.dueDate === selectedDateStr) {
-        setTodos(prev => {
-          if (prev.some(t => t.id === todo.id)) return prev;
-          return [todo, ...prev];
-        });
-      }
+      setTodos(prev => {
+        if (prev.some(t => t.id === todo.id)) return prev;
+        return [todo, ...prev];
+      });
     };
 
     const handleTodoUpdated = (todo: TodoItem) => {
-      // Update if it exists in current list, or add if it's for today's date
       setTodos(prev => {
         const exists = prev.some(t => t.id === todo.id);
-        if (exists) {
-          // If the date changed and it's no longer for selected date, remove it
-          if (todo.dueDate !== selectedDateStr) {
-            return prev.filter(t => t.id !== todo.id);
-          }
-          return prev.map(t => t.id === todo.id ? todo : t);
-        } else if (todo.dueDate === selectedDateStr) {
-          // New todo for selected date
-          return [todo, ...prev];
-        }
-        return prev;
+        if (exists) return prev.map(t => t.id === todo.id ? todo : t);
+        return [todo, ...prev];
       });
     };
 
@@ -381,12 +582,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('todo:updated', handleTodoUpdated);
       socket.off('todo:deleted', handleTodoDeleted);
     };
-  }, [selectedDateStr, socketConnected]);
+  }, [socketConnected]);
 
-  // Fetch shopping items when selectedDate changes
   useEffect(() => {
-    fetchShopping(selectedDateStr);
-  }, [selectedDateStr, fetchShopping]);
+    fetchShopping();
+  }, [fetchShopping]);
+
+  useEffect(() => {
+    fetchLowStock();
+  }, [fetchLowStock]);
 
   // Fetch staff when selectedDate changes
   useEffect(() => {
@@ -411,31 +615,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     console.log('🛒 Setting up shopping socket listeners...');
 
     const handleShoppingCreated = (item: ShoppingItem) => {
-      console.log('🛒 Socket: shopping:created received', item, 'selectedDate:', selectedDateStr);
-      // Only add if it's for the currently selected date
-      if (item.date === selectedDateStr) {
-        setShoppingItems(prev => {
-          if (prev.some(i => i.id === item.id)) return prev;
-          return [...prev, item];
-        });
-      }
+      setShoppingItems(prev => {
+        if (prev.some(i => i.id === item.id)) return prev;
+        return [...prev, item];
+      });
     };
 
     const handleShoppingUpdated = (item: ShoppingItem) => {
-      console.log('Socket: shopping:updated received', item);
       setShoppingItems(prev => prev.map(i => i.id === item.id ? item : i));
     };
 
     const handleShoppingDeleted = (data: { id: string }) => {
-      console.log('Socket: shopping:deleted received', data);
       setShoppingItems(prev => prev.filter(i => i.id !== data.id));
     };
 
-    const handleShoppingCleared = (data: { date: string }) => {
-      console.log('Socket: shopping:cleared received', data);
-      if (data.date === selectedDateStr) {
-        setShoppingItems(prev => prev.filter(i => !i.checked));
-      }
+    const handleShoppingCleared = () => {
+      setShoppingItems(prev => prev.filter(i => !i.checked));
     };
 
     socket.on('shopping:created', handleShoppingCreated);
@@ -458,7 +653,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       socket.off('shopping:cleared', handleShoppingCleared);
       socket.offAny(debugHandler);
     };
-  }, [selectedDateStr, socketConnected]);
+  }, [socketConnected]);
 
   const handleGenerateReport = async () => {
     setLoading(true);
@@ -494,10 +689,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   };
 
   const handleSaveTodo = async () => {
-    if (!todoForm.title.trim()) return;
+    if (!todoForm.title.trim() || isSavingTodo) return;
     const assignedUser = staffUsers.find(u => u.id === todoForm.assignedToUserId);
 
     try {
+      setIsSavingTodo(true);
       if (editingTodo) {
         // Update existing todo
         const updated = await todoApiService.updateTodo(editingTodo.id, {
@@ -530,6 +726,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       setShowTodoModal(false);
     } catch (error) {
       console.error('Error saving todo:', error);
+    } finally {
+      setIsSavingTodo(false);
     }
   };
 
@@ -593,10 +791,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Format date for display
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('it-IT', {
-      weekday: 'long',
+      weekday: 'short',
       day: 'numeric',
-      month: 'long',
-      year: 'numeric'
+      month: 'short',
     });
   };
 
@@ -682,10 +879,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
 
-  // Reservations with notes/allergens for selected day, filtered by shift (for dashboard card)
+  // Reservations with notes/allergens for selected day, follows the global meal filter.
   const reservationNotes = useMemo(() => {
     const items = selectedDayReservations
-      .filter(r => r.shift === notesShift && r.notes && r.notes.trim().length > 0)
+      .filter(r => {
+        if (!r.notes || r.notes.trim().length === 0) return false;
+        if (globalShiftFilter === 'LUNCH') return r.shift === Shift.LUNCH;
+        if (globalShiftFilter === 'DINNER') return r.shift === Shift.DINNER;
+        return true; // ALL
+      })
       .map(r => {
         const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
         const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
@@ -695,7 +897,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       });
     items.sort((a, b) => a.reservation.reservation_time.localeCompare(b.reservation.reservation_time));
     return items;
-  }, [selectedDayReservations, tables, rooms, notesShift]);
+  }, [selectedDayReservations, tables, rooms, globalShiftFilter]);
 
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {
@@ -784,8 +986,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         : [];
 
       // Filter by shift if not ALL
-      if (chartShiftFilter !== 'ALL') {
-        dayReservations = dayReservations.filter(r => r.shift === chartShiftFilter);
+      if (globalShiftFilter !== 'ALL') {
+        dayReservations = dayReservations.filter(r => r.shift === globalShiftFilter);
       }
 
       const dayGuests = dayReservations.reduce((acc, r) => acc + r.guests, 0);
@@ -798,7 +1000,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
 
     return data;
-  }, [reservations, chartShiftFilter, selectedDate]);
+  }, [reservations, globalShiftFilter, selectedDate]);
 
   // Get week range for display (based on selected date's week)
   const weekRange = useMemo(() => {
@@ -813,324 +1015,358 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [selectedDate]);
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 lg:space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
       {/* Header with Calendar Navigation */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-        <div>
-          <h1 className="text-3xl lg:text-4xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-500 text-base lg:text-lg">Benvenuto su RistoCRM, {user?.full_name}</p>
-        </div>
+      {(() => {
+        const hour = currentTime.getHours();
+        const greeting =
+          hour >= 5 && hour < 12 ? 'Buongiorno'
+          : hour >= 12 && hour < 18 ? 'Buon pomeriggio'
+          : hour >= 18 && hour < 23 ? 'Buonasera'
+          : 'Buonanotte';
+        const firstName = user?.full_name?.trim().split(' ')[0] || 'Utente';
+        // Service window: lunch 11:00-15:30, dinner 18:00-23:30
+        const minutes = hour * 60 + currentTime.getMinutes();
+        const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
+        const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
+        const serviceLabel = inLunch
+          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
+          : inDinner
+          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
+          : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
+        return (
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+            <div className="flex items-center justify-between w-full gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
+                  <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
+                    {serviceLabel.text}
+                  </span>
+                </div>
+                <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
+                  {greeting}, {firstName}.
+                </h1>
+              </div>
+              {todaysTodos.length > 0 && (
+                <button
+                  onClick={() => todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex-shrink-0 self-end"
+                  aria-label={`${todaysTodos.length} attività di oggi`}
+                  title="Attività di oggi"
+                >
+                  <ListTodo className="h-7 w-7" />
+                  <span className="hidden md:inline text-sm font-semibold">Attività di oggi</span>
+                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-violet-500 text-[#ffffff]">
+                    {todaysTodos.length}
+                  </span>
+                </button>
+              )}
+            </div>
 
-        {/* Clock + Date Navigation */}
-        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-2 md:gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-4 py-2.5 self-start sm:self-auto">
-            <Clock className="h-5 w-5 text-indigo-600" />
-            <span className="font-mono text-lg font-semibold text-slate-700 tabular-nums">
-              {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
+            {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
+            <div className="flex flex-wrap items-center gap-2 self-stretch w-full md:hidden">
+              {/* Date pill with fixed-position arrows */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 md:flex-none min-w-0">
+                {!isToday && (
+                  <button
+                    onClick={goToToday}
+                    className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors"
+                  >
+                    Oggi
+                  </button>
+                )}
 
-          <div className="flex items-center justify-between sm:justify-start gap-1 bg-white rounded-xl border border-slate-200 p-1.5">
-            {!isToday && (
-              <button
-                onClick={goToToday}
-                className="px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-              >
-                Oggi
-              </button>
-            )}
+                <button
+                  onClick={goToPreviousDay}
+                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                  aria-label="Giorno precedente"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
 
-            <button
-              onClick={goToPreviousDay}
-              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Giorno precedente"
-            >
-              <ChevronLeft className="h-5 w-5 text-slate-600" />
-            </button>
+                <div className="relative flex-1 md:w-[200px] md:flex-none flex justify-center min-w-0">
+                  <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
+                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
+                      {formatDate(selectedDate)}
+                    </span>
+                  </div>
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    value={selectedDateStr}
+                    onChange={handleDateInputChange}
+                    onClick={(e) => {
+                      const input = e.currentTarget;
+                      try {
+                        if (typeof input.showPicker === 'function') input.showPicker();
+                      } catch {
+                        // ignore — fall back to native focus
+                      }
+                    }}
+                    aria-label="Seleziona data"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                </div>
 
-            <div className="relative">
-              <div className="flex items-center gap-2 px-3 sm:px-4 py-2 hover:bg-slate-50 rounded-lg transition-colors pointer-events-none">
-                <Calendar className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-                <span className="font-semibold text-sm sm:text-base lg:text-lg text-slate-700 capitalize sm:min-w-[220px] lg:min-w-[260px] text-center whitespace-nowrap">
-                  {formatDate(selectedDate)}
+                <button
+                  onClick={goToNextDay}
+                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+                  aria-label="Giorno successivo"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Separate time chip — always shows live current time */}
+              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 py-2.5">
+                <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+                  {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-              <input
-                ref={dateInputRef}
-                type="date"
-                value={selectedDateStr}
-                onChange={handleDateInputChange}
-                onClick={(e) => {
-                  // Desktop Chrome: clicking an opacity:0 date input doesn't
-                  // open the picker; force it via showPicker (mobile opens
-                  // natively on tap and treats this as a no-op or harmless).
-                  const input = e.currentTarget;
-                  try {
-                    if (typeof input.showPicker === 'function') input.showPicker();
-                  } catch {
-                    // ignore — fall back to native focus
-                  }
-                }}
-                aria-label="Seleziona data"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
+
+              {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
+              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+                {([
+                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
+                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setGlobalShiftFilter(opt.key)}
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
+                      globalShiftFilter === opt.key
+                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                    }`}
+                    aria-pressed={globalShiftFilter === opt.key}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* KPI Cards — Ospiti / Tavoli / Prenotazioni & Banchetti, follow the global meal filter */}
+      {(() => {
+        const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+        const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+        const cols = (showLunch && showDinner) ? 'grid-cols-2' : 'grid-cols-1';
+
+        // One tinted block per active meal — matches Prenotazioni & banchetti style.
+        // Shift identity comes from the bg tone + icon (no "Pranzo"/"Cena" label).
+        // Attesi and Arrivati sit side-by-side inside the block.
+        const renderShiftBreakdown = (
+          shift: 'lunch' | 'dinner',
+          attesiValue: number,
+          arrivatiValue: number,
+        ) => {
+          const tone = shift === 'lunch' ? KPI_TONES.amber : KPI_TONES.blue;
+          const icon = shift === 'lunch' ? <Sun className="h-3.5 w-3.5" /> : <Sunset className="h-3.5 w-3.5" />;
+          return (
+            <div key={shift} className={`min-w-0 rounded-xl ${tone.bg} p-3 sm:p-4 flex flex-col gap-3`}>
+              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tone.chip}`}>
+                {icon}
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] text-[var(--color-fg-muted)]">Attesi</div>
+                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{attesiValue}</div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] text-[var(--color-fg-muted)]">Arrivati</div>
+                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{arrivatiValue}</div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
+            {/* Ospiti */}
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti</h3>
+              <div className={`grid ${cols} gap-4 sm:gap-5`}>
+                {showLunch && renderShiftBreakdown('lunch', lunchExpectedGuests, lunchArrivedGuests)}
+                {showDinner && renderShiftBreakdown('dinner', dinnerExpectedGuests, dinnerArrivedGuests)}
+              </div>
             </div>
 
+            {/* Tavoli */}
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli</h3>
+              <div className={`grid ${cols} gap-4 sm:gap-5`}>
+                {showLunch && renderShiftBreakdown('lunch', lunchTableIds.size, lunchArrivedTableIds.size)}
+                {showDinner && renderShiftBreakdown('dinner', dinnerTableIds.size, dinnerArrivedTableIds.size)}
+              </div>
+            </div>
+
+            {/* Prenotazioni */}
             <button
-              onClick={goToNextDay}
-              className="p-2.5 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Giorno successivo"
+              type="button"
+              onClick={onNavigateToReservations}
+              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
             >
-              <ChevronRight className="h-5 w-5 text-slate-600" />
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni</h3>
+              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
+                {showLunch && (
+                  <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
+                )}
+                {showDinner && (
+                  <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
+                )}
+              </div>
+            </button>
+
+            {/* Banchetti */}
+            <button
+              type="button"
+              onClick={onNavigateToBanquets}
+              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
+            >
+              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Banchetti</h3>
+              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
+                <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
+              </div>
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* My Tasks Alert Banner */}
-      {myTodos.length > 0 && (
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-2xl shadow-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/20 rounded-lg">
-                <UserCircle className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="font-semibold">Hai {myTodos.length} {myTodos.length === 1 ? 'attività assegnata' : 'attività assegnate'}</h3>
-                <p className="text-sm text-white/80">
-                  {myTodos.filter(isAssignedToMe).length > 0 && (
-                    <span>{myTodos.filter(isAssignedToMe).length} personali</span>
-                  )}
-                  {myTodos.filter(isAssignedToMe).length > 0 && myTodos.filter(isAssignedToMyTeam).length > 0 && ' · '}
-                  {myTodos.filter(isAssignedToMyTeam).length > 0 && (
-                    <span>{myTodos.filter(isAssignedToMyTeam).length} del team {user?.role && TEAM_LABELS[user.role]}</span>
-                  )}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowMyTasksModal(true)}
-              className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-medium transition-colors"
-            >
-              Visualizza
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* KPI Cards — per shift (Pranzo / Cena) */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl flex-shrink-0">
-            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Attesi</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchExpectedGuests}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerExpectedGuests}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0">
-            <Users className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Ospiti Arrivati</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedGuests}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedGuests}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-sky-50 text-sky-600 rounded-xl flex-shrink-0">
-            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Attesi</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchTableIds.size}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerTableIds.size}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4">
-          <div className="p-2 sm:p-3 bg-teal-50 text-teal-600 rounded-xl flex-shrink-0">
-            <Armchair className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Tavoli Arrivati</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchArrivedTableIds.size}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerArrivedTableIds.size}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onNavigateToBanquets}
-          className="bg-white p-3 sm:p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 sm:gap-4 text-left hover:bg-slate-50 hover:border-rose-200 transition-colors group col-span-2 md:col-span-1"
-        >
-          <div className="p-2 sm:p-3 bg-rose-50 text-rose-600 rounded-xl flex-shrink-0">
-            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm lg:text-base text-slate-500 truncate">Prenotazioni & Banchetti</p>
-            <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-              <div className="flex items-center gap-1">
-                <Sun className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{lunchReservations.length}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Moon className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-indigo-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-slate-800 tabular-nums">{dinnerReservations.length}</span>
-              </div>
-              <div className="flex items-center gap-1 pl-1 sm:pl-2 border-l border-slate-200">
-                <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-rose-500 flex-shrink-0" />
-                <span className="text-base sm:text-xl lg:text-2xl font-bold text-rose-600 tabular-nums">{banquetsToday}</span>
-              </div>
-            </div>
-          </div>
-          <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-slate-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
-        </button>
-      </div>
+        );
+      })()}
 
       {/* Row 1: Stato Tavoli + Note & Allergeni */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        <div className="lg:col-span-2 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h2 className="text-lg lg:text-xl font-semibold mb-4 text-slate-800">Stato Tavoli</h2>
+      {/* Stato Tavoli — Pranzo / Cena side by side */}
+      <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+        <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
-          {/* Shift Occupancy Summary */}
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-3 sm:p-4 border border-amber-100">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-                <span className="text-sm font-medium text-amber-800">Pranzo</span>
-                <span className="text-[11px] sm:text-xs text-amber-600 whitespace-nowrap">{lunchTableIds.size}/{totalTables} tavoli</span>
-              </div>
-              <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-                <span className="text-2xl sm:text-3xl font-bold text-amber-700 leading-none">{lunchOccupancy}%</span>
-                <span className="text-xs sm:text-sm text-amber-600 mb-0.5 sm:mb-1">occupazione</span>
-              </div>
-              <div className="mt-2 h-2 bg-amber-200 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lunchOccupancy}%` }} />
-              </div>
-              <p className="text-[11px] sm:text-xs text-amber-600 mt-2">{lunchReservationsOpen.length} prenotazioni · {lunchReservationsOpen.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
-            </div>
-
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-3 sm:p-4 border border-indigo-100">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 mb-2">
-                <span className="text-sm font-medium text-indigo-800">Cena</span>
-                <span className="text-[11px] sm:text-xs text-indigo-600 whitespace-nowrap">{dinnerTableIds.size}/{totalTables} tavoli</span>
-              </div>
-              <div className="flex flex-wrap items-end gap-x-2 gap-y-0">
-                <span className="text-2xl sm:text-3xl font-bold text-indigo-700 leading-none">{dinnerOccupancy}%</span>
-                <span className="text-xs sm:text-sm text-indigo-600 mb-0.5 sm:mb-1">occupazione</span>
-              </div>
-              <div className="mt-2 h-2 bg-indigo-200 rounded-full overflow-hidden">
-                <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${dinnerOccupancy}%` }} />
-              </div>
-              <p className="text-[11px] sm:text-xs text-indigo-600 mt-2">{dinnerReservationsOpen.length} prenotazioni · {dinnerReservationsOpen.reduce((acc, r) => acc + r.guests, 0)} ospiti</p>
-            </div>
-          </div>
-
-          {/* Room by Room Status (skip closed rooms) */}
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-2">
-            {rooms.filter(r => !r.is_closed).map(room => {
+        <div className={`grid grid-cols-1 ${globalShiftFilter === 'ALL' ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-4 lg:gap-5`}>
+          {([
+            {
+              key: 'lunch',
+              label: 'Pranzo',
+              icon: <Sun className="h-4 w-4" />,
+              chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
+              barFill: 'bg-amber-500',
+              roomBar: 'bg-amber-400',
+              cardBg: 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-500/[0.06] dark:border-amber-500/20',
+              divider: 'border-amber-200/60 dark:border-amber-500/20',
+              occupancy: lunchOccupancy,
+              occupiedTables: lunchTableIds.size,
+              reservations: lunchReservations,
+              reservationCount: lunchReservations.length,
+              guestCount: lunchReservations.reduce((acc, r) => acc + r.guests, 0),
+            },
+            {
+              key: 'dinner',
+              label: 'Cena',
+              icon: <Sunset className="h-4 w-4" />,
+              chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
+              barFill: 'bg-blue-500',
+              roomBar: 'bg-blue-400',
+              cardBg: 'bg-blue-50/40 border-blue-200/60 dark:bg-blue-500/[0.06] dark:border-blue-500/20',
+              divider: 'border-blue-200/60 dark:border-blue-500/20',
+              occupancy: dinnerOccupancy,
+              occupiedTables: dinnerTableIds.size,
+              reservations: dinnerReservations,
+              reservationCount: dinnerReservations.length,
+              guestCount: dinnerReservations.reduce((acc, r) => acc + r.guests, 0),
+            },
+          ] as const)
+            .filter(m => globalShiftFilter === 'ALL' || globalShiftFilter === (m.key === 'lunch' ? 'LUNCH' : 'DINNER'))
+            .map(meal => {
+            const roomStats = rooms.filter(room => !room.is_closed).map(room => {
               const roomTables = tables.filter(t => t.room_id === room.id);
               const roomTableIds = new Set(roomTables.map(t => t.id));
-              const roomLunchReserved = lunchReservations.filter(r => roomTableIds.has(r.table_id)).length;
-              const roomDinnerReserved = dinnerReservations.filter(r => roomTableIds.has(r.table_id)).length;
-              const roomLunchAvailable = roomTables.length - roomLunchReserved;
-              const roomDinnerAvailable = roomTables.length - roomDinnerReserved;
+              const occupied = meal.reservations.filter(r => r.table_id && roomTableIds.has(r.table_id))
+                .reduce((set, r) => { set.add(r.table_id!); return set; }, new Set<number>()).size;
+              const total = roomTables.length;
+              const pct = total > 0 ? Math.round((occupied / total) * 100) : 0;
+              return { id: room.id, name: room.name, occupied, total, pct };
+            }).sort((a, b) => b.pct - a.pct);
 
-              return (
-                <div key={room.id} className="border border-slate-100 rounded-lg p-2 hover:border-slate-200 transition-colors bg-slate-50/50">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="font-medium text-slate-700 text-xs truncate">{room.name}</h3>
-                    <span className="text-[10px] text-slate-400">{roomTables.length}</span>
+            return (
+              <div
+                key={meal.key}
+                className={`rounded-xl border ${meal.cardBg} p-4 sm:p-5 flex flex-col gap-4`}
+              >
+                {/* Header: meal chip + label + total tavoli */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${meal.chip}`}>
+                      {meal.icon}
+                    </span>
+                    <span className="text-[15px] font-semibold text-[var(--color-fg)] tracking-tight">{meal.label}</span>
                   </div>
-                  <div className="flex gap-1">
-                    <div className="flex-1 bg-amber-50 rounded px-1 py-0.5 border border-amber-100 text-center">
-                      <span className={`text-[10px] font-bold ${roomLunchAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {roomLunchAvailable}
-                      </span>
-                    </div>
-                    <div className="flex-1 bg-indigo-50 rounded px-1 py-0.5 border border-indigo-100 text-center">
-                      <span className={`text-[10px] font-bold ${roomDinnerAvailable > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {roomDinnerAvailable}
-                      </span>
-                    </div>
-                  </div>
+                  <span className="tabular text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{meal.occupiedTables}/{totalTables} tavoli</span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* Note & Allergeni */}
-        <div className="lg:col-span-1 bg-white p-4 lg:p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <h2 className="text-base lg:text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <StickyNote className="h-4 w-4 lg:h-5 lg:w-5 text-amber-500" />
+                {/* Big % + bar with threshold ticks + annotations */}
+                <div>
+                  <div className="flex items-end gap-2">
+                    <span className="tabular text-3xl font-semibold leading-none text-[var(--color-fg)]">{meal.occupancy}%</span>
+                    <span className="text-sm text-[var(--color-fg-muted)] mb-0.5">occupazione</span>
+                  </div>
+                  <div className="relative mt-2 h-2 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                    <div className={`absolute inset-y-0 left-0 ${meal.barFill} rounded-full transition-all duration-500`} style={{ width: `${meal.occupancy}%` }} />
+                    {/* threshold ticks */}
+                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '40%' }} aria-hidden />
+                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '80%' }} aria-hidden />
+                  </div>
+                  <div className="relative mt-1.5 h-3 text-[10px] text-[var(--color-fg-subtle)]">
+                    <span className="absolute left-0">Calmo</span>
+                    <span className="absolute" style={{ left: '40%', transform: 'translateX(-50%)' }}>Pieno</span>
+                    <span className="absolute right-0">Sold out</span>
+                  </div>
+                  <p className="tabular text-xs text-[var(--color-fg-muted)] mt-2">
+                    {meal.reservationCount} prenotazioni · {meal.guestCount} ospiti
+                  </p>
+                </div>
+
+                {/* Per-room rows */}
+                <div className={`border-t ${meal.divider} pt-3 space-y-1.5`}>
+                  {roomStats.map(room => {
+                    const Icon = getRoomIcon(room.name);
+                    return (
+                      <div key={room.id} className="flex items-center gap-3">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="text-sm text-[var(--color-fg)] flex-shrink-0 w-20 truncate">{room.name}</span>
+                        <div className="flex-1 h-1.5 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                          <div className={`h-full ${meal.roomBar} rounded-full transition-all duration-500`} style={{ width: `${room.pct}%` }} />
+                        </div>
+                        <span className="tabular text-xs text-[var(--color-fg-muted)] w-12 text-right flex-shrink-0">{room.occupied}/{room.total}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Note & Allergeni */}
+      <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+          <div className="flex items-center mb-3 gap-2">
+            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">
               Note &amp; Allergeni
             </h2>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-              <button
-                onClick={() => setNotesShift(Shift.LUNCH)}
-                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md transition-colors ${
-                  notesShift === Shift.LUNCH
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Sun className="h-3 w-3" />
-                Pranzo
-              </button>
-              <button
-                onClick={() => setNotesShift(Shift.DINNER)}
-                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md transition-colors ${
-                  notesShift === Shift.DINNER
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Moon className="h-3 w-3" />
-                Cena
-              </button>
-            </div>
           </div>
           {reservationNotes.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-center py-8">
               <div>
-                <StickyNote className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">
-                  Nessuna nota per il {notesShift === Shift.LUNCH ? 'pranzo' : 'la cena'}
+                <StickyNote className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-xs text-[var(--color-fg-subtle)]">
+                  Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
                 </p>
               </div>
             </div>
@@ -1139,54 +1375,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {reservationNotes.map(({ reservation, table, room, allergens }) => {
                 const isLunch = reservation.shift === Shift.LUNCH;
                 const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
-                const accentBorder = isLunch ? 'border-l-amber-400' : 'border-l-indigo-400';
+                const circleBg = isLunch ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]';
+                const isExpanded = expandedNoteIds.has(reservation.id);
+                const noteText = reservation.notes || '';
+                const isTruncatable = noteText.length > 80;
                 return (
-                  <div key={reservation.id} className={`border border-slate-100 border-l-4 ${accentBorder} rounded-lg p-2.5 bg-slate-50/40 hover:bg-white hover:border-slate-200 transition-colors`}>
-                    <div className="flex items-stretch justify-between gap-3">
-                      {/* Left: prominent table + room + customer */}
-                      <div className="flex-shrink-0 min-w-0 max-w-[40%]">
-                        {table ? (
-                          <>
-                            <div className="flex items-center gap-1 text-sm font-bold text-slate-800 leading-tight">
-                              <Armchair className="h-3.5 w-3.5 text-slate-500 flex-shrink-0" />
-                              <span className="truncate">{table.name}</span>
-                            </div>
-                            {room && (
-                              <div className="text-[11px] font-medium text-indigo-600 truncate mt-0.5">
-                                {room.name}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-xs text-slate-400 italic">Tavolo non assegnato</div>
-                        )}
-                        <div className="text-[10px] text-slate-500 truncate mt-1">
-                          {reservation.customer_name}
+                  <div key={reservation.id} className="border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                    {/* Row 1: Table circle + Name/Time + Warning */}
+                    <div className="flex items-center gap-3">
+                      <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${circleBg}`}>
+                        {table ? table.name.replace(/[^0-9]/g, '') || table.name.charAt(0) : '–'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-fg)] truncate">{reservation.customer_name}</p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                          <span className="text-xs text-[var(--color-fg-muted)]">{time || '—'}</span>
+                          {room && (
+                            <>
+                              <span className="text-[var(--color-fg-subtle)] text-xs mx-0.5">·</span>
+                              <span className="text-xs text-[var(--color-fg-muted)] truncate">{room.name}</span>
+                            </>
+                          )}
                         </div>
-                        {time && (
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {time}
-                          </div>
-                        )}
                       </div>
-
-                      {/* Right: notes + allergens */}
-                      <div className="flex-1 min-w-0 text-right">
-                        <p className="text-[11px] text-slate-700 leading-snug whitespace-pre-wrap break-words">
-                          {reservation.notes}
-                        </p>
-                        {allergens.length > 0 && (
-                          <div className="flex items-center justify-end gap-1 mt-1.5 flex-wrap">
-                            <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0" />
-                            {allergens.map(a => (
-                              <span key={a} className="inline-block bg-rose-100 text-rose-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                                {a}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {!table && (
+                        <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30">
+                          <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                          <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 whitespace-nowrap">Non assegnato</span>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Row 2: Allergen chips */}
+                    {allergens.length > 0 && (
+                      <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
+                        {allergens.map(a => (
+                          <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30">
+                            {a}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Row 3: Notes (truncatable) */}
+                    {noteText && (
+                      <div className="mt-2">
+                        <p className="text-xs text-[var(--color-fg-muted)] leading-relaxed whitespace-pre-wrap break-words">
+                          {isTruncatable && !isExpanded ? noteText.slice(0, 80) + '…' : noteText}
+                        </p>
+                        {isTruncatable && (
+                          <button
+                            onClick={() => setExpandedNoteIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(reservation.id)) next.delete(reservation.id);
+                              else next.add(reservation.id);
+                              return next;
+                            })}
+                            className="text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] mt-1 transition-colors"
+                          >
+                            {isExpanded ? 'Mostra meno' : 'Mostra tutto'}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1195,259 +1447,262 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       </div>
 
-      {/* Row 2: Affluenza per Sala (con orari) + Affluenza Settimanale */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
-        {/* Affluenza per Sala con orari - 75% */}
-        <div className="lg:col-span-3 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Affluenza per Orario</h2>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-              <button
-                onClick={() => setAffluenceShiftFilter('ALL')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  affluenceShiftFilter === 'ALL'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Tutti
-              </button>
-              <button
-                onClick={() => setAffluenceShiftFilter('LUNCH')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  affluenceShiftFilter === 'LUNCH'
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Pranzo
-              </button>
-              <button
-                onClick={() => setAffluenceShiftFilter('DINNER')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  affluenceShiftFilter === 'DINNER'
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Cena
-              </button>
+      {/* Row 2: Affluenza — merged Orario + Settimana with shared shift filter */}
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+        {/* Header: title, view tabs, shift filter */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-2">
+              {([
+                { key: 'ORARIO', label: 'Orario' },
+                { key: 'SETTIMANA', label: 'Settimana' },
+              ] as const).map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setAffluenceTab(t.key)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors border ${
+                    affluenceTab === t.key
+                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
+        </div>
 
-          <div className="space-y-4 max-h-[400px] overflow-y-auto">
-            {timeSlotAffluence.roomTimeSlots.map(room => (
-              <div key={room.roomId} className="border border-slate-100 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-slate-700">{room.roomName}</h3>
-                  <span className="text-xs text-slate-400">Max {room.maxCapacity} coperti</span>
-                </div>
+        {affluenceTab === 'ORARIO' && (() => {
+          const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+          const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+          const cellColor = (p: number, isLunch: boolean) => {
+            if (p === 0) return 'bg-[var(--color-surface-3)]';
+            if (isLunch) {
+              if (p < 25) return 'bg-amber-200 dark:bg-amber-500/30';
+              if (p < 50) return 'bg-amber-300 dark:bg-amber-500/45';
+              if (p < 75) return 'bg-amber-400 dark:bg-amber-500/65';
+              return 'bg-amber-500 dark:bg-amber-500/85';
+            }
+            if (p < 25) return 'bg-blue-200 dark:bg-blue-500/30';
+            if (p < 50) return 'bg-blue-300 dark:bg-blue-500/45';
+            if (p < 75) return 'bg-blue-400 dark:bg-blue-500/65';
+            return 'bg-blue-500 dark:bg-blue-500/85';
+          };
 
-                {/* Lunch Time Slots */}
-                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
-                  <div className={affluenceShiftFilter === 'ALL' ? 'mb-2' : ''}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-amber-700 w-16">Pranzo</span>
-                      <span className="text-[10px] text-slate-400">{room.totalLunchGuests}/{room.maxCapacity} ({room.lunchPercentage}%)</span>
+          const renderShift = (
+            shift: 'lunch' | 'dinner',
+            slots: { time: string; guests: number; percentage: number }[],
+            total: number,
+            pct: number,
+            roomMax: number,
+          ) => {
+            const isLunch = shift === 'lunch';
+            const tone = isLunch
+              ? { chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300', icon: <Sun className="h-3 w-3" />, label: 'Pranzo', text: 'text-amber-900 dark:text-amber-100' }
+              : { chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300', icon: <Sunset className="h-3 w-3" />, label: 'Cena', text: 'text-blue-900 dark:text-blue-100' };
+
+            return (
+              <div className="flex items-center gap-2">
+                {/* Fixed left chip */}
+                <span className={`inline-flex h-5 w-5 items-center justify-center rounded ${tone.chip} flex-shrink-0 self-end mb-[6px]`} aria-label={tone.label}>
+                  {tone.icon}
+                </span>
+                {/* Scrollable middle: labels + cells */}
+                <div className="flex-1 min-w-0 overflow-x-auto">
+                  <div className="flex flex-col gap-1" style={{ minWidth: `${slots.length * 44}px` }}>
+                    <div className="flex gap-1">
+                      {slots.map(s => (
+                        <span key={s.time} className="tabular text-[10px] text-[var(--color-fg-subtle)] text-center flex-1 min-w-[40px]">{s.time}</span>
+                      ))}
                     </div>
-                    <div className={`flex ${affluenceShiftFilter === 'LUNCH' ? 'gap-2' : 'gap-1'}`}>
-                      {room.lunchSlots.map(slot => (
-                        <div key={slot.time} className="flex-1 text-center">
-                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'LUNCH' ? 'text-xs' : 'text-[9px]'}`}>{slot.time}</div>
-                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'LUNCH' ? 'h-12' : ''}`}>
-                            <div
-                              className="absolute inset-y-0 left-0 bg-amber-300 transition-all duration-300"
-                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                            />
-                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'LUNCH' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-amber-800' : 'text-slate-400'}`}>
-                              {slot.guests}
-                            </div>
-                          </div>
-                          {affluenceShiftFilter === 'LUNCH' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
-                          )}
+                    <div className="flex gap-1">
+                      {slots.map(slot => (
+                        <div
+                          key={slot.time}
+                          className={`relative flex-1 min-w-[40px] ${cellColor(slot.percentage, isLunch)} rounded h-7 sm:h-8 flex items-center justify-center transition-colors`}
+                          title={`${slot.time} · ${slot.guests} ospiti (${slot.percentage}%)`}
+                        >
+                          <span className={`tabular text-[11px] font-semibold ${slot.guests > 0 ? tone.text : 'text-[var(--color-fg-subtle)]'}`}>
+                            {slot.guests}
+                          </span>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                </div>
+                {/* Fixed right total */}
+                <span className="tabular text-[11px] text-[var(--color-fg-muted)] w-20 text-right flex-shrink-0 self-end mb-[6px]">{total}/{roomMax} · {pct}%</span>
+              </div>
+            );
+          };
 
-                {/* Dinner Time Slots */}
-                {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-indigo-700 w-16">Cena</span>
-                      <span className="text-[10px] text-slate-400">{room.totalDinnerGuests}/{room.maxCapacity} ({room.dinnerPercentage}%)</span>
-                    </div>
-                    <div className={`flex overflow-x-auto ${affluenceShiftFilter === 'DINNER' ? 'gap-1.5' : 'gap-0.5'}`}>
-                      {room.dinnerSlots.map(slot => (
-                        <div key={slot.time} className={`flex-1 text-center ${affluenceShiftFilter === 'DINNER' ? 'min-w-[50px]' : 'min-w-[32px]'}`}>
-                          <div className={`text-slate-400 mb-0.5 ${affluenceShiftFilter === 'DINNER' ? 'text-[10px]' : 'text-[8px]'}`}>{slot.time.substring(0, 5)}</div>
-                          <div className={`relative overflow-hidden rounded bg-slate-100 ${affluenceShiftFilter === 'DINNER' ? 'h-12' : ''}`}>
-                            <div
-                              className="absolute inset-y-0 left-0 bg-indigo-300 transition-all duration-300"
-                              style={{ width: `${Math.min(slot.percentage, 100)}%` }}
-                            />
-                            <div className={`relative font-bold z-10 flex items-center justify-center ${affluenceShiftFilter === 'DINNER' ? 'text-base h-12' : 'text-xs py-0.5'} ${slot.guests > 0 ? 'text-indigo-800' : 'text-slate-400'}`}>
-                              {slot.guests}
-                            </div>
-                          </div>
-                          {affluenceShiftFilter === 'DINNER' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">{slot.percentage}%</div>
-                          )}
+          return (
+            <>
+              <div className="space-y-3 max-h-[460px] overflow-y-auto">
+                {timeSlotAffluence.roomTimeSlots.map(room => {
+                  const Icon = getRoomIcon(room.roomName);
+                  return (
+                    <div key={room.roomId} className="border border-[var(--color-line)] rounded-md p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                          <h3 className="font-medium text-sm text-[var(--color-fg)] truncate">{room.roomName}</h3>
                         </div>
-                      ))}
+                        <span className="tabular text-xs text-[var(--color-fg-subtle)] flex-shrink-0">Max {room.maxCapacity} coperti</span>
+                      </div>
+                      {showLunch && renderShift('lunch', room.lunchSlots, room.totalLunchGuests, room.lunchPercentage, room.maxCapacity)}
+                      {showDinner && renderShift('dinner', room.dinnerSlots, room.totalDinnerGuests, room.dinnerPercentage, room.maxCapacity)}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Totals */}
+              <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                {showLunch && (
+                  <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
+                          <Sun className="h-3 w-3" />
+                        </span>
+                        Totale Pranzo
+                      </span>
+                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                        {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {showDinner && (
+                  <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
+                          <Sunset className="h-3 w-3" />
+                        </span>
+                        Totale Cena
+                      </span>
+                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                        {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
+                      </span>
                     </div>
                   </div>
                 )}
               </div>
-            ))}
-          </div>
+            </>
+          );
+        })()}
 
-          {/* Total Summary */}
-          <div className={`mt-4 pt-3 border-t border-slate-100 grid gap-3 ${affluenceShiftFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'LUNCH') && (
-              <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-amber-800">Totale Pranzo</span>
-                  <span className="text-sm font-bold text-amber-700">
-                    {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                  </span>
-                </div>
-              </div>
-            )}
-            {(affluenceShiftFilter === 'ALL' || affluenceShiftFilter === 'DINNER') && (
-              <div className="bg-indigo-50 rounded-lg p-2.5 border border-indigo-100">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-indigo-800">Totale Cena</span>
-                  <span className="text-sm font-bold text-indigo-700">
-                    {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        {affluenceTab === 'SETTIMANA' && (
+          <>
+            <p className="tabular text-xs text-[var(--color-fg-muted)] mb-3">{weekRange}</p>
+            <div className="h-64 sm:h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} />
+                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
+                  <Tooltip
+                    cursor={{ fill: 'var(--color-surface-hover)' }}
+                    contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)', borderRadius: '8px', fontSize: '12px' }}
+                    labelStyle={{ color: 'var(--color-fg-muted)' }}
+                    formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload[0]) {
+                        return `${label} (${payload[0].payload.date})`;
+                      }
+                      return label;
+                    }}
+                  />
+                  <Bar
+                    dataKey="guests"
+                    fill={globalShiftFilter === 'LUNCH' ? '#f59e0b' : globalShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
-        {/* Affluenza Settimanale - 25% */}
-        <div className="lg:col-span-1 bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex flex-col gap-3 mb-4">
-            <div>
-              <h2 className="text-base font-semibold text-slate-800">Affluenza Settimanale</h2>
-              <p className="text-xs text-slate-500">{weekRange}</p>
+            {/* Totals — same pattern as Orario */}
+            <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              {(globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH') && (
+                <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
+                        <Sun className="h-3 w-3" />
+                      </span>
+                      Totale Pranzo (settimana)
+                    </span>
+                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
+                    </span>
+                  </div>
+                </div>
+              )}
+              {(globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER') && (
+                <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
+                        <Sunset className="h-3 w-3" />
+                      </span>
+                      Totale Cena (settimana)
+                    </span>
+                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
+                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-              <button
-                onClick={() => setChartShiftFilter('ALL')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'ALL'
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Tutti
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('LUNCH')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'LUNCH'
-                    ? 'bg-amber-100 text-amber-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Pranzo
-              </button>
-              <button
-                onClick={() => setChartShiftFilter('DINNER')}
-                className={`flex-1 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${
-                  chartShiftFilter === 'DINNER'
-                    ? 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Cena
-              </button>
-            </div>
-          </div>
-          <div className="h-48 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 9}}
-                />
-                <YAxis
-                  domain={[0, 'auto']}
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{fill: '#64748b', fontSize: 9}}
-                  width={25}
-                />
-                <Tooltip
-                  cursor={{fill: '#f1f5f9'}}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
-                  labelFormatter={(label, payload) => {
-                    if (payload && payload[0]) {
-                      return `${label} (${payload[0].payload.date})`;
-                    }
-                    return label;
-                  }}
-                />
-                <Bar
-                  dataKey="guests"
-                  fill={chartShiftFilter === 'LUNCH' ? '#f59e0b' : chartShiftFilter === 'DINNER' ? '#6366f1' : '#6366f1'}
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
-      {/* Row 3: Attività + Spesa del giorno */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+
+      {/* Row 3: Attività + Spesa del giorno + Sotto Scorta */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Attività (Todo List) */}
-        <div ref={todoSectionRef} className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
-                <ListTodo className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Attività</h2>
-                <p className="text-base text-slate-500">{pendingCount} da completare</p>
-              </div>
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">
+                {todos.filter(t => t.completed).length}/{todos.length} completate
+              </p>
             </div>
             <button
               onClick={handleOpenAddTodo}
-              className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition"
+              aria-label="Aggiungi attività"
             >
-              <Plus className="h-5 w-5" />
+              <Plus className="h-4 w-4" />
             </button>
           </div>
 
           {/* Filter Tabs */}
-          <div className="flex gap-1 mb-4 p-1 bg-slate-100 rounded-lg">
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
             {[
-              { key: 'mine', label: 'Mie', icon: UserCircle },
-              { key: 'all', label: 'Tutte', icon: ListTodo },
-              { key: 'pending', label: 'Da fare', icon: Circle },
-              { key: 'completed', label: 'Fatte', icon: CheckCircle2 },
-            ].map(({ key, label, icon: Icon }) => (
+              { key: 'mine', label: 'Mie' },
+              { key: 'all', label: 'Tutte' },
+              { key: 'pending', label: 'Da fare' },
+              { key: 'completed', label: 'Fatte' },
+            ].map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setTodoFilter(key as typeof todoFilter)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${
                   todoFilter === key
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
                 {label}
               </button>
             ))}
@@ -1455,12 +1710,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           {/* Overdue Alert */}
           {overdueTodos.length > 0 && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-rose-500 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-rose-700">{overdueTodos.length} attività scadute</p>
-                <p className="text-xs text-rose-600">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
+            <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 rounded-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                <p className="tabular text-sm font-medium text-rose-700 dark:text-rose-300">{overdueTodos.length} attività scadute</p>
               </div>
+              <p className="text-xs text-rose-600 dark:text-rose-400 pl-6">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
             </div>
           )}
 
@@ -1468,13 +1723,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
             {todosLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-8 w-8 text-indigo-400 mx-auto mb-2 animate-spin" />
-                <p className="text-slate-400 text-sm">Caricamento attività...</p>
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento attività...</p>
               </div>
             ) : filteredTodos.length === 0 ? (
               <div className="py-8 text-center">
-                <CheckCircle2 className="h-10 w-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">
+                <CheckCircle2 className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">
                   {todoFilter === 'mine' ? 'Nessuna attività assegnata a te' : 'Nessuna attività'}
                 </p>
               </div>
@@ -1484,78 +1739,95 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 return (
                   <div
                     key={todo.id}
-                    className={`group p-3 rounded-xl border transition-all hover:shadow-sm ${
+                    className={`group p-3 rounded-lg border transition-colors ${
                       todo.completed
-                        ? 'bg-slate-50 border-slate-100'
+                        ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
                         : isOverdue
-                        ? 'bg-rose-50 border-rose-100'
-                        : 'bg-white border-slate-200 hover:border-slate-300'
+                        ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30'
+                        : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
+                    {/* Row 1: Checkbox + Title + Actions */}
                     <div className="flex items-start gap-3">
                       <button
                         onClick={() => handleToggleTodo(todo.id)}
-                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
                           todo.completed
-                            ? 'bg-emerald-500 border-emerald-500 text-white'
-                            : 'border-slate-300 hover:border-indigo-400'
+                            ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
+                            : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                         }`}
                       >
-                        {todo.completed && <Check className="h-3 w-3" />}
+                        {todo.completed && <Check className="h-2.5 w-2.5" />}
                       </button>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                             {todo.title}
                           </p>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                             <button
                               onClick={() => handleOpenEditTodo(todo)}
-                              className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => setDeleteTodoConfirm(todo)}
-                              className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 transition-colors"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
-                            {CATEGORY_LABELS[todo.category]}
-                          </span>
-                          <Flag className={`h-3.5 w-3.5 ${PRIORITY_COLORS[todo.priority]}`} />
+
+                        {/* Row 2: Assignee + Due date */}
+                        <div className="flex items-center gap-2 mt-1.5 text-[var(--color-fg-muted)]">
                           {todo.assignedToUserName && (
-                            <span className="text-xs text-slate-500 flex items-center gap-1">
-                              <UserCircle className="h-3 w-3" />
+                            <span className="inline-flex items-center gap-1 text-xs">
+                              <UserCircle className="h-3 w-3 flex-shrink-0" />
                               {todo.assignedToUserName}
                             </span>
                           )}
                           {todo.assignedToTeam && !todo.assignedToUserId && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${TEAM_COLORS[todo.assignedToTeam]}`}>
+                            <span className="inline-flex items-center gap-1 text-xs">
+                              <UsersRound className="h-3 w-3 flex-shrink-0" />
                               {TEAM_LABELS[todo.assignedToTeam]}
                             </span>
                           )}
                           {todo.dueDate && (
-                            <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-400'}`}>
-                              <Clock className="h-3 w-3" />
+                            <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : ''}`}>
+                              <Clock className="h-3 w-3 flex-shrink-0" />
                               {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                             </span>
                           )}
+                        </div>
+
+                        {/* Row 3: Category + Priority + Banquet badge */}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
+                            <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]}`} />
+                            {CATEGORY_LABELS[todo.category]}
+                          </span>
+                          {todo.priority !== TodoPriority.LOW && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
+                              todo.priority === TodoPriority.HIGH
+                                ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-500/30'
+                                : 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/30'
+                            }`}>
+                              <Flag className="h-3 w-3" />
+                              {todo.priority === TodoPriority.HIGH ? 'Alta' : 'Media'}
+                            </span>
+                          )}
                           {todo.banquetReminderHours != null && (
-                            <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-100 dark:border-orange-500/30">
                               {todo.banquetReminderHours}h prima
                             </span>
                           )}
                         </div>
+
+                        {/* Row 4: Linked banquets */}
                         {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
                           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                              Banchetti:
-                            </span>
                             {todo.linkedBanquetIds.map(bid => {
                               const banquet = banquetMenus.find(b => b.id === bid);
                               if (!banquet) return null;
@@ -1584,66 +1856,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa del Giorno (Shopping List) */}
-        <div className="bg-white p-6 lg:p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
-                <ShoppingCart className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-xl lg:text-2xl font-semibold text-slate-800">Spesa del Giorno</h2>
-                <p className="text-base text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} · {checkedItems}/{totalItems} completati</p>
-              </div>
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">{checkedItems}/{totalItems} completati</p>
             </div>
-            {checkedItems > 0 && (
-              <button
-                onClick={clearCheckedItems}
-                className="text-sm text-slate-500 hover:text-rose-600 transition-colors"
-              >
-                Rimuovi completati
-              </button>
-            )}
-          </div>
-
-          {/* Add Item Form */}
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addShoppingItem()}
-              placeholder="Aggiungi prodotto..."
-              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
-            />
-            <select
-              value={newItemCategory}
-              onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
-              className="px-2 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-            >
-              <option value="CUCINA">Cucina</option>
-              <option value="BAR">Bar</option>
-              <option value="ALTRO">Altro</option>
-            </select>
-            <button
-              onClick={addShoppingItem}
-              disabled={!newItemName.trim()}
-              className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {checkedItems > 0 && (
+                <button
+                  onClick={clearCheckedItems}
+                  className="text-xs text-[var(--color-fg-muted)] hover:text-rose-600 transition-colors"
+                >
+                  Rimuovi completati
+                </button>
+              )}
+              {totalItems > 0 && (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(cat => {
+                const items = shoppingByCategory[cat];
+                if (items.length === 0) return null;
+                return (
+                  <div key={cat} className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => shareShoppingListWhatsApp(items, cat, selectedDateStr)}
+                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
+                      title={`WhatsApp ${SHOPPING_CATEGORY_LABELS[cat]}`}
+                    >
+                      <Share2 className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => printShoppingList(items, cat, selectedDateStr)}
+                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
+                      title={`Stampa ${SHOPPING_CATEGORY_LABELS[cat]}`}
+                    >
+                      <Printer className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Shopping List by Category */}
-          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-4">
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-3 mb-3">
             {shoppingLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-8 w-8 text-emerald-400 mx-auto mb-2 animate-spin" />
-                <p className="text-slate-400 text-sm">Caricamento...</p>
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
               </div>
             ) : totalItems === 0 ? (
               <div className="py-8 text-center">
-                <ShoppingCart className="h-10 w-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">Nessun prodotto nella lista</p>
+                <ShoppingCart className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Nessun prodotto nella lista</p>
               </div>
             ) : (
               (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(category => {
@@ -1651,252 +1916,396 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 if (items.length === 0) return null;
                 return (
                   <div key={category}>
-                    <div className={`flex items-center gap-2 px-2 py-1 rounded-lg ${SHOPPING_CATEGORY_COLORS[category]} mb-2`}>
-                      {SHOPPING_CATEGORY_ICONS[category]}
-                      <span className="text-xs font-medium">{SHOPPING_CATEGORY_LABELS[category]}</span>
-                      <span className="text-xs opacity-70">({items.length})</span>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${SHOPPING_CATEGORY_COLORS[category]}`}>
+                        {SHOPPING_CATEGORY_ICONS[category]}
+                        {SHOPPING_CATEGORY_LABELS[category]}
+                        <span className="tabular opacity-70">({items.length})</span>
+                      </span>
                     </div>
-                    <div className="space-y-2 pl-2">
-                      {items.map(item => (
-                        <div key={item.id} className="group">
-                          <div className="flex items-center gap-2">
+                    <div className="space-y-0.5">
+                      {items.map(item => {
+                        const meta = `${item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}${
+                          item.createdAt
+                            ? ` · ${new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} ${new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+                            : ''
+                        }`;
+                        const isEditing = editingShoppingId === item.id;
+                        if (isEditing) {
+                          return (
+                            <div key={item.id} className="flex items-center gap-2 py-1.5 px-1">
+                              <input
+                                type="text"
+                                value={editShoppingName}
+                                onChange={(e) => setEditShoppingName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') saveEditShoppingItem();
+                                  if (e.key === 'Escape') cancelEditShoppingItem();
+                                }}
+                                autoFocus
+                                className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+                              />
+                              <select
+                                value={editShoppingCategory}
+                                onChange={(e) => setEditShoppingCategory(e.target.value as ShoppingCategory)}
+                                className="text-xs bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+                              >
+                                <option value="CUCINA">Cucina</option>
+                                <option value="BAR">Bar</option>
+                                <option value="ALTRO">Altro</option>
+                              </select>
+                              <button
+                                onClick={saveEditShoppingItem}
+                                disabled={!editShoppingName.trim() || isSavingShoppingEdit}
+                                className="p-1 rounded text-emerald-600 hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
+                                title="Salva"
+                              >
+                                {isSavingShoppingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                onClick={cancelEditShoppingItem}
+                                disabled={isSavingShoppingEdit}
+                                className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                                title="Annulla"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={item.id} className="group flex items-center gap-3 py-1.5 px-1 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors" title={meta}>
                             <button
                               onClick={() => toggleShoppingItem(item.id)}
-                              className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
                                 item.checked
-                                  ? 'bg-emerald-500 border-emerald-500 text-white'
-                                  : 'border-slate-300 hover:border-emerald-400'
+                                  ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
+                                  : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
                               }`}
                             >
                               {item.checked && <Check className="h-2.5 w-2.5" />}
                             </button>
-                            <span className={`flex-1 text-sm ${item.checked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                            <span className={`flex-1 min-w-0 text-sm truncate ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                               {item.name}
                             </span>
                             <button
+                              onClick={() => startEditShoppingItem(item)}
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
+                              title="Modifica"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
                               onClick={() => deleteShoppingItem(item.id)}
-                              className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
+                              title="Elimina"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                          <div className="ml-6 text-xs text-slate-400">
-                            {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
-                            {item.createdAt && (
-                              <> • {new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} {new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
               })
             )}
           </div>
+
+          {/* Add Item — Google Keep style: input at bottom with autocomplete */}
+          <div className="relative border-t border-[var(--color-line)] pt-3">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+              <input
+                ref={shoppingInputRef}
+                type="text"
+                value={newItemName}
+                onChange={(e) => { setNewItemName(e.target.value); setShowShoppingSuggestions(true); }}
+                onFocus={() => setShowShoppingSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowShoppingSuggestions(false), 150)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); addShoppingItem(); }
+                }}
+                placeholder="Aggiungi prodotto..."
+                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+              />
+              <div className="relative flex-shrink-0">
+                <select
+                  value={newItemCategory}
+                  onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
+                  className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
+                >
+                  <option value="CUCINA">Cucina</option>
+                  <option value="BAR">Bar</option>
+                  <option value="ALTRO">Altro</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+              </div>
+              {isAddingShoppingItem && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-subtle)] flex-shrink-0" />}
+            </div>
+
+            {/* Autocomplete dropdown */}
+            {showShoppingSuggestions && shoppingSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 bottom-full mb-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-sm)] overflow-hidden z-10">
+                {shoppingSuggestions.map(name => (
+                  <button
+                    key={name}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setShowShoppingSuggestions(false);
+                      addShoppingItem(name);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-2"
+                  >
+                    <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sotto Scorta (Low Stock) */}
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Sotto Scorta</h2>
+              <p className="tabular text-xs text-[var(--color-fg-muted)]">
+                {lowStockLoading ? 'Caricamento…' : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} ≤ 5`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onNavigateToInventario}
+              className="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+              title="Vai all'inventario"
+            >
+              Apri
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-1.5">
+            {lowStockLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
+              </div>
+            ) : lowStockItems.length === 0 ? (
+              <div className="py-8 text-center">
+                <Package className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Tutte le scorte sono in regola</p>
+              </div>
+            ) : (
+              lowStockItems.map(item => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md bg-rose-50 dark:bg-red-950/20 border border-rose-100 dark:border-red-900/40"
+                >
+                  <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-rose-700 dark:text-rose-300 truncate">{item.name}</div>
+                    {(item.category_name || item.area) && (
+                      <div className="text-[11px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70 truncate">
+                        {[item.area, item.category_name].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-sm font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                      {Number.isInteger(item.total_quantity) ? item.total_quantity : item.total_quantity.toFixed(1)}
+                    </div>
+                    {item.unit && (
+                      <div className="text-[10px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70">{item.unit}</div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
       {/* Row 4: Staff Presence */}
-      <div className="bg-white p-5 lg:p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 bg-violet-50 text-violet-600 rounded-xl">
-            <UsersRound className="h-6 w-6" />
-          </div>
-          <div>
-            <h2 className="text-lg lg:text-xl font-semibold text-slate-800">Personale in Servizio</h2>
-            <p className="text-sm text-slate-500">{isToday ? 'Oggi' : selectedDate.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</p>
-          </div>
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+        <div className="mb-4">
+          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
         </div>
 
         {staffLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-subtle)]" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Pranzo */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-200 flex items-center justify-center">
-                  <span className="text-amber-700 text-sm font-bold">P</span>
+          (() => {
+            const renderChip = (s: StaffMember, _isLive: boolean) => {
+              const initials = `${(s.name || '').charAt(0)}${(s.surname || '').charAt(0)}`.toUpperCase();
+              return (
+                <div
+                  key={s.id}
+                  className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
+                  title={s.role ? `${s.name} ${s.surname} · ${s.role}` : `${s.name} ${s.surname}`}
+                >
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex items-center justify-center text-[10px] font-semibold">
+                    {initials}
+                  </span>
+                  <span className="truncate max-w-[8rem]">{s.name}</span>
                 </div>
-                <span className="font-semibold text-amber-800">Pranzo</span>
-                <span className="ml-auto text-sm text-amber-600">
-                  {staffPresence.lunch.sala.length + staffPresence.lunch.cucina.length} persone
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Sala */}
-                <div className="bg-white/60 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-4 w-4 text-emerald-600" />
-                    <span className="text-xs font-medium text-emerald-700">Sala</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.sala.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.lunch.sala.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
-                    ) : (
-                      staffPresence.lunch.sala.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-                {/* Cucina */}
-                <div className="bg-white/60 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-4 w-4 text-orange-600" />
-                    <span className="text-xs font-medium text-orange-700">Cucina</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.lunch.cucina.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.lunch.cucina.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
-                    ) : (
-                      staffPresence.lunch.cucina.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+              );
+            };
 
-            {/* Cena */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-100">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-indigo-200 flex items-center justify-center">
-                  <span className="text-indigo-700 text-sm font-bold">C</span>
-                </div>
-                <span className="font-semibold text-indigo-800">Cena</span>
-                <span className="ml-auto text-sm text-indigo-600">
-                  {staffPresence.dinner.sala.length + staffPresence.dinner.cucina.length} persone
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {/* Sala */}
-                <div className="bg-white/60 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Users className="h-4 w-4 text-emerald-600" />
-                    <span className="text-xs font-medium text-emerald-700">Sala</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.sala.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.dinner.sala.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
-                    ) : (
-                      staffPresence.dinner.sala.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-medium text-emerald-700">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
-                        </div>
-                      ))
+            const renderShiftCard = (
+              shiftKey: 'lunch' | 'dinner',
+              label: string,
+              icon: React.ReactNode,
+              iconWrap: string,
+              cardWash: string,
+              liveAccent: string,
+              restBorder: string,
+            ) => {
+              const data = staffPresence[shiftKey];
+              const total = data.sala.length + data.cucina.length;
+              const isLive = liveShift === shiftKey;
+              return (
+                <div
+                  className={`relative rounded-lg p-4 transition ${
+                    isLive ? `border ${cardWash} ${liveAccent} shadow-[var(--shadow-sm)]` : `border ${restBorder}`
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconWrap}`}>{icon}</div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-sm font-semibold text-[var(--color-fg)]">{label}</span>
+                      <span className="tabular text-xs text-[var(--color-fg-muted)]">({total})</span>
+                    </div>
+                    {isLive && (
+                      <span className="inline-flex items-center gap-1.5 ml-auto text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        </span>
+                        In corso
+                      </span>
                     )}
                   </div>
-                </div>
-                {/* Cucina */}
-                <div className="bg-white/60 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <ChefHat className="h-4 w-4 text-orange-600" />
-                    <span className="text-xs font-medium text-orange-700">Cucina</span>
-                    <span className="ml-auto text-xs text-slate-500">{staffPresence.dinner.cucina.length}</span>
-                  </div>
-                  <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                    {staffPresence.dinner.cucina.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Nessuno</p>
-                    ) : (
-                      staffPresence.dinner.cucina.map(s => (
-                        <div key={s.id} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-orange-100 flex items-center justify-center text-[10px] font-medium text-orange-700">
-                            {s.name[0]}{s.surname[0]}
-                          </div>
-                          <span className="text-xs text-slate-700 truncate">{s.name}</span>
+                  <div className="space-y-2.5">
+                    <div>
+                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
+                        Sala <span className="tabular text-[var(--color-fg-subtle)]">({data.sala.length})</span>
+                      </div>
+                      {data.sala.length === 0 ? (
+                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {data.sala.map(s => renderChip(s, isLive))}
                         </div>
-                      ))
-                    )}
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
+                        Cucina <span className="tabular text-[var(--color-fg-subtle)]">({data.cucina.length})</span>
+                      </div>
+                      {data.cucina.length === 0 ? (
+                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {data.cucina.map(s => renderChip(s, isLive))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
+              );
+            };
+
+            const showLunchPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+            const showDinnerPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+            return (
+              <div className={`grid grid-cols-1 ${(showLunchPersonale && showDinnerPersonale) ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-4`}>
+                {showLunchPersonale && renderShiftCard(
+                  'lunch',
+                  'Pranzo',
+                  <Sun className="h-4 w-4 text-amber-700 dark:text-amber-300" />,
+                  'bg-amber-100 dark:bg-amber-500/20',
+                  'bg-amber-50 dark:bg-amber-500/10',
+                  'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
+                  'bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20',
+                )}
+                {showDinnerPersonale && renderShiftCard(
+                  'dinner',
+                  'Cena',
+                  <Sunset className="h-4 w-4 text-blue-600 dark:text-blue-400" />,
+                  'bg-blue-100 dark:bg-blue-500/20',
+                  'bg-blue-50 dark:bg-blue-500/10',
+                  'border-blue-300/70 ring-1 ring-blue-200/60 dark:ring-blue-400/20',
+                  'bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/20',
+                )}
               </div>
-            </div>
-          </div>
+            );
+          })()
         )}
       </div>
 
       {/* My Tasks Modal */}
       {showMyTasksModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600">
-              <div className="flex items-center gap-3 text-white">
-                <div className="p-2 bg-white/20 rounded-lg">
-                  <UserCircle className="h-5 w-5" />
-                </div>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => setShowMyTasksModal(false)}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-center gap-3">
+                <UserCircle className="h-5 w-5 text-[var(--color-fg-muted)]" />
                 <div>
-                  <h3 className="text-lg font-semibold">Le Mie Attività</h3>
-                  <p className="text-sm text-white/80">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
+                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Le Mie Attività</h3>
+                  <p className="tabular text-xs text-[var(--color-fg-muted)]">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
                 </div>
               </div>
-              <button onClick={() => setShowMyTasksModal(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X className="h-5 w-5 text-white" />
+              <button onClick={() => setShowMyTasksModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                <X className="h-5 w-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {myTodos.length === 0 ? (
                 <div className="py-12 text-center">
-                  <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
-                  <p className="text-slate-600 font-medium">Tutto fatto!</p>
-                  <p className="text-slate-400 text-sm">Non hai attività assegnate</p>
+                  <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
+                  <p className="text-[var(--color-fg)] font-medium">Tutto fatto!</p>
+                  <p className="text-[var(--color-fg-subtle)] text-sm">Non hai attività assegnate</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {myTodos.map(todo => {
                     const isOverdue = todo.dueDate && todo.dueDate < todayStr;
                     return (
-                      <div key={todo.id} className={`p-4 rounded-xl border ${isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'} hover:shadow-md transition-shadow`}>
+                      <div key={todo.id} className={`p-3 rounded-md border ${isOverdue ? 'border-rose-100 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15' : 'border-[var(--color-line)] bg-[var(--color-surface)]'} transition-colors`}>
                         <div className="flex items-start gap-3">
                           <button
                             onClick={() => handleToggleTodo(todo.id)}
-                            className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 border-slate-300 hover:border-indigo-400 flex items-center justify-center transition-colors"
+                            className="mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] flex items-center justify-center transition-colors"
                           >
                           </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2">
-                              <p className="font-medium text-slate-800">{todo.title}</p>
+                              <p className="font-medium text-sm text-[var(--color-fg)]">{todo.title}</p>
                               <Flag className={`h-4 w-4 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
                             </div>
                             {todo.description && (
-                              <p className="text-sm text-slate-500 mt-1">{todo.description}</p>
+                              <p className="text-sm text-[var(--color-fg-muted)] mt-1">{todo.description}</p>
                             )}
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
-                              <span className={`text-xs px-2 py-1 rounded-full ${CATEGORY_COLORS[todo.category]}`}>
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[todo.category]}`}>
                                 {CATEGORY_LABELS[todo.category]}
                               </span>
                               {isAssignedToMe(todo) && (
-                                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 flex items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-500/30">
                                   <UserCircle className="h-3 w-3" /> Personale
                                 </span>
                               )}
                               {isAssignedToMyTeam(todo) && !isAssignedToMe(todo) && (
-                                <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${TEAM_COLORS[todo.assignedToTeam!]}`}>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${TEAM_COLORS[todo.assignedToTeam!]}`}>
                                   <UsersRound className="h-3 w-3" /> {TEAM_LABELS[todo.assignedToTeam!]}
                                 </span>
                               )}
                               {todo.dueDate && (
-                                <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-medium' : 'text-slate-500'}`}>
+                                <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-[var(--color-fg-muted)]'}`}>
                                   <Clock className="h-3 w-3" />
                                   {isOverdue ? 'Scaduto: ' : ''}
                                   {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
@@ -1911,10 +2320,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               )}
             </div>
-            <div className="p-4 border-t border-slate-100 bg-slate-50">
+            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
               <button
                 onClick={() => setShowMyTasksModal(false)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
               >
                 Chiudi
               </button>
@@ -1925,48 +2334,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Add/Edit Todo Modal */}
       {showTodoModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-500" /></button>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => { setShowTodoModal(false); resetTodoForm(); }}>
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)] flex-shrink-0">
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"><X className="h-5 w-5" /></button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Titolo</label>
-                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus />
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Titolo</label>
+                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" autoFocus />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Descrizione (opzionale)</label>
-                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none" />
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Descrizione (opzionale)</label>
+                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20 resize-none" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Priorità</label>
-                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Priorità</label>
+                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     <option value={TodoPriority.LOW}>Bassa</option>
                     <option value={TodoPriority.MEDIUM}>Media</option>
                     <option value={TodoPriority.HIGH}>Alta</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Categoria</label>
-                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Categoria</label>
+                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
                     {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Scadenza (opzionale)</label>
-                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Scadenza (opzionale)</label>
+                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Persona</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a persona</label>
                   <select
                     value={todoForm.assignedToUserId || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     <option value="">Nessuno</option>
                     {staffUsers.map(u => (
@@ -1975,23 +2384,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">Assegna a Team</label>
+                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a team</label>
                   <select
                     value={todoForm.assignedToTeam || ''}
                     onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
-                    className="w-full rounded-lg border border-slate-300 p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                   >
                     <option value="">Nessun team</option>
-                    {Object.entries(TEAM_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
+                    {(Object.entries(TEAM_LABELS) as [UserRole, string][])
+                      .filter(([key]) => canAssignToRole(user?.role, key))
+                      .map(([key, label]) => (
+                        <option key={key} value={key}>{label}</option>
+                      ))}
                   </select>
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-3">
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors font-medium">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end flex-shrink-0">
+              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
+              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim() || isSavingTodo} className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
+                {isSavingTodo && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingTodo ? 'Salva' : 'Aggiungi'}
               </button>
             </div>
@@ -1999,34 +2411,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
       )}
 
-      {/* Today's Tasks Summary */}
-      {todaysTodos.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-4 rounded-2xl border border-amber-100">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="h-5 w-5 text-amber-600" />
-            <h3 className="font-semibold text-amber-900">Attività di oggi</h3>
-            <span className="bg-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-full font-medium">{todaysTodos.length}</span>
-          </div>
-          <div className="space-y-2">
-            {todaysTodos.slice(0, 3).map(todo => (
-              <div key={todo.id} className="flex items-center gap-2 text-sm text-amber-800">
-                <div className={`w-2 h-2 rounded-full ${PRIORITY_COLORS[todo.priority].replace('text-', 'bg-')}`} />
-                {todo.title}
-              </div>
-            ))}
-            {todaysTodos.length > 3 && <p className="text-xs text-amber-600">+{todaysTodos.length - 3} altre attività</p>}
-          </div>
-        </div>
-      )}
+      {/* Today's Tasks Summary — moved to top of page */}
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl border border-indigo-100 animate-fade-in">
+        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-lg font-bold text-indigo-900">Analisi AI Gemini</h2>
+            <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
+            <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>
           </div>
-          <div className="prose prose-indigo max-w-none text-slate-700">
+          <div className="prose prose-sm max-w-none text-[var(--color-fg-muted)]">
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         </div>

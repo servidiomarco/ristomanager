@@ -8,13 +8,16 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
-import { createSchema, queryWithRetry } from './db.js';
+import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { RolePermissionService } from './auth/permissionService.js';
+import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
+import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -32,7 +35,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+// 2 MB body limit accommodates inlined dish photos as base64 data URLs
+// (resized client-side to ~200KB). Default 100KB would reject them.
+app.use(express.json({ limit: '2mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -125,10 +130,101 @@ async function isTableInClosedRoom(tableId: number | null | undefined): Promise<
     return result.rows[0]?.is_closed === true;
 }
 
+// Find tables already booked on a given date+shift, either by a reservation
+// or by another banquet. Used to prevent overbooking across both sections.
+// Returns one row per (table_id, source) conflict; an empty result means free.
+interface TableConflict {
+    table_id: number;
+    table_name: string;
+    source: 'reservation' | 'banquet';
+    source_id: number;
+    source_name: string;
+}
+
+async function findTableConflicts(
+    eventDate: string,
+    shift: string | null | undefined,
+    tableIds: number[],
+    options?: { excludeBanquetId?: number; excludeReservationId?: number }
+): Promise<TableConflict[]> {
+    if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
+
+    const conflicts: TableConflict[] = [];
+
+    const resParams: any[] = [tableIds, eventDate, shift];
+    let resWhere = `r.table_id = ANY($1::int[])
+                    AND DATE(r.reservation_time) = $2::date
+                    AND r.shift = $3
+                    AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'`;
+    if (options?.excludeReservationId) {
+        resParams.push(options.excludeReservationId);
+        resWhere += ` AND r.id <> $${resParams.length}`;
+    }
+    const resResult = await queryWithRetry(
+        `SELECT r.id, r.customer_name, r.table_id, t.name AS table_name
+         FROM reservations r
+         JOIN tables t ON t.id = r.table_id
+         WHERE ${resWhere}`,
+        resParams
+    );
+    for (const row of resResult.rows) {
+        conflicts.push({
+            table_id: row.table_id,
+            table_name: row.table_name,
+            source: 'reservation',
+            source_id: row.id,
+            source_name: row.customer_name,
+        });
+    }
+
+    const banParams: any[] = [eventDate, shift, tableIds];
+    let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[]`;
+    if (options?.excludeBanquetId) {
+        banParams.push(options.excludeBanquetId);
+        banWhere += ` AND b.id <> $${banParams.length}`;
+    }
+    const banResult = await queryWithRetry(
+        `SELECT b.id, b.name, b.table_ids FROM banquet_menus b WHERE ${banWhere}`,
+        banParams
+    );
+    for (const row of banResult.rows) {
+        const overlap: number[] = (row.table_ids || []).filter((tid: number) => tableIds.includes(tid));
+        if (overlap.length === 0) continue;
+        const tableNames = await queryWithRetry(
+            'SELECT id, name FROM tables WHERE id = ANY($1::int[])',
+            [overlap]
+        );
+        for (const t of tableNames.rows) {
+            conflicts.push({
+                table_id: t.id,
+                table_name: t.name,
+                source: 'banquet',
+                source_id: row.id,
+                source_name: row.name,
+            });
+        }
+    }
+
+    return conflicts;
+}
+
+const buildConflictMessage = (conflicts: TableConflict[]): string => {
+    const parts = conflicts.map(c => {
+        const what = c.source === 'reservation' ? 'prenotazione di' : 'banchetto';
+        return `Tavolo ${c.table_name} occupato (${what} ${c.source_name})`;
+    });
+    return parts.join('; ');
+};
+
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('SELECT * FROM reservations ORDER BY reservation_time DESC');
+        const result = await queryWithRetry(`
+            SELECT r.*, u.full_name AS created_by_user_name
+            FROM reservations r
+            LEFT JOIN users u ON r.created_by_user_id = u.id
+            ORDER BY r.reservation_time DESC
+        `);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -138,12 +234,29 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
+        if (table_id != null && reservation_time && shift) {
+            const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)]);
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+            `WITH ins AS (
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING *
+            )
+            SELECT ins.*, u.full_name AS created_by_user_name
+            FROM ins
+            LEFT JOIN users u ON ins.created_by_user_id = u.id`,
             [
                 customer_name,
                 reservation_time,
@@ -155,6 +268,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 phone ?? null,
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
+                reservation_status ?? 'CONFIRMED',
+                req.user?.userId ?? null,
             ]
         );
         const newReservation = result.rows[0];
@@ -173,9 +288,39 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             );
         }
 
+        // Auto-save contact to the customer rubrica if a phone was provided
+        // and no matching customer exists. Side-effect — never fails the route.
+        await upsertCustomerFromReservation(
+            customer_name,
+            phone,
+            email,
+            req.user ? { userId: req.user.userId, email: req.user.email } : null
+        );
+
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
+
+        const reservationLabel = (() => {
+            try {
+                const dt = new Date(reservation_time);
+                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                return `${date} ${time}`;
+            } catch {
+                return reservation_time;
+            }
+        })();
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Nuova prenotazione',
+                body: `${customer_name} · ${guests} ospiti · ${reservationLabel}`,
+                url: '/?view=RESERVATIONS',
+                tag: `reservation-${newReservation.id}`,
+            },
+            { excludeUserId: req.user?.userId ?? null }
+        ).catch(err => console.error('Push (new reservation) failed:', err));
 
         res.status(201).json(newReservation);
     } catch (err: any) {
@@ -193,12 +338,30 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
+        if (table_id != null && reservation_time && shift) {
+            const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id) });
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            'UPDATE reservations SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10 WHERE id = $11 RETURNING *',
+            `WITH upd AS (
+                UPDATE reservations
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10, reservation_status = $11
+                WHERE id = $12
+                RETURNING *
+            )
+            SELECT upd.*, u.full_name AS created_by_user_name
+            FROM upd
+            LEFT JOIN users u ON upd.created_by_user_id = u.id`,
             [
                 customer_name,
                 reservation_time,
@@ -210,6 +373,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 phone ?? null,
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
+                reservation_status ?? 'CONFIRMED',
                 id,
             ]
         );
@@ -225,9 +389,18 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ResourceType.RESERVATION,
                 parseInt(id, 10),
                 customer_name,
-                { guests, reservation_time, shift, payment_status, arrival_status }
+                { guests, reservation_time, shift, payment_status, arrival_status, reservation_status }
             );
         }
+
+        // Auto-save contact to the customer rubrica if a phone was provided
+        // and no matching customer exists. Side-effect — never fails the route.
+        await upsertCustomerFromReservation(
+            customer_name,
+            phone,
+            email,
+            req.user ? { userId: req.user.userId, email: req.user.email } : null
+        );
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
@@ -1066,6 +1239,17 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
                 hours,
             ]);
             if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+            if (created.rows[0]) {
+                pushSendToRoles(
+                    ['KITCHEN'],
+                    {
+                        title: 'Promemoria cucina',
+                        body: created.rows[0].title,
+                        url: '/?view=DASHBOARD',
+                        tag: `kitchen-reminder-${dueDate}-${hours}`,
+                    }
+                ).catch(err => console.error('Push (kitchen reminder) failed:', err));
+            }
         }
     }
 }
@@ -1181,6 +1365,17 @@ async function runDailyBreadReminder(): Promise<void> {
             RETURNING ${TODO_FULL_SELECT}
         `, [title, description, tomorrowIso, BREAD_AUTO_KIND]);
         if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+        if (created.rows[0]) {
+            pushSendToRoles(
+                ['OWNER'],
+                {
+                    title: 'Promemoria pane',
+                    body: title,
+                    url: '/?view=DASHBOARD',
+                    tag: `bread-${tomorrowIso}`,
+                }
+            ).catch(err => console.error('Push (bread reminder) failed:', err));
+        }
     }
     console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
 }
@@ -1206,11 +1401,872 @@ const startBreadReminderScheduler = () => {
     setInterval(tick, 5 * 60 * 1000);
 };
 
+// ============================================
+// CUSTOMERS (rubrica) - require authentication
+// ============================================
+
+// Title-case Italian names: "MARIO ROSSI" / "mario rossi" / "d'angelo"
+// → "Mario Rossi" / "Mario Rossi" / "D'Angelo". Splits on whitespace,
+// apostrophes (' and ’) and hyphens, preserving the separators.
+const normalizeCustomerName = (raw: string): string => {
+    return raw
+        .toLowerCase()
+        .replace(/(^|[\s'’\-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
+};
+
+// Auto-add the reservation contact to the rubrica when a phone is provided and
+// no customer with the same digits-only phone already exists. Failures are
+// swallowed: the reservation save must succeed even if this side-effect fails.
+const upsertCustomerFromReservation = async (
+    customerName: string | null | undefined,
+    phone: string | null | undefined,
+    email: string | null | undefined,
+    actor: { userId: number; email: string } | null | undefined
+): Promise<void> => {
+    try {
+        if (!phone || !String(phone).trim()) return;
+        if (!customerName || !String(customerName).trim()) return;
+        const trimmedPhone = String(phone).trim();
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (!phoneDigits) return;
+
+        const existing = await queryWithRetry(
+            `SELECT id FROM customers
+             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+             LIMIT 1`,
+            [phoneDigits]
+        );
+        if (existing.rows.length > 0) return;
+
+        const inserted = await queryWithRetry(
+            `INSERT INTO customers (name, phone, email)
+             VALUES ($1, $2, $3)
+             RETURNING id, name`,
+            [
+                normalizeCustomerName(String(customerName).trim()),
+                trimmedPhone,
+                email && String(email).trim() ? String(email).trim() : null,
+            ]
+        );
+        const newCustomer = inserted.rows[0];
+
+        if (actor && newCustomer) {
+            LogService.logActivity(
+                actor.userId,
+                actor.email,
+                actor.email,
+                ActivityAction.CREATE,
+                ResourceType.CUSTOMER,
+                newCustomer.id,
+                newCustomer.name,
+                { source: 'reservation_autosave' }
+            );
+        }
+    } catch (err) {
+        console.error('upsertCustomerFromReservation failed:', err);
+    }
+};
+
+app.get('/customers', authenticate, requirePermission('customers:view'), async (req, res) => {
+    try {
+        const { q, limit } = req.query as { q?: string; limit?: string };
+        const cap = Math.min(Math.max(parseInt(limit || '500', 10) || 500, 1), 1000);
+        // Sub-select counts past NO_SHOW reservations matching this customer's phone.
+        // Phone is required on rubrica records, so this is the reliable identifier.
+        const noShowSubquery = `(
+            SELECT COUNT(*)::int
+            FROM reservations r
+            WHERE r.reservation_status = 'NO_SHOW'
+              AND r.phone IS NOT NULL
+              AND REGEXP_REPLACE(r.phone, '\\D', '', 'g') = REGEXP_REPLACE(c.phone, '\\D', '', 'g')
+        ) AS no_show_count`;
+        if (q && q.trim()) {
+            const term = `%${q.trim().toLowerCase()}%`;
+            const result = await queryWithRetry(
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                        ${noShowSubquery}
+                 FROM customers c
+                 WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+                   AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
+                 ORDER BY name
+                 LIMIT $2`,
+                [term, cap]
+            );
+            return res.json(result.rows);
+        }
+        const result = await queryWithRetry(
+            `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                    ${noShowSubquery}
+             FROM customers c
+             WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+             ORDER BY name
+             LIMIT $1`,
+            [cap]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /customers error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        if (!phone || !String(phone).trim()) {
+            return res.status(400).json({ error: 'phone is required' });
+        }
+
+        // Dedupe on the digit-only form of the phone — strips spaces, "+",
+        // dashes, etc. so "+39 333 1234567" and "3331234567" match. Phone
+        // is required, so it's a reliable identifier.
+        const trimmedPhone = String(phone).trim();
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (phoneDigits) {
+            const existing = await queryWithRetry(
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
+                 FROM customers
+                 WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+                 LIMIT 1`,
+                [phoneDigits]
+            );
+            if (existing.rows.length > 0) {
+                return res.status(200).json(existing.rows[0]);
+            }
+        }
+
+        const result = await queryWithRetry(
+            `INSERT INTO customers (name, phone, email, address, city, postal_code, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+            [
+                normalizeCustomerName(String(name).trim()),
+                trimmedPhone || null,
+                email ? String(email).trim() : null,
+                address ?? null,
+                city ?? null,
+                postal_code ?? null,
+                notes ?? null,
+            ]
+        );
+        const newCustomer = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.CUSTOMER,
+                newCustomer.id,
+                newCustomer.name
+            );
+        }
+
+        res.status(201).json(newCustomer);
+    } catch (err: any) {
+        console.error('POST /customers error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        if (!phone || !String(phone).trim()) {
+            return res.status(400).json({ error: 'phone is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE customers SET
+                name = $1,
+                phone = $2,
+                email = $3,
+                address = $4,
+                city = $5,
+                postal_code = $6,
+                notes = $7,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = $8
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+            [
+                normalizeCustomerName(String(name).trim()),
+                phone ? String(phone).trim() : null,
+                email ? String(email).trim() : null,
+                address ?? null,
+                city ?? null,
+                postal_code ?? null,
+                notes ?? null,
+                id,
+            ]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+        const updated = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.CUSTOMER,
+                updated.id,
+                updated.name
+            );
+        }
+
+        res.json(updated);
+    } catch (err: any) {
+        console.error('PUT /customers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+        const resourceName = existing.rows[0].name;
+
+        await queryWithRetry('DELETE FROM customers WHERE id = $1', [id]);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.CUSTOMER,
+                parseInt(id, 10),
+                resourceName
+            );
+        }
+
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /customers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// INVENTORY (rubrica magazzino) - require authentication
+// ============================================
+
+const ALLOWED_INVENTORY_AREAS = new Set(['CUCINA', 'SALA', 'BAR']);
+const ALLOWED_MOVEMENT_REASONS = new Set(['CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO']);
+const LOW_STOCK_THRESHOLD = 5;
+const LOW_STOCK_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'KITCHEN'];
+
+// GET /inventory/locations?area=CUCINA — all locations, optionally filtered.
+app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT id, area, name, sort_order, created_at
+             FROM inventory_locations
+             ${where}
+             ORDER BY area, sort_order, name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/locations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/locations', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, sort_order } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO inventory_locations (area, name, sort_order)
+             VALUES ($1, $2, $3)
+             RETURNING id, area, name, sort_order, created_at`,
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_LOCATION,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Location with this name already exists in the area' });
+        }
+        console.error('POST /inventory/locations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/locations/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, sort_order } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE inventory_locations
+             SET name = $1, sort_order = $2
+             WHERE id = $3
+             RETURNING id, area, name, sort_order, created_at`,
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Location not found' });
+        }
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_LOCATION,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Location with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/locations/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/locations/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_locations WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Location not found' });
+        }
+        // ON DELETE CASCADE on inventory_stock + inventory_movements drops the
+        // related rows. Stock is destroyed — confirm on the client side.
+        await queryWithRetry('DELETE FROM inventory_locations WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_LOCATION,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/locations/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ----- Categories CRUD -----
+app.get('/inventory/categories', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT id, area, name, sort_order, created_at
+             FROM inventory_categories
+             ${where}
+             ORDER BY area, sort_order, name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/categories', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, sort_order } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `INSERT INTO inventory_categories (area, name, sort_order)
+             VALUES ($1, $2, $3)
+             RETURNING id, area, name, sort_order, created_at`,
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_CATEGORY,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Category with this name already exists in the area' });
+        }
+        console.error('POST /inventory/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/categories/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, sort_order } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE inventory_categories
+             SET name = $1, sort_order = $2
+             WHERE id = $3
+             RETURNING id, area, name, sort_order, created_at`,
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_CATEGORY,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Category with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/categories/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/categories/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_categories WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Category not found' });
+        }
+        // ON DELETE SET NULL on inventory_products.category_id keeps products
+        // alive but unassigned.
+        await queryWithRetry('DELETE FROM inventory_categories WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_CATEGORY,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/categories/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/products?area=CUCINA
+app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT p.id, p.area, p.name, p.unit, p.notes, p.category_id, c.name AS category_name, p.created_at
+             FROM inventory_products p
+             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             ${where}
+             ORDER BY p.area, p.name`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/products error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/inventory/products', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { area, name, unit, notes, category_id } = req.body;
+        if (!area || !ALLOWED_INVENTORY_AREAS.has(area)) {
+            return res.status(400).json({ error: 'Invalid area' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        // Validate category_id belongs to the same area, if provided.
+        let validCategoryId: number | null = null;
+        if (category_id != null && category_id !== '') {
+            const catCheck = await queryWithRetry(
+                'SELECT area FROM inventory_categories WHERE id = $1',
+                [category_id]
+            );
+            if (catCheck.rowCount === 0) {
+                return res.status(400).json({ error: 'Invalid category' });
+            }
+            if (catCheck.rows[0].area !== area) {
+                return res.status(400).json({ error: 'Category belongs to a different area' });
+            }
+            validCategoryId = Number(category_id);
+        }
+        const result = await queryWithRetry(
+            `WITH inserted AS (
+               INSERT INTO inventory_products (area, name, unit, notes, category_id)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id, area, name, unit, notes, category_id, created_at
+             )
+             SELECT i.*, c.name AS category_name
+             FROM inserted i
+             LEFT JOIN inventory_categories c ON c.id = i.category_id`,
+            [
+                area,
+                String(name).trim(),
+                unit ? String(unit).trim() : null,
+                notes ? String(notes).trim() : null,
+                validCategoryId,
+            ]
+        );
+        const created = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_PRODUCT,
+                created.id, `${area} · ${created.name}`
+            );
+        }
+        res.status(201).json(created);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'A product with this name already exists in the area' });
+        }
+        console.error('POST /inventory/products error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, unit, notes, category_id } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        // Look up product area to validate category_id stays in the same area.
+        const prod = await queryWithRetry('SELECT area FROM inventory_products WHERE id = $1', [id]);
+        if (prod.rowCount === 0) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        let validCategoryId: number | null = null;
+        if (category_id != null && category_id !== '') {
+            const catCheck = await queryWithRetry(
+                'SELECT area FROM inventory_categories WHERE id = $1',
+                [category_id]
+            );
+            if (catCheck.rowCount === 0) {
+                return res.status(400).json({ error: 'Invalid category' });
+            }
+            if (catCheck.rows[0].area !== prod.rows[0].area) {
+                return res.status(400).json({ error: 'Category belongs to a different area' });
+            }
+            validCategoryId = Number(category_id);
+        }
+        const result = await queryWithRetry(
+            `WITH updated AS (
+               UPDATE inventory_products
+               SET name = $1, unit = $2, notes = $3, category_id = $4
+               WHERE id = $5
+               RETURNING id, area, name, unit, notes, category_id, created_at
+             )
+             SELECT u.*, c.name AS category_name
+             FROM updated u
+             LEFT JOIN inventory_categories c ON c.id = u.category_id`,
+            [
+                String(name).trim(),
+                unit ? String(unit).trim() : null,
+                notes ? String(notes).trim() : null,
+                validCategoryId,
+                id,
+            ]
+        );
+        const updated = result.rows[0];
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.INVENTORY_PRODUCT,
+                updated.id, `${updated.area} · ${updated.name}`
+            );
+        }
+        res.json(updated);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'A product with this name already exists in the area' });
+        }
+        console.error('PUT /inventory/products/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_products WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        await queryWithRetry('DELETE FROM inventory_products WHERE id = $1', [id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.INVENTORY_PRODUCT,
+                parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
+            );
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /inventory/products/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/stock?area=CUCINA — full per-(product, location) breakdown.
+// Always returns numeric values (not strings) so the client can sum on read.
+app.get('/inventory/stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $1';
+        }
+        const result = await queryWithRetry(
+            `SELECT s.product_id, s.location_id, s.quantity::float AS quantity
+             FROM inventory_stock s
+             JOIN inventory_products p ON p.id = s.product_id
+             ${where}`,
+            params
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /inventory/stock error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /inventory/low-stock?area=CUCINA — products whose total quantity across
+// all locations is at or below LOW_STOCK_THRESHOLD. Includes products with no
+// stock rows at all (treated as 0).
+app.get('/inventory/low-stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
+    try {
+        const { area } = req.query as { area?: string };
+        const params: any[] = [LOW_STOCK_THRESHOLD];
+        let where = '';
+        if (area) {
+            if (!ALLOWED_INVENTORY_AREAS.has(area)) {
+                return res.status(400).json({ error: 'Invalid area' });
+            }
+            params.push(area);
+            where = 'WHERE p.area = $2';
+        }
+        const result = await queryWithRetry(
+            `SELECT p.id, p.area, p.name, p.unit, p.category_id,
+                    c.name AS category_name,
+                    COALESCE(SUM(s.quantity), 0)::float AS total_quantity
+             FROM inventory_products p
+             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             LEFT JOIN inventory_stock s     ON s.product_id = p.id
+             ${where}
+             GROUP BY p.id, c.name
+             HAVING COALESCE(SUM(s.quantity), 0) <= $1
+             ORDER BY total_quantity ASC, p.name`,
+            params
+        );
+        res.json({ threshold: LOW_STOCK_THRESHOLD, items: result.rows });
+    } catch (err) {
+        console.error('GET /inventory/low-stock error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /inventory/movements — apply a delta to (product, location).
+// delta > 0 = carico, delta < 0 = scarico. The stock row is upserted in a
+// transaction so concurrent +/- never lose updates.
+app.post('/inventory/movements', authenticate, requirePermission('inventory:full'), async (req, res) => {
+    const { product_id, location_id, delta, reason, notes } = req.body;
+    const productId = Number(product_id);
+    const locationId = Number(location_id);
+    const deltaNum = Number(delta);
+    if (!Number.isFinite(productId) || !Number.isFinite(locationId)) {
+        return res.status(400).json({ error: 'product_id and location_id are required' });
+    }
+    if (!Number.isFinite(deltaNum) || deltaNum === 0) {
+        return res.status(400).json({ error: 'delta must be a non-zero number' });
+    }
+    if (!reason || !ALLOWED_MOVEMENT_REASONS.has(reason)) {
+        return res.status(400).json({ error: 'Invalid reason' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Make sure product and location exist and belong to the same area.
+        const validation = await client.query(
+            `SELECT p.area AS p_area, l.area AS l_area, p.name AS p_name, l.name AS l_name, p.unit AS p_unit
+             FROM inventory_products p, inventory_locations l
+             WHERE p.id = $1 AND l.id = $2`,
+            [productId, locationId]
+        );
+        if (validation.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Product or location not found' });
+        }
+        const v = validation.rows[0];
+        if (v.p_area !== v.l_area) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Product and location must belong to the same area' });
+        }
+
+        // Snapshot the total stock before the update so we can detect a
+        // threshold-crossing once the delta lands.
+        const totalBeforeRes = await client.query(
+            `SELECT COALESCE(SUM(quantity), 0)::float AS total
+             FROM inventory_stock WHERE product_id = $1`,
+            [productId]
+        );
+        const totalBefore: number = totalBeforeRes.rows[0]?.total ?? 0;
+
+        // Upsert the stock row. Negative results are allowed so carico/scarico
+        // never silently fails — the UI surfaces a warning when total < 0.
+        const upsert = await client.query(
+            `INSERT INTO inventory_stock (product_id, location_id, quantity, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (product_id, location_id)
+             DO UPDATE SET quantity = inventory_stock.quantity + EXCLUDED.quantity,
+                           updated_at = CURRENT_TIMESTAMP
+             RETURNING quantity::float AS quantity`,
+            [productId, locationId, deltaNum]
+        );
+
+        const movement = await client.query(
+            `INSERT INTO inventory_movements (product_id, location_id, delta, reason, notes, user_id, user_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, product_id, location_id, delta::float AS delta, reason, notes, user_id, user_name, created_at`,
+            [
+                productId,
+                locationId,
+                deltaNum,
+                reason,
+                notes ? String(notes).trim() : null,
+                req.user?.userId ?? null,
+                req.user?.email ?? null,
+            ]
+        );
+
+        await client.query('COMMIT');
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.INVENTORY_MOVEMENT,
+                movement.rows[0].id, `${v.p_name} @ ${v.l_name}`,
+                { delta: deltaNum, reason }
+            );
+        }
+
+        // Push alert when this movement crosses the low-stock threshold.
+        const totalAfter = totalBefore + deltaNum;
+        if (totalBefore > LOW_STOCK_THRESHOLD && totalAfter <= LOW_STOCK_THRESHOLD) {
+            const unit = v.p_unit ? ` ${v.p_unit}` : '';
+            const qtyText = Number.isInteger(totalAfter) ? String(totalAfter) : totalAfter.toFixed(1);
+            pushSendToRoles(
+                LOW_STOCK_ALERT_ROLES,
+                {
+                    title: 'Scorta bassa',
+                    body: `${v.p_name}: ${qtyText}${unit} rimanenti`,
+                    url: '/?view=INVENTARIO',
+                    tag: `low-stock-${productId}`,
+                }
+            ).catch(err => console.error('Push (low stock) failed:', err));
+        }
+
+        res.status(201).json({
+            movement: movement.rows[0],
+            stock: { product_id: productId, location_id: locationId, quantity: upsert.rows[0].quantity },
+        });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('POST /inventory/movements error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
+    }
+});
+
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            "SELECT id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place FROM banquet_menus ORDER BY event_date NULLS LAST, name"
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    b.table_ids,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b
+             ORDER BY b.event_date NULLS LAST, b.name`
         );
         res.json(result.rows);
     } catch (err) {
@@ -1221,7 +2277,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1230,9 +2286,21 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
+        const tableIdsArr: number[] = Array.isArray(table_ids)
+            ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+            : [];
+        if (tableIdsArr.length > 0 && shift) {
+            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr);
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null]
         );
         const newMenu = result.rows[0];
 
@@ -1268,7 +2336,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -1276,9 +2344,21 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
             : (Array.isArray(dish_ids) ? dish_ids : []);
         const coursesJson = Array.isArray(courses) ? JSON.stringify(courses) : null;
+        const tableIdsArr: number[] = Array.isArray(table_ids)
+            ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+            : [];
+        if (tableIdsArr.length > 0 && shift) {
+            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr, { excludeBanquetId: Number(id) });
+            if (conflicts.length > 0) {
+                return res.status(409).json({
+                    error: buildConflictMessage(conflicts),
+                    conflicts,
+                });
+            }
+        }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12 WHERE id = $13 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12, customer_id = $13, table_ids = $14 WHERE id = $15 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, id]
         );
         const updatedMenu = result.rows[0];
 
@@ -1345,6 +2425,141 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         res.status(204).send();
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// BANQUET PAYMENTS - require authentication; mutations require banquet:manage_payments
+// ============================================
+app.get('/banquet-menus/:id/payments', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry(
+            `SELECT p.id, p.banquet_id, p.amount, TO_CHAR(p.payment_date, 'YYYY-MM-DD') AS payment_date,
+                    p.payment_type, p.payment_method, p.notes, p.created_by_user_id, p.created_at,
+                    u.full_name AS created_by_user_name
+             FROM banquet_payments p
+             LEFT JOIN users u ON p.created_by_user_id = u.id
+             WHERE p.banquet_id = $1
+             ORDER BY p.payment_date DESC, p.id DESC`,
+            [id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('GET /banquet-menus/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { amount, payment_date, payment_type, payment_method, notes } = req.body;
+        if (amount == null || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ error: 'amount must be a positive number' });
+        }
+        if (!payment_date) {
+            return res.status(400).json({ error: 'payment_date is required' });
+        }
+        const validTypes = ['DEPOSIT', 'BALANCE', 'OTHER'];
+        const validMethods = ['CASH', 'CARD', 'TRANSFER', 'OTHER'];
+        if (!validTypes.includes(payment_type)) {
+            return res.status(400).json({ error: 'invalid payment_type' });
+        }
+        if (!validMethods.includes(payment_method)) {
+            return res.status(400).json({ error: 'invalid payment_method' });
+        }
+
+        const banquetCheck = await queryWithRetry('SELECT id, name FROM banquet_menus WHERE id = $1', [id]);
+        if (banquetCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Banquet not found' });
+        }
+        const banquetName = banquetCheck.rows[0].name;
+
+        const result = await queryWithRetry(
+            `INSERT INTO banquet_payments (banquet_id, amount, payment_date, payment_type, payment_method, notes, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, banquet_id, amount, TO_CHAR(payment_date, 'YYYY-MM-DD') AS payment_date,
+                       payment_type, payment_method, notes, created_by_user_id, created_at`,
+            [id, amount, payment_date, payment_type, payment_method, notes ?? null, req.user?.userId ?? null]
+        );
+        const newPayment = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                banquetName,
+                { sub_action: 'payment_added', payment_id: newPayment.id, amount: Number(amount), payment_type, payment_method, payment_date }
+            );
+        }
+
+        // Re-fetch banquet with new total_paid and broadcast so all clients refresh
+        const refreshed = await queryWithRetry(
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b WHERE b.id = $1`,
+            [id]
+        );
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
+
+        res.status(201).json(newPayment);
+    } catch (err) {
+        console.error('POST /banquet-menus/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermission('banquet:manage_payments'), async (req, res) => {
+    try {
+        const { id, paymentId } = req.params;
+        const existing = await queryWithRetry(
+            `SELECT p.amount, p.payment_type, b.name AS banquet_name
+             FROM banquet_payments p
+             JOIN banquet_menus b ON p.banquet_id = b.id
+             WHERE p.id = $1 AND p.banquet_id = $2`,
+            [paymentId, id]
+        );
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: 'Payment not found' });
+        }
+        const { amount, payment_type, banquet_name } = existing.rows[0];
+
+        await queryWithRetry('DELETE FROM banquet_payments WHERE id = $1 AND banquet_id = $2', [paymentId, id]);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.BANQUET_MENU,
+                parseInt(id, 10),
+                banquet_name,
+                { sub_action: 'payment_deleted', payment_id: parseInt(paymentId, 10), amount: Number(amount), payment_type }
+            );
+        }
+
+        const refreshed = await queryWithRetry(
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b WHERE b.id = $1`,
+            [id]
+        );
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /banquet-menus/:id/payments/:paymentId error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -1455,6 +2670,23 @@ app.post('/todos', authenticate, async (req, res) => {
             banquetReminderHours
         } = req.body;
 
+        const actorRole = req.user?.role;
+        if (actorRole) {
+            if (assignedToTeam && !canAssignToRole(actorRole, assignedToTeam)) {
+                return res.status(403).json({ error: 'Non puoi assegnare task a questo team' });
+            }
+            if (assignedToUserId) {
+                const target = await queryWithRetry(
+                    'SELECT role FROM users WHERE id = $1',
+                    [assignedToUserId]
+                );
+                const targetRole = target.rows[0]?.role as UserRole | undefined;
+                if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
+                    return res.status(403).json({ error: 'Non puoi assegnare task a questo utente' });
+                }
+            }
+        }
+
         const result = await queryWithRetry(`
             INSERT INTO todos (
                 title, description, priority, category, due_date,
@@ -1508,6 +2740,15 @@ app.post('/todos', authenticate, async (req, res) => {
             console.error('📝 socketService is undefined, cannot broadcast!');
         }
 
+        if (newTodo.assignedToUserId && newTodo.assignedToUserId !== req.user?.userId) {
+            pushSendToUser(newTodo.assignedToUserId, {
+                title: 'Nuovo todo assegnato',
+                body: newTodo.title,
+                url: '/?view=DASHBOARD',
+                tag: `todo-${newTodo.id}`,
+            }).catch(err => console.error('Push (todo assigned) failed:', err));
+        }
+
         res.status(201).json(newTodo);
     } catch (err) {
         console.error(err);
@@ -1529,6 +2770,23 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             assignedToUserName,
             assignedToTeam
         } = req.body;
+
+        const actorRole = req.user?.role;
+        if (actorRole) {
+            if (req.body.hasOwnProperty('assignedToTeam') && assignedToTeam && !canAssignToRole(actorRole, assignedToTeam)) {
+                return res.status(403).json({ error: 'Non puoi assegnare task a questo team' });
+            }
+            if (req.body.hasOwnProperty('assignedToUserId') && assignedToUserId) {
+                const target = await queryWithRetry(
+                    'SELECT role FROM users WHERE id = $1',
+                    [assignedToUserId]
+                );
+                const targetRole = target.rows[0]?.role as UserRole | undefined;
+                if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
+                    return res.status(403).json({ error: 'Non puoi assegnare task a questo utente' });
+                }
+            }
+        }
 
         // Build dynamic update query
         const fields: string[] = [];
@@ -1575,6 +2833,15 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'No fields to update' });
         }
 
+        let previousAssignee: number | null = null;
+        if (req.body.hasOwnProperty('assignedToUserId')) {
+            const prev = await queryWithRetry(
+                'SELECT assigned_to_user_id FROM todos WHERE id = $1',
+                [id]
+            );
+            previousAssignee = prev.rows[0]?.assigned_to_user_id ?? null;
+        }
+
         values.push(id);
         const query = `
             UPDATE todos
@@ -1612,6 +2879,21 @@ app.put('/todos/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+
+        const newAssignee = updatedTodo.assignedToUserId ?? null;
+        if (
+            req.body.hasOwnProperty('assignedToUserId')
+            && newAssignee
+            && newAssignee !== previousAssignee
+            && newAssignee !== req.user?.userId
+        ) {
+            pushSendToUser(newAssignee, {
+                title: 'Todo assegnato a te',
+                body: updatedTodo.title,
+                url: '/?view=DASHBOARD',
+                tag: `todo-${updatedTodo.id}`,
+            }).catch(err => console.error('Push (todo reassigned) failed:', err));
+        }
 
         res.json(updatedTodo);
     } catch (err) {
@@ -1698,12 +2980,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 app.get('/shopping', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ error: 'Date parameter is required' });
-        }
-
-        const result = await queryWithRetry(`
+        let query = `
             SELECT
                 id,
                 name,
@@ -1714,7 +2991,15 @@ app.get('/shopping', authenticate, async (req, res) => {
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
             FROM shopping_items
-            WHERE date = $1
+        `;
+        const params: string[] = [];
+
+        if (date) {
+            query += ' WHERE date = $1';
+            params.push(date as string);
+        }
+
+        query += `
             ORDER BY
                 CASE category
                     WHEN 'CUCINA' THEN 1
@@ -1722,8 +3007,9 @@ app.get('/shopping', authenticate, async (req, res) => {
                     WHEN 'ALTRO' THEN 3
                 END,
                 created_at ASC
-        `, [date]);
+        `;
 
+        const result = await queryWithRetry(query, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -1779,6 +3065,53 @@ app.post('/shopping', authenticate, async (req, res) => {
     }
 });
 
+app.put('/shopping/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, category } = req.body;
+
+        if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+            return res.status(400).json({ error: 'name must be a non-empty string' });
+        }
+        if (category !== undefined && !['CUCINA', 'BAR', 'ALTRO'].includes(category)) {
+            return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
+        }
+        if (name === undefined && category === undefined) {
+            return res.status(400).json({ error: 'At least one of name or category is required' });
+        }
+
+        const result = await queryWithRetry(`
+            UPDATE shopping_items
+            SET name = COALESCE($1, name),
+                category = COALESCE($2, category)
+            WHERE id = $3
+            RETURNING
+                id,
+                name,
+                category,
+                checked,
+                TO_CHAR(date, 'YYYY-MM-DD') as date,
+                created_at as "createdAt",
+                created_by_user_id as "createdByUserId",
+                created_by_user_name as "createdByUserName"
+        `, [name?.trim() ?? null, category ?? null, id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        const updatedItem = result.rows[0];
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:updated', updatedItem, socketId);
+
+        res.json(updatedItem);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
@@ -1815,6 +3148,28 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     }
 });
 
+// NOTE: keep this route BEFORE the /shopping/:id route — Express matches in
+// declaration order, otherwise "clear-checked" is captured as :id.
+app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+
+        if (date) {
+            await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+        } else {
+            await queryWithRetry('DELETE FROM shopping_items WHERE checked = true');
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('shopping:cleared', { date: date || null }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.delete('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
@@ -1828,27 +3183,6 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('shopping:deleted', { id, date: result.rows[0].date }, socketId);
-
-        res.status(204).send();
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
-    try {
-        const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ error: 'Date parameter is required' });
-        }
-
-        await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
-
-        // Broadcast to all connected clients
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:cleared', { date }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -2179,6 +3513,7 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2194,17 +3529,21 @@ app.get('/staff/time-off', authenticate, async (req, res) => {
 // Create time off
 app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { staffId, startDate, endDate, type, notes, approved } = req.body;
+        const { staffId, startDate, endDate, type, shift, notes, approved } = req.body;
 
         if (!staffId || !startDate || !endDate || !type) {
             return res.status(400).json({ error: 'staffId, startDate, endDate, and type are required' });
         }
 
+        if (shift && shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
+        }
+
         const result = await queryWithRetry(
-            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, notes, approved)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, shift, notes, approved)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING *`,
-            [staffId, startDate, endDate, type, notes || null, approved !== false]
+            [staffId, startDate, endDate, type, shift || null, notes || null, approved !== false]
         );
 
         const row = result.rows[0];
@@ -2214,6 +3553,7 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2234,18 +3574,27 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
 app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { startDate, endDate, type, notes, approved } = req.body;
+        const { startDate, endDate, type, shift, notes, approved } = req.body;
+
+        if (shift !== undefined && shift !== null && shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
+        }
+
+        // shift is set unconditionally when the key is present in the body so the
+        // client can clear it (full day) by sending null; COALESCE wouldn't allow that.
+        const shiftProvided = 'shift' in req.body;
 
         const result = await queryWithRetry(
             `UPDATE staff_time_off SET
                 start_date = COALESCE($1, start_date),
                 end_date = COALESCE($2, end_date),
                 type = COALESCE($3, type),
-                notes = COALESCE($4, notes),
-                approved = COALESCE($5, approved)
-             WHERE id = $6
+                shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
+                notes = COALESCE($6, notes),
+                approved = COALESCE($7, approved)
+             WHERE id = $8
              RETURNING *`,
-            [startDate, endDate, type, notes, approved, id]
+            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id]
         );
 
         if (result.rows.length === 0) {
@@ -2259,6 +3608,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
             startDate: row.start_date,
             endDate: row.end_date,
             type: row.type,
+            shift: row.shift,
             notes: row.notes,
             approved: row.approved,
             createdAt: row.created_at
@@ -2312,10 +3662,21 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
             queryWithRetry('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
             queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
-            queryWithRetry('SELECT staff_id FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
+            queryWithRetry('SELECT staff_id, shift FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
         ]);
 
-        const onTimeOff = new Set(timeOffResult.rows.map(r => r.staff_id));
+        // A NULL shift in time_off means the whole day is off; otherwise only the
+        // specific shift is off, leaving the other one available as usual.
+        const onTimeOffFullDay = new Set<string>();
+        const onTimeOffShift = new Set<string>(); // key: `${staffId}-${shift}`
+        for (const r of timeOffResult.rows) {
+            if (r.shift) {
+                onTimeOffShift.add(`${r.staff_id}-${r.shift}`);
+            } else {
+                onTimeOffFullDay.add(r.staff_id);
+            }
+        }
+
         const explicitShifts = new Map<string, boolean>();
         for (const row of shiftsResult.rows) {
             explicitShifts.set(`${row.staff_id}-${row.shift}`, row.present);
@@ -2330,7 +3691,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const dayOfWeek = new Date(`${dateStr}T00:00:00`).getDay();
 
         for (const row of staffResult.rows) {
-            if (onTimeOff.has(row.id)) continue;
+            if (onTimeOffFullDay.has(row.id)) continue;
             // Weekly rest day overrides implicit presence (explicit shifts can still override below)
             const isWeeklyRest = row.weekly_rest_day !== null && row.weekly_rest_day === dayOfWeek;
 
@@ -2355,6 +3716,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
 
             for (const shift of ['LUNCH', 'DINNER'] as const) {
+                if (onTimeOffShift.has(`${row.id}-${shift}`)) continue;
                 const explicit = explicitShifts.get(`${row.id}-${shift}`);
                 const present = explicit !== undefined ? explicit : inHirePeriod;
                 if (present) {
@@ -2494,6 +3856,104 @@ app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (r
         res.status(204).send();
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PUSH NOTIFICATIONS (Web Push / VAPID)
+// ============================================
+
+app.get('/push/vapid-public-key', (_req, res) => {
+    if (!isPushConfigured()) {
+        return res.status(503).json({ error: 'Push notifications not configured' });
+    }
+    res.json({ publicKey: getVapidPublicKey() });
+});
+
+app.post('/push/subscribe', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const { endpoint, keys, userAgent } = req.body || {};
+        if (!endpoint || !keys?.p256dh || !keys?.auth) {
+            return res.status(400).json({ error: 'Invalid subscription payload' });
+        }
+
+        await queryWithRetry(
+            `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (endpoint) DO UPDATE
+             SET user_id = EXCLUDED.user_id,
+                 p256dh = EXCLUDED.p256dh,
+                 auth = EXCLUDED.auth,
+                 user_agent = EXCLUDED.user_agent`,
+            [userId, endpoint, keys.p256dh, keys.auth, userAgent || null]
+        );
+
+        res.status(201).json({ ok: true });
+    } catch (err) {
+        console.error('POST /push/subscribe error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/push/unsubscribe', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const { endpoint } = req.body || {};
+        if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+
+        await queryWithRetry(
+            'DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2',
+            [endpoint, userId]
+        );
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /push/unsubscribe error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/push/debug', authenticate, authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT ps.id, ps.user_id, u.email, u.full_name, u.role,
+                    ps.user_agent, ps.created_at,
+                    LEFT(ps.endpoint, 60) || '...' AS endpoint_preview
+             FROM push_subscriptions ps
+             JOIN users u ON u.id = ps.user_id
+             ORDER BY u.full_name, ps.created_at DESC`
+        );
+        res.json({
+            count: result.rows.length,
+            subscriptions: result.rows,
+        });
+    } catch (err) {
+        console.error('GET /push/debug error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/push/test', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const result = await pushSendToUser(userId, {
+            title: 'Notifica di test',
+            body: 'Le notifiche push funzionano correttamente.',
+            url: '/',
+            tag: 'test-notification'
+        });
+
+        res.json({ ok: true, ...result });
+    } catch (err) {
+        console.error('POST /push/test error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -2700,6 +4160,12 @@ const startServer = async () => {
             createSchema()
                 .then(async () => {
                     console.log('✅ Database schema initialized');
+                    try {
+                        await RolePermissionService.warmUp();
+                        console.log('✅ Role permission cache warmed up');
+                    } catch (permErr) {
+                        console.warn('Permission cache warm-up skipped:', permErr);
+                    }
                     try {
                         const today = new Date().toISOString().substring(0, 10);
                         const upcoming = await queryWithRetry(

@@ -58,6 +58,7 @@ export const COMMON_ALLERGENS = [
 export interface BanquetCourse {
   name: string;          // e.g. "1ª Uscita", "Antipasti"
   dish_ids: number[];
+  notes?: string;
 }
 
 export interface BanquetMenu {
@@ -74,6 +75,9 @@ export interface BanquetMenu {
   notes_courses?: string;
   notes_service?: string;
   notes_mise_en_place?: string;
+  customer_id?: number | null;
+  total_paid?: number;
+  table_ids?: number[];
 }
 
 export enum PaymentStatus {
@@ -81,6 +85,32 @@ export enum PaymentStatus {
   PAID_DEPOSIT = 'PAID_DEPOSIT',
   PAID_FULL = 'PAID_FULL',
   REFUNDED = 'REFUNDED'
+}
+
+export enum BanquetPaymentType {
+  DEPOSIT = 'DEPOSIT',
+  BALANCE = 'BALANCE',
+  OTHER = 'OTHER'
+}
+
+export enum BanquetPaymentMethod {
+  CASH = 'CASH',
+  CARD = 'CARD',
+  TRANSFER = 'TRANSFER',
+  OTHER = 'OTHER'
+}
+
+export interface BanquetPayment {
+  id: number;
+  banquet_id: number;
+  amount: number;
+  payment_date: string; // YYYY-MM-DD
+  payment_type: BanquetPaymentType;
+  payment_method: BanquetPaymentMethod;
+  notes?: string | null;
+  created_by_user_id?: number | null;
+  created_by_user_name?: string;
+  created_at?: string;
 }
 
 export enum Shift {
@@ -115,6 +145,11 @@ export enum ReservationSource {
   VOICE = 'VOICE'           // Created from ElevenLabs voice agent
 }
 
+export enum ReservationStatus {
+  CONFIRMED = 'CONFIRMED',  // Default — booking is on
+  NO_SHOW = 'NO_SHOW'       // Customer did not show up
+}
+
 export interface Reservation {
   id: number;
   customer_name: string;
@@ -134,6 +169,9 @@ export interface Reservation {
   arrival_status?: ArrivalStatus;
   source?: ReservationSource;
   requires_review?: boolean;
+  reservation_status?: ReservationStatus;
+  created_by_user_id?: number | null;
+  created_by_user_name?: string | null;
 }
 
 export interface Notification {
@@ -161,7 +199,24 @@ export enum ViewState {
   MENU = 'MENU',
   RESERVATIONS = 'RESERVATIONS',
   STAFF = 'STAFF',
+  CLIENTI = 'CLIENTI',
+  INVENTARIO = 'INVENTARIO',
+  USERS = 'USERS',
   SETTINGS = 'SETTINGS'
+}
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  no_show_count?: number;
 }
 
 // ============================================
@@ -170,6 +225,7 @@ export enum ViewState {
 
 export enum UserRole {
   OWNER = 'OWNER',
+  GENERAL_MANAGER = 'GENERAL_MANAGER',
   MANAGER = 'MANAGER',
   WAITER = 'WAITER',
   KITCHEN = 'KITCHEN'
@@ -184,6 +240,7 @@ export interface User {
   created_at?: string;
   updated_at?: string;
   last_login?: string;
+  preferred_landing_view?: string | null;
 }
 
 export interface AuthUser extends User {
@@ -226,7 +283,8 @@ export enum ResourceType {
   AUTH = 'AUTH',
   STAFF = 'STAFF',
   STAFF_SHIFT = 'STAFF_SHIFT',
-  STAFF_TIME_OFF = 'STAFF_TIME_OFF'
+  STAFF_TIME_OFF = 'STAFF_TIME_OFF',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export interface ActivityLog {
@@ -352,12 +410,83 @@ export interface StaffShift {
   createdAt?: string;
 }
 
+// ============================================
+// INVENTORY TYPES
+// ============================================
+
+export enum InventoryArea {
+  CUCINA = 'CUCINA',
+  SALA = 'SALA',
+  BAR = 'BAR'
+}
+
+// A storage location within an area — e.g. "Cella 1" / "Cella 2" for CUCINA,
+// "Bancone" / "Magazzino" for BAR. Areas are fixed; locations are user-managed.
+export interface InventoryLocation {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+}
+
+// A category groups products within an area (e.g. "Verdure", "Pesce" for CUCINA).
+// Categories are user-managed and optional.
+export interface InventoryCategory {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+}
+
+// A product belongs to one area (CUCINA / SALA / BAR) but its quantity is
+// distributed across that area's locations.
+export interface InventoryProduct {
+  id: number;
+  area: InventoryArea;
+  name: string;
+  unit?: string | null;
+  notes?: string | null;
+  category_id?: number | null;
+  category_name?: string | null;
+  created_at?: string;
+}
+
+// Per-(product, location) quantity. Returned aggregated by GET /inventory/stock.
+export interface InventoryStockRow {
+  product_id: number;
+  location_id: number;
+  quantity: number;
+}
+
+// One audit entry per carico/scarico operation. Sum of deltas == stock.
+export enum InventoryMovementReason {
+  CARICO = 'CARICO',          // stock in
+  SCARICO = 'SCARICO',        // stock out (consumption)
+  RETTIFICA = 'RETTIFICA',    // manual correction (set to specific value)
+  TRASFERIMENTO = 'TRASFERIMENTO' // moved between cells
+}
+
+export interface InventoryMovement {
+  id: number;
+  product_id: number;
+  location_id: number;
+  delta: number;
+  reason: InventoryMovementReason;
+  notes?: string | null;
+  user_id?: number | null;
+  user_name?: string | null;
+  created_at: string;
+}
+
 export interface StaffTimeOff {
   id: string;
   staffId: string;
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   type: TimeOffType;
+  shift?: Shift | null; // null/undefined = full day; LUNCH or DINNER = single shift
   notes?: string;
   approved: boolean;
   createdAt?: string;
