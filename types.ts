@@ -139,6 +139,12 @@ export enum ArrivalStatus {
   DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
 }
 
+export enum ReservationSource {
+  MANUAL = 'MANUAL',        // Created via CRM UI
+  WHATSAPP = 'WHATSAPP',    // Created from Vonage WhatsApp inbound
+  VOICE = 'VOICE'           // Created from ElevenLabs voice agent
+}
+
 export enum ReservationStatus {
   CONFIRMED = 'CONFIRMED',  // Default — booking is on
   NO_SHOW = 'NO_SHOW'       // Customer did not show up
@@ -161,6 +167,8 @@ export interface Reservation {
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
+  source?: ReservationSource;
+  requires_review?: boolean;
   reservation_status?: ReservationStatus;
   created_by_user_id?: number | null;
   created_by_user_name?: string | null;

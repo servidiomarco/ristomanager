@@ -13,6 +13,7 @@ import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
+import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -1730,6 +1731,9 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* ElevenLabs voice-agent widget — dev/test only, owner role */}
+        {user?.role === UserRole.OWNER && <VoiceAgentWidget />}
 
         {/* Global Toasts */}
         <div

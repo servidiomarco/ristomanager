@@ -18,6 +18,14 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
+import {
+    verifyElevenLabsSignature,
+    findAvailability,
+    createVoiceReservation,
+    recordVoiceCall,
+    formatItalianConfirmation,
+    normalizeItalianPhone,
+} from './services/elevenlabsService.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -37,7 +45,13 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // 2 MB body limit accommodates inlined dish photos as base64 data URLs
 // (resized client-side to ~200KB). Default 100KB would reject them.
-app.use(express.json({ limit: '2mb' }));
+// `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)
+// can validate against the exact bytes sent by the caller — JSON.stringify
+// would reorder keys and break the signature.
+app.use(express.json({
+    limit: '2mb',
+    verify: (req: any, _res, buf) => { req.rawBody = buf; }
+}));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -114,6 +128,245 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
 app.post('/webhook/vonage-status', (req, res) => {
     console.log('[Vonage] Message status:', JSON.stringify(req.body, null, 2));
     res.status(200).send();
+});
+
+// ============================================
+// ELEVENLABS VOICE-AGENT WEBHOOKS
+// ============================================
+// Tools the Restaurant Host agent can call mid-conversation. Each request
+// is signed with HMAC-SHA256 (Stripe-style header); the secret lives in
+// ELEVENLABS_WEBHOOK_SECRET. If the secret is unset we skip verification
+// and log a warning — useful during early dev, never run that way in prod.
+
+const ELEVENLABS_WEBHOOK_SECRET = process.env.ELEVENLABS_WEBHOOK_SECRET || '';
+if (!ELEVENLABS_WEBHOOK_SECRET) {
+    console.warn('[ElevenLabs] ELEVENLABS_WEBHOOK_SECRET is not set — webhook HMAC verification is DISABLED. Do not deploy like this.');
+}
+
+function authorizeElevenLabs(req: express.Request, res: express.Response): boolean {
+    if (!ELEVENLABS_WEBHOOK_SECRET) return true;
+    if (verifyElevenLabsSignature(req as any, ELEVENLABS_WEBHOOK_SECRET)) return true;
+    console.warn('[ElevenLabs] HMAC verification failed for', req.path);
+    res.status(401).json({ error: 'invalid_signature' });
+    return false;
+}
+
+// Tool 1 — check_availability
+// Body shape (per ElevenLabs tools spec): { parameters: { date, shift, guests }, conversation_id?, agent_id? }
+// We also accept flat top-level fields as a fallback.
+app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const rawDate = String(p.date ?? '').trim();
+    const rawShift = String(p.shift ?? '').trim().toUpperCase();
+    const guests = Number(p.guests);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    }
+    if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
+        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+    }
+    if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
+        return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
+    }
+
+    try {
+        const result = await findAvailability({
+            date: rawDate,
+            shift: rawShift as Shift,
+            guests: Math.trunc(guests)
+        });
+        console.log('[ElevenLabs] check-availability', { date: rawDate, shift: rawShift, guests, result });
+        res.json(result);
+    } catch (err) {
+        console.error('[ElevenLabs] check-availability error', err);
+        res.status(500).json({
+            available: false,
+            free_tables_count: 0,
+            message: 'Si è verificato un errore tecnico, posso richiamarla?'
+        });
+    }
+});
+
+// Tool 2 — create_reservation
+// Body shape: { parameters: { customer_name, phone, date (YYYY-MM-DD), time (HH:MM),
+//                              shift (LUNCH|DINNER), guests, notes? }, conversation_id?, agent_id? }
+// Writes a reservation with source=VOICE and requires_review=true so staff can sanity-check
+// before the booking is treated as confirmed. Returns the Italian confirmation phrase the
+// agent reads aloud at the end of the call.
+app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
+
+    const customerName = String(p.customer_name ?? '').trim();
+    const phoneRaw = String(p.phone ?? '').trim();
+    const rawDate = String(p.date ?? '').trim();
+    const rawTime = String(p.time ?? '').trim();
+    const rawShift = String(p.shift ?? '').trim().toUpperCase();
+    const guests = Number(p.guests);
+    const notes = typeof p.notes === 'string' ? p.notes.trim() : undefined;
+
+    if (!customerName) {
+        return res.status(400).json({ error: 'invalid_customer_name', message: 'customer_name is required' });
+    }
+    if (!phoneRaw) {
+        return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    }
+    if (!/^\d{1,2}:\d{2}$/.test(rawTime)) {
+        return res.status(400).json({ error: 'invalid_time', message: 'time must be HH:MM' });
+    }
+    if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
+        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+    }
+    if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
+        return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
+    }
+
+    // Build an ISO datetime; the DB column is TIMESTAMPTZ so we let Postgres
+    // interpret as the server's configured timezone (Europe/Rome in prod).
+    const [hh, mm] = rawTime.split(':');
+    const reservationTime = `${rawDate}T${hh.padStart(2, '0')}:${mm.padStart(2, '0')}:00`;
+
+    try {
+        const created = await createVoiceReservation({
+            customer_name: customerName,
+            phone: phoneRaw,
+            reservation_time: reservationTime,
+            shift: rawShift as Shift,
+            guests: Math.trunc(guests),
+            notes,
+            conversation_id: conversationId,
+        });
+
+        // Link the (eventual) call audit row to this reservation. Fire-and-forget
+        // so a missing voice_calls table (pre-migration) doesn't break booking.
+        if (conversationId) {
+            recordVoiceCall({
+                conversation_id: conversationId,
+                phone: normalizeItalianPhone(phoneRaw),
+                reservation_id: created.id,
+            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (create) failed:', err?.message || err));
+        }
+
+        // Activity log: no authenticated user, attribute to the voice agent.
+        LogService.logActivity(
+            null,
+            'voice-agent@elevenlabs',
+            'Agent vocale',
+            ActivityAction.CREATE,
+            ResourceType.RESERVATION,
+            created.id,
+            created.customer_name,
+            {
+                source: 'VOICE',
+                conversation_id: conversationId,
+                requires_review: created.requires_review,
+                guests: created.guests,
+                reservation_time: created.reservation_time,
+                shift: created.shift,
+            }
+        );
+
+        // Broadcast to live dashboards so the new booking pops up without refresh.
+        if (socketService) {
+            try {
+                socketService.broadcastReservationCreated(created as any);
+            } catch (err) {
+                console.warn('[ElevenLabs] broadcastReservationCreated failed:', err);
+            }
+        }
+
+        const confirmationPhrase = formatItalianConfirmation(created);
+        console.log('[ElevenLabs] create-reservation OK', {
+            id: created.id, conversation_id: conversationId, customer: created.customer_name,
+        });
+        res.json({
+            success: true,
+            reservation_id: created.id,
+            requires_review: created.requires_review,
+            confirmation_phrase: confirmationPhrase,
+        });
+    } catch (err: any) {
+        console.error('[ElevenLabs] create-reservation error', err);
+        res.status(500).json({
+            success: false,
+            message: 'Si è verificato un errore tecnico nel salvare la prenotazione, posso richiamarla?'
+        });
+    }
+});
+
+// Post-call webhook — fires when the conversation ends.
+// Body shape (per ElevenLabs): { conversation_id, transcript?, summary?, status?,
+//                                duration_seconds?, metadata?: { phone?, reservation_id? } }
+// Persists transcript+summary for audit, and if the call produced a reservation,
+// sends a WhatsApp recap via the existing Vonage path.
+app.post('/webhook/elevenlabs/post-call', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const body = req.body || {};
+    const conversationId: string | undefined = body.conversation_id;
+    if (!conversationId) {
+        return res.status(400).json({ error: 'invalid_conversation_id', message: 'conversation_id is required' });
+    }
+
+    const transcript: string | undefined = typeof body.transcript === 'string' ? body.transcript : undefined;
+    const summary: string | undefined = typeof body.summary === 'string' ? body.summary : undefined;
+    const duration = Number(body.duration_seconds);
+    const phoneRaw: string | undefined = body.metadata?.phone || body.phone;
+
+    // Acknowledge fast — ElevenLabs retries on timeout. Side-effects below are fire-and-forget.
+    res.status(200).json({ ok: true });
+
+    try {
+        await recordVoiceCall({
+            conversation_id: conversationId,
+            phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
+            duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
+            transcript,
+            summary,
+        });
+    } catch (err: any) {
+        console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
+    }
+
+    // Look up any reservation linked to this conversation (set during create_reservation).
+    // If found and we have a phone, send the WhatsApp recap.
+    try {
+        const linked = await queryWithRetry(
+            `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests
+             FROM voice_calls vc
+             JOIN reservations r ON r.id = vc.reservation_id
+             WHERE vc.conversation_id = $1`,
+            [conversationId]
+        );
+        const row = linked.rows[0];
+        if (row && row.phone) {
+            const dt = new Date(row.reservation_time);
+            const day = String(dt.getDate()).padStart(2, '0');
+            const month = String(dt.getMonth() + 1).padStart(2, '0');
+            const year = dt.getFullYear();
+            const hours = String(dt.getHours()).padStart(2, '0');
+            const minutes = String(dt.getMinutes()).padStart(2, '0');
+            const persone = row.guests === 1 ? 'persona' : 'persone';
+            const message = `Ciao ${row.customer_name.split(' ')[0]}, la tua prenotazione per ${row.guests} ${persone} è registrata per il ${day}/${month}/${year} alle ${hours}:${minutes}. A presto!`;
+            sendVonageWhatsApp(row.phone, message).catch(err =>
+                console.warn('[ElevenLabs] post-call WhatsApp send failed:', err?.message || err)
+            );
+        }
+    } catch (err: any) {
+        console.warn('[ElevenLabs] post-call recap lookup failed:', err?.message || err);
+    }
 });
 
 // ============================================
