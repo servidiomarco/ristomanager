@@ -7,6 +7,7 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 
 import express from 'express';
 import { createServer } from 'http';
+import crypto from 'crypto';
 import cors from 'cors';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
@@ -145,21 +146,42 @@ if (!ELEVENLABS_WEBHOOK_SECRET) {
     console.warn('[ElevenLabs] ELEVENLABS_WEBHOOK_SECRET is not set — webhook HMAC verification is DISABLED. Do not deploy like this.');
 }
 
+// Two valid auth shapes:
+//   - HMAC signature (ElevenLabs-Signature header) — used for the post-call webhook
+//   - Shared-secret header (X-Webhook-Secret) — used for tool calls, since
+//     ElevenLabs tool runner doesn't sign requests but supports custom headers
+// Either is sufficient. Both compare against the same ELEVENLABS_WEBHOOK_SECRET.
+function timingSafeStringEqual(a: string, b: string): boolean {
+    const aBuf = Buffer.from(a);
+    const bBuf = Buffer.from(b);
+    if (aBuf.length !== bBuf.length) return false;
+    return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function authorizeElevenLabs(req: express.Request, res: express.Response): boolean {
     if (!ELEVENLABS_WEBHOOK_SECRET) return true;
+
+    // Path A — shared-secret header sent by ElevenLabs tool runner.
+    const sharedSecret = req.header('x-webhook-secret');
+    if (sharedSecret && timingSafeStringEqual(sharedSecret, ELEVENLABS_WEBHOOK_SECRET)) {
+        return true;
+    }
+
+    // Path B — HMAC signature (post-call webhook + workspace-signed webhooks).
     if (verifyElevenLabsSignature(req as any, ELEVENLABS_WEBHOOK_SECRET)) return true;
-    // Verbose failure log — lets us tell apart "missing header" from "wrong digest"
-    // from "outside replay window". Without this every failure looks identical.
+
+    // Verbose failure log: tells us which path was attempted and which header was present.
     const sigHeader = req.header('elevenlabs-signature') || '<missing>';
     const sigMasked = sigHeader.length > 24 ? sigHeader.slice(0, 24) + '…' : sigHeader;
     const bodyLen = (req as any).rawBody?.length ?? -1;
-    console.warn('[ElevenLabs] HMAC verification failed', {
+    console.warn('[ElevenLabs] auth failed', {
         path: req.path,
-        signature_header: sigMasked,
+        x_webhook_secret_present: !!sharedSecret,
+        x_webhook_secret_match: sharedSecret ? false : null,
+        elevenlabs_signature_header: sigMasked,
         body_bytes: bodyLen,
-        secret_set: !!ELEVENLABS_WEBHOOK_SECRET,
     });
-    res.status(401).json({ error: 'invalid_signature' });
+    res.status(401).json({ error: 'invalid_credentials' });
     return false;
 }
 
