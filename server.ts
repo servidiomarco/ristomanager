@@ -148,7 +148,17 @@ if (!ELEVENLABS_WEBHOOK_SECRET) {
 function authorizeElevenLabs(req: express.Request, res: express.Response): boolean {
     if (!ELEVENLABS_WEBHOOK_SECRET) return true;
     if (verifyElevenLabsSignature(req as any, ELEVENLABS_WEBHOOK_SECRET)) return true;
-    console.warn('[ElevenLabs] HMAC verification failed for', req.path);
+    // Verbose failure log — lets us tell apart "missing header" from "wrong digest"
+    // from "outside replay window". Without this every failure looks identical.
+    const sigHeader = req.header('elevenlabs-signature') || '<missing>';
+    const sigMasked = sigHeader.length > 24 ? sigHeader.slice(0, 24) + '…' : sigHeader;
+    const bodyLen = (req as any).rawBody?.length ?? -1;
+    console.warn('[ElevenLabs] HMAC verification failed', {
+        path: req.path,
+        signature_header: sigMasked,
+        body_bytes: bodyLen,
+        secret_set: !!ELEVENLABS_WEBHOOK_SECRET,
+    });
     res.status(401).json({ error: 'invalid_signature' });
     return false;
 }
@@ -325,26 +335,66 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
 });
 
 // Post-call webhook — fires when the conversation ends.
-// Body shape (per ElevenLabs): { conversation_id, transcript?, summary?, status?,
-//                                duration_seconds?, metadata?: { phone?, reservation_id? } }
-// Persists transcript+summary for audit, and if the call produced a reservation,
-// sends a WhatsApp recap via the existing Vonage path.
+// ElevenLabs sends slightly different shapes depending on agent version and
+// "event vs payload" wrappers. We accept all of:
+//   { conversation_id, ... }
+//   { data: { conversation_id, ... } }
+//   { event: "post_call_transcript", data: { conversation_id, transcript: [...] } }
+// and extract conversation_id / transcript / summary / phone / duration from
+// wherever they live.
 app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
 
     const body = req.body || {};
-    const conversationId: string | undefined = body.conversation_id;
+    const data = (body.data && typeof body.data === 'object') ? body.data : body;
+
+    const conversationId: string | undefined =
+        body.conversation_id ||
+        data.conversation_id ||
+        data.conversation?.id ||
+        data.convai_session_id;
+
     if (!conversationId) {
-        return res.status(400).json({ error: 'invalid_conversation_id', message: 'conversation_id is required' });
+        // Don't fail the webhook — ElevenLabs will retry forever on 4xx/5xx.
+        // Log the whole payload (truncated) once so we can adjust extraction.
+        const raw = JSON.stringify(body).slice(0, 2000);
+        console.warn('[ElevenLabs] post-call: conversation_id missing — body shape:', raw);
+        return res.status(200).json({ ok: true, note: 'conversation_id not extracted; payload logged' });
     }
 
-    const transcript: string | undefined = typeof body.transcript === 'string' ? body.transcript : undefined;
-    const summary: string | undefined = typeof body.summary === 'string' ? body.summary : undefined;
-    const duration = Number(body.duration_seconds);
-    const phoneRaw: string | undefined = body.metadata?.phone || body.phone;
+    // Transcript may be a string (rare) or an array of turns. Coerce to string.
+    let transcript: string | undefined;
+    const rawTranscript = data.transcript ?? body.transcript;
+    if (typeof rawTranscript === 'string') {
+        transcript = rawTranscript;
+    } else if (Array.isArray(rawTranscript)) {
+        transcript = rawTranscript
+            .map((t: any) => {
+                const who = t.role || t.speaker || 'unknown';
+                const text = t.message ?? t.text ?? t.content ?? '';
+                return `${who}: ${text}`;
+            })
+            .join('\n');
+    }
+
+    const summary: string | undefined =
+        (typeof data.summary === 'string' ? data.summary : undefined) ??
+        (typeof data.analysis?.summary === 'string' ? data.analysis.summary : undefined) ??
+        (typeof body.summary === 'string' ? body.summary : undefined);
+
+    const duration = Number(data.duration_seconds ?? body.duration_seconds ?? data.metadata?.call_duration_seconds);
+    const phoneRaw: string | undefined =
+        data.metadata?.phone || body.metadata?.phone || data.phone || body.phone || data.caller_id || body.caller_id;
 
     // Acknowledge fast — ElevenLabs retries on timeout. Side-effects below are fire-and-forget.
     res.status(200).json({ ok: true });
+    console.log('[ElevenLabs] post-call', {
+        conversation_id: conversationId,
+        has_transcript: !!transcript,
+        has_summary: !!summary,
+        duration_seconds: Number.isFinite(duration) ? duration : null,
+        phone: phoneRaw || null,
+    });
 
     try {
         await recordVoiceCall({
