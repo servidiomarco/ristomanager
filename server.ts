@@ -25,6 +25,8 @@ import {
     recordVoiceCall,
     formatItalianConfirmation,
     normalizeItalianPhone,
+    parseFlexibleDate,
+    parseFlexibleTime,
 } from './services/elevenlabsService.js';
 
 const app = express();
@@ -160,12 +162,16 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
         ? req.body.parameters
         : req.body || {};
-    const rawDate = String(p.date ?? '').trim();
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
-        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    const normalizedDate = parseFlexibleDate(p.date);
+    if (!normalizedDate) {
+        console.warn('[ElevenLabs] check-availability rejected: unparseable date', { received: p.date });
+        return res.status(400).json({
+            error: 'invalid_date',
+            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
+        });
     }
     if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
         return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
@@ -176,11 +182,11 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
 
     try {
         const result = await findAvailability({
-            date: rawDate,
+            date: normalizedDate,
             shift: rawShift as Shift,
             guests: Math.trunc(guests)
         });
-        console.log('[ElevenLabs] check-availability', { date: rawDate, shift: rawShift, guests, result });
+        console.log('[ElevenLabs] check-availability', { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, result });
         res.json(result);
     } catch (err) {
         console.error('[ElevenLabs] check-availability error', err);
@@ -208,8 +214,6 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
 
     const customerName = String(p.customer_name ?? '').trim();
     const phoneRaw = String(p.phone ?? '').trim();
-    const rawDate = String(p.date ?? '').trim();
-    const rawTime = String(p.time ?? '').trim();
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
     const notes = typeof p.notes === 'string' ? p.notes.trim() : undefined;
@@ -220,11 +224,21 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!phoneRaw) {
         return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
-        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    const normalizedDate = parseFlexibleDate(p.date);
+    if (!normalizedDate) {
+        console.warn('[ElevenLabs] create-reservation rejected: unparseable date', { received: p.date });
+        return res.status(400).json({
+            error: 'invalid_date',
+            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
+        });
     }
-    if (!/^\d{1,2}:\d{2}$/.test(rawTime)) {
-        return res.status(400).json({ error: 'invalid_time', message: 'time must be HH:MM' });
+    const normalizedTime = parseFlexibleTime(p.time);
+    if (!normalizedTime) {
+        console.warn('[ElevenLabs] create-reservation rejected: unparseable time', { received: p.time });
+        return res.status(400).json({
+            error: 'invalid_time',
+            message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
+        });
     }
     if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
         return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
@@ -235,10 +249,14 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
 
     // Build an ISO datetime; the DB column is TIMESTAMPTZ so we let Postgres
     // interpret as the server's configured timezone (Europe/Rome in prod).
-    const [hh, mm] = rawTime.split(':');
-    const reservationTime = `${rawDate}T${hh.padStart(2, '0')}:${mm.padStart(2, '0')}:00`;
+    const reservationTime = `${normalizedDate}T${normalizedTime}:00`;
 
     try {
+        console.log('[ElevenLabs] create-reservation start', {
+            customer_name: customerName, raw_date: p.date, raw_time: p.time,
+            normalized_date: normalizedDate, normalized_time: normalizedTime,
+            shift: rawShift, guests, conversation_id: conversationId,
+        });
         const created = await createVoiceReservation({
             customer_name: customerName,
             phone: phoneRaw,

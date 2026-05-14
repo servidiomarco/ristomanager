@@ -47,6 +47,110 @@ export function verifyElevenLabsSignature(
 }
 
 // ============================================
+// FLEXIBLE DATE / TIME PARSING
+// ============================================
+// ElevenLabs ASR + LLM sends date/time in many shapes. Accept them all and
+// normalize to ISO YYYY-MM-DD / HH:MM before validation. Returns null on
+// truly unparseable input — let the caller respond with a clear 400.
+
+const ITALIAN_MONTHS_LOOKUP: Record<string, number> = {
+    gennaio: 1, gen: 1,
+    febbraio: 2, feb: 2,
+    marzo: 3, mar: 3,
+    aprile: 4, apr: 4,
+    maggio: 5, mag: 5,
+    giugno: 6, giu: 6,
+    luglio: 7, lug: 7,
+    agosto: 8, ago: 8,
+    settembre: 9, set: 9, sett: 9,
+    ottobre: 10, ott: 10,
+    novembre: 11, nov: 11,
+    dicembre: 12, dic: 12,
+};
+
+function toIsoDate(y: number, mo: number, d: number): string | null {
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    // Reject impossible day-of-month (e.g. 31 Feb).
+    const probe = new Date(Date.UTC(y, mo - 1, d));
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null;
+    return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+export function parseFlexibleDate(input: unknown): string | null {
+    if (typeof input !== 'string') return null;
+    const s = input.trim();
+    if (!s) return null;
+
+    // YYYY-MM-DD (optionally followed by THH:MM:SS) — already canonical.
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return toIsoDate(+m[1], +m[2], +m[3]);
+
+    // YYYY/MM/DD
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) return toIsoDate(+m[1], +m[2], +m[3]);
+
+    // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY (Italian human format)
+    m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (m) return toIsoDate(+m[3], +m[2], +m[1]);
+
+    // DD/MM/YY → 20YY
+    m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2})(?!\d)/);
+    if (m) return toIsoDate(2000 + +m[3], +m[2], +m[1]);
+
+    // "14 maggio 2026" / "14 mag 2026" / "14 maggio" (assume current year)
+    m = s.toLowerCase().match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|gen|feb|mar|apr|mag|giu|lug|ago|set|sett|ott|nov|dic)(?:\s+(\d{4}))?/);
+    if (m) {
+        const day = +m[1];
+        const month = ITALIAN_MONTHS_LOOKUP[m[2]];
+        const year = m[3] ? +m[3] : new Date().getFullYear();
+        return toIsoDate(year, month, day);
+    }
+
+    return null;
+}
+
+export function parseFlexibleTime(input: unknown): string | null {
+    if (typeof input !== 'string') return null;
+    const s = input.trim().toLowerCase();
+    if (!s) return null;
+
+    // 20:30, 20.30, 20-30, 8:05 — explicit hour:minute
+    let m = s.match(/(\d{1,2})[:.\-](\d{2})/);
+    if (m) {
+        const h = +m[1];
+        const mm = +m[2];
+        if (h >= 0 && h <= 23 && mm >= 0 && mm <= 59) {
+            return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+        }
+    }
+
+    // "20 e 30" / "20 e mezza" / "8 e un quarto"
+    m = s.match(/(\d{1,2})\s*e\s*(mezza|mezzo|trenta|tre\s*quarti|un\s*quarto|quarto|quindici|quarantacinque|\d{1,2})/);
+    if (m) {
+        const h = +m[1];
+        const minPart = m[2].replace(/\s+/g, ' ');
+        let mins: number;
+        if (minPart === 'mezza' || minPart === 'mezzo' || minPart === 'trenta') mins = 30;
+        else if (minPart === 'un quarto' || minPart === 'quarto' || minPart === 'quindici') mins = 15;
+        else if (minPart === 'tre quarti' || minPart === 'quarantacinque') mins = 45;
+        else mins = parseInt(minPart) || 0;
+        if (h >= 0 && h <= 23 && mins >= 0 && mins <= 59) {
+            return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+        }
+    }
+
+    // Bare hour: "20", "8" → assume :00. Reject if it's clearly something else.
+    m = s.match(/^(\d{1,2})$/);
+    if (m) {
+        const h = +m[1];
+        if (h >= 0 && h <= 23) return `${String(h).padStart(2, '0')}:00`;
+    }
+
+    return null;
+}
+
+// ============================================
 // PHONE NUMBER NORMALIZATION
 // ============================================
 
