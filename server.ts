@@ -337,6 +337,27 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             }
         }
 
+        const reservationLabel = (() => {
+            try {
+                const dt = new Date(created.reservation_time);
+                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                return `${date} ${time}`;
+            } catch {
+                return created.reservation_time;
+            }
+        })();
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Nuova prenotazione vocale',
+                body: `${created.customer_name} · ${created.guests} ospiti · ${reservationLabel}`,
+                url: '/?view=RESERVATIONS',
+                tag: `reservation-${created.id}`,
+            },
+            { excludeUserId: null }
+        ).catch(err => console.error('Push (voice reservation) failed:', err));
+
         const confirmationPhrase = formatItalianConfirmation(created);
         console.log('[ElevenLabs] create-reservation OK', {
             id: created.id, conversation_id: conversationId, customer: created.customer_name,
