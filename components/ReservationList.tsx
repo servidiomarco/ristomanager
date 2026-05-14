@@ -1096,7 +1096,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           r.table_id === table_id &&
           r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
           (selectedShift === 'ALL' || r.shift === selectedShift) &&
-          r.arrival_status !== ArrivalStatus.DEPARTED
+          r.arrival_status !== ArrivalStatus.DEPARTED &&
+          r.reservation_status !== ReservationStatus.CANCELLED
       );
   }
 

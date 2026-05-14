@@ -208,6 +208,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
               WHERE res.table_id = t.id
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
     `, [guests, date, shift]);
 
@@ -233,6 +234,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
               WHERE res.table_id = t.id
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
     `, [guests, date, otherShift]);
     const altFree = altResult.rows[0]?.free ?? 0;
@@ -309,6 +311,95 @@ export async function createVoiceReservation(
     ]);
 
     return result.rows[0];
+}
+
+// ============================================
+// VOICE RESERVATION CANCELLATION
+// ============================================
+
+export interface CancelVoiceReservationInput {
+    phone: string;          // raw input — will be normalized
+    date: string;           // YYYY-MM-DD
+    time?: string;          // HH:MM, used to disambiguate when caller has >1 booking that day
+    conversation_id?: string;
+}
+
+export interface CancelCandidate {
+    id: number;
+    customer_name: string;
+    reservation_time: string;
+    shift: Shift;
+    guests: number;
+}
+
+export type CancelVoiceReservationOutput =
+    | { status: 'cancelled'; reservation: CancelCandidate }
+    | { status: 'not_found' }
+    | { status: 'ambiguous'; candidates: CancelCandidate[] };
+
+/**
+ * Soft-cancel a reservation booked by `phone` on `date`. Sets
+ * reservation_status='CANCELLED' rather than deleting the row, so the
+ * audit trail (and the link in voice_calls) is preserved.
+ *
+ * Matching rules:
+ *   - Phone is normalized to E.164 (+39…) before comparing.
+ *   - Only non-cancelled reservations for the given date are considered.
+ *   - If `time` is provided it must match exactly (HH:MM); otherwise we
+ *     require a single non-cancelled booking on that date.
+ *   - Returns 'ambiguous' (with candidates) if the caller has more than
+ *     one booking that day and no time was provided.
+ */
+export async function cancelVoiceReservation(
+    input: CancelVoiceReservationInput
+): Promise<CancelVoiceReservationOutput> {
+    const phone = normalizeItalianPhone(input.phone);
+
+    const params: any[] = [phone, input.date];
+    let sql = `
+        SELECT id, customer_name, reservation_time, shift, guests
+        FROM reservations
+        WHERE phone = $1
+          AND DATE(reservation_time) = $2::date
+          AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
+    `;
+    if (input.time) {
+        sql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+        params.push(input.time);
+    }
+    sql += ' ORDER BY reservation_time ASC';
+
+    const matches = await queryWithRetry(sql, params);
+    const rows: CancelCandidate[] = matches.rows;
+
+    if (rows.length === 0) return { status: 'not_found' };
+    if (rows.length > 1) return { status: 'ambiguous', candidates: rows };
+
+    const target = rows[0];
+    const updated = await queryWithRetry(`
+        UPDATE reservations
+        SET reservation_status = 'CANCELLED'
+        WHERE id = $1
+        RETURNING id, customer_name, reservation_time, shift, guests
+    `, [target.id]);
+
+    return { status: 'cancelled', reservation: updated.rows[0] };
+}
+
+/**
+ * Short Italian phrase the agent can read after a successful cancellation.
+ * Example: "Cancellazione confermata Mario, prenotazione di giovedì 14 maggio
+ * alle 20:30 annullata. Le invieremo conferma su WhatsApp."
+ */
+export function formatItalianCancellation(r: CancelCandidate): string {
+    const d = new Date(r.reservation_time);
+    const weekday = ITALIAN_WEEKDAYS[d.getDay()];
+    const day = d.getDate();
+    const month = ITALIAN_MONTHS[d.getMonth()];
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const firstName = r.customer_name.split(' ')[0];
+    return `Cancellazione confermata ${firstName}, la prenotazione di ${weekday} ${day} ${month} alle ${hh}:${mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
 }
 
 // ============================================

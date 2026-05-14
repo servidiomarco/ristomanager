@@ -147,7 +147,8 @@ export enum ReservationSource {
 
 export enum ReservationStatus {
   CONFIRMED = 'CONFIRMED',  // Default — booking is on
-  NO_SHOW = 'NO_SHOW'       // Customer did not show up
+  NO_SHOW = 'NO_SHOW',      // Customer did not show up
+  CANCELLED = 'CANCELLED'   // Cancelled by customer (e.g. via voice agent)
 }
 
 export interface Reservation {

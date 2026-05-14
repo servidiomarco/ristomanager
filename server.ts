@@ -23,8 +23,10 @@ import {
     verifyElevenLabsSignature,
     findAvailability,
     createVoiceReservation,
+    cancelVoiceReservation,
     recordVoiceCall,
     formatItalianConfirmation,
+    formatItalianCancellation,
     normalizeItalianPhone,
     parseFlexibleDate,
     parseFlexibleTime,
@@ -377,6 +379,166 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     }
 });
 
+// Cancel a reservation made by the caller. The agent should ask the caller
+// for date (and optionally time) and confirm by repeating the customer name
+// before invoking this tool. Soft cancel — sets reservation_status=CANCELLED
+// so the row remains for audit and can be linked to the conversation.
+app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
+
+    const phoneRaw = String(p.phone ?? '').trim();
+    if (!phoneRaw) {
+        return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
+    }
+    const normalizedDate = parseFlexibleDate(p.date);
+    if (!normalizedDate) {
+        console.warn('[ElevenLabs] cancel-reservation rejected: unparseable date', { received: p.date });
+        return res.status(400).json({
+            error: 'invalid_date',
+            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
+        });
+    }
+    // Time is optional — only used to disambiguate when the caller has more
+    // than one booking on the same day.
+    let normalizedTime: string | undefined;
+    if (p.time !== undefined && p.time !== null && String(p.time).trim() !== '') {
+        const t = parseFlexibleTime(p.time);
+        if (!t) {
+            console.warn('[ElevenLabs] cancel-reservation rejected: unparseable time', { received: p.time });
+            return res.status(400).json({
+                error: 'invalid_time',
+                message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
+            });
+        }
+        normalizedTime = t;
+    }
+
+    try {
+        console.log('[ElevenLabs] cancel-reservation start', {
+            phone_raw: phoneRaw, normalized_date: normalizedDate,
+            normalized_time: normalizedTime, conversation_id: conversationId,
+        });
+        const outcome = await cancelVoiceReservation({
+            phone: phoneRaw,
+            date: normalizedDate,
+            time: normalizedTime,
+            conversation_id: conversationId,
+        });
+
+        if (outcome.status === 'not_found') {
+            console.log('[ElevenLabs] cancel-reservation: no match', {
+                phone: normalizeItalianPhone(phoneRaw), date: normalizedDate, time: normalizedTime,
+            });
+            return res.json({
+                success: false,
+                status: 'not_found',
+                message: 'Non trovo una prenotazione a questo numero per la data indicata. Può confermarmi la data esatta?'
+            });
+        }
+
+        if (outcome.status === 'ambiguous') {
+            const list = outcome.candidates.map(c => {
+                const t = new Date(c.reservation_time);
+                const hh = String(t.getHours()).padStart(2, '0');
+                const mm = String(t.getMinutes()).padStart(2, '0');
+                return `${hh}:${mm} per ${c.guests}`;
+            }).join(', ');
+            console.log('[ElevenLabs] cancel-reservation: ambiguous', {
+                count: outcome.candidates.length, candidates: outcome.candidates.map(c => c.id),
+            });
+            return res.json({
+                success: false,
+                status: 'ambiguous',
+                candidates: outcome.candidates,
+                message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da annullare?`
+            });
+        }
+
+        const cancelled = outcome.reservation;
+
+        // Link the audit row so the cancellation conversation is traceable.
+        if (conversationId) {
+            recordVoiceCall({
+                conversation_id: conversationId,
+                phone: normalizeItalianPhone(phoneRaw),
+                reservation_id: cancelled.id,
+            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (cancel) failed:', err?.message || err));
+        }
+
+        LogService.logActivity(
+            null,
+            'voice-agent@elevenlabs',
+            'Agent vocale',
+            ActivityAction.DELETE,
+            ResourceType.RESERVATION,
+            cancelled.id,
+            cancelled.customer_name,
+            {
+                source: 'VOICE',
+                conversation_id: conversationId,
+                cancelled_via: 'voice_agent',
+                reservation_time: cancelled.reservation_time,
+                shift: cancelled.shift,
+                guests: cancelled.guests,
+            }
+        );
+
+        if (socketService) {
+            try {
+                socketService.broadcastReservationUpdated({
+                    ...cancelled,
+                    reservation_status: 'CANCELLED',
+                } as any);
+            } catch (err) {
+                console.warn('[ElevenLabs] broadcastReservationUpdated failed:', err);
+            }
+        }
+
+        const reservationLabel = (() => {
+            try {
+                const dt = new Date(cancelled.reservation_time);
+                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                return `${date} ${time}`;
+            } catch {
+                return cancelled.reservation_time;
+            }
+        })();
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Prenotazione cancellata (voce)',
+                body: `${cancelled.customer_name} · ${cancelled.guests} ospiti · ${reservationLabel}`,
+                url: '/?view=RESERVATIONS',
+                tag: `reservation-${cancelled.id}`,
+            },
+            { excludeUserId: null }
+        ).catch(err => console.error('Push (voice cancellation) failed:', err));
+
+        const confirmationPhrase = formatItalianCancellation(cancelled);
+        console.log('[ElevenLabs] cancel-reservation OK', {
+            id: cancelled.id, conversation_id: conversationId, customer: cancelled.customer_name,
+        });
+        return res.json({
+            success: true,
+            status: 'cancelled',
+            reservation_id: cancelled.id,
+            confirmation_phrase: confirmationPhrase,
+        });
+    } catch (err: any) {
+        console.error('[ElevenLabs] cancel-reservation error', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Si è verificato un errore tecnico, posso richiamarla per cancellare la prenotazione?'
+        });
+    }
+});
+
 // Post-call webhook — fires when the conversation ends.
 // ElevenLabs sends slightly different shapes depending on agent version and
 // "event vs payload" wrappers. We accept all of:
@@ -519,7 +681,8 @@ async function findTableConflicts(
     let resWhere = `r.table_id = ANY($1::int[])
                     AND DATE(r.reservation_time) = $2::date
                     AND r.shift = $3
-                    AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'`;
+                    AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
+                    AND COALESCE(r.reservation_status, 'CONFIRMED') <> 'CANCELLED'`;
     if (options?.excludeReservationId) {
         resParams.push(options.excludeReservationId);
         resWhere += ` AND r.id <> $${resParams.length}`;
@@ -1685,7 +1848,9 @@ async function runDailyBreadReminder(): Promise<void> {
 
     // Sum guests for tomorrow's reservations (banquet bookings already counted via reservation rows)
     const result = await queryWithRetry(
-        "SELECT COALESCE(SUM(guests), 0)::int AS total FROM reservations WHERE DATE(reservation_time) = $1",
+        `SELECT COALESCE(SUM(guests), 0)::int AS total FROM reservations
+         WHERE DATE(reservation_time) = $1
+         AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'`,
         [tomorrowIso]
     );
     const totalGuests: number = result.rows[0]?.total ?? 0;

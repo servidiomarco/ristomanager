@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, TodoItem, TodoPriority, TodoCategory, UserRole, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoItem, TodoPriority, TodoCategory, UserRole, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { todoApiService } from '../services/todoApiService';
 import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
@@ -825,10 +825,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     if (y && m && d) setSelectedDate(new Date(y, m - 1, d));
   };
 
-  // Filter reservations for selected date
+  // Filter reservations for selected date (exclude cancelled bookings from KPIs/occupancy)
   const selectedDayReservations = useMemo(() => {
     return Array.isArray(reservations)
-      ? reservations.filter(r => r.reservation_time.startsWith(selectedDateStr))
+      ? reservations.filter(r =>
+          r.reservation_time.startsWith(selectedDateStr) &&
+          r.reservation_status !== ReservationStatus.CANCELLED
+        )
       : [];
   }, [reservations, selectedDateStr]);
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, BanquetMenu } from '../types';
+import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
@@ -394,6 +394,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           if (r.reservation_time.split('T')[0] !== todayStr) return false;
           if (currentActiveShift && r.shift !== currentActiveShift) return false;
           if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
+          if (r.reservation_status === ReservationStatus.CANCELLED) return false;
 
           const [h, m] = r.reservation_time.split('T')[1].substring(0, 5).split(':').map(Number);
           const resTimeValue = h * 60 + m;
