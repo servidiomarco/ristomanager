@@ -94,6 +94,8 @@ interface DashboardProps {
   onNavigateToInventario?: () => void;
   autoOpenNewShoppingItem?: boolean;
   onAutoOpenNewShoppingItemHandled?: () => void;
+  autoOpenNewTodo?: boolean;
+  onAutoOpenNewTodoHandled?: () => void;
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
   onDateChange?: (date: Date) => void;
@@ -163,7 +165,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled, autoOpenNewTodo, onAutoOpenNewTodoHandled, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
   const { user } = useAuth();
   const todoSectionRef = useRef<HTMLDivElement>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -273,6 +275,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }, 120);
     return () => clearTimeout(t);
   }, [autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled]);
+
+  useEffect(() => {
+    if (!autoOpenNewTodo) return;
+    const t = setTimeout(() => {
+      handleOpenAddTodo();
+      onAutoOpenNewTodoHandled?.();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [autoOpenNewTodo, onAutoOpenNewTodoHandled]);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
