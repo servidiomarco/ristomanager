@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
@@ -47,6 +47,34 @@ const getInitials = (name?: string | null): string => {
   const first = parts[0][0] || '';
   const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : '';
   return (first + last).toUpperCase();
+};
+
+// Small circular badge showing who took the reservation:
+// voice-agent bookings get a Mic icon, manual bookings get user initials.
+const renderOperatorBadge = (res: Reservation): React.ReactNode => {
+  if (res.source === ReservationSource.VOICE) {
+    return (
+      <span
+        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-600 dark:bg-indigo-500/20 dark:border-indigo-500/30 dark:text-indigo-300 flex-shrink-0"
+        title="Presa dall'agente vocale"
+        aria-label="Presa dall'agente vocale"
+      >
+        <Mic className="h-2.5 w-2.5" />
+      </span>
+    );
+  }
+  if (res.created_by_user_name) {
+    return (
+      <span
+        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+        title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+        aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+      >
+        {getInitials(res.created_by_user_name)}
+      </span>
+    );
+  }
+  return null;
 };
 
 // Helper to format only time
@@ -1449,9 +1477,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div
                     style={{ top: pillTopPx }}
                     className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
-                    title={reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined}
+                    title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
                 >
-                    {reservation.created_by_user_name ? (
+                    {reservation.source === ReservationSource.VOICE ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            <Mic className="h-3 w-3" />
+                        </span>
+                    ) : reservation.created_by_user_name ? (
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[10px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
@@ -1556,15 +1588,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {/* Row 2: Customer name */}
           <div className="flex items-center gap-1.5 min-w-0">
-            {res.created_by_user_name && (
-              <span
-                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-                aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-              >
-                {getInitials(res.created_by_user_name)}
-              </span>
-            )}
+            {renderOperatorBadge(res)}
             <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
               {toTitleCase(res.customer_name)}
             </p>
@@ -2427,15 +2451,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                   {/* Row 2: Customer name */}
                                   <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                                    {res.created_by_user_name && (
-                                      <span
-                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                                        title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-                                        aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
-                                      >
-                                        {getInitials(res.created_by_user_name)}
-                                      </span>
-                                    )}
+                                    {renderOperatorBadge(res)}
                                     <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
                                       {toTitleCase(res.customer_name)}
                                     </p>
@@ -3608,15 +3624,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
-                                {r.created_by_user_name && (
-                                  <span
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                                    title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
-                                    aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
-                                  >
-                                    {getInitials(r.created_by_user_name)}
-                                  </span>
-                                )}
+                                {renderOperatorBadge(r)}
                               </div>
                               <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
@@ -3782,15 +3790,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
-                                    {r.created_by_user_name && (
-                                      <span
-                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
-                                        title={`Presa da ${toTitleCase(r.created_by_user_name)}`}
-                                        aria-label={`Presa da ${toTitleCase(r.created_by_user_name)}`}
-                                      >
-                                        {getInitials(r.created_by_user_name)}
-                                      </span>
-                                    )}
+                                    {renderOperatorBadge(r)}
                                     {insufficient && (
                                       <span className="text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
                                         Capienza insufficiente
