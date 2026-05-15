@@ -1763,8 +1763,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ElevenLabs voice-agent widget — dev/test only, owner role */}
-        {user?.role === UserRole.OWNER && <VoiceAgentWidget />}
+        {/* ElevenLabs voice-agent widget — temporarily hidden, will be
+            re-enabled in the future. Component and import preserved. */}
+        {false && user?.role === UserRole.OWNER && <VoiceAgentWidget />}
 
         {/* Global Toasts */}
         <div
