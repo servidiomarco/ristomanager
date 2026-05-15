@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListTodo } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -63,7 +63,6 @@ const App: React.FC = () => {
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
   const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
   const [autoOpenNewShoppingItem, setAutoOpenNewShoppingItem] = useState(false);
-  const [autoOpenNewTodo, setAutoOpenNewTodo] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
@@ -1298,8 +1297,6 @@ const App: React.FC = () => {
             onNavigateToInventario={() => { setSidebarCollapsed(false); setView(ViewState.INVENTARIO); }}
             autoOpenNewShoppingItem={autoOpenNewShoppingItem}
             onAutoOpenNewShoppingItemHandled={() => setAutoOpenNewShoppingItem(false)}
-            autoOpenNewTodo={autoOpenNewTodo}
-            onAutoOpenNewTodoHandled={() => setAutoOpenNewTodo(false)}
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
             onDateChange={setGlobalDate}
@@ -1618,25 +1615,21 @@ const App: React.FC = () => {
               className="fixed left-0 right-0 z-[29] lg:hidden bg-[var(--color-surface)] rounded-t-[20px] border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)]"
               style={{ bottom: 0, animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
-              <div className="px-6 pt-5 pb-20 flex flex-wrap justify-center gap-x-3 gap-y-5" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+              <div className="px-6 pt-5 pb-20 grid grid-cols-2 gap-4 justify-items-center" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
                 {[
-                  { key: 'reservation', icon: <Calendar className="h-6 w-6" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'banquet', icon: <CalendarDays className="h-6 w-6" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
-                  { key: 'shopping', icon: <ShoppingCart className="h-6 w-6" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
-                  { key: 'customer', icon: <BookUser className="h-6 w-6" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
-                  { key: 'todo', icon: <ListTodo className="h-6 w-6" />, label: 'Attività', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewTodo(true); setShowCreateSheet(false); } },
+                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
+                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
+                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button
                     key={tile.key}
                     type="button"
                     onClick={tile.action}
-                    // Fixed-width flex children with flex-wrap + justify-center
-                    // gives a 3-2 layout where the bottom row is centered, so
-                    // no orphan tile sits next to an empty grid cell.
-                    className="basis-[28%] max-w-[112px] flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
+                    className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
                     style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
                   >
-                    <div className="w-16 h-16 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
+                    <div className="w-20 h-20 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
                       {tile.icon}
                     </div>
                     <span className="text-[12px] font-semibold text-[var(--color-fg)]">{tile.label}</span>
