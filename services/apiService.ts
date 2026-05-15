@@ -62,7 +62,10 @@ const apiRequest = async <T>(
   options: RequestInit = {},
   expectJson = true
 ): Promise<T> => {
-  const response = await fetchWithAuth(url, options);
+  // Bypass the browser HTTP cache by default. iOS Safari in PWA mode can
+  // otherwise serve stale GET responses after the app is backgrounded.
+  // Callers can still override by passing an explicit `cache` option.
+  const response = await fetchWithAuth(url, { cache: 'no-store', ...options });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));

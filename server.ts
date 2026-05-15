@@ -67,6 +67,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// Disable HTTP caching for all API responses. iOS Safari (and Safari-based
+// PWAs in particular) will otherwise serve stale GET responses even after
+// the underlying data has changed, since the server sets no validators.
+app.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Health check endpoint for Railway
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'RistoManager API is running' });
