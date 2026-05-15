@@ -151,6 +151,37 @@ export function parseFlexibleTime(input: unknown): string | null {
 }
 
 // ============================================
+// RESTAURANT SLOT GRID
+// ============================================
+
+/**
+ * Allowed reservation times per shift. Must stay in sync with the
+ * dropdown options in components/ReservationList.tsx — these are the
+ * times the manual UI can produce. The voice agent must constrain
+ * itself to the same grid so bookings round-trip through the edit form
+ * without falling back to a different option.
+ */
+export const RESTAURANT_SLOTS: Record<Shift, readonly string[]> = {
+    [Shift.LUNCH]: ['13:00', '13:30', '14:00'] as const,
+    [Shift.DINNER]: ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'] as const,
+};
+
+export function isValidSlotForShift(time: string, shift: Shift): boolean {
+    return RESTAURANT_SLOTS[shift]?.includes(time) ?? false;
+}
+
+/**
+ * Italian list rendering for an array of HH:MM slot strings.
+ * Example: ["19:30","20:00","20:30"] → "19:30, 20:00 o 20:30"
+ */
+export function formatSlotListItalian(slots: readonly string[]): string {
+    if (slots.length === 0) return '';
+    if (slots.length === 1) return slots[0];
+    const head = slots.slice(0, -1).join(', ');
+    return `${head} o ${slots[slots.length - 1]}`;
+}
+
+// ============================================
 // PHONE NUMBER NORMALIZATION
 // ============================================
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -656,10 +656,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const arrived: Reservation[] = [];
     const freed: Reservation[] = [];
     const noshow: Reservation[] = [];
+    const cancelled: Reservation[] = [];
 
     for (const r of dateFiltered) {
-      const isNoShow = (r.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW;
-      if (isNoShow) {
+      const resStatus = r.reservation_status || ReservationStatus.CONFIRMED;
+      if (resStatus === ReservationStatus.CANCELLED) {
+        cancelled.push(r);
+        continue;
+      }
+      if (resStatus === ReservationStatus.NO_SHOW) {
         noshow.push(r);
         continue;
       }
@@ -677,12 +682,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
     noshow.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    cancelled.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
     return [
       { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
       { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
       { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
+      { key: 'cancelled', label: 'Annullate', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: cancelled },
     ].filter(g => g.items.length > 0);
   }, [reservations, selectedDate, selectedShift, searchTerm, displayTables]);
 
@@ -1491,9 +1498,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <div
         key={res.id}
         className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
-          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
+          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
           ${isFlashing ? 'animate-flash-row' : ''}
-          ${group.key === 'freed' ? 'opacity-60' : ''}
+          ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''}
         `}
         onMouseEnter={() => setHoveredReservationId(res.id)}
         onMouseLeave={() => setHoveredReservationId(null)}
@@ -1533,10 +1540,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <UserX className="h-2.5 w-2.5" /> No show
               </span>
             )}
+            {group.key === 'cancelled' && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                <Ban className="h-2.5 w-2.5" /> Annullata
+              </span>
+            )}
           </div>
 
           {/* Row 2: Customer name */}
-          <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate">
+          <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
             {toTitleCase(res.customer_name)}
           </p>
 
@@ -1586,7 +1598,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           table
             ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
               : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
-              : group.key === 'noshow' ? 'bg-rose-50 dark:bg-rose-500/15'
+              : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
               : 'bg-[#dbeafe] dark:bg-blue-500/15'
             : 'bg-[var(--color-surface-3)]'
         }`}>
@@ -2345,12 +2357,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             const circleColor = group.key === 'freed' ? 'bg-slate-400'
                               : group.key === 'arrived' ? 'bg-emerald-500'
-                              : group.key === 'noshow' ? 'bg-rose-500'
+                              : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-500'
                               : 'bg-blue-500';
 
                             return (
                               <div key={res.id}
-                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
                                 onMouseEnter={() => setHoveredReservationId(res.id)}
                                 onMouseLeave={() => setHoveredReservationId(null)}
                                 onClick={() => handleRowClick(res)}>
@@ -2388,10 +2400,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <UserX className="h-2.5 w-2.5" /> No show
                                       </span>
                                     )}
+                                    {group.key === 'cancelled' && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                        <Ban className="h-2.5 w-2.5" /> Annullata
+                                      </span>
+                                    )}
                                   </div>
 
                                   {/* Row 2: Customer name */}
-                                  <p className="text-base font-semibold text-[var(--color-fg)] leading-6 truncate mt-0.5">
+                                  <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate mt-0.5 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
                                     {toTitleCase(res.customer_name)}
                                   </p>
 

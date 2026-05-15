@@ -30,6 +30,9 @@ import {
     normalizeItalianPhone,
     parseFlexibleDate,
     parseFlexibleTime,
+    isValidSlotForShift,
+    RESTAURANT_SLOTS,
+    formatSlotListItalian,
 } from './services/elevenlabsService.js';
 
 const app = express();
@@ -276,6 +279,20 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     }
     if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
         return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+    }
+    // Constrain the booking time to the restaurant's slot grid so voice
+    // bookings round-trip through the manual edit form without falling back
+    // to a different time option.
+    if (!isValidSlotForShift(normalizedTime, rawShift as Shift)) {
+        const validSlots = RESTAURANT_SLOTS[rawShift as Shift];
+        const shiftLabel = (rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena';
+        console.warn('[ElevenLabs] create-reservation rejected: invalid_slot', {
+            received_time: p.time, normalized_time: normalizedTime, shift: rawShift,
+        });
+        return res.status(400).json({
+            error: 'invalid_slot',
+            message: `Per ${shiftLabel} possiamo prenotare solo alle ${formatSlotListItalian(validSlots)}. Quale orario preferisce?`
+        });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
         return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
