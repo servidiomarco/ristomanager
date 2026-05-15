@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -206,8 +207,11 @@ export const PrintReservationsModal: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Print-only area — hidden on screen, shown when printing */}
-      <div id="print-area" className="print-only">
+      {/* Print-only area — portaled to <body> so it's a direct body child
+          (see PrintInventoryModal for why this matters with App's h-screen). */}
+      {createPortal(
+        <div className="print-portal">
+          <div id="print-area" className="print-only">
         <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0f172a' }}>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Lista Prenotazioni</h1>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: '#475569', textTransform: 'capitalize' }}>
@@ -285,7 +289,10 @@ export const PrintReservationsModal: React.FC<Props> = ({
         <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#94a3b8', textAlign: 'right' }}>
           Stampato il {new Date().toLocaleString('it-IT')}
         </footer>
-      </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };

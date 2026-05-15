@@ -342,12 +342,13 @@ body {
 .print-only { display: none; }
 
 @media print {
-  body * { visibility: hidden; }
-  #print-area, #print-area * { visibility: visible; }
+  /* Hide every direct body child except the portal that holds #print-area.
+     `display: none` (not `visibility: hidden`) lets the body collapse so the
+     print content can grow to its natural multi-page height. */
+  body > *:not(.print-portal) { display: none !important; }
+  .print-portal { display: block !important; }
   #print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
+    display: block;
     width: 100%;
     padding: 0;
     color: #0f172a;

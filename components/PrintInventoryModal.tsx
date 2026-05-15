@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   InventoryArea,
   InventoryLocation,
@@ -205,14 +206,19 @@ export const PrintInventoryModal: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Print-only area — hidden on screen, shown when printing */}
-      <div id="print-area" className="print-only">
-        <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0f172a' }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Inventario — {AREA_LABEL[area]}</h1>
-          <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: '#475569' }}>
-            {locationLabel} · {categoryLabel}
-          </p>
-        </header>
+      {/* Print-only area — portaled to <body> so it's a direct body child.
+          Combined with the @media print CSS that hides every other body child,
+          this lets the document flow grow to the print content's full height
+          (avoids the single-page clipping caused by App's h-screen layout). */}
+      {createPortal(
+        <div className="print-portal">
+          <div id="print-area" className="print-only">
+            <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0f172a' }}>
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Inventario — {AREA_LABEL[area]}</h1>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: '#475569' }}>
+                {locationLabel} · {categoryLabel}
+              </p>
+            </header>
 
         {totalProducts === 0 ? (
           <p style={{ fontStyle: 'italic', color: '#64748b' }}>Nessun prodotto corrispondente ai filtri.</p>
@@ -263,10 +269,13 @@ export const PrintInventoryModal: React.FC<Props> = ({
           ))
         )}
 
-        <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#94a3b8', textAlign: 'right' }}>
-          Stampato il {new Date().toLocaleString('it-IT')}
-        </footer>
-      </div>
+            <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#94a3b8', textAlign: 'right' }}>
+              Stampato il {new Date().toLocaleString('it-IT')}
+            </footer>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };
