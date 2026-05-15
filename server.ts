@@ -969,14 +969,13 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             );
         }
 
-        // Auto-save contact to the customer rubrica if a phone was provided
-        // and no matching customer exists. Side-effect — never fails the route.
-        await upsertCustomerFromReservation(
-            customer_name,
-            phone,
-            email,
-            req.user ? { userId: req.user.userId, email: req.user.email } : null
-        );
+        // Auto-save the contact to the rubrica if a phone was provided and no
+        // matching customer exists. If one already exists, sync the name (and
+        // email) so the rubrica reflects edits made on the reservation. Both
+        // are side-effects — never fail the route.
+        const actor = req.user ? { userId: req.user.userId, email: req.user.email } : null;
+        await upsertCustomerFromReservation(customer_name, phone, email, actor);
+        await syncCustomerFromReservation(customer_name, phone, email, actor);
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
@@ -2068,6 +2067,64 @@ const upsertCustomerFromReservation = async (
         }
     } catch (err) {
         console.error('upsertCustomerFromReservation failed:', err);
+    }
+};
+
+// Keep the rubrica name in sync when a reservation is renamed. Looks up the
+// customer by phone-digits match and updates the name (and email if newly
+// provided) when they differ. Failures are swallowed.
+const syncCustomerFromReservation = async (
+    customerName: string | null | undefined,
+    phone: string | null | undefined,
+    email: string | null | undefined,
+    actor: { userId: number; email: string } | null | undefined
+): Promise<void> => {
+    try {
+        if (!phone || !String(phone).trim()) return;
+        if (!customerName || !String(customerName).trim()) return;
+        const phoneDigits = String(phone).trim().replace(/\D/g, '');
+        if (!phoneDigits) return;
+
+        const existing = await queryWithRetry(
+            `SELECT id, name, email FROM customers
+             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+             LIMIT 1`,
+            [phoneDigits]
+        );
+        if (existing.rows.length === 0) return;
+
+        const current = existing.rows[0];
+        const normalizedName = normalizeCustomerName(String(customerName).trim());
+        const newEmail = email && String(email).trim() ? String(email).trim() : null;
+
+        const nameChanged = normalizedName !== current.name;
+        const emailChanged = newEmail && newEmail !== current.email;
+
+        if (!nameChanged && !emailChanged) return;
+
+        await queryWithRetry(
+            `UPDATE customers SET
+                name = $1,
+                email = COALESCE($2, email),
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [normalizedName, newEmail, current.id]
+        );
+
+        if (actor) {
+            LogService.logActivity(
+                actor.userId,
+                actor.email,
+                actor.email,
+                ActivityAction.UPDATE,
+                ResourceType.CUSTOMER,
+                current.id,
+                normalizedName,
+                { source: 'reservation_sync', previous_name: current.name }
+            );
+        }
+    } catch (err) {
+        console.error('syncCustomerFromReservation failed:', err);
     }
 };
 
