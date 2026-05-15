@@ -441,6 +441,21 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
             });
         }
 
+        if (outcome.status === 'already_cancelled') {
+            const dt = new Date(outcome.reservation.reservation_time);
+            const hh = String(dt.getHours()).padStart(2, '0');
+            const mm = String(dt.getMinutes()).padStart(2, '0');
+            console.log('[ElevenLabs] cancel-reservation: already cancelled', {
+                id: outcome.reservation.id, conversation_id: conversationId,
+            });
+            return res.json({
+                success: false,
+                status: 'already_cancelled',
+                reservation_id: outcome.reservation.id,
+                message: `La prenotazione di ${outcome.reservation.customer_name} delle ${hh}:${mm} risulta già annullata. C'è altro che posso fare?`
+            });
+        }
+
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map(c => {
                 const t = new Date(c.reservation_time);

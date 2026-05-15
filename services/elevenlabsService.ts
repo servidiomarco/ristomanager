@@ -334,6 +334,7 @@ export interface CancelCandidate {
 
 export type CancelVoiceReservationOutput =
     | { status: 'cancelled'; reservation: CancelCandidate }
+    | { status: 'already_cancelled'; reservation: CancelCandidate }
     | { status: 'not_found' }
     | { status: 'ambiguous'; candidates: CancelCandidate[] };
 
@@ -372,7 +373,30 @@ export async function cancelVoiceReservation(
     const matches = await queryWithRetry(sql, params);
     const rows: CancelCandidate[] = matches.rows;
 
-    if (rows.length === 0) return { status: 'not_found' };
+    if (rows.length === 0) {
+        // Nothing active to cancel — check whether the caller is asking us to
+        // cancel something we already cancelled (common after a dashboard test
+        // or a duplicate call). Same filters as above but allowing the
+        // CANCELLED status, so we can tell the caller it's already done.
+        const cancelledParams: any[] = [phone, input.date];
+        let cancelledSql = `
+            SELECT id, customer_name, reservation_time, shift, guests
+            FROM reservations
+            WHERE phone = $1
+              AND DATE(reservation_time) = $2::date
+              AND COALESCE(reservation_status, 'CONFIRMED') = 'CANCELLED'
+        `;
+        if (input.time) {
+            cancelledSql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+            cancelledParams.push(input.time);
+        }
+        cancelledSql += ' ORDER BY reservation_time DESC LIMIT 1';
+        const cancelledResult = await queryWithRetry(cancelledSql, cancelledParams);
+        if (cancelledResult.rows.length > 0) {
+            return { status: 'already_cancelled', reservation: cancelledResult.rows[0] };
+        }
+        return { status: 'not_found' };
+    }
     if (rows.length > 1) return { status: 'ambiguous', candidates: rows };
 
     const target = rows[0];
