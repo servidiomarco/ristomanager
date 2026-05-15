@@ -19,16 +19,15 @@ declare module 'react' {
     }
 }
 
-// On mobile (<1024px, where our bottom tab bar is shown) we lift the
-// widget above the nav so it doesn't overlap the tab buttons. The bar is
-// ~72px tall and sits below the iOS safe-area, so the offset combines
-// both plus a small gap.
+// Pin the widget to the top-right corner. Use the iOS safe-area inset so
+// it clears the status bar / notch on PWA installs; bottom is reset to
+// `auto` because the widget's default :host rule positions from bottom.
 const POSITION_OVERRIDE_CSS = `
-@media (max-width: 1023.98px) {
-    :host {
-        bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 16px) !important;
-        right: 16px !important;
-    }
+:host {
+    top: calc(env(safe-area-inset-top, 0px) + 16px) !important;
+    right: 16px !important;
+    bottom: auto !important;
+    left: auto !important;
 }
 `;
 
