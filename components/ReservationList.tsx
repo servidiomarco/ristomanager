@@ -811,10 +811,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  type ReservationStateKey = 'waiting' | 'arrived' | 'freed' | 'noshow';
+  type ReservationStateKey = 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled';
 
   const getReservationState = (res: Reservation): ReservationStateKey => {
-    if ((res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.NO_SHOW) return 'noshow';
+    const rs = res.reservation_status || ReservationStatus.CONFIRMED;
+    if (rs === ReservationStatus.CANCELLED) return 'cancelled';
+    if (rs === ReservationStatus.NO_SHOW) return 'noshow';
     const a = res.arrival_status || ArrivalStatus.WAITING;
     if (a === ArrivalStatus.DEPARTED) return 'freed';
     if (a === ArrivalStatus.ARRIVED) return 'arrived';
@@ -822,10 +824,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
-    waiting: { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
-    arrived: { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
-    freed:   { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
-    noshow:  { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
+    waiting:   { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
+    arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
+    freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
+    noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
+    cancelled: { label: 'Annullata',dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
   };
 
   const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
@@ -848,6 +851,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       case 'noshow':
         update.arrival_status = ArrivalStatus.WAITING;
         update.reservation_status = ReservationStatus.NO_SHOW;
+        break;
+      case 'cancelled':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.CANCELLED;
         break;
     }
     onUpdateReservation({ ...res, ...update });
@@ -3478,7 +3485,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {stateChangeReservation && (() => {
         const res = stateChangeReservation;
         const current = getReservationState(res);
-        const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow'];
+        const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow', 'cancelled'];
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] px-4" onClick={() => setStateChangeReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[var(--color-line)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
