@@ -1555,9 +1555,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
 
           {/* Row 2: Customer name */}
-          <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
-            {toTitleCase(res.customer_name)}
-          </p>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {res.created_by_user_name && (
+              <span
+                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+                title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+                aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+              >
+                {getInitials(res.created_by_user_name)}
+              </span>
+            )}
+            <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+              {toTitleCase(res.customer_name)}
+            </p>
+          </div>
 
           {/* Row 3: Actions */}
           {canEdit && (
@@ -2415,9 +2426,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   </div>
 
                                   {/* Row 2: Customer name */}
-                                  <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate mt-0.5 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
-                                    {toTitleCase(res.customer_name)}
-                                  </p>
+                                  <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                                    {res.created_by_user_name && (
+                                      <span
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+                                        title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+                                        aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
+                                      >
+                                        {getInitials(res.created_by_user_name)}
+                                      </span>
+                                    )}
+                                    <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+                                      {toTitleCase(res.customer_name)}
+                                    </p>
+                                  </div>
 
                                   {/* Row 3: Actions */}
                                   {canEdit && (
