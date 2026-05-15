@@ -345,15 +345,18 @@ body {
   /* Hide every direct body child except the portal that holds #print-area.
      `display: none` (not `visibility: hidden`) lets the body collapse so the
      print content can grow to its natural multi-page height. */
+  html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
   body > *:not(.print-portal) { display: none !important; }
-  .print-portal { display: block !important; }
+  .print-portal { display: block !important; margin: 0 !important; padding: 0 !important; }
   #print-area {
     display: block;
     width: 100%;
+    margin: 0;
     padding: 0;
     color: #0f172a;
     background: white;
   }
+  #print-area > *:first-child { margin-top: 0 !important; }
   .print-only { display: block; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 1.5cm; }

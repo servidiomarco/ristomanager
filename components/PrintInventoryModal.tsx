@@ -224,7 +224,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
           <p style={{ fontStyle: 'italic', color: '#64748b' }}>Nessun prodotto corrispondente ai filtri.</p>
         ) : (
           groups.map(group => (
-            <section key={group.id} style={{ marginBottom: '1.25rem', pageBreakInside: 'avoid' }}>
+            <section key={group.id} style={{ marginBottom: '1.25rem' }}>
               <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 0.4rem', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.25rem' }}>
                 {group.name}
                 <span style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.8rem', color: '#64748b' }}>
