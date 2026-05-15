@@ -235,6 +235,27 @@ const App: React.FC = () => {
     }
   }, [isAuthenticated]);
 
+  // Re-fetch when the PWA / tab returns to the foreground. iOS Safari throttles
+  // and often kills background websockets, so the socket "connect" handler is
+  // not always enough — visibilitychange and pageshow cover the short
+  // backgrounding case where the socket never noticed the gap.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onResume = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+    document.addEventListener('visibilitychange', onResume);
+    // pageshow fires when a page is restored from the bfcache (common on iOS
+    // when swiping back to a previously suspended PWA).
+    window.addEventListener('pageshow', onResume);
+    return () => {
+      document.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('pageshow', onResume);
+    };
+  }, [isAuthenticated]);
+
   const fetchData = async () => {
     try {
       const [roomsData, tablesData, dishesData, banquetMenusData, reservationsData] = await Promise.all([
@@ -418,10 +439,15 @@ const App: React.FC = () => {
 
     // Connection/Disconnection handlers with offline queue
     socket.on('connect', async () => {
-      console.log('✅ Socket connected - flushing offline queue');
+      console.log('✅ Socket connected - refreshing data');
 
       // Show reconnection toast
       addToast('Connessione ristabilita', 'success');
+
+      // Always re-fetch on (re)connect. iOS suspends websockets when the PWA
+      // is backgrounded; on resume the socket reconnects and we may have
+      // missed broadcasts while disconnected, so pull the current state.
+      fetchData();
 
       // Flush offline queue if there are pending operations
       if (!offlineQueue.isEmpty()) {
@@ -437,7 +463,8 @@ const App: React.FC = () => {
           addToast(`⚠ ${result.failed} operazioni non riuscite`, 'error');
         }
 
-        // Refresh all data after sync
+        // Refresh again after the flush so the UI reflects the server state
+        // produced by replaying the queue.
         fetchData();
       }
     });
