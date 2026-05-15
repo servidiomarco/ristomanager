@@ -911,14 +911,19 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 });
             }
         }
+        // Capture the previous reservation_status in the same statement so we
+        // can detect transitions (e.g. → CANCELLED) without an extra round-trip
+        // and without a race with concurrent updates.
         const result = await queryWithRetry(
-            `WITH upd AS (
+            `WITH old AS (
+                SELECT reservation_status AS prev_status FROM reservations WHERE id = $12
+            ), upd AS (
                 UPDATE reservations
                 SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10, reservation_status = $11
                 WHERE id = $12
                 RETURNING *
             )
-            SELECT upd.*, u.full_name AS created_by_user_name
+            SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status
             FROM upd
             LEFT JOIN users u ON upd.created_by_user_id = u.id`,
             [
@@ -937,6 +942,10 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             ]
         );
         const updatedReservation = result.rows[0];
+        const previousStatus: string | null = updatedReservation?.prev_status ?? null;
+        if (updatedReservation && 'prev_status' in updatedReservation) {
+            delete (updatedReservation as any).prev_status;
+        }
 
         // Log activity
         if (req.user) {
@@ -964,6 +973,32 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationUpdated(updatedReservation, socketId);
+
+        // Notify managers when a booking transitions to CANCELLED (soft cancel).
+        // Skip if it was already CANCELLED — avoids duplicate notifications on
+        // saves that don't change the status.
+        if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
+            const reservationLabel = (() => {
+                try {
+                    const dt = new Date(updatedReservation.reservation_time);
+                    const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                    const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                    return `${date} ${time}`;
+                } catch {
+                    return updatedReservation.reservation_time;
+                }
+            })();
+            pushSendToRoles(
+                ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+                {
+                    title: 'Prenotazione annullata',
+                    body: `${updatedReservation.customer_name} · ${updatedReservation.guests} ospiti · ${reservationLabel}`,
+                    url: '/?view=RESERVATIONS',
+                    tag: `reservation-${updatedReservation.id}`,
+                },
+                { excludeUserId: req.user?.userId ?? null }
+            ).catch(err => console.error('Push (cancellation) failed:', err));
+        }
 
         res.json(updatedReservation);
     } catch (err: any) {
