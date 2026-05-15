@@ -27,8 +27,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import {
   Loader2, Plus, Minus, Pencil, Trash2, X, Settings, Boxes,
-  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer,
 } from 'lucide-react';
+import { PrintInventoryModal } from './PrintInventoryModal';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -94,6 +95,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
+
+  // Print modal
+  const [printModalOpen, setPrintModalOpen] = useState(false);
 
   // Load everything for the active area whenever it changes.
   useEffect(() => {
@@ -452,26 +456,36 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           ))}
         </div>
 
-        {canEdit && (
-          <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
-            <button
-              onClick={() => setCategoriesModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-              title="Gestione categorie"
-            >
-              <Tag className="h-3.5 w-3.5" />
-              Gestione categorie
-            </button>
-            <button
-              onClick={() => setLocationsModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-              title="Gestione aree"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Gestione aree
-            </button>
-          </div>
-        )}
+        <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
+          <button
+            onClick={() => setPrintModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+            title="Stampa inventario"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Stampa
+          </button>
+          {canEdit && (
+            <>
+              <button
+                onClick={() => setCategoriesModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                title="Gestione categorie"
+              >
+                <Tag className="h-3.5 w-3.5" />
+                Gestione categorie
+              </button>
+              <button
+                onClick={() => setLocationsModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                title="Gestione aree"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Gestione aree
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Category filter pills */}
@@ -530,24 +544,33 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               className="w-full h-9 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] pl-9 pr-3 text-sm focus:outline-none focus:border-[var(--color-fg)]"
             />
           </div>
-          {canEdit && (
-            <div className="flex md:hidden items-center gap-1.5">
-              <button
-                onClick={() => setCategoriesModalOpen(true)}
-                className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                title="Gestione categorie"
-              >
-                <Tag className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setLocationsModalOpen(true)}
-                className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                title="Gestione aree"
-              >
-                <Settings className="h-4 w-4" />
-              </button>
-            </div>
-          )}
+          <div className="flex md:hidden items-center gap-1.5">
+            <button
+              onClick={() => setPrintModalOpen(true)}
+              className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+              title="Stampa inventario"
+            >
+              <Printer className="h-4 w-4" />
+            </button>
+            {canEdit && (
+              <>
+                <button
+                  onClick={() => setCategoriesModalOpen(true)}
+                  className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                  title="Gestione categorie"
+                >
+                  <Tag className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setLocationsModalOpen(true)}
+                  className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
+                  title="Gestione aree"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
         {canEdit && (
           <button
@@ -950,6 +973,19 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </div>
         </div>
       )}
+
+      {/* ----- Print inventory modal ----- */}
+      <PrintInventoryModal
+        isOpen={printModalOpen}
+        onClose={() => setPrintModalOpen(false)}
+        area={activeArea}
+        locations={locations}
+        products={products}
+        stock={stock}
+        categories={categories}
+        initialLocationId={activeLocationId}
+        initialCategoryFilter={categoryFilter}
+      />
 
       {/* ----- Confirm delete product ----- */}
       {confirmDeleteProductId != null && (
