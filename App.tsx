@@ -1618,22 +1618,25 @@ const App: React.FC = () => {
               className="fixed left-0 right-0 z-[29] lg:hidden bg-[var(--color-surface)] rounded-t-[20px] border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)]"
               style={{ bottom: 0, animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
-              <div className="px-6 pt-5 pb-20 grid grid-cols-2 gap-4 justify-items-center" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+              <div className="px-6 pt-5 pb-20 flex flex-wrap justify-center gap-x-3 gap-y-5" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
                 {[
-                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
-                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
-                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
-                  { key: 'todo', icon: <ListTodo className="h-7 w-7" />, label: 'Attività', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewTodo(true); setShowCreateSheet(false); } },
+                  { key: 'reservation', icon: <Calendar className="h-6 w-6" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  { key: 'banquet', icon: <CalendarDays className="h-6 w-6" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
+                  { key: 'shopping', icon: <ShoppingCart className="h-6 w-6" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
+                  { key: 'customer', icon: <BookUser className="h-6 w-6" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
+                  { key: 'todo', icon: <ListTodo className="h-6 w-6" />, label: 'Attività', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewTodo(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button
                     key={tile.key}
                     type="button"
                     onClick={tile.action}
-                    className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
+                    // Fixed-width flex children with flex-wrap + justify-center
+                    // gives a 3-2 layout where the bottom row is centered, so
+                    // no orphan tile sits next to an empty grid cell.
+                    className="basis-[28%] max-w-[112px] flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
                     style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
                   >
-                    <div className="w-20 h-20 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
+                    <div className="w-16 h-16 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
                       {tile.icon}
                     </div>
                     <span className="text-[12px] font-semibold text-[var(--color-fg)]">{tile.label}</span>
