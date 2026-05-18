@@ -79,6 +79,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
   }, [banquetMenus, printDate, includeBanquets]);
 
   const totalGuests = filteredReservations.reduce((acc, r) => acc + r.guests, 0);
+  const totalChildren = filteredReservations.reduce((acc, r) => acc + (r.children || 0), 0);
   const arrivedCount = filteredReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED).length;
 
   const shiftLabel = printShift === 'ALL'
@@ -247,7 +248,12 @@ export const PrintReservationsModal: React.FC<Props> = ({
                           {r.customer_name}
                           {arrived && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#059669' }}>✓ arrivato</span>}
                         </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>{r.guests}</td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          {r.guests}
+                          {r.children && r.children > 0 ? (
+                            <span style={{ fontSize: '0.7rem', color: '#64748b', marginLeft: 3 }}>({r.children}b)</span>
+                          ) : null}
+                        </td>
                         <td style={{ padding: '0.5rem' }}>{table ? table.name : '—'}</td>
                         <td style={{ padding: '0.5rem' }}>{r.phone || '—'}</td>
                         <td style={{ padding: '0.5rem', fontSize: '0.78rem' }}>{r.notes || ''}</td>
@@ -260,7 +266,12 @@ export const PrintReservationsModal: React.FC<Props> = ({
                     <td colSpan={2} style={{ padding: '0.5rem' }}>
                       Totale: {filteredReservations.length} prenotazioni
                     </td>
-                    <td style={{ padding: '0.5rem', textAlign: 'center' }}>{totalGuests}</td>
+                    <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                      {totalGuests}
+                      {totalChildren > 0 && (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginLeft: 4 }}>({totalChildren}b)</span>
+                      )}
+                    </td>
                     <td colSpan={3} style={{ padding: '0.5rem' }}>
                       {arrivedCount > 0 && `(${arrivedCount} arrivati)`}
                     </td>

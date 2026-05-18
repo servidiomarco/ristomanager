@@ -80,9 +80,12 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
   const totalDue = useMemo(() => {
     const guests = banquet.guests || 0;
-    const price = Number(banquet.price_per_person) || 0;
-    return guests > 0 ? price * guests : 0;
-  }, [banquet.guests, banquet.price_per_person]);
+    const children = Math.min(banquet.children || 0, guests);
+    const adults = Math.max(0, guests - children);
+    const adultPrice = Number(banquet.price_per_person) || 0;
+    const childPrice = banquet.children_price != null ? Number(banquet.children_price) : adultPrice;
+    return guests > 0 ? adults * adultPrice + children * childPrice : 0;
+  }, [banquet.guests, banquet.children, banquet.price_per_person, banquet.children_price]);
 
   const totalPaid = useMemo(
     () => payments.reduce((sum, p) => sum + Number(p.amount), 0),
@@ -170,7 +173,16 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
               </div>
               {totalDue > 0 && (
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  {banquet.guests} × {formatEuro(banquet.price_per_person)}
+                  {(() => {
+                    const guests = banquet.guests || 0;
+                    const children = Math.min(banquet.children || 0, guests);
+                    const adults = Math.max(0, guests - children);
+                    const childPrice = banquet.children_price != null ? Number(banquet.children_price) : null;
+                    if (children > 0 && childPrice != null) {
+                      return `${adults} × ${formatEuro(banquet.price_per_person)} + ${children} × ${formatEuro(childPrice)}`;
+                    }
+                    return `${guests} × ${formatEuro(banquet.price_per_person)}`;
+                  })()}
                 </div>
               )}
             </div>

@@ -62,11 +62,17 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 <span className="inline-flex items-center gap-1 text-xs text-slate-600">
                   <Users className="h-3.5 w-3.5 text-indigo-500" />
                   <span className="font-semibold">{banquet.guests}</span> coperti
+                  {banquet.children != null && banquet.children > 0 && (
+                    <span className="text-slate-500">({banquet.children} bambin{banquet.children === 1 ? 'o' : 'i'})</span>
+                  )}
                 </span>
               )}
               {canViewBanquetPrice && (
                 <span className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600">
                   €{banquet.price_per_person}/pax
+                  {banquet.children_price != null && (
+                    <span className="text-indigo-500">· €{banquet.children_price}/bambino</span>
+                  )}
                 </span>
               )}
             </div>

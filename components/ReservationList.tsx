@@ -391,6 +391,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
       guests: 2,
+      children: 0,
       reservation_time: `${new Date().toISOString().split('T')[0]}T20:00`,
       shift: Shift.DINNER,
       payment_status: PaymentStatus.PENDING,
@@ -1014,6 +1015,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setFormData({
         customer_name: '',
         guests: 2,
+        children: 0,
         reservation_time: `${dateOnly}T${defaultTime}`,
         shift: newShift,
         payment_status: PaymentStatus.PENDING,
@@ -1462,6 +1464,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {reservation ? (
                     <span className="flex items-center gap-1 text-lg sm:text-xl font-bold leading-tight">
                         <Users size={18} /> {reservation.guests}
+                        {reservation.children && reservation.children > 0 ? (
+                            <span className="text-xs font-normal opacity-75 ml-0.5">({reservation.children}b)</span>
+                        ) : null}
                     </span>
                 ) : banquet ? (
                     <span className="flex items-center gap-1 text-xs sm:text-sm font-semibold">
@@ -1632,6 +1637,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
             <Users className="h-3.5 w-3.5" />
             <span className="text-base font-medium tabular">{res.guests}</span>
+            {res.children && res.children > 0 ? (
+                <span className="text-[10px] opacity-75">({res.children}b)</span>
+            ) : null}
           </div>
         </div>
 
@@ -1685,7 +1693,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div>
               <h3 className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name)}</h3>
               <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
-                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
+                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
                 {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
               </div>
@@ -1844,6 +1852,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
                 <span className="text-xs text-[var(--color-fg-muted)] font-medium">
                   {group.items.length} {group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · {group.items.reduce((s, r) => s + (r.guests || 0), 0)} coperti
+                  {(() => {
+                    const totalChildren = group.items.reduce((s, r) => s + (r.children || 0), 0);
+                    return totalChildren > 0 ? ` (${totalChildren} bambin${totalChildren === 1 ? 'o' : 'i'})` : '';
+                  })()}
                 </span>
                 <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
               </button>
@@ -2160,7 +2172,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
-                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}{reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''}</span>
                                   <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
                                 </div>
                               </>
@@ -2688,7 +2700,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => setFormData({...formData, guests: Math.max(1, (formData.guests || 2) - 1)})}
+                                        onClick={() => {
+                                            const newGuests = Math.max(1, (formData.guests || 2) - 1);
+                                            setFormData({...formData, guests: newGuests, children: Math.min(formData.children || 0, newGuests)});
+                                        }}
                                         className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
                                     >
                                         −
@@ -2699,11 +2714,47 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         required
                                         className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
                                         value={formData.guests || ''}
-                                        onChange={e => setFormData({...formData, guests: parseInt(e.target.value) || undefined})}
+                                        onChange={e => {
+                                            const newGuests = parseInt(e.target.value) || undefined;
+                                            setFormData({...formData, guests: newGuests, children: newGuests != null ? Math.min(formData.children || 0, newGuests) : formData.children});
+                                        }}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Children */}
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Di cui Bambini</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, children: Math.max(0, (formData.children || 0) - 1)})}
+                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                                    >
+                                        −
+                                    </button>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max={formData.guests || 0}
+                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                        value={formData.children ?? 0}
+                                        onChange={e => {
+                                            const raw = parseInt(e.target.value) || 0;
+                                            const clamped = Math.max(0, Math.min(raw, formData.guests || 0));
+                                            setFormData({...formData, children: clamped});
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData({...formData, children: Math.min(formData.guests || 0, (formData.children || 0) + 1)})}
                                         className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
                                     >
                                         +

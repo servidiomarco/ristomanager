@@ -801,7 +801,8 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
@@ -817,8 +818,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name
@@ -829,6 +830,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 reservation_time,
                 shift,
                 guests,
+                childrenCount,
                 table_id ?? null,
                 notes ?? null,
                 email ?? null,
@@ -905,7 +907,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
@@ -924,11 +927,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
-                SELECT reservation_status AS prev_status FROM reservations WHERE id = $12
+                SELECT reservation_status AS prev_status FROM reservations WHERE id = $13
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, table_id = $5, notes = $6, email = $7, phone = $8, payment_status = $9, arrival_status = $10, reservation_status = $11
-                WHERE id = $12
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12
+                WHERE id = $13
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status
@@ -939,6 +942,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 reservation_time,
                 shift,
                 guests,
+                childrenCount,
                 table_id ?? null,
                 notes ?? null,
                 email ?? null,
@@ -2923,8 +2927,8 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
         const result = await queryWithRetry(
             `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
-                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
-                    b.table_ids,
+                    b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
+                    b.notes_mise_en_place, b.customer_id, b.table_ids,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b
              ORDER BY b.event_date NULLS LAST, b.name`
@@ -2938,7 +2942,9 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const childrenPrice = children_price != null && children_price !== '' ? Number(children_price) : null;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -2960,8 +2966,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             }
         }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null]
         );
         const newMenu = result.rows[0];
 
@@ -2997,7 +3003,9 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const childrenPrice = children_price != null && children_price !== '' ? Number(children_price) : null;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -3018,8 +3026,8 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             }
         }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, notes_courses = $10, notes_service = $11, notes_mise_en_place = $12, customer_id = $13, table_ids = $14 WHERE id = $15 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16 WHERE id = $17 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, id]
         );
         const updatedMenu = result.rows[0];
 

@@ -129,6 +129,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       shift: undefined,
       deposit_amount: undefined,
       guests: undefined,
+      children: 0,
+      children_price: null,
       customer_id: null,
       notes_courses: '',
       notes_service: '',
@@ -297,6 +299,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           guests: newBanquet.guests != null && newBanquet.guests !== ('' as any)
               ? Number(newBanquet.guests)
               : undefined,
+          children: Number(newBanquet.children ?? 0),
+          children_price: newBanquet.children_price != null && newBanquet.children_price !== ('' as any)
+              ? Number(newBanquet.children_price)
+              : null,
           customer_id: newBanquet.customer_id ?? null,
           notes_courses: newBanquet.notes_courses?.trim() || undefined,
           notes_service: newBanquet.notes_service?.trim() || undefined,
@@ -316,7 +322,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         setIsEditingBanquet(false);
         setEditingBanquetId(null);
         setSelectedBanquetCustomer(null);
-        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [] });
+        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [] });
       } catch (err: any) {
         const msg = err?.message || 'Errore durante il salvataggio';
         const isConflict = err?.status === 409 || /tavolo/i.test(msg);
@@ -343,6 +349,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       shift: menu.shift,
       deposit_amount: menu.deposit_amount != null ? Number(menu.deposit_amount) : undefined,
       guests: menu.guests != null ? Number(menu.guests) : undefined,
+      children: menu.children != null ? Number(menu.children) : 0,
+      children_price: menu.children_price != null ? Number(menu.children_price) : null,
       customer_id: menu.customer_id ?? null,
       notes_courses: menu.notes_courses || '',
       notes_service: menu.notes_service || '',
@@ -367,6 +375,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       courses: [{ name: '1ª Uscita', dish_ids: [] }],
       event_date: '', shift: undefined, deposit_amount: undefined,
       guests: undefined,
+      children: 0,
+      children_price: null,
       customer_id: null,
       notes_courses: '', notes_service: '', notes_mise_en_place: '',
       table_ids: []
@@ -1123,9 +1133,44 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         placeholder="es. 80"
                         className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
                         value={newBanquet.guests ?? ''}
-                        onChange={e => setNewBanquet({...newBanquet, guests: e.target.value === '' ? undefined : parseInt(e.target.value, 10)})}
+                        onChange={e => {
+                            const parsed = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                            const clampedChildren = parsed != null ? Math.min(newBanquet.children ?? 0, parsed) : (newBanquet.children ?? 0);
+                            setNewBanquet({...newBanquet, guests: parsed, children: clampedChildren});
+                        }}
                     />
                 </div>
+                <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Di cui Bambini <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                    <input
+                        type="number"
+                        min="0"
+                        max={newBanquet.guests ?? undefined}
+                        step="1"
+                        placeholder="0"
+                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                        value={newBanquet.children ?? 0}
+                        onChange={e => {
+                            const raw = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                            const clamped = Math.max(0, Math.min(raw, newBanquet.guests ?? 0));
+                            setNewBanquet({...newBanquet, children: clamped});
+                        }}
+                    />
+                </div>
+                {canViewBanquetPrice && (
+                <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Bambini (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Se vuoto: stesso prezzo adulti"
+                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                        value={newBanquet.children_price ?? ''}
+                        onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                    />
+                </div>
+                )}
               </div>
               <div>
                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Cliente <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
@@ -1786,6 +1831,9 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                             <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
                             <span className="font-medium text-[var(--color-fg)]">{menu.guests}</span>
                             <span>coperti</span>
+                            {menu.children != null && menu.children > 0 && (
+                              <span className="text-[var(--color-fg-subtle)]">({menu.children} bambin{menu.children === 1 ? 'o' : 'i'})</span>
+                            )}
                           </span>
                         )}
                         {hasNotes && (

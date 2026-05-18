@@ -259,6 +259,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_courses TEXT;`);
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_service TEXT;`);
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS notes_mise_en_place TEXT;`);
+        // Children sub-count (of `guests`) and optional child fare. children_price
+        // NULL means children are billed at the adult rate.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS children INTEGER NOT NULL DEFAULT 0;`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS children_price DECIMAL(10, 2);`);
 
         // Add event_date column to existing banquet_menus if missing
         await client.query(`
@@ -343,6 +347,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Track origin of each reservation: MANUAL (CRM), WHATSAPP (Vonage), VOICE (ElevenLabs).
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'MANUAL';`);
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS requires_review BOOLEAN DEFAULT false;`);
+        // Children sub-count of `guests`. Server enforces 0 <= children <= guests.
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS children INTEGER NOT NULL DEFAULT 0;`);
 
         // Audit table for ElevenLabs voice calls. Stores transcript + summary so
         // staff can review what the agent agreed to. Linked to a reservation

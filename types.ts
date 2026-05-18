@@ -72,6 +72,8 @@ export interface BanquetMenu {
   shift?: Shift;
   deposit_amount?: number;
   guests?: number;
+  children?: number;
+  children_price?: number | null;
   notes_courses?: string;
   notes_service?: string;
   notes_mise_en_place?: string;
@@ -157,6 +159,7 @@ export interface Reservation {
   reservation_time: string;
   shift: Shift;
   guests: number;
+  children?: number;
   table_id?: number;
   notes?: string;
   email?: string;
