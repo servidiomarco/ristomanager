@@ -273,7 +273,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (!newBanquet.name || !newBanquet.name.trim()) missing.push('Nome Menu');
       if (!newBanquet.event_date) missing.push('Data Evento');
       if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
-        missing.push('Prezzo per Persona');
+        missing.push('Prezzo Adulti');
       }
 
       if (missing.length > 0) {
@@ -1027,161 +1027,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeBanquetForm(); }}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-none overflow-hidden flex flex-col h-full" onClick={e => e.stopPropagation()}>
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-5xl overflow-hidden flex flex-col h-full" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h3>
               <button onClick={closeBanquetForm} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
-                    <input
-                        required
-                        placeholder="es. Menu Matrimonio Gold"
-                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
-                          banquetFieldHasError('Nome Menu')
-                            ? 'border-rose-400 focus:border-rose-500'
-                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
-                        }`}
-                        value={newBanquet.name}
-                        onChange={e => {
-                          setNewBanquet({...newBanquet, name: e.target.value});
-                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Nome Menu'));
-                        }}
-                    />
-                </div>
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
-                    <input
-                        type="date"
-                        required
-                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
-                          banquetFieldHasError('Data Evento')
-                            ? 'border-rose-400 focus:border-rose-500'
-                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
-                        }`}
-                        value={newBanquet.event_date || ''}
-                        onChange={e => {
-                          setNewBanquet({...newBanquet, event_date: e.target.value});
-                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Data Evento'));
-                        }}
-                    />
-                </div>
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
-                    <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-                        <button
-                            type="button"
-                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                newBanquet.shift === Shift.LUNCH
-                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                            }`}
-                        >
-                            <Sun className="h-4 w-4" /> Pranzo
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                newBanquet.shift === Shift.DINNER
-                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                            }`}
-                        >
-                            <Sunset className="h-4 w-4" /> Cena
-                        </button>
-                    </div>
-                </div>
-                {canViewBanquetPrice && (
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo per Persona (€) <span className="text-rose-500">*</span></label>
-                    <input
-                        type="number"
-                        required
-                        min="0"
-                        step="0.01"
-                        className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
-                          banquetFieldHasError('Prezzo per Persona')
-                            ? 'border-rose-400 focus:border-rose-500'
-                            : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
-                        }`}
-                        value={newBanquet.price_per_person}
-                        onChange={e => {
-                          setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)});
-                          if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Prezzo per Persona'));
-                        }}
-                    />
-                </div>
-                )}
-                {canViewBanquetPrice && (
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                    <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                        value={newBanquet.deposit_amount ?? ''}
-                        onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
-                    />
-                </div>
-                )}
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Numero Ospiti <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                    <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="es. 80"
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                        value={newBanquet.guests ?? ''}
-                        onChange={e => {
-                            const parsed = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                            const clampedChildren = parsed != null ? Math.min(newBanquet.children ?? 0, parsed) : (newBanquet.children ?? 0);
-                            setNewBanquet({...newBanquet, guests: parsed, children: clampedChildren});
-                        }}
-                    />
-                </div>
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Di cui Bambini <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                    <input
-                        type="number"
-                        min="0"
-                        max={newBanquet.guests ?? undefined}
-                        step="1"
-                        placeholder="0"
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                        value={newBanquet.children ?? 0}
-                        onChange={e => {
-                            const raw = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                            const clamped = Math.max(0, Math.min(raw, newBanquet.guests ?? 0));
-                            setNewBanquet({...newBanquet, children: clamped});
-                        }}
-                    />
-                </div>
-                {canViewBanquetPrice && (
-                <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Bambini (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                    <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Se vuoto: stesso prezzo adulti"
-                        className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                        value={newBanquet.children_price ?? ''}
-                        onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
-                    />
-                </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Cliente <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+            <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 sm:px-8 py-6 space-y-8">
+
+              {/* SECTION: Cliente */}
+              <section>
+                <header className="mb-3">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Cliente</h4>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Chi ha richiesto il banchetto. Selezionalo dalla rubrica per collegare la prenotazione.</p>
+                </header>
                 {selectedBanquetCustomer ? (
                   <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3">
                     <div className="min-w-0">
@@ -1226,58 +1086,233 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     Seleziona dalla rubrica
                   </button>
                 )}
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale</label>
-                <textarea
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
-                  value={newBanquet.description}
-                  onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
-                />
-              </div>
+              </section>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
-                  <textarea
-                    placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
-                    value={newBanquet.notes_courses || ''}
-                    onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
-                  />
+              {/* SECTION: Evento */}
+              <section className="pt-6 border-t border-[var(--color-line)]">
+                <header className="mb-3">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Evento</h4>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Identifica il banchetto: nome interno, data e turno.</p>
+                </header>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
+                      <input
+                          required
+                          placeholder="es. Menu Matrimonio Gold"
+                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                            banquetFieldHasError('Nome Menu')
+                              ? 'border-rose-400 focus:border-rose-500'
+                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                          }`}
+                          value={newBanquet.name}
+                          onChange={e => {
+                            setNewBanquet({...newBanquet, name: e.target.value});
+                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Nome Menu'));
+                          }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
+                      <input
+                          type="date"
+                          required
+                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                            banquetFieldHasError('Data Evento')
+                              ? 'border-rose-400 focus:border-rose-500'
+                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                          }`}
+                          value={newBanquet.event_date || ''}
+                          onChange={e => {
+                            setNewBanquet({...newBanquet, event_date: e.target.value});
+                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Data Evento'));
+                          }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                      <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
+                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.LUNCH
+                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                            }`}
+                        >
+                            <Sun className="h-4 w-4" /> Pranzo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
+                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                                newBanquet.shift === Shift.DINNER
+                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                            }`}
+                        >
+                            <Sunset className="h-4 w-4" /> Cena
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                    <textarea
+                      placeholder="Breve descrizione visibile in stampa (es. Cresima, Matrimonio civile…)"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
+                      value={newBanquet.description}
+                      onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
-                  <textarea
-                    placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
-                    value={newBanquet.notes_service || ''}
-                    onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Mise en Place</label>
-                  <textarea
-                    placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-24"
-                    value={newBanquet.notes_mise_en_place || ''}
-                    onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
-                  />
-                </div>
-              </div>
+              </section>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)]">Composizione del Menu — Uscite</label>
+              {/* SECTION: Coperti & Tariffa */}
+              <section className="pt-6 border-t border-[var(--color-line)]">
+                <header className="mb-3">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Coperti e Tariffa</h4>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
+                </header>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Numero Ospiti <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="es. 80"
+                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          value={newBanquet.guests ?? ''}
+                          onChange={e => {
+                              const parsed = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                              const clampedChildren = parsed != null ? Math.min(newBanquet.children ?? 0, parsed) : (newBanquet.children ?? 0);
+                              setNewBanquet({...newBanquet, guests: parsed, children: clampedChildren});
+                          }}
+                      />
+                  </div>
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Di cui Bambini <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <input
+                          type="number"
+                          min="0"
+                          max={newBanquet.guests ?? undefined}
+                          step="1"
+                          placeholder="0"
+                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          value={newBanquet.children ?? 0}
+                          onChange={e => {
+                              const raw = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                              const clamped = Math.max(0, Math.min(raw, newBanquet.guests ?? 0));
+                              setNewBanquet({...newBanquet, children: clamped});
+                          }}
+                      />
+                  </div>
+                  {canViewBanquetPrice && (
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Adulti (€) <span className="text-rose-500">*</span></label>
+                      <input
+                          type="number"
+                          required
+                          min="0"
+                          step="0.01"
+                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                            banquetFieldHasError('Prezzo Adulti')
+                              ? 'border-rose-400 focus:border-rose-500'
+                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                          }`}
+                          value={newBanquet.price_per_person}
+                          onChange={e => {
+                            setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)});
+                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Prezzo Adulti'));
+                          }}
+                      />
+                  </div>
+                  )}
+                  {canViewBanquetPrice && (
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Bambini (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Se vuoto: stesso adulti"
+                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          value={newBanquet.children_price ?? ''}
+                          onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                      />
+                  </div>
+                  )}
+                  {canViewBanquetPrice && (
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          value={newBanquet.deposit_amount ?? ''}
+                          onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
+                      />
+                  </div>
+                  )}
+                </div>
+              </section>
+
+              {/* SECTION: Note operative */}
+              <section className="pt-6 border-t border-[var(--color-line)]">
+                <header className="mb-3">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Note operative</h4>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
+                </header>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
+                    <textarea
+                      placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      value={newBanquet.notes_courses || ''}
+                      onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
+                    <textarea
+                      placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      value={newBanquet.notes_service || ''}
+                      onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Mise en Place</label>
+                    <textarea
+                      placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      value={newBanquet.notes_mise_en_place || ''}
+                      onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="pt-6 border-t border-[var(--color-line)]">
+                <header className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Composizione del menu</h4>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-1">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
+                  </div>
                   <button
                     type="button"
                     onClick={addCourse}
-                    className="text-xs font-medium text-[var(--color-fg)] hover:underline flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--color-surface-hover)]"
+                    className="text-xs font-medium text-[var(--color-fg)] hover:underline flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--color-surface-hover)] flex-shrink-0"
                   >
                     <Plus className="h-3.5 w-3.5" /> Aggiungi Uscita
                   </button>
-                </div>
-                <p className="text-xs text-[var(--color-fg-muted)] mb-3">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
+                </header>
 
                 <div className="space-y-3">
                   {(newBanquet.courses || []).map((course, courseIndex) => {
@@ -1429,19 +1464,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   )}
                 </div>
-              </div>
+              </section>
 
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">
-                  Tavoli Assegnati <span className="text-slate-400 font-normal normal-case tracking-normal">— opzionale</span>
-                </label>
+              <section className="pt-6 border-t border-[var(--color-line)]">
+                <header className="mb-3">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Tavoli assegnati <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></h4>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
+                </header>
                 {!newBanquet.event_date || !newBanquet.shift ? (
                   <p className="text-xs text-[var(--color-fg-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
                 ) : tables.length === 0 ? (
                   <p className="text-xs text-[var(--color-fg-muted)] italic">Nessun tavolo configurato.</p>
                 ) : (
                   <div className="space-y-3">
-                    <p className="text-xs text-[var(--color-fg-muted)]">Seleziona uno o più tavoli per il banchetto. I tavoli occupati da altre prenotazioni o banchetti nello stesso turno sono disabilitati.</p>
 
                     {/* Room tabs */}
                     {(() => {
@@ -1567,7 +1602,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     )}
                   </div>
                 )}
-              </div>
+              </section>
 
             </form>
             {banquetFormErrors.length > 0 && (
