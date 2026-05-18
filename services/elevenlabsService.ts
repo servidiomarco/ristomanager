@@ -297,6 +297,7 @@ export interface VoiceReservationInput {
     reservation_time: string;  // ISO datetime
     shift: Shift;
     guests: number;
+    children?: number;
     notes?: string;
     conversation_id?: string;
 }
@@ -307,6 +308,7 @@ export interface VoiceReservationOutput {
     reservation_time: string;
     shift: Shift;
     guests: number;
+    children: number;
     phone: string;
     requires_review: boolean;
 }
@@ -323,19 +325,21 @@ export async function createVoiceReservation(
     const notes = input.notes
         ? `[Voce] ${input.notes}`
         : '[Voce] Prenotazione creata da agent vocale ElevenLabs';
+    const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
 
     const result = await queryWithRetry(`
         INSERT INTO reservations (
-            customer_name, reservation_time, shift, guests, phone,
+            customer_name, reservation_time, shift, guests, children, phone,
             notes, payment_status, arrival_status, source, requires_review
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', 'WAITING', $7, true)
-        RETURNING id, customer_name, reservation_time, shift, guests, phone, requires_review
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true)
+        RETURNING id, customer_name, reservation_time, shift, guests, children, phone, requires_review
     `, [
         input.customer_name.trim(),
         input.reservation_time,
         input.shift,
         input.guests,
+        children,
         phone,
         notes,
         ReservationSource.VOICE
@@ -511,5 +515,8 @@ export function formatItalianConfirmation(r: VoiceReservationOutput): string {
     const mm = String(d.getMinutes()).padStart(2, '0');
     const persone = r.guests === 1 ? 'persona' : 'persone';
     const firstName = r.customer_name.split(' ')[0];
-    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone} ${weekday} ${day} ${month} alle ${hh}:${mm}. Le invieremo conferma su WhatsApp.`;
+    const childrenSuffix = r.children && r.children > 0
+        ? ` di cui ${r.children} ${r.children === 1 ? 'bambino' : 'bambini'}`
+        : '';
+    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone}${childrenSuffix} ${weekday} ${day} ${month} alle ${hh}:${mm}. Le invieremo conferma su WhatsApp.`;
 }

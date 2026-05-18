@@ -907,20 +907,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       console.log('Parsed reservation:', parsed);
 
       // Update form with parsed values, keeping existing values if not parsed
-      setFormData(prev => ({
-        ...prev,
-        customer_name: parsed.customer_name || prev.customer_name,
-        guests: parsed.guests || prev.guests,
-        reservation_time: parsed.reservation_time || prev.reservation_time,
-        shift: parsed.shift || prev.shift,
-        phone: parsed.phone || prev.phone,
-        notes: parsed.notes ? (prev.notes ? `${prev.notes}, ${parsed.notes}` : parsed.notes) : prev.notes,
-      }));
+      setFormData(prev => {
+        const nextGuests = parsed.guests || prev.guests;
+        const rawChildren = parsed.children ?? prev.children;
+        const nextChildren = rawChildren != null && nextGuests != null
+          ? Math.max(0, Math.min(rawChildren, nextGuests))
+          : rawChildren;
+        return {
+          ...prev,
+          customer_name: parsed.customer_name || prev.customer_name,
+          guests: nextGuests,
+          children: nextChildren,
+          reservation_time: parsed.reservation_time || prev.reservation_time,
+          shift: parsed.shift || prev.shift,
+          phone: parsed.phone || prev.phone,
+          notes: parsed.notes ? (prev.notes ? `${prev.notes}, ${parsed.notes}` : parsed.notes) : prev.notes,
+        };
+      });
 
       // Build summary of what was parsed
       const parsedFields: string[] = [];
       if (parsed.customer_name) parsedFields.push(`Nome: ${parsed.customer_name}`);
       if (parsed.guests) parsedFields.push(`${parsed.guests} persone`);
+      if (parsed.children) parsedFields.push(`${parsed.children} bambin${parsed.children === 1 ? 'o' : 'i'}`);
       if (parsed.reservation_time) {
         const dt = new Date(parsed.reservation_time);
         parsedFields.push(`${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`);

@@ -261,6 +261,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     const phoneRaw = String(p.phone ?? '').trim();
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
+    const childrenRaw = p.children;
     const notes = typeof p.notes === 'string' ? p.notes.trim() : undefined;
 
     if (!customerName) {
@@ -305,6 +306,10 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
         return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
     }
+    const childrenNum = Number(childrenRaw);
+    const children = Number.isFinite(childrenNum) && childrenNum > 0
+        ? Math.max(0, Math.min(Math.trunc(childrenNum), Math.trunc(guests)))
+        : 0;
 
     // Build an ISO datetime; the DB column is TIMESTAMPTZ so we let Postgres
     // interpret as the server's configured timezone (Europe/Rome in prod).
@@ -314,7 +319,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         console.log('[ElevenLabs] create-reservation start', {
             customer_name: customerName, raw_date: p.date, raw_time: p.time,
             normalized_date: normalizedDate, normalized_time: normalizedTime,
-            shift: rawShift, guests, conversation_id: conversationId,
+            shift: rawShift, guests, children, conversation_id: conversationId,
         });
         const created = await createVoiceReservation({
             customer_name: customerName,
@@ -322,6 +327,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             reservation_time: reservationTime,
             shift: rawShift as Shift,
             guests: Math.trunc(guests),
+            children,
             notes,
             conversation_id: conversationId,
         });
@@ -350,6 +356,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
                 conversation_id: conversationId,
                 requires_review: created.requires_review,
                 guests: created.guests,
+                children: created.children,
                 reservation_time: created.reservation_time,
                 shift: created.shift,
             }

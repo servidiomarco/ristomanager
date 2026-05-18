@@ -75,6 +75,8 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
   const shift = shiftLabel(menu.shift);
   const guests = menu.guests != null && menu.guests > 0 ? menu.guests : null;
+  const children = menu.children != null && menu.children > 0 ? menu.children : null;
+  const childrenPrice = menu.children_price != null ? formatEuro(menu.children_price) : null;
   const notesHtml = [
     renderNoteBlock('Note Portate (Cucina)', menu.notes_courses),
     renderNoteBlock('Note Servizio (Sala)', menu.notes_service),
@@ -163,6 +165,12 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     font-weight: 700;
     color: #1e1b4b;
     line-height: 1.1;
+  }
+  .meta-item .meta-sub {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+    margin-top: 4px;
   }
   h1 { margin: 0 0 6px; font-size: 32px; color: #1e1b4b; }
   .date { color: #4f46e5; font-size: 16px; font-weight: 600; text-transform: capitalize; }
@@ -255,11 +263,13 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
       <div class="meta-item">
         <span class="meta-label">Coperti</span>
         <span class="meta-value">${guests}</span>
+        ${children ? `<span class="meta-sub">${guests - children} adulti + ${children} bambin${children === 1 ? 'o' : 'i'}</span>` : ''}
       </div>` : ''}
       ${showPrice ? `
       <div class="meta-item">
         <span class="meta-label">Per persona</span>
         <span class="meta-value">${price}</span>
+        ${childrenPrice ? `<span class="meta-sub">${childrenPrice} bambini</span>` : ''}
       </div>
       ${deposit ? `
       <div class="meta-item">

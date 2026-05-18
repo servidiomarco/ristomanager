@@ -3,6 +3,7 @@ import { Shift } from '../types';
 export interface ParsedReservation {
   customer_name?: string;
   guests?: number;
+  children?: number;
   reservation_time?: string;
   shift?: Shift;
   phone?: string;
@@ -142,6 +143,31 @@ export const parseReservationText = (text: string): ParsedReservation => {
     }
   }
 
+  // Extract children FIRST so the guests regex doesn't swallow "2 bambini" as the guest count.
+  // Patterns: "di cui 2 bambini", "con 2 bambini", "2 bambini", "2 piccoli", "2 bimbi"
+  const childWordOrDigit = '(\\d+|uno|una|un|due|tre|quattro|cinque|sei|sette|otto|nove|dieci)';
+  const childNoun = '(?:bambini|bambino|bambina|bambine|bimbi|bimbo|bimba|bimbe|piccoli|piccolo|piccola|piccole|minori|minore)';
+  const childrenPatterns = [
+    new RegExp(`di\\s+cui\\s+${childWordOrDigit}\\s*${childNoun}`, 'i'),
+    new RegExp(`con\\s+${childWordOrDigit}\\s*${childNoun}`, 'i'),
+    new RegExp(`${childWordOrDigit}\\s*${childNoun}`, 'i'),
+  ];
+  // Track which raw token matched the children noun so we can strip it before
+  // matching guests, otherwise "4 persone di cui 2 bambini" would yield guests=2.
+  let childrenMatchedText = '';
+  for (const pattern of childrenPatterns) {
+    const match = lowerText.match(pattern);
+    if (match && match[1]) {
+      const num = match[1];
+      result.children = isNaN(Number(num)) ? wordToNumber(num) : Number(num);
+      childrenMatchedText = match[0];
+      break;
+    }
+  }
+  const guestSearchText = childrenMatchedText
+    ? lowerText.replace(childrenMatchedText, ' ')
+    : lowerText;
+
   // Extract guests: "[n] persone", "[n] coperti", "in [n]", "per [n]"
   const guestPatterns = [
     /(\d+)\s*(?:persone|persona|coperti|coperto|ospiti|ospite|posti|posto)/i,
@@ -150,12 +176,17 @@ export const parseReservationText = (text: string): ParsedReservation => {
   ];
 
   for (const pattern of guestPatterns) {
-    const match = lowerText.match(pattern);
+    const match = guestSearchText.match(pattern);
     if (match && match[1]) {
       const num = match[1];
       result.guests = isNaN(Number(num)) ? wordToNumber(num) : Number(num);
       break;
     }
+  }
+
+  // Clamp children to ≤ guests when both are present.
+  if (result.children != null && result.guests != null && result.children > result.guests) {
+    result.children = result.guests;
   }
 
   // Extract date
