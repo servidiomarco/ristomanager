@@ -66,16 +66,19 @@ const renderNoteBlock = (title: string, content?: string): string => {
 
 export interface PrintBanquetOptions {
   showPrice?: boolean;
+  kitchenMode?: boolean;
 }
 
 export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBanquetOptions = {}): void => {
-  const showPrice = options.showPrice !== false;
+  const kitchenMode = options.kitchenMode === true;
+  const showPrice = kitchenMode ? false : options.showPrice !== false;
   const eventDate = formatDate(menu.event_date);
   const price = formatEuro(menu.price_per_person);
   const deposit = menu.deposit_amount != null ? formatEuro(menu.deposit_amount) : null;
   const shift = shiftLabel(menu.shift);
   const guests = menu.guests != null && menu.guests > 0 ? menu.guests : null;
   const children = menu.children != null && menu.children > 0 ? menu.children : null;
+  const adults = guests != null && children != null ? guests - children : null;
   const childrenPrice = menu.children_price != null ? formatEuro(menu.children_price) : null;
   const notesHtml = [
     renderNoteBlock('Note Portate (Cucina)', menu.notes_courses),
@@ -172,6 +175,41 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     font-weight: 500;
     margin-top: 4px;
   }
+  .kitchen-cover {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 22px;
+    border-radius: 12px;
+    background: #eef2ff;
+    border: 2px solid #4f46e5;
+    min-width: 130px;
+  }
+  .kitchen-cover.children {
+    background: #fef3c7;
+    border-color: #d97706;
+  }
+  .kitchen-cover .kitchen-cover-label {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #4338ca;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .kitchen-cover.children .kitchen-cover-label {
+    color: #b45309;
+  }
+  .kitchen-cover .kitchen-cover-value {
+    font-size: 56px;
+    font-weight: 800;
+    color: #1e1b4b;
+    line-height: 1;
+  }
+  .kitchen-cover.children .kitchen-cover-value {
+    color: #78350f;
+  }
   h1 { margin: 0 0 6px; font-size: 32px; color: #1e1b4b; }
   .date { color: #4f46e5; font-size: 16px; font-weight: 600; text-transform: capitalize; }
   .description { color: #475569; margin: 12px 0 0; font-size: 15px; }
@@ -259,7 +297,22 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
       ${menu.description ? `<p class="description">${escapeHtml(menu.description)}</p>` : ''}
     </div>
     <div class="header-meta">
-      ${guests != null ? `
+      ${kitchenMode && guests != null ? `
+      ${children != null && adults != null ? `
+      <div class="kitchen-cover">
+        <span class="kitchen-cover-label">Adulti</span>
+        <span class="kitchen-cover-value">${adults}</span>
+      </div>
+      <div class="kitchen-cover children">
+        <span class="kitchen-cover-label">Bambini</span>
+        <span class="kitchen-cover-value">${children}</span>
+      </div>` : `
+      <div class="kitchen-cover">
+        <span class="kitchen-cover-label">Coperti</span>
+        <span class="kitchen-cover-value">${guests}</span>
+      </div>`}
+      ` : ''}
+      ${!kitchenMode && guests != null ? `
       <div class="meta-item">
         <span class="meta-label">Coperti</span>
         <span class="meta-value">${guests}</span>

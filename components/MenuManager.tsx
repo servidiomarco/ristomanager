@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -754,6 +754,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                               >
                                                   <Printer className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
                                                   Stampa / PDF
+                                              </button>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => { setCardMenuOpenId(null); printBanquet(menu, dishes, { kitchenMode: true }); }}
+                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                              >
+                                                  <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+                                                  Stampa per cucina
                                               </button>
                                               <button
                                                   type="button"

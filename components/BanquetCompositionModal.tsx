@@ -1,6 +1,6 @@
 import React from 'react';
 import { BanquetMenu, Dish, Shift } from '../types';
-import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote, ImageIcon } from 'lucide-react';
+import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote, ImageIcon, ChefHat } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -88,6 +88,14 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
               title="Stampa"
             >
               <Printer className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => printBanquet(banquet, dishes, { kitchenMode: true })}
+              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+              title="Stampa per cucina"
+            >
+              <ChefHat className="h-4 w-4" />
             </button>
             <button
               type="button"
