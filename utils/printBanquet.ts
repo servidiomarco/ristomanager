@@ -81,11 +81,13 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   const children = menu.children != null && menu.children > 0 ? menu.children : null;
   const adults = guests != null && children != null ? guests - children : null;
   const childrenPrice = menu.children_price != null ? formatEuro(menu.children_price) : null;
-  const notesHtml = [
-    renderNoteBlock('Note Portate (Cucina)', menu.notes_courses, 'kitchen-note'),
-    renderNoteBlock('Note Servizio (Sala)', menu.notes_service),
-    renderNoteBlock('Note Mise en Place', menu.notes_mise_en_place),
-  ].join('');
+  const notesHtml = kitchenMode
+    ? renderNoteBlock('Note Portate (Cucina)', menu.notes_courses, 'kitchen-note')
+    : [
+        renderNoteBlock('Note Portate (Cucina)', menu.notes_courses, 'kitchen-note'),
+        renderNoteBlock('Note Servizio (Sala)', menu.notes_service),
+        renderNoteBlock('Note Mise en Place', menu.notes_mise_en_place),
+      ].join('');
 
   let dishesHtml = '';
   if (menu.courses && menu.courses.length > 0) {
@@ -300,6 +302,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   body.kitchen-mode .note-block h3 { font-size: 18px; }
   body.kitchen-mode .note-block .note-content { font-size: 18px; }
   body.kitchen-mode footer { font-size: 13px; }
+  body.kitchen-mode .notes-section { page-break-before: always; break-before: page; margin-top: 0; padding-top: 8px; }
 
   /* Highlight cucina notes in kitchen mode */
   body.kitchen-mode .note-block.kitchen-note {
