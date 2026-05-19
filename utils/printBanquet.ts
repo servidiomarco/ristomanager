@@ -53,11 +53,12 @@ const shiftLabel = (s?: Shift): string => {
   return '';
 };
 
-const renderNoteBlock = (title: string, content?: string): string => {
+const renderNoteBlock = (title: string, content?: string, variant?: string): string => {
   const trimmed = content?.trim();
   if (!trimmed) return '';
+  const cls = variant ? `note-block ${variant}` : 'note-block';
   return `
-    <section class="note-block">
+    <section class="${cls}">
       <h3>${escapeHtml(title)}</h3>
       <div class="note-content">${escapeHtml(trimmed).replace(/\n/g, '<br/>')}</div>
     </section>
@@ -81,7 +82,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   const adults = guests != null && children != null ? guests - children : null;
   const childrenPrice = menu.children_price != null ? formatEuro(menu.children_price) : null;
   const notesHtml = [
-    renderNoteBlock('Note Portate (Cucina)', menu.notes_courses),
+    renderNoteBlock('Note Portate (Cucina)', menu.notes_courses, 'kitchen-note'),
     renderNoteBlock('Note Servizio (Sala)', menu.notes_service),
     renderNoteBlock('Note Mise en Place', menu.notes_mise_en_place),
   ].join('');
@@ -283,9 +284,45 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     body { padding: 12mm; }
     header { break-after: avoid; }
   }
+
+  /* Kitchen mode — larger text, prominent cucina notes */
+  body.kitchen-mode { font-size: 19px; }
+  body.kitchen-mode h1 { font-size: 40px; }
+  body.kitchen-mode .date { font-size: 20px; }
+  body.kitchen-mode .description { font-size: 18px; }
+  body.kitchen-mode .badge { font-size: 15px; padding: 4px 12px; }
+  body.kitchen-mode h2 { font-size: 22px; margin-bottom: 14px; }
+  body.kitchen-mode .category { margin-bottom: 20px; }
+  body.kitchen-mode .category h3 { font-size: 26px; margin-bottom: 8px; padding-bottom: 6px; }
+  body.kitchen-mode .category li { font-size: 22px; margin: 6px 0; }
+  body.kitchen-mode .course-note { font-size: 18px; margin-top: 10px; }
+  body.kitchen-mode .note-block { padding: 12px 16px; margin-bottom: 14px; }
+  body.kitchen-mode .note-block h3 { font-size: 18px; }
+  body.kitchen-mode .note-block .note-content { font-size: 18px; }
+  body.kitchen-mode footer { font-size: 13px; }
+
+  /* Highlight cucina notes in kitchen mode */
+  body.kitchen-mode .note-block.kitchen-note {
+    background: #fef3c7;
+    border-left: 8px solid #d97706;
+    padding: 18px 22px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+  }
+  body.kitchen-mode .note-block.kitchen-note h3 {
+    font-size: 24px;
+    color: #78350f;
+    margin-bottom: 10px;
+  }
+  body.kitchen-mode .note-block.kitchen-note .note-content {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1e1b4b;
+    line-height: 1.5;
+  }
 </style>
 </head>
-<body>
+<body${kitchenMode ? ' class="kitchen-mode"' : ''}>
   <header>
     <div class="header-main">
       <h1>
