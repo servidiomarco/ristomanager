@@ -375,53 +375,101 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
   const handleOpenAddShift = (date?: Date) => {
     if (!selectedStaff) return;
+    const targetDate = date || new Date();
+    const dateStr = formatLocalDate(targetDate);
+    const existing = shifts.filter(s => s.staffId === selectedStaff.id && toDateOnly(s.date) === dateStr);
+    const lunchExisting = existing.find(s => s.shift === Shift.LUNCH);
+    const dinnerExisting = existing.find(s => s.shift === Shift.DINNER);
     setShiftForm({
       staffId: selectedStaff.id,
-      date: formatLocalDate(date || new Date()),
-      lunch: true,
-      dinner: false,
+      date: dateStr,
+      lunch: !!lunchExisting,
+      dinner: !!dinnerExisting,
       present: true,
-      notes: ''
+      notes: lunchExisting?.notes || dinnerExisting?.notes || ''
     });
     setShowShiftModal(true);
   };
 
   const handleSaveShift = async () => {
-    if (!shiftForm.lunch && !shiftForm.dinner) {
-      showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
-      return;
-    }
     if (isSavingShift) return;
 
+    const existing = shifts.filter(s => s.staffId === shiftForm.staffId && toDateOnly(s.date) === shiftForm.date);
+    const lunchExisting = existing.find(s => s.shift === Shift.LUNCH);
+    const dinnerExisting = existing.find(s => s.shift === Shift.DINNER);
+
     const shiftsToCreate: Shift[] = [];
-    if (shiftForm.lunch) shiftsToCreate.push(Shift.LUNCH);
-    if (shiftForm.dinner) shiftsToCreate.push(Shift.DINNER);
+    if (shiftForm.lunch && !lunchExisting) shiftsToCreate.push(Shift.LUNCH);
+    if (shiftForm.dinner && !dinnerExisting) shiftsToCreate.push(Shift.DINNER);
+
+    const shiftsToDelete: StaffShift[] = [];
+    if (!shiftForm.lunch && lunchExisting) shiftsToDelete.push(lunchExisting);
+    if (!shiftForm.dinner && dinnerExisting) shiftsToDelete.push(dinnerExisting);
+
+    // Existing shifts that remain selected — update notes if changed
+    const shiftsToUpdate: StaffShift[] = [];
+    if (shiftForm.lunch && lunchExisting && (lunchExisting.notes || '') !== shiftForm.notes) {
+      shiftsToUpdate.push(lunchExisting);
+    }
+    if (shiftForm.dinner && dinnerExisting && (dinnerExisting.notes || '') !== shiftForm.notes) {
+      shiftsToUpdate.push(dinnerExisting);
+    }
+
+    if (shiftsToCreate.length === 0 && shiftsToDelete.length === 0 && shiftsToUpdate.length === 0) {
+      if (!shiftForm.lunch && !shiftForm.dinner && existing.length === 0) {
+        showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
+        return;
+      }
+      setShowShiftModal(false);
+      return;
+    }
 
     try {
       setIsSavingShift(true);
-      const created = await Promise.all(
-        shiftsToCreate.map(shift =>
-          staffApiService.createShift({
-            staffId: shiftForm.staffId,
-            date: shiftForm.date,
-            shift,
-            present: shiftForm.present,
-            notes: shiftForm.notes
-          })
+      const [created] = await Promise.all([
+        Promise.all(
+          shiftsToCreate.map(shift =>
+            staffApiService.createShift({
+              staffId: shiftForm.staffId,
+              date: shiftForm.date,
+              shift,
+              present: shiftForm.present,
+              notes: shiftForm.notes
+            })
+          )
+        ),
+        Promise.all(shiftsToDelete.map(s => staffApiService.deleteShift(s.id))),
+        Promise.all(
+          shiftsToUpdate.map(s =>
+            staffApiService.createShift({
+              staffId: s.staffId,
+              date: toDateOnly(s.date),
+              shift: s.shift,
+              present: s.present,
+              notes: shiftForm.notes
+            })
+          )
         )
-      );
+      ]);
+
+      const deletedIds = new Set(shiftsToDelete.map(s => s.id));
       setShifts(prev => {
-        // Replace existing shifts for the same staff/date/shift, append new ones
-        const filtered = prev.filter(s => !created.some(c =>
+        const next = prev.filter(s => !deletedIds.has(s.id) && !created.some(c =>
           c.staffId === s.staffId && c.date === s.date && c.shift === s.shift
         ));
-        return [...filtered, ...created];
+        // Apply updated notes for remaining shifts that were re-upserted
+        const updatedMap = new Map<string, string>();
+        shiftsToUpdate.forEach(s => updatedMap.set(s.id, shiftForm.notes));
+        const remapped = next.map(s => updatedMap.has(s.id) ? { ...s, notes: updatedMap.get(s.id)! } : s);
+        return [...remapped, ...created];
       });
       setShowShiftModal(false);
-      showToast(
-        shiftsToCreate.length === 2 ? 'Turni Pranzo e Cena aggiunti' : 'Turno aggiunto',
-        'success'
-      );
+
+      const parts: string[] = [];
+      if (shiftsToCreate.length > 0) parts.push(`${shiftsToCreate.length} aggiunt${shiftsToCreate.length === 1 ? 'o' : 'i'}`);
+      if (shiftsToDelete.length > 0) parts.push(`${shiftsToDelete.length} rimoss${shiftsToDelete.length === 1 ? 'o' : 'i'}`);
+      if (shiftsToUpdate.length > 0) parts.push(`${shiftsToUpdate.length} aggiornat${shiftsToUpdate.length === 1 ? 'o' : 'i'}`);
+      showToast(`Turni: ${parts.join(', ')}`, 'success');
     } catch (error) {
       showToast('Errore nel salvataggio del turno', 'error');
     } finally {
@@ -1194,11 +1242,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       )}
 
       {/* Add Shift Modal */}
-      {showShiftModal && (
+      {showShiftModal && (() => {
+        const modalExistingShifts = shifts.filter(s => s.staffId === shiftForm.staffId && toDateOnly(s.date) === shiftForm.date);
+        const hasExistingShifts = modalExistingShifts.length > 0;
+        return (
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowShiftModal(false)}>
           <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-sm h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aggiungi Turno</h3>
+              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{hasExistingShifts ? 'Modifica Turni' : 'Aggiungi Turno'}</h3>
               <button onClick={() => setShowShiftModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
                 <X className="h-5 w-5" />
               </button>
@@ -1214,7 +1265,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 />
               </div>
               <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)]">Turno</label>
+                  <button
+                    type="button"
+                    onClick={() => setShiftForm({ ...shiftForm, lunch: false, dinner: false })}
+                    disabled={!shiftForm.lunch && !shiftForm.dinner}
+                    className="text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-40 disabled:cursor-not-allowed underline-offset-2 hover:underline"
+                  >
+                    Deseleziona tutto
+                  </button>
+                </div>
                 <p className="text-[11px] text-[var(--color-fg-subtle)] mb-2">Seleziona uno o entrambi i turni</p>
                 <div className="flex gap-2">
                   <button
@@ -1269,12 +1330,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingShift && <Loader2 className="h-4 w-4 animate-spin" />}
-                Aggiungi
+                {hasExistingShifts ? 'Aggiorna turni' : 'Aggiungi'}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Add Time Off Modal */}
       {showTimeOffModal && (
