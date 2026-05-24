@@ -1271,8 +1271,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     type="button"
                     onClick={() => setShiftForm({ ...shiftForm, lunch: false, dinner: false })}
                     disabled={!shiftForm.lunch && !shiftForm.dinner}
-                    className="text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-40 disabled:cursor-not-allowed underline-offset-2 hover:underline"
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] text-[11px] font-medium hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--color-surface)] disabled:hover:text-[var(--color-fg-muted)]"
                   >
+                    <X className="h-3 w-3" />
                     Deseleziona tutto
                   </button>
                 </div>
