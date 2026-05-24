@@ -254,6 +254,46 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     return days;
   }, [calendarDate]);
 
+  // Time-offs grouped by month (YYYY-MM), most recent first, for the
+  // selected staff's "Assenze Programmate" list.
+  const timeOffsByMonth = useMemo(() => {
+    if (!selectedStaff) return [] as Array<{ key: string; label: string; items: StaffTimeOff[] }>;
+    const filtered = timeOffs
+      .filter(t => t.staffId === selectedStaff.id)
+      .sort((a, b) => b.startDate.localeCompare(a.startDate));
+
+    const groups: Array<{ key: string; label: string; items: StaffTimeOff[] }> = [];
+    for (const t of filtered) {
+      const key = t.startDate.slice(0, 7);
+      let group = groups[groups.length - 1];
+      if (!group || group.key !== key) {
+        const [year, month] = key.split('-').map(Number);
+        const label = new Date(year, month - 1, 1)
+          .toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+        group = { key, label, items: [] };
+        groups.push(group);
+      }
+      group.items.push(t);
+    }
+    return groups;
+  }, [timeOffs, selectedStaff?.id]);
+
+  const formatTimeOffDayLabel = (timeOff: StaffTimeOff, groupKey: string): string => {
+    const startKey = timeOff.startDate.slice(0, 7);
+    const endKey = timeOff.endDate.slice(0, 7);
+    const startD = new Date(timeOff.startDate);
+    const endD = new Date(timeOff.endDate);
+    if (timeOff.startDate === timeOff.endDate) {
+      return startKey === groupKey
+        ? String(startD.getDate())
+        : startD.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+    }
+    if (startKey === groupKey && endKey === groupKey) {
+      return `${startD.getDate()} - ${endD.getDate()}`;
+    }
+    return `${startD.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${endD.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+  };
+
   const getShiftsForDay = (date: Date, staffId: string) => {
     const dateStr = formatLocalDate(date);
     return shifts.filter(s => s.staffId === staffId && toDateOnly(s.date) === dateStr);
@@ -1025,40 +1065,46 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               </div>
 
               {/* Time Off List */}
-              {timeOffs.filter(t => t.staffId === selectedStaff.id).length > 0 && (
+              {timeOffsByMonth.length > 0 && (
                 <div className="px-4 pb-4">
                   <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Assenze Programmate</h3>
-                  <div className="space-y-1.5">
-                    {timeOffs.filter(t => t.staffId === selectedStaff.id).map(timeOff => (
-                      <div key={timeOff.id} className="flex items-center justify-between p-2 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${TIME_OFF_COLORS[timeOff.type]}`}>
-                            {TIME_OFF_LABELS[timeOff.type]}
-                          </span>
-                          {timeOff.shift && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
-                              {timeOff.shift === Shift.LUNCH ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
-                              {timeOff.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
-                            </span>
-                          )}
-                          <span className="text-sm text-[var(--color-fg-muted)]">
-                            {new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
-                            {timeOff.startDate !== timeOff.endDate && (
-                              <> - {new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</>
-                            )}
-                          </span>
+                  <div className="space-y-3">
+                    {timeOffsByMonth.map(group => (
+                      <div key={group.key}>
+                        <div className="text-[10px] tracking-[0.06em] font-semibold uppercase text-[var(--color-fg-subtle)] mb-1.5 px-0.5">
+                          {group.label}
                         </div>
-                        <button
-                          onClick={() => {
-                            const dateRange = timeOff.startDate === timeOff.endDate
-                              ? new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
-                              : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
-                            setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
-                          }}
-                          className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="space-y-1.5">
+                          {group.items.map(timeOff => (
+                            <div key={timeOff.id} className="flex items-center justify-between p-2 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md">
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${TIME_OFF_COLORS[timeOff.type]}`}>
+                                  {TIME_OFF_LABELS[timeOff.type]}
+                                </span>
+                                {timeOff.shift && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
+                                    {timeOff.shift === Shift.LUNCH ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
+                                    {timeOff.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                                  </span>
+                                )}
+                                <span className="text-sm text-[var(--color-fg-muted)]">
+                                  {formatTimeOffDayLabel(timeOff, group.key)}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const dateRange = timeOff.startDate === timeOff.endDate
+                                    ? new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
+                                    : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+                                  setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
+                                }}
+                                className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
