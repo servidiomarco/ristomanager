@@ -20,6 +20,7 @@ import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
+import { toTitleCase } from './utils/text';
 
 import {
   getReservations,
@@ -337,14 +338,14 @@ const App: React.FC = () => {
         }
         return [...prev, reservation];
       });
-      addToast(`Nuova prenotazione: ${reservation.customer_name}`, 'info');
+      addToast(`Nuova prenotazione: ${toTitleCase(reservation.customer_name)}`, 'info');
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
-      addToast(`Prenotazione aggiornata: ${reservation.customer_name}`, 'info');
+      addToast(`Prenotazione aggiornata: ${toTitleCase(reservation.customer_name)}`, 'info');
     });
 
     socket.on('reservation:deleted', (id: number) => {
