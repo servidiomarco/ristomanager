@@ -34,6 +34,7 @@ import {
     RESTAURANT_SLOTS,
     formatSlotListItalian,
 } from './services/elevenlabsService.js';
+import { toTitleCase } from './utils/text.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -385,7 +386,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 title: 'Nuova prenotazione vocale',
-                body: `${created.customer_name} · ${created.guests} ospiti · ${reservationLabel}`,
+                body: `${toTitleCase(created.customer_name)} · ${created.guests} ospiti · ${reservationLabel}`,
                 url: '/?view=RESERVATIONS',
                 tag: `reservation-${created.id}`,
             },
@@ -560,7 +561,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 title: 'Prenotazione cancellata (voce)',
-                body: `${cancelled.customer_name} · ${cancelled.guests} ospiti · ${reservationLabel}`,
+                body: `${toTitleCase(cancelled.customer_name)} · ${cancelled.guests} ospiti · ${reservationLabel}`,
                 url: '/?view=RESERVATIONS',
                 tag: `reservation-${cancelled.id}`,
             },
@@ -891,7 +892,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 title: 'Nuova prenotazione',
-                body: `${customer_name} · ${guests} ospiti · ${reservationLabel}`,
+                body: `${toTitleCase(customer_name)} · ${guests} ospiti · ${reservationLabel}`,
                 url: '/?view=RESERVATIONS',
                 tag: `reservation-${newReservation.id}`,
             },
@@ -1010,7 +1011,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     title: 'Prenotazione annullata',
-                    body: `${updatedReservation.customer_name} · ${updatedReservation.guests} ospiti · ${reservationLabel}`,
+                    body: `${toTitleCase(updatedReservation.customer_name)} · ${updatedReservation.guests} ospiti · ${reservationLabel}`,
                     url: '/?view=RESERVATIONS',
                     tag: `reservation-${updatedReservation.id}`,
                 },
