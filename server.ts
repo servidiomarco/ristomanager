@@ -30,11 +30,14 @@ import {
     normalizeItalianPhone,
     parseFlexibleDate,
     parseFlexibleTime,
-    isValidSlotForShift,
-    RESTAURANT_SLOTS,
-    formatSlotListItalian,
 } from './services/elevenlabsService.js';
 import { toTitleCase } from './utils/text.js';
+import {
+    getAvailableSlots,
+    getAllOpeningHours,
+    listClosures,
+    formatSlotListItalian,
+} from './utils/slots.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -292,17 +295,20 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     }
     // Constrain the booking time to the restaurant's slot grid so voice
     // bookings round-trip through the manual edit form without falling back
-    // to a different time option.
-    if (!isValidSlotForShift(normalizedTime, rawShift as Shift)) {
-        const validSlots = RESTAURANT_SLOTS[rawShift as Shift];
+    // to a different time option. The grid is derived from the
+    // opening_hours + special_closures tables (see utils/slots.ts), so it
+    // changes per weekday and can be temporarily closed for holidays.
+    const validSlots = await getAvailableSlots(normalizedDate, rawShift as Shift);
+    if (!validSlots.includes(normalizedTime)) {
         const shiftLabel = (rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena';
         console.warn('[ElevenLabs] create-reservation rejected: invalid_slot', {
             received_time: p.time, normalized_time: normalizedTime, shift: rawShift,
+            available_slots: validSlots,
         });
-        return res.status(400).json({
-            error: 'invalid_slot',
-            message: `Per ${shiftLabel} possiamo prenotare solo alle ${formatSlotListItalian(validSlots)}. Quale orario preferisce?`
-        });
+        const message = validSlots.length === 0
+            ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
+            : `Per ${shiftLabel} possiamo prenotare solo alle ${formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
+        return res.status(400).json({ error: 'invalid_slot', message });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
         return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
@@ -4815,6 +4821,133 @@ async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
     }
 }
 
+
+// ============================================
+// OPENING HOURS & SPECIAL CLOSURES
+// ============================================
+// Single source of truth for the bookable slot grid. Read by the voice
+// agent (utils/slots.ts) and — later — by the public Google booking page.
+// Writes are gated by settings:full; reads only require an authenticated
+// session so the booking form on the dashboard can render the grid.
+
+const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function validateHHMM(v: unknown): string | null {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v !== 'string' || !HHMM_RE.test(v)) return undefined as any;
+    return v;
+}
+
+app.get('/opening-hours', authenticate, async (_req, res) => {
+    try {
+        const rows = await getAllOpeningHours();
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching opening_hours:', error);
+        res.status(500).json({ error: 'Failed to fetch opening hours' });
+    }
+});
+
+app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const weekday = parseInt(req.params.weekday, 10);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+        return res.status(400).json({ error: 'invalid_weekday', message: 'weekday must be 0-6 (0=Sun)' });
+    }
+    const { lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes } = req.body ?? {};
+
+    const lo = validateHHMM(lunch_open);
+    const lc = validateHHMM(lunch_close);
+    const dorn = validateHHMM(dinner_open);
+    const dc = validateHHMM(dinner_close);
+    if (lo === undefined || lc === undefined || dorn === undefined || dc === undefined) {
+        return res.status(400).json({ error: 'invalid_time', message: 'Times must be HH:MM or null' });
+    }
+    if ((lo && !lc) || (!lo && lc)) {
+        return res.status(400).json({ error: 'invalid_range', message: 'lunch_open and lunch_close must be both set or both null' });
+    }
+    if ((dorn && !dc) || (!dorn && dc)) {
+        return res.status(400).json({ error: 'invalid_range', message: 'dinner_open and dinner_close must be both set or both null' });
+    }
+    const step = Number(slot_minutes);
+    if (!Number.isInteger(step) || step < 5 || step > 240) {
+        return res.status(400).json({ error: 'invalid_slot_minutes', message: 'slot_minutes must be 5-240' });
+    }
+
+    try {
+        const result = await queryWithRetry(
+            `UPDATE opening_hours
+             SET lunch_open = $2::time, lunch_close = $3::time,
+                 dinner_open = $4::time, dinner_close = $5::time,
+                 slot_minutes = $6
+             WHERE weekday = $1
+             RETURNING weekday,
+                       to_char(lunch_open,  'HH24:MI') AS lunch_open,
+                       to_char(lunch_close, 'HH24:MI') AS lunch_close,
+                       to_char(dinner_open, 'HH24:MI') AS dinner_open,
+                       to_char(dinner_close,'HH24:MI') AS dinner_close,
+                       slot_minutes`,
+            [weekday, lo, lc, dorn, dc, step]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'not_found' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error updating opening_hours:', error);
+        res.status(500).json({ error: 'Failed to update opening hours' });
+    }
+});
+
+app.get('/closures', authenticate, async (req, res) => {
+    try {
+        const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+        const rows = await listClosures(from);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching closures:', error);
+        res.status(500).json({ error: 'Failed to fetch closures' });
+    }
+});
+
+app.post('/closures', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const { date, shift, reason } = req.body ?? {};
+    if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date must be YYYY-MM-DD' });
+    }
+    if (shift !== null && shift !== undefined && shift !== Shift.LUNCH && shift !== Shift.DINNER) {
+        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH, DINNER or null (whole day)' });
+    }
+    const reasonText = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : null;
+
+    try {
+        const result = await queryWithRetry(
+            `INSERT INTO special_closures (date, shift, reason)
+             VALUES ($1::date, $2, $3)
+             ON CONFLICT (date, shift) DO UPDATE SET reason = EXCLUDED.reason
+             RETURNING id, to_char(date, 'YYYY-MM-DD') AS date, shift, reason`,
+            [date, shift ?? null, reasonText]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error('Error creating closure:', error);
+        res.status(500).json({ error: 'Failed to create closure' });
+    }
+});
+
+app.delete('/closures/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'invalid_id' });
+    }
+    try {
+        const result = await queryWithRetry('DELETE FROM special_closures WHERE id = $1', [id]);
+        if (result.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+        res.status(204).send();
+    } catch (error) {
+        console.error('Error deleting closure:', error);
+        res.status(500).json({ error: 'Failed to delete closure' });
+    }
+});
 
 const startServer = async () => {
     try {

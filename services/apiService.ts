@@ -497,3 +497,62 @@ export const sendWhatsAppConfirmation = async (reservationId: number): Promise<{
     headers: getHeaders(),
   });
 };
+
+// ============================================
+// OPENING HOURS & SPECIAL CLOSURES
+// ============================================
+
+export interface OpeningHoursRow {
+  weekday: number;
+  lunch_open: string | null;
+  lunch_close: string | null;
+  dinner_open: string | null;
+  dinner_close: string | null;
+  slot_minutes: number;
+}
+
+export interface SpecialClosure {
+  id: number;
+  date: string;
+  shift: Shift | null;
+  reason: string | null;
+}
+
+export const getOpeningHours = async (): Promise<OpeningHoursRow[]> => {
+  return apiRequest<OpeningHoursRow[]>(`${API_URL}/opening-hours`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateOpeningHours = async (
+  weekday: number,
+  data: Omit<OpeningHoursRow, 'weekday'>
+): Promise<OpeningHoursRow> => {
+  return apiRequest<OpeningHoursRow>(`${API_URL}/opening-hours/${weekday}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+};
+
+export const getClosures = async (fromDate?: string): Promise<SpecialClosure[]> => {
+  const qs = fromDate ? `?from=${encodeURIComponent(fromDate)}` : '';
+  return apiRequest<SpecialClosure[]>(`${API_URL}/closures${qs}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createClosure = async (closure: { date: string; shift: Shift | null; reason?: string | null }): Promise<SpecialClosure> => {
+  return apiRequest<SpecialClosure>(`${API_URL}/closures`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(closure),
+  });
+};
+
+export const deleteClosure = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/closures/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};

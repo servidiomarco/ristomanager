@@ -13,6 +13,7 @@ import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
+import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
@@ -1464,6 +1465,14 @@ const App: React.FC = () => {
                     );
                   })}
                 </select>
+              </div>
+            </div>
+
+            {/* Opening hours & closures */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Orari di apertura</h3>
+              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                <OpeningHoursManager showToast={addToast} />
               </div>
             </div>
 

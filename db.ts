@@ -1014,6 +1014,39 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);`);
 
+        // ============================================
+        // OPENING HOURS + SPECIAL CLOSURES
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS opening_hours (
+                weekday      INTEGER PRIMARY KEY,
+                lunch_open   TIME,
+                lunch_close  TIME,
+                dinner_open  TIME,
+                dinner_close TIME,
+                slot_minutes INTEGER NOT NULL DEFAULT 30
+            );
+        `);
+        // Seed default schedule once (matches the slot grid previously hardcoded
+        // in services/elevenlabsService.ts so behaviour is unchanged on first deploy).
+        await client.query(`
+            INSERT INTO opening_hours (weekday, lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes)
+            SELECT g.weekday, '13:00'::time, '14:00'::time, '19:30'::time, '23:30'::time, 30
+            FROM generate_series(0, 6) AS g(weekday)
+            ON CONFLICT (weekday) DO NOTHING;
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS special_closures (
+                id     SERIAL PRIMARY KEY,
+                date   DATE NOT NULL,
+                shift  VARCHAR(20),
+                reason TEXT,
+                UNIQUE (date, shift)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_special_closures_date ON special_closures(date);`);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {
