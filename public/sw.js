@@ -22,7 +22,6 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || '',
     icon: data.icon || '/icon-192.png',
-    badge: '/icon-192.png',
     tag: data.tag,
     data: { url: data.url || '/' },
     renotify: !!data.tag,
