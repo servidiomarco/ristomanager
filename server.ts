@@ -5005,6 +5005,46 @@ app.get('/public/availability', async (req, res) => {
     }
 });
 
+app.get('/public/rooms', async (req, res) => {
+    const date = typeof req.query.date === 'string' ? req.query.date : '';
+    const shift = typeof req.query.shift === 'string' ? req.query.shift : '';
+    const guests = Number(req.query.guests);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date deve essere YYYY-MM-DD' });
+    }
+    if (shift !== Shift.LUNCH && shift !== Shift.DINNER) {
+        return res.status(400).json({ error: 'invalid_shift', message: 'shift deve essere LUNCH o DINNER' });
+    }
+    if (!Number.isFinite(guests) || guests < 1 || guests > 20) {
+        return res.status(400).json({ error: 'invalid_guests', message: 'guests deve essere 1-20' });
+    }
+
+    try {
+        const result = await queryWithRetry(
+            `SELECT r.id, r.name, COUNT(t.id)::int AS free_tables
+             FROM rooms r
+             LEFT JOIN tables t ON t.room_id = r.id
+               AND t.seats >= $1
+               AND NOT EXISTS (
+                   SELECT 1 FROM reservations res
+                   WHERE res.table_id = t.id
+                     AND DATE(res.reservation_time) = $2
+                     AND res.shift = $3
+                     AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+               )
+             WHERE r.is_closed = false
+             GROUP BY r.id, r.name
+             ORDER BY r.name ASC`,
+            [Math.trunc(guests), date, shift]
+        );
+        res.json({ rooms: result.rows });
+    } catch (err: any) {
+        console.error('GET /public/rooms error:', err);
+        res.status(500).json({ error: 'Failed to load rooms' });
+    }
+});
+
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
     try {
         const body = req.body ?? {};
@@ -5022,6 +5062,10 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         const shift = body.shift;
         const guestsNum = Number(body.guests);
         const notesRaw = typeof body.notes === 'string' ? body.notes.trim() : '';
+        const roomIdRaw = body.room_id;
+        const requestedRoomId = (roomIdRaw === null || roomIdRaw === undefined || roomIdRaw === '')
+            ? null
+            : Number(roomIdRaw);
 
         if (!customer_name || customer_name.length < 2 || customer_name.length > 80) {
             return res.status(400).json({ error: 'invalid_name', message: 'Nome non valido' });
@@ -5048,13 +5092,28 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             return res.status(409).json({ error: 'slot_unavailable', message: 'Lo slot scelto non è più disponibile' });
         }
 
+        // Resolve the requested room name (if any) so the staff sees the
+        // preference in the notes column without needing extra joins.
+        let requestedRoomName: string | null = null;
+        if (requestedRoomId && Number.isFinite(requestedRoomId)) {
+            const roomRes = await queryWithRetry(
+                'SELECT name FROM rooms WHERE id = $1 AND is_closed = false',
+                [requestedRoomId]
+            );
+            if (roomRes.rows[0]) requestedRoomName = roomRes.rows[0].name;
+        }
+
         // Normalize phone to E.164 if it starts with a leading 3 (IT mobile) and no +.
         const phoneE164 = phone.startsWith('+')
             ? phone.replace(/\s/g, '')
             : phone.replace(/\D/g, '').replace(/^3/, '+393').slice(0, 13);
 
         const reservation_time = `${date}T${time}:00`;
-        const notes = notesRaw ? `[Web] ${notesRaw.slice(0, 500)}` : '[Web] Richiesta prenotazione dal sito';
+        const userNote = notesRaw ? notesRaw.slice(0, 500) : '';
+        const noteParts = ['[Web]'];
+        if (requestedRoomName) noteParts.push(`Sala richiesta: ${requestedRoomName}.`);
+        noteParts.push(userNote || 'Richiesta prenotazione dal sito');
+        const notes = noteParts.join(' ');
 
         const result = await queryWithRetry(
             `INSERT INTO reservations (
