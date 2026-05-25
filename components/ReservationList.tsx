@@ -1216,8 +1216,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       // Check if table is too small
       if (table.seats < guests) {
+          const closedRoomIds = new Set(rooms.filter(r => r.is_closed).map(r => r.id));
           // Find suitable alternatives (use displayTables for current shift context)
           const suitableTables = displayTables
+              .filter(t => !closedRoomIds.has(t.room_id))
               .filter(t => t.seats >= guests)
               .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
               .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)
@@ -1287,7 +1289,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleAutoAssign = () => {
       if (!formData.guests || !formData.reservation_time || !formData.shift) return;
 
+      const closedRoomIds = new Set(rooms.filter(r => r.is_closed).map(r => r.id));
+
       const availableTables = displayTables
+        .filter(t => !closedRoomIds.has(t.room_id))
         .filter(t => t.seats >= (formData.guests || 0))
         .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
         .filter(t => modalRoomFilter === 'ALL' || t.room_id === modalRoomFilter)

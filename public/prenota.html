@@ -311,51 +311,35 @@
             return;
         }
         if (state.rooms.length === 0) {
-            roomsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Nessuna sala configurata. Procedi senza scegliere.</p>';
+            roomsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Nessuna sala disponibile per questa richiesta.</p>';
             return;
         }
         roomsContainer.innerHTML = '<div class="grid grid-cols-1 gap-2"></div>';
         const grid = roomsContainer.firstElementChild;
 
-        const makeChip = (label, sublabel, isActive, isDisabled, onClick) => {
+        const makeChip = (label, isActive, onClick) => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.disabled = !!isDisabled;
-            b.className = `w-full text-left px-4 py-3 rounded-xl text-sm font-semibold border-2 transition flex items-center justify-between ${
+            b.className = `w-full text-left px-4 py-3 rounded-xl text-sm font-semibold border-2 transition ${
                 isActive
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : isDisabled
-                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                        : 'border-slate-200 bg-white text-slate-700 active:bg-slate-50'
+                    : 'border-slate-200 bg-white text-slate-700 active:bg-slate-50'
             }`;
-            const left = document.createElement('span');
-            left.textContent = label;
-            const right = document.createElement('span');
-            right.className = 'text-xs font-medium ' + (isActive ? 'text-indigo-600' : 'text-slate-400');
-            right.textContent = sublabel;
-            b.appendChild(left);
-            b.appendChild(right);
-            if (!isDisabled) b.addEventListener('click', onClick);
+            b.textContent = label;
+            b.addEventListener('click', onClick);
             return b;
         };
 
         grid.appendChild(makeChip(
             'Nessuna preferenza',
-            'sceglie lo staff',
             state.roomId === null,
-            false,
             () => { state.roomId = null; renderRooms(); }
         ));
 
         state.rooms.forEach(room => {
-            const free = Number(room.free_tables) || 0;
-            const full = free <= 0;
-            const sublabel = full ? 'esaurita' : `${free} ${free === 1 ? 'tavolo libero' : 'tavoli liberi'}`;
             grid.appendChild(makeChip(
                 room.name,
-                sublabel,
                 state.roomId === room.id,
-                full,
                 () => { state.roomId = room.id; renderRooms(); }
             ));
         });

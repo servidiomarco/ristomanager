@@ -5022,19 +5022,21 @@ app.get('/public/rooms', async (req, res) => {
 
     try {
         const result = await queryWithRetry(
-            `SELECT r.id, r.name, COUNT(t.id)::int AS free_tables
+            `SELECT r.id, r.name
              FROM rooms r
-             LEFT JOIN tables t ON t.room_id = r.id
-               AND t.seats >= $1
-               AND NOT EXISTS (
-                   SELECT 1 FROM reservations res
-                   WHERE res.table_id = t.id
-                     AND DATE(res.reservation_time) = $2
-                     AND res.shift = $3
-                     AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-               )
              WHERE r.is_closed = false
-             GROUP BY r.id, r.name
+               AND EXISTS (
+                   SELECT 1 FROM tables t
+                   WHERE t.room_id = r.id
+                     AND t.seats >= $1
+                     AND NOT EXISTS (
+                         SELECT 1 FROM reservations res
+                         WHERE res.table_id = t.id
+                           AND DATE(res.reservation_time) = $2
+                           AND res.shift = $3
+                           AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+                     )
+               )
              ORDER BY r.name ASC`,
             [Math.trunc(guests), date, shift]
         );
