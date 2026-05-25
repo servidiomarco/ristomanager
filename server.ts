@@ -8,7 +8,9 @@ console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 import express from 'express';
 import { createServer } from 'http';
 import crypto from 'crypto';
+import path from 'path';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
@@ -4947,6 +4949,149 @@ app.delete('/closures/:id', authenticate, requirePermission('settings:full'), as
         console.error('Error deleting closure:', error);
         res.status(500).json({ error: 'Failed to delete closure' });
     }
+});
+
+// ============================================
+// PUBLIC BOOKING (Google Business link)
+// ============================================
+// Unauthenticated endpoints powering the /prenota mobile page. Two safeguards
+// against abuse:
+//   - express-rate-limit caps each IP to 5 reservation POSTs per minute
+//   - a hidden honeypot field (`website`) — bots fill every field, humans don't
+// Submissions always land as source=GOOGLE + reservation_status=PENDING so staff
+// review them before they become confirmed bookings.
+
+const publicBookingLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
+});
+
+app.get('/public/availability', async (req, res) => {
+    const date = typeof req.query.date === 'string' ? req.query.date : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'invalid_date', message: 'date deve essere YYYY-MM-DD' });
+    }
+
+    try {
+        const [lunchSlots, dinnerSlots] = await Promise.all([
+            getAvailableSlots(date, Shift.LUNCH),
+            getAvailableSlots(date, Shift.DINNER),
+        ]);
+
+        // Drop past slots when the requested date is today (Europe/Rome).
+        const now = new Date();
+        const todayIso = now.toISOString().slice(0, 10);
+        const isToday = date === todayIso;
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const filterFuture = (slots: string[]) => {
+            if (!isToday) return slots;
+            return slots.filter(s => {
+                const [h, m] = s.split(':').map(Number);
+                return h * 60 + m > currentMinutes;
+            });
+        };
+
+        res.json({
+            date,
+            lunch:  { slots: filterFuture(lunchSlots) },
+            dinner: { slots: filterFuture(dinnerSlots) },
+        });
+    } catch (err: any) {
+        console.error('GET /public/availability error:', err);
+        res.status(500).json({ error: 'Failed to load availability' });
+    }
+});
+
+app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
+    try {
+        const body = req.body ?? {};
+
+        // Honeypot — if the hidden field is populated we silently accept and drop.
+        if (typeof body.website === 'string' && body.website.trim().length > 0) {
+            console.warn('[public-booking] honeypot triggered', { ip: req.ip });
+            return res.status(201).json({ ok: true });
+        }
+
+        const customer_name = typeof body.customer_name === 'string' ? body.customer_name.trim() : '';
+        const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+        const date = typeof body.date === 'string' ? body.date : '';
+        const time = typeof body.time === 'string' ? body.time : '';
+        const shift = body.shift;
+        const guestsNum = Number(body.guests);
+        const notesRaw = typeof body.notes === 'string' ? body.notes.trim() : '';
+
+        if (!customer_name || customer_name.length < 2 || customer_name.length > 80) {
+            return res.status(400).json({ error: 'invalid_name', message: 'Nome non valido' });
+        }
+        if (!phone || !/^\+?[0-9 ]{6,20}$/.test(phone)) {
+            return res.status(400).json({ error: 'invalid_phone', message: 'Numero di telefono non valido' });
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ error: 'invalid_date', message: 'Data non valida' });
+        }
+        if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(time)) {
+            return res.status(400).json({ error: 'invalid_time', message: 'Orario non valido' });
+        }
+        if (shift !== Shift.LUNCH && shift !== Shift.DINNER) {
+            return res.status(400).json({ error: 'invalid_shift', message: 'Turno non valido' });
+        }
+        if (!Number.isFinite(guestsNum) || guestsNum < 1 || guestsNum > 20) {
+            return res.status(400).json({ error: 'invalid_guests', message: 'Numero ospiti non valido' });
+        }
+
+        // Confirm the requested slot is on the current grid for that date+shift.
+        const validSlots = await getAvailableSlots(date, shift as Shift);
+        if (!validSlots.includes(time)) {
+            return res.status(409).json({ error: 'slot_unavailable', message: 'Lo slot scelto non è più disponibile' });
+        }
+
+        // Normalize phone to E.164 if it starts with a leading 3 (IT mobile) and no +.
+        const phoneE164 = phone.startsWith('+')
+            ? phone.replace(/\s/g, '')
+            : phone.replace(/\D/g, '').replace(/^3/, '+393').slice(0, 13);
+
+        const reservation_time = `${date}T${time}:00`;
+        const notes = notesRaw ? `[Web] ${notesRaw.slice(0, 500)}` : '[Web] Richiesta prenotazione dal sito';
+
+        const result = await queryWithRetry(
+            `INSERT INTO reservations (
+                customer_name, reservation_time, shift, guests, children,
+                table_id, notes, email, phone, payment_status, arrival_status,
+                reservation_status, source, requires_review
+            )
+            VALUES ($1, $2, $3, $4, 0, NULL, $5, NULL, $6, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
+            RETURNING *`,
+            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, phoneE164]
+        );
+        const created = result.rows[0];
+
+        // Notify staff dashboards in real time.
+        if (socketService) {
+            try { socketService.broadcastReservationCreated(created); }
+            catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
+        }
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Nuova richiesta prenotazione',
+                body: `${toTitleCase(customer_name)} · ${guestsNum} ospiti · ${date} ${time}`,
+                url: '/?view=RESERVATIONS',
+                tag: `pending-${created.id}`,
+            }
+        ).catch(err => console.error('Push (public booking) failed:', err));
+
+        res.status(201).json({ ok: true, id: created.id });
+    } catch (err: any) {
+        console.error('POST /public/reservations error:', err);
+        res.status(500).json({ error: 'internal_error' });
+    }
+});
+
+app.get('/prenota', (_req, res) => {
+    res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
 const startServer = async () => {

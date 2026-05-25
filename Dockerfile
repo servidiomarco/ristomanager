@@ -43,6 +43,9 @@ RUN npm ci --only=production
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
 
+# Static assets served by the API (public booking page lives here)
+COPY public ./public
+
 # Expose port 8080 (Railway's default)
 EXPOSE 8080
 

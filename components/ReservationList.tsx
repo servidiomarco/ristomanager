@@ -681,6 +681,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return matchesDate && matchesShift && matchesSearch;
     });
 
+    const pending: Reservation[] = [];
     const waiting: Reservation[] = [];
     const arrived: Reservation[] = [];
     const freed: Reservation[] = [];
@@ -689,6 +690,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     for (const r of dateFiltered) {
       const resStatus = r.reservation_status || ReservationStatus.CONFIRMED;
+      if (resStatus === ReservationStatus.PENDING) {
+        pending.push(r);
+        continue;
+      }
       if (resStatus === ReservationStatus.CANCELLED) {
         cancelled.push(r);
         continue;
@@ -707,6 +712,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
     }
 
+    pending.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     waiting.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
     freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
@@ -714,6 +720,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     cancelled.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
     return [
+      { key: 'pending', label: 'Da confermare', color: 'bg-amber-500', dotClass: 'bg-amber-500', items: pending },
       { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
       { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
       { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
@@ -840,10 +847,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  type ReservationStateKey = 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled';
+  type ReservationStateKey = 'pending' | 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled';
 
   const getReservationState = (res: Reservation): ReservationStateKey => {
     const rs = res.reservation_status || ReservationStatus.CONFIRMED;
+    if (rs === ReservationStatus.PENDING) return 'pending';
     if (rs === ReservationStatus.CANCELLED) return 'cancelled';
     if (rs === ReservationStatus.NO_SHOW) return 'noshow';
     const a = res.arrival_status || ArrivalStatus.WAITING;
@@ -853,6 +861,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
+    pending:   { label: 'Da confermare', dotClass: 'bg-amber-500', chipClass: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-amber-500/25' },
     waiting:   { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
     arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
     freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
@@ -865,6 +874,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleSetReservationState = (res: Reservation, state: ReservationStateKey) => {
     const update: Partial<Reservation> = {};
     switch (state) {
+      case 'pending':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.PENDING;
+        break;
       case 'waiting':
         update.arrival_status = ArrivalStatus.WAITING;
         update.reservation_status = ReservationStatus.CONFIRMED;
@@ -1623,6 +1636,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   </button>
                 );
               })()}
+              {(res.reservation_status === ReservationStatus.PENDING) && (
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
+                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                  title="Conferma prenotazione">
+                  <Check className="h-3.5 w-3.5" /> Conferma
+                </button>
+              )}
               {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                   className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
@@ -3583,7 +3603,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {stateChangeReservation && (() => {
         const res = stateChangeReservation;
         const current = getReservationState(res);
-        const options: ReservationStateKey[] = ['waiting', 'arrived', 'freed', 'noshow', 'cancelled'];
+        const options: ReservationStateKey[] = ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled'];
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] px-4" onClick={() => setStateChangeReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[var(--color-line)] overflow-hidden" onClick={(e) => e.stopPropagation()}>

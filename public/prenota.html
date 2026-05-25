@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Prenota un tavolo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { -webkit-font-smoothing: antialiased; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .hp { position: absolute; left: -9999px; top: -9999px; height: 0; width: 0; opacity: 0; pointer-events: none; }
+        /* Slot chip pulse on load */
+        @keyframes pop { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .slot-chip { animation: pop 0.15s ease-out; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <div class="max-w-md mx-auto px-4 py-6 pb-32">
+        <header class="text-center mb-6">
+            <h1 class="text-2xl font-bold text-slate-900">Prenota un tavolo</h1>
+            <p class="text-sm text-slate-500 mt-1">Compila il modulo, ti contatteremo per confermare.</p>
+        </header>
+
+        <form id="bookingForm" novalidate>
+            <!-- Honeypot — invisible to humans, irresistible to bots -->
+            <div class="hp" aria-hidden="true">
+                <label>Sito web (lascia vuoto)
+                    <input type="text" name="website" tabindex="-1" autocomplete="off" />
+                </label>
+            </div>
+
+            <!-- Section 1: Date -->
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
+                <label for="date" class="block text-sm font-semibold text-slate-900 mb-2">Quando vuoi venire?</label>
+                <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    required
+                    class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                />
+            </section>
+
+            <!-- Section 2: Guests -->
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
+                <label class="block text-sm font-semibold text-slate-900 mb-3">Quanti siete?</label>
+                <div class="flex items-center justify-between bg-slate-50 rounded-xl px-2 py-1.5">
+                    <button type="button" id="guestsDec" aria-label="Diminuisci"
+                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-slate-600 active:bg-slate-200 disabled:opacity-30">−</button>
+                    <div class="text-center">
+                        <div class="text-3xl font-bold text-slate-900 tabular-nums" id="guestsValue">2</div>
+                        <div class="text-xs text-slate-500" id="guestsLabel">persone</div>
+                    </div>
+                    <button type="button" id="guestsInc" aria-label="Aumenta"
+                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-slate-600 active:bg-slate-200 disabled:opacity-30">+</button>
+                </div>
+            </section>
+
+            <!-- Section 3: Shift + Slots -->
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
+                <label class="block text-sm font-semibold text-slate-900 mb-3">A che ora?</label>
+                <div class="grid grid-cols-2 gap-2 mb-4">
+                    <button type="button" data-shift="LUNCH" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-slate-200 bg-white text-slate-700">
+                        ☀ Pranzo
+                    </button>
+                    <button type="button" data-shift="DINNER" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-slate-200 bg-white text-slate-700">
+                        🌙 Cena
+                    </button>
+                </div>
+                <div id="slotsContainer" class="min-h-[44px]">
+                    <p class="text-sm text-slate-400 text-center py-3" id="slotsHint">Seleziona prima data e turno.</p>
+                </div>
+            </section>
+
+            <!-- Section 4: Contact (revealed after slot pick) -->
+            <section id="contactSection" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4 hidden">
+                <h2 class="text-sm font-semibold text-slate-900 mb-3">I tuoi contatti</h2>
+                <div class="space-y-3">
+                    <div>
+                        <label for="customer_name" class="block text-xs font-medium text-slate-600 mb-1">Nome e cognome</label>
+                        <input
+                            type="text"
+                            id="customer_name"
+                            name="customer_name"
+                            required
+                            minlength="2"
+                            maxlength="80"
+                            autocomplete="name"
+                            placeholder="Mario Rossi"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                        />
+                    </div>
+                    <div>
+                        <label for="phone" class="block text-xs font-medium text-slate-600 mb-1">Telefono</label>
+                        <input
+                            type="tel"
+                            id="phone"
+                            name="phone"
+                            required
+                            pattern="[\+0-9 ]{6,20}"
+                            autocomplete="tel"
+                            inputmode="tel"
+                            placeholder="333 1234567"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                        />
+                    </div>
+                    <div>
+                        <label for="notes" class="block text-xs font-medium text-slate-600 mb-1">Note (opzionale)</label>
+                        <textarea
+                            id="notes"
+                            name="notes"
+                            rows="2"
+                            maxlength="500"
+                            placeholder="Allergie, esigenze, occasioni speciali…"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition resize-none"
+                        ></textarea>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Submit (sticky bottom on mobile) -->
+            <div id="submitWrap" class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent pt-6 pb-4 px-4 hidden">
+                <div class="max-w-md mx-auto">
+                    <button
+                        type="submit"
+                        id="submitBtn"
+                        class="w-full bg-indigo-600 text-white text-base font-semibold py-4 rounded-2xl shadow-lg shadow-indigo-200 active:bg-indigo-700 disabled:opacity-50 disabled:shadow-none transition"
+                    >
+                        Invia richiesta
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <!-- Error toast -->
+        <div id="errorBox" class="hidden mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm"></div>
+
+        <!-- Confirmation overlay -->
+        <div id="confirmation" class="hidden fixed inset-0 bg-white z-50 flex items-center justify-center px-6">
+            <div class="text-center max-w-xs">
+                <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
+                    <svg class="w-10 h-10 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Richiesta ricevuta</h2>
+                <p class="text-slate-600 leading-relaxed">
+                    Grazie! Ti contatteremo via telefono o WhatsApp per confermare la prenotazione.
+                </p>
+                <p id="confirmRecap" class="text-sm text-slate-500 mt-4"></p>
+            </div>
+        </div>
+    </div>
+
+<script>
+(function () {
+    const state = {
+        date: '',
+        guests: 2,
+        shift: null,
+        time: null,
+        availability: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const dateInput = $('date');
+    const guestsValue = $('guestsValue');
+    const guestsLabel = $('guestsLabel');
+    const guestsDec = $('guestsDec');
+    const guestsInc = $('guestsInc');
+    const shiftBtns = document.querySelectorAll('.shift-btn');
+    const slotsContainer = $('slotsContainer');
+    const slotsHint = $('slotsHint');
+    const contactSection = $('contactSection');
+    const submitWrap = $('submitWrap');
+    const submitBtn = $('submitBtn');
+    const errorBox = $('errorBox');
+    const form = $('bookingForm');
+    const confirmation = $('confirmation');
+    const confirmRecap = $('confirmRecap');
+
+    // Init date = today
+    const today = new Date();
+    const todayIso = today.toISOString().slice(0, 10);
+    dateInput.value = todayIso;
+    dateInput.min = todayIso;
+    state.date = todayIso;
+
+    // Guests counter
+    function renderGuests() {
+        guestsValue.textContent = state.guests;
+        guestsLabel.textContent = state.guests === 1 ? 'persona' : 'persone';
+        guestsDec.disabled = state.guests <= 1;
+        guestsInc.disabled = state.guests >= 20;
+    }
+    renderGuests();
+    guestsDec.addEventListener('click', () => { if (state.guests > 1) { state.guests--; renderGuests(); } });
+    guestsInc.addEventListener('click', () => { if (state.guests < 20) { state.guests++; renderGuests(); } });
+
+    // Date change → refetch availability if a shift is already chosen
+    dateInput.addEventListener('change', async () => {
+        state.date = dateInput.value;
+        state.time = null;
+        await loadAvailability();
+        renderSlots();
+        updateSubmitVisibility();
+    });
+
+    // Shift selection
+    shiftBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            state.shift = btn.dataset.shift;
+            state.time = null;
+            shiftBtns.forEach(b => {
+                const active = b === btn;
+                b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
+                    active ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-700'
+                }`;
+            });
+            await loadAvailability();
+            renderSlots();
+            updateSubmitVisibility();
+        });
+    });
+
+    async function loadAvailability() {
+        if (!state.date) return;
+        slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Caricamento orari…</p>';
+        try {
+            const resp = await fetch(`/public/availability?date=${encodeURIComponent(state.date)}`);
+            if (!resp.ok) throw new Error('availability fetch failed');
+            state.availability = await resp.json();
+        } catch (err) {
+            console.error(err);
+            state.availability = { lunch: { slots: [] }, dinner: { slots: [] } };
+        }
+    }
+
+    function renderSlots() {
+        if (!state.shift) {
+            slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Seleziona il turno.</p>';
+            return;
+        }
+        const slots = (state.availability?.[state.shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
+        if (slots.length === 0) {
+            slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Per questa data non ci sono orari disponibili.</p>';
+            return;
+        }
+        slotsContainer.innerHTML = '<div class="grid grid-cols-4 gap-2"></div>';
+        const grid = slotsContainer.firstElementChild;
+        slots.forEach(time => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = time;
+            b.dataset.time = time;
+            const active = state.time === time;
+            b.className = `slot-chip py-2.5 rounded-lg text-sm font-semibold border-2 transition ${
+                active ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700'
+            }`;
+            b.addEventListener('click', () => {
+                state.time = time;
+                renderSlots();
+                contactSection.classList.remove('hidden');
+                updateSubmitVisibility();
+            });
+            grid.appendChild(b);
+        });
+    }
+
+    function updateSubmitVisibility() {
+        if (state.date && state.shift && state.time) {
+            submitWrap.classList.remove('hidden');
+        } else {
+            submitWrap.classList.add('hidden');
+        }
+    }
+
+    function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.classList.remove('hidden');
+        setTimeout(() => errorBox.classList.add('hidden'), 5000);
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorBox.classList.add('hidden');
+
+        const customer_name = $('customer_name').value.trim();
+        const phone = $('phone').value.trim();
+        const notes = $('notes').value.trim();
+        const website = form.elements['website'].value;
+
+        if (!customer_name) { showError('Inserisci il tuo nome'); return; }
+        if (!phone) { showError('Inserisci il numero di telefono'); return; }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Invio in corso…';
+
+        try {
+            const resp = await fetch('/public/reservations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    customer_name,
+                    phone,
+                    date: state.date,
+                    time: state.time,
+                    shift: state.shift,
+                    guests: state.guests,
+                    notes,
+                    website,
+                }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                showError(data.message || 'Si è verificato un errore. Riprova.');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Invia richiesta';
+                return;
+            }
+            // Success
+            const dateLabel = new Date(state.date + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+            confirmRecap.textContent = `${state.guests} ${state.guests === 1 ? 'persona' : 'persone'} · ${dateLabel} · ${state.time}`;
+            confirmation.classList.remove('hidden');
+        } catch (err) {
+            console.error(err);
+            showError('Connessione non disponibile. Riprova fra qualche istante.');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Invia richiesta';
+        }
+    });
+
+    // Initial fetch so slots appear as soon as a shift is picked.
+    loadAvailability();
+})();
+</script>
+</body>
+</html>
