@@ -5144,6 +5144,15 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             }
         ).catch(err => console.error('Push (public booking) failed:', err));
 
+        // Fire-and-forget WhatsApp acknowledgement to the customer. The booking
+        // is PENDING — staff still need to confirm — so wording reflects that.
+        const [yyyy, mm, dd] = date.split('-');
+        const dateLabel = `${dd}/${mm}/${yyyy}`;
+        sendVonageWhatsApp(
+            phoneE164,
+            `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`
+        ).catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
+
         res.status(201).json({ ok: true, id: created.id });
     } catch (err: any) {
         console.error('POST /public/reservations error:', err);
