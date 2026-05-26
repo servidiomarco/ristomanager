@@ -42,6 +42,10 @@ import {
 } from './utils/slots.js';
 
 const app = express();
+// Railway terminates TLS at a single upstream proxy and forwards via
+// X-Forwarded-For. Without this, express-rate-limit refuses to derive
+// the client IP and falls back to throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set('trust proxy', 1);
 const port = process.env.PORT || 3000;
 
 // Create HTTP server from Express app
