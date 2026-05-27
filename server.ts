@@ -4827,6 +4827,69 @@ async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
     }
 }
 
+// Meta WhatsApp Business Cloud API — uses approved templates, so customers
+// don't need to opt-in like in the Vonage sandbox. Active when the three
+// META_WHATSAPP_* env vars are set; otherwise we fall back to Vonage.
+function isMetaWhatsAppConfigured(): boolean {
+    return !!(process.env.META_WHATSAPP_ACCESS_TOKEN
+        && process.env.META_WHATSAPP_PHONE_NUMBER_ID);
+}
+
+interface MetaTemplateMessage {
+    templateName: string;
+    languageCode: string;
+    bodyParams: string[];
+}
+
+async function sendMetaWhatsAppTemplate(to: string, template: MetaTemplateMessage): Promise<void> {
+    const ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
+    const PHONE_NUMBER_ID = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
+    const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
+
+    if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+        console.error('[Meta] Missing META_WHATSAPP_ACCESS_TOKEN or META_WHATSAPP_PHONE_NUMBER_ID');
+        return;
+    }
+
+    // Meta wants digits only, no leading +.
+    const digitsTo = to.replace(/^\+/, '').replace(/\D/g, '');
+
+    const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
+    const body = {
+        messaging_product: 'whatsapp',
+        to: digitsTo,
+        type: 'template',
+        template: {
+            name: template.templateName,
+            language: { code: template.languageCode },
+            components: template.bodyParams.length > 0
+                ? [{
+                    type: 'body',
+                    parameters: template.bodyParams.map(text => ({ type: 'text', text })),
+                }]
+                : [],
+        },
+    };
+
+    console.log(`[Meta] Sending template "${template.templateName}" to ${digitsTo}`);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        console.error('[Meta] ❌ Send failed', response.status, result);
+        throw new Error(`Meta API error: ${response.status} - ${JSON.stringify(result)}`);
+    }
+    console.log(`[Meta] ✅ Template sent to ${digitsTo}`, result);
+}
+
 
 // ============================================
 // OPENING HOURS & SPECIAL CLOSURES
@@ -5152,10 +5215,29 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // is PENDING — staff still need to confirm — so wording reflects that.
         const [yyyy, mm, dd] = date.split('-');
         const dateLabel = `${dd}/${mm}/${yyyy}`;
-        sendVonageWhatsApp(
-            phoneE164,
-            `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`
-        ).catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
+        const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
+
+        if (isMetaWhatsAppConfigured()) {
+            const templateName = process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
+            const templateLang = process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
+            sendMetaWhatsAppTemplate(phoneE164, {
+                templateName,
+                languageCode: templateLang,
+                // Body params order MUST match the template approved in Meta:
+                // {{1}} customer name, {{2}} guests, {{3}} date, {{4}} time.
+                bodyParams: [
+                    toTitleCase(customer_name),
+                    guestsLabel,
+                    dateLabel,
+                    time,
+                ],
+            }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
+        } else {
+            sendVonageWhatsApp(
+                phoneE164,
+                `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`
+            ).catch(err => console.error('[public-booking] Vonage WhatsApp ack failed:', err));
+        }
 
         res.status(201).json({ ok: true, id: created.id });
     } catch (err: any) {
@@ -5168,24 +5250,81 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
-// WhatsApp sandbox diagnostic — returns the raw Vonage response (status, body,
-// resolved sender/recipient) so we can see exactly why the sandbox rejects.
-// Gated by settings:full so only owners can hit it.
+// WhatsApp diagnostic — sends a real message via the active provider (Meta if
+// configured, otherwise Vonage sandbox) and returns the raw response so we can
+// see exactly what's happening. Owner-only.
 app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'), async (req, res) => {
     const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
     const text = typeof req.body?.text === 'string' && req.body.text.trim()
         ? req.body.text.trim()
-        : 'Test diagnostico Vonage sandbox.';
+        : 'Test diagnostico WhatsApp.';
+    const provider = typeof req.body?.provider === 'string' ? req.body.provider : 'auto';
 
     if (!to) return res.status(400).json({ error: 'missing_to', message: 'Body must include "to"' });
 
+    const useMeta = provider === 'meta' || (provider === 'auto' && isMetaWhatsAppConfigured());
+
+    if (useMeta) {
+        const ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
+        const PHONE_NUMBER_ID = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
+        const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
+        const templateName = req.body?.templateName || process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
+        const templateLang = req.body?.templateLang || process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
+        const bodyParams: string[] = Array.isArray(req.body?.bodyParams) ? req.body.bodyParams : [];
+
+        if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+            return res.status(500).json({
+                error: 'missing_meta_config',
+                present: {
+                    META_WHATSAPP_ACCESS_TOKEN: !!ACCESS_TOKEN,
+                    META_WHATSAPP_PHONE_NUMBER_ID: !!PHONE_NUMBER_ID,
+                },
+            });
+        }
+
+        const digitsTo = to.replace(/^\+/, '').replace(/\D/g, '');
+        const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
+        const reqBody = {
+            messaging_product: 'whatsapp',
+            to: digitsTo,
+            type: 'template',
+            template: {
+                name: templateName,
+                language: { code: templateLang },
+                components: bodyParams.length > 0
+                    ? [{ type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })) }]
+                    : [],
+            },
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ACCESS_TOKEN}` },
+                body: JSON.stringify(reqBody),
+            });
+            const rawBody = await response.text();
+            let parsedBody: any;
+            try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
+            return res.json({
+                ok: response.ok,
+                provider: 'meta',
+                request: { to: digitsTo, phoneNumberId: PHONE_NUMBER_ID, template: templateName, language: templateLang, bodyParams },
+                meta: { status: response.status, body: parsedBody },
+            });
+        } catch (err: any) {
+            return res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
+        }
+    }
+
+    // Vonage path
     const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
     const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
     const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
 
     if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
         return res.status(500).json({
-            error: 'missing_config',
+            error: 'missing_vonage_config',
             present: {
                 VONAGE_API_KEY: !!VONAGE_API_KEY,
                 VONAGE_API_SECRET: !!VONAGE_API_SECRET,
@@ -5215,6 +5354,7 @@ app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'
         try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
         res.json({
             ok: response.ok,
+            provider: 'vonage',
             request: { from: formattedFrom, to: formattedTo, text, apiKey: VONAGE_API_KEY },
             vonage: { status: response.status, body: parsedBody },
         });
