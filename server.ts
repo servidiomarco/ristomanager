@@ -5168,6 +5168,61 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
+// WhatsApp sandbox diagnostic — returns the raw Vonage response (status, body,
+// resolved sender/recipient) so we can see exactly why the sandbox rejects.
+// Gated by settings:full so only owners can hit it.
+app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
+    const text = typeof req.body?.text === 'string' && req.body.text.trim()
+        ? req.body.text.trim()
+        : 'Test diagnostico Vonage sandbox.';
+
+    if (!to) return res.status(400).json({ error: 'missing_to', message: 'Body must include "to"' });
+
+    const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
+    const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
+    const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
+
+    if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
+        return res.status(500).json({
+            error: 'missing_config',
+            present: {
+                VONAGE_API_KEY: !!VONAGE_API_KEY,
+                VONAGE_API_SECRET: !!VONAGE_API_SECRET,
+                VONAGE_WHATSAPP_NUMBER: !!VONAGE_WHATSAPP_NUMBER,
+            },
+        });
+    }
+
+    const formattedTo = to.startsWith('+') ? to : `+${to}`;
+    const formattedFrom = VONAGE_WHATSAPP_NUMBER.startsWith('+') ? VONAGE_WHATSAPP_NUMBER : `+${VONAGE_WHATSAPP_NUMBER}`;
+    const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
+
+    try {
+        const response = await fetch('https://messages-sandbox.nexmo.com/v1/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+            body: JSON.stringify({
+                from: formattedFrom,
+                to: formattedTo,
+                message_type: 'text',
+                text,
+                channel: 'whatsapp',
+            }),
+        });
+        const rawBody = await response.text();
+        let parsedBody: any;
+        try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
+        res.json({
+            ok: response.ok,
+            request: { from: formattedFrom, to: formattedTo, text, apiKey: VONAGE_API_KEY },
+            vonage: { status: response.status, body: parsedBody },
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
+    }
+});
+
 const startServer = async () => {
     try {
         // Start HTTP server
