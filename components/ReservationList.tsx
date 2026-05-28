@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -50,7 +50,8 @@ const getInitials = (name?: string | null): string => {
 };
 
 // Small circular badge showing who took the reservation:
-// voice-agent bookings get a Mic icon, manual bookings get user initials.
+// voice-agent bookings get a Mic icon, web bookings get a Globe icon,
+// manual bookings get user initials.
 const renderOperatorBadge = (res: Reservation): React.ReactNode => {
   if (res.source === ReservationSource.VOICE) {
     return (
@@ -60,6 +61,17 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
         aria-label="Presa dall'agente vocale"
       >
         <Mic className="h-2.5 w-2.5" />
+      </span>
+    );
+  }
+  if (res.source === ReservationSource.GOOGLE) {
+    return (
+      <span
+        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-sky-100 border border-sky-200 text-sky-600 dark:bg-sky-500/20 dark:border-sky-500/30 dark:text-sky-300 flex-shrink-0"
+        title="Prenotazione dal web"
+        aria-label="Prenotazione dal web"
+      >
+        <Globe className="h-2.5 w-2.5" />
       </span>
     );
   }
@@ -1509,11 +1521,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div
                     style={{ top: pillTopPx }}
                     className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
-                    title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
+                    title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : reservation.source === ReservationSource.GOOGLE ? "Prenotazione dal web" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
                 >
                     {reservation.source === ReservationSource.VOICE ? (
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             <Mic className="h-3 w-3" />
+                        </span>
+                    ) : reservation.source === ReservationSource.GOOGLE ? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            <Globe className="h-3 w-3" />
                         </span>
                     ) : reservation.created_by_user_name ? (
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[10px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
