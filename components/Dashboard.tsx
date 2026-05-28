@@ -11,7 +11,7 @@ import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2 } from 'lucide-react';
+import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2, Wheat } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -834,6 +834,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         )
       : [];
   }, [reservations, selectedDateStr]);
+
+  // Bread estimate for the selected day. Mirrors the server's daily bread
+  // reminder formula (1 kg every 10 covers, min 1 kg) so the shopping list and
+  // the 20:00 reminder always agree. Covers = non-cancelled reservations +
+  // banquets scheduled for the day. Recomputes live as bookings change.
+  const breadEstimate = useMemo(() => {
+    const reservationGuests = selectedDayReservations.reduce((acc, r) => acc + (r.guests || 0), 0);
+    const banquetGuests = Array.isArray(banquetMenus)
+      ? banquetMenus
+          .filter(m => m.event_date === selectedDateStr)
+          .reduce((acc, m) => acc + (m.guests || 0), 0)
+      : 0;
+    const coperti = reservationGuests + banquetGuests;
+    return { coperti, kg: Math.max(1, Math.ceil(coperti / 10)) };
+  }, [selectedDayReservations, banquetMenus, selectedDateStr]);
 
   // Calculate stats for selected day (skip tables in closed rooms)
   const openRoomIds = useMemo(
@@ -1898,6 +1913,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Pane del giorno — auto-calcolato dalle prenotazioni + banchetti del giorno */}
+          <div className="mb-3 flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/25 text-amber-600 dark:text-amber-300 flex-shrink-0">
+              <Wheat className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-[var(--color-fg)]">
+                Pane{' '}
+                {breadEstimate.coperti > 0 ? (
+                  <span className="tabular font-semibold text-amber-700 dark:text-amber-300">{breadEstimate.kg} kg</span>
+                ) : (
+                  <span className="text-[var(--color-fg-subtle)]">— nessuna prenotazione</span>
+                )}
+              </p>
+              <p className="text-[11px] text-[var(--color-fg-muted)]">
+                {breadEstimate.coperti > 0
+                  ? `${breadEstimate.coperti} coperti previsti · 1 kg ogni 10`
+                  : 'Si aggiorna in base alle prenotazioni del giorno'}
+              </p>
             </div>
           </div>
 
