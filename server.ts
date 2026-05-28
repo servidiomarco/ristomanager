@@ -1944,11 +1944,22 @@ async function runDailyBreadReminder(): Promise<void> {
     const todayIso = getItalianTodayIso();
     const tomorrowIso = addDaysIso(todayIso, 1);
 
-    // Sum guests for tomorrow's reservations (banquet bookings already counted via reservation rows)
+    // Sum guests for tomorrow's covers. Banquets live in their own table
+    // (banquet_menus, keyed by event_date) and are NOT stored as reservation
+    // rows, so they must be added explicitly — otherwise a banquet's covers are
+    // silently missing from the bread count.
     const result = await queryWithRetry(
-        `SELECT COALESCE(SUM(guests), 0)::int AS total FROM reservations
-         WHERE DATE(reservation_time) = $1
-         AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'`,
+        `SELECT (
+            COALESCE((
+                SELECT SUM(guests) FROM reservations
+                WHERE DATE(reservation_time) = $1
+                  AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
+            ), 0)
+            + COALESCE((
+                SELECT SUM(guests) FROM banquet_menus
+                WHERE event_date = $1
+            ), 0)
+         )::int AS total`,
         [tomorrowIso]
     );
     const totalGuests: number = result.rows[0]?.total ?? 0;
