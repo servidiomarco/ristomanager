@@ -175,30 +175,39 @@ export function normalizeItalianPhone(input: string): string {
 // AVAILABILITY LOOKUP
 // ============================================
 
+export type RoomLocation = 'INDOOR' | 'OUTDOOR';
+
 export interface AvailabilityInput {
     date: string;       // YYYY-MM-DD
     shift: Shift;
     guests: number;
+    location_preference?: RoomLocation;
 }
 
 export interface AvailabilityResult {
     available: boolean;
     free_tables_count: number;
+    free_indoor: number;
+    free_outdoor: number;
     alternative_shift?: Shift;
     message: string;    // Italian phrase the agent can read aloud
 }
 
 /**
- * Free-table count for the given date+shift. Excludes:
+ * Free-table breakdown for the given date+shift, split by room location
+ * (INDOOR/OUTDOOR). Excludes:
  *   - Tables in closed rooms
- *   - Tables already assigned to a reservation on that date+shift
+ *   - Tables already assigned to a non-cancelled reservation that date+shift
  *   - Tables whose seats are below requested guest count
+ *
+ * The agent uses the per-zone counts to negotiate with the caller when their
+ * preferred zone is full but the other has space.
  */
 export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
-    const { date, shift, guests } = input;
+    const { date, shift, guests, location_preference } = input;
 
-    const result = await queryWithRetry(`
-        SELECT COUNT(*)::int AS free
+    const breakdown = await queryWithRetry(`
+        SELECT r.location AS location, COUNT(*)::int AS free
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
@@ -210,15 +219,41 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
+        GROUP BY r.location
     `, [guests, date, shift]);
 
-    const free = result.rows[0]?.free ?? 0;
+    let freeIndoor = 0;
+    let freeOutdoor = 0;
+    for (const row of breakdown.rows) {
+        if (row.location === 'INDOOR') freeIndoor = row.free;
+        else if (row.location === 'OUTDOOR') freeOutdoor = row.free;
+    }
+    const freeTotal = freeIndoor + freeOutdoor;
 
-    if (free > 0) {
+    if (freeTotal > 0) {
+        const preferredFree = location_preference === 'INDOOR' ? freeIndoor
+            : location_preference === 'OUTDOOR' ? freeOutdoor
+            : freeTotal;
+        if (preferredFree > 0) {
+            const where = location_preference === 'INDOOR' ? " all'interno"
+                : location_preference === 'OUTDOOR' ? ' all\'esterno' : '';
+            return {
+                available: true,
+                free_tables_count: freeTotal,
+                free_indoor: freeIndoor,
+                free_outdoor: freeOutdoor,
+                message: `Sì, abbiamo disponibilità${where} per ${guests} persone.`
+            };
+        }
+        // Preferred zone full but the other has space — let the agent propose it.
+        const altWhere = location_preference === 'INDOOR' ? "all'esterno" : "all'interno";
+        const requestedWhere = location_preference === 'INDOOR' ? "all'interno" : "all'esterno";
         return {
-            available: true,
-            free_tables_count: free,
-            message: `Sì, abbiamo disponibilità per ${guests} persone.`
+            available: false,
+            free_tables_count: freeTotal,
+            free_indoor: freeIndoor,
+            free_outdoor: freeOutdoor,
+            message: `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
         };
     }
 
@@ -244,6 +279,8 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
         return {
             available: false,
             free_tables_count: 0,
+            free_indoor: 0,
+            free_outdoor: 0,
             alternative_shift: otherShift,
             message: `Mi dispiace, per quella fascia siamo al completo. Posso proporle ${altLabel} dello stesso giorno?`
         };
@@ -252,6 +289,8 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
     return {
         available: false,
         free_tables_count: 0,
+        free_indoor: 0,
+        free_outdoor: 0,
         message: 'Mi dispiace, per quel giorno siamo al completo. Possiamo provare un altro giorno?'
     };
 }
@@ -269,6 +308,7 @@ export interface VoiceReservationInput {
     children?: number;
     notes?: string;
     conversation_id?: string;
+    location_preference?: RoomLocation;
 }
 
 export interface VoiceReservationOutput {
@@ -280,12 +320,59 @@ export interface VoiceReservationOutput {
     children: number;
     phone: string;
     requires_review: boolean;
+    table_id: number | null;
+    table_name: string | null;
+    room_name: string | null;
+    room_location: RoomLocation | null;
+}
+
+/**
+ * Pick the smallest free table that fits `guests` on the given date+shift,
+ * restricted to `locationPreference` when provided. Returns null if nothing
+ * matches — the caller saves the reservation with table_id=NULL so a human
+ * can place it manually.
+ */
+async function pickAutoAssignTable(
+    date: string,
+    shift: Shift,
+    guests: number,
+    locationPreference: RoomLocation | undefined
+): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
+    const params: any[] = [guests, date, shift];
+    let locationFilter = '';
+    if (locationPreference) {
+        params.push(locationPreference);
+        locationFilter = ` AND r.location = $${params.length}`;
+    }
+    const result = await queryWithRetry(`
+        SELECT t.id, t.name, r.name AS room_name, r.location
+        FROM tables t
+        JOIN rooms r ON t.room_id = r.id
+        WHERE r.is_closed = false
+          AND t.seats >= $1
+          ${locationFilter}
+          AND NOT EXISTS (
+              SELECT 1 FROM reservations res
+              WHERE res.table_id = t.id
+                AND DATE(res.reservation_time) = $2
+                AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+          )
+        ORDER BY t.seats ASC, t.id ASC
+        LIMIT 1
+    `, params);
+    return result.rows[0] ?? null;
 }
 
 /**
  * Insert a reservation with source=VOICE and requires_review=true.
  * Phase 2 of the rollout: every voice booking is flagged for human approval
  * until accuracy metrics let us lift the flag.
+ *
+ * Auto-assigns a table when one fits the requested location_preference (with
+ * hard restriction — agent must negotiate fallback with the caller before
+ * calling this). Falls back to table_id=NULL when nothing fits, so the
+ * booking is still recorded for manual placement.
  */
 export async function createVoiceReservation(
     input: VoiceReservationInput
@@ -295,14 +382,22 @@ export async function createVoiceReservation(
         ? `[Voce] ${input.notes}`
         : '[Voce] Prenotazione creata da agent vocale ElevenLabs';
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
+    const reservationDate = input.reservation_time.slice(0, 10);
+
+    const assigned = await pickAutoAssignTable(
+        reservationDate,
+        input.shift,
+        input.guests,
+        input.location_preference
+    );
 
     const result = await queryWithRetry(`
         INSERT INTO reservations (
             customer_name, reservation_time, shift, guests, children, phone,
-            notes, payment_status, arrival_status, source, requires_review
+            notes, payment_status, arrival_status, source, requires_review, table_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true)
-        RETURNING id, customer_name, reservation_time, shift, guests, children, phone, requires_review
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9)
+        RETURNING id, customer_name, reservation_time, shift, guests, children, phone, requires_review, table_id
     `, [
         input.customer_name.trim(),
         input.reservation_time,
@@ -311,10 +406,17 @@ export async function createVoiceReservation(
         children,
         phone,
         notes,
-        ReservationSource.VOICE
+        ReservationSource.VOICE,
+        assigned?.id ?? null
     ]);
 
-    return result.rows[0];
+    const row = result.rows[0];
+    return {
+        ...row,
+        table_name: assigned?.name ?? null,
+        room_name: assigned?.room_name ?? null,
+        room_location: assigned?.location ?? null,
+    };
 }
 
 // ============================================

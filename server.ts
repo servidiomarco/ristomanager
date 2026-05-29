@@ -219,6 +219,10 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
         : req.body || {};
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
+    const rawLocation = String(p.location_preference ?? '').trim().toUpperCase();
+    const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
+        ? (rawLocation as 'INDOOR' | 'OUTDOOR')
+        : undefined;
 
     const normalizedDate = parseFlexibleDate(p.date);
     if (!normalizedDate) {
@@ -239,9 +243,10 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
         const result = await findAvailability({
             date: normalizedDate,
             shift: rawShift as Shift,
-            guests: Math.trunc(guests)
+            guests: Math.trunc(guests),
+            location_preference: locationPreference,
         });
-        console.log('[ElevenLabs] check-availability', { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, result });
+        console.log('[ElevenLabs] check-availability', { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         res.json(result);
     } catch (err) {
         console.error('[ElevenLabs] check-availability error', err);
@@ -273,6 +278,10 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     const guests = Number(p.guests);
     const childrenRaw = p.children;
     const notes = typeof p.notes === 'string' ? p.notes.trim() : undefined;
+    const rawLocation = String(p.location_preference ?? '').trim().toUpperCase();
+    const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
+        ? (rawLocation as 'INDOOR' | 'OUTDOOR')
+        : undefined;
 
     if (!customerName) {
         return res.status(400).json({ error: 'invalid_customer_name', message: 'customer_name is required' });
@@ -333,6 +342,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             customer_name: customerName, raw_date: p.date, raw_time: p.time,
             normalized_date: normalizedDate, normalized_time: normalizedTime,
             shift: rawShift, guests, children, conversation_id: conversationId,
+            location_preference: locationPreference,
         });
         const created = await createVoiceReservation({
             customer_name: customerName,
@@ -343,6 +353,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             children,
             notes,
             conversation_id: conversationId,
+            location_preference: locationPreference,
         });
 
         // Link the (eventual) call audit row to this reservation. Fire-and-forget
@@ -408,12 +419,18 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         const confirmationPhrase = formatItalianConfirmation(created);
         console.log('[ElevenLabs] create-reservation OK', {
             id: created.id, conversation_id: conversationId, customer: created.customer_name,
+            table_id: created.table_id, table_name: created.table_name,
+            room: created.room_name, location: created.room_location,
         });
         res.json({
             success: true,
             reservation_id: created.id,
             requires_review: created.requires_review,
             confirmation_phrase: confirmationPhrase,
+            table_id: created.table_id,
+            table_name: created.table_name,
+            room_name: created.room_name,
+            room_location: created.room_location,
         });
     } catch (err: any) {
         console.error('[ElevenLabs] create-reservation error', err);
@@ -677,9 +694,12 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     // If found and we have a phone, send the WhatsApp recap.
     try {
         const linked = await queryWithRetry(
-            `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests
+            `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests,
+                    t.name AS table_name, rm.name AS room_name
              FROM voice_calls vc
              JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN tables t ON t.id = r.table_id
+             LEFT JOIN rooms rm ON rm.id = t.room_id
              WHERE vc.conversation_id = $1`,
             [conversationId]
         );
@@ -692,7 +712,10 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
             const hours = String(dt.getHours()).padStart(2, '0');
             const minutes = String(dt.getMinutes()).padStart(2, '0');
             const persone = row.guests === 1 ? 'persona' : 'persone';
-            const message = `Ciao ${row.customer_name.split(' ')[0]}, la tua prenotazione per ${row.guests} ${persone} è registrata per il ${day}/${month}/${year} alle ${hours}:${minutes}. A presto!`;
+            const tableSuffix = row.table_name
+                ? `, tavolo ${row.table_name}${row.room_name ? ` (${row.room_name})` : ''}`
+                : '';
+            const message = `Ciao ${row.customer_name.split(' ')[0]}, la tua prenotazione per ${row.guests} ${persone} è registrata per il ${day}/${month}/${year} alle ${hours}:${minutes}${tableSuffix}. A presto!`;
             sendVonageWhatsApp(row.phone, message).catch(err =>
                 console.warn('[ElevenLabs] post-call WhatsApp send failed:', err?.message || err)
             );

@@ -135,6 +135,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT false;`);
+        await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS location VARCHAR(20);`);
+        // One-shot seed for the initial room set. Idempotent: only assigns
+        // location when still NULL, so later edits via UI/SQL win.
+        await client.query(`
+            UPDATE rooms SET location = 'INDOOR'
+            WHERE location IS NULL AND name IN ('Veranda', 'Tettoia', 'Macine');
+        `);
+        await client.query(`
+            UPDATE rooms SET location = 'OUTDOOR'
+            WHERE location IS NULL AND name IN ('Fiume', 'Fuori', 'Porticato');
+        `);
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS tables (
