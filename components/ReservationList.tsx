@@ -2341,20 +2341,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
 
                 <div className="relative flex-1 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const el = dateInputRef.current;
-                      if (!el) return;
+                  {/* Native date input — overlays the visible pill, captures the tap natively
+                      so the platform picker (incl. iOS Safari) opens reliably on icon click. */}
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    value={selectedDateStr}
+                    onChange={handleDateInputChange}
+                    onClick={(e) => {
                       try {
-                        if (typeof el.showPicker === 'function') el.showPicker();
-                        else el.click();
+                        if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker();
                       } catch {
-                        el.click();
+                        // ignore — the native click on the input already triggers the picker
                       }
                     }}
                     aria-label="Seleziona data"
-                    className={`w-full h-10 px-3 rounded-full border bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] active:scale-[0.99] transition-all flex items-center justify-center gap-2 ${
+                    className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div
+                    aria-hidden="true"
+                    className={`pointer-events-none w-full h-10 px-3 rounded-full border bg-[var(--color-surface)] peer-hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center gap-2 ${
                       isToday
                         ? 'border-[var(--color-line)]'
                         : 'border-[var(--color-line-strong)]'
@@ -2373,16 +2379,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         {formatSelectedDateShort(selectedDateObj)}
                       </span>
                     )}
-                  </button>
-                  <input
-                    ref={dateInputRef}
-                    type="date"
-                    value={selectedDateStr}
-                    onChange={handleDateInputChange}
-                    aria-hidden="true"
-                    tabIndex={-1}
-                    className="absolute inset-0 w-full h-full opacity-0 pointer-events-none"
-                  />
+                  </div>
                 </div>
 
                 <button
