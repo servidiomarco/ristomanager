@@ -277,21 +277,39 @@ per testare con il vero traffico. Step paralleli al lavoro tecnico:
 Operazioni nella console Vonage (Voice → SIP trunks):
 
 1. Creare un **outbound SIP trunk** con:
-   - URI: `sip:<agent-id>@sip.elevenlabs.io` (ricavato dal dashboard ElevenLabs
-     → Conversational AI → Inbound → "SIP URI")
+   - URI: `sip:+<DID>@sip.rtc.elevenlabs.io:5060;transport=tcp`
+     (es. `sip:+447451263812@sip.rtc.elevenlabs.io:5060;transport=tcp`)
    - Codec: G.711 µ-law / A-law (default ElevenLabs)
-   - Auth: secret/username se ElevenLabs lo richiede (vedi loro docs SIP)
+   - Auth: nessuna se l'inbound trunk ElevenLabs ha "Allowed IPs = any" e
+     "Authentication = none" (default), altrimenti credenziali digest.
 2. Sul DID italiano: routing → "Forward inbound calls via SIP trunk →
    <nome trunk>" (oppure NCCO `connect.endpoint.type=sip`).
 3. Test: chiamare il DID → deve atterrare sull'agent ElevenLabs entro 2-3 secondi.
 4. Verificare in ElevenLabs Conversational AI → Calls che la chiamata appaia,
    con caller_id valorizzato (numero del chiamante).
 
-Lato ElevenLabs:
-- Abilitare "Inbound SIP" sull'agent.
-- Configurare i tool con gli URL del nostro server (`/webhook/elevenlabs/*`) e
-  il secret HMAC (`ELEVENLABS_WEBHOOK_SECRET`).
-- Configurare il "Post-call webhook" → `https://<host>/webhook/elevenlabs/post-call`.
+> **Gotcha SIP URI (verificato 2026-05-29 con DID `+447451263812`).**
+> Sia il DID come *user part* sia `;transport=tcp` sono obbligatori.
+> - Senza user part (`sip:sip.rtc.elevenlabs.io:5060`) ElevenLabs non sa
+>   verso quale agent instradare e Vonage riporta solo "Internal error occurred".
+> - Senza `;transport=tcp` Vonage manda UDP, che l'inbound trunk ElevenLabs
+>   non accetta — i server pubblicizzati sono `:5060;transport=tcp` e
+>   `:5061;transport=tls`.
+> In alternativa al TCP, usare TLS: `sip:+<DID>@sip.rtc.elevenlabs.io:5061;transport=tls`
+> (richiede TLS attivo sul trunk Vonage — vedi link "How to enable TLS and custom ports"
+> nella dialog di configurazione del numero).
+
+Lato ElevenLabs (Conversational AI → Numeri di telefono → Importa numero → SIP Trunk):
+- **Numero**: `+<DID>` in formato E.164.
+- **Agente assegnato**: quello che deve rispondere (es. `agent_5401kq7cjqa8evzbvwpbeghefm6w`).
+- **Inbound trunk → Crittografia dei Media**: `Allowed (Default)`.
+- **Inbound trunk → Indirizzi Consentiti**: `Tutti gli indirizzi` (oppure
+  IP egress Vonage se si vuole stringere).
+- **Inbound trunk → Autenticazione**: non configurata (oppure digest se
+  configurato anche su Vonage).
+- **Tool** dell'agent: URL `/webhook/elevenlabs/*` su Railway + header con il
+  secret HMAC (`ELEVENLABS_WEBHOOK_SECRET`).
+- **Post-call webhook**: `https://<host>/webhook/elevenlabs/post-call`.
 
 **WhatsApp post-call (decisione 4)**
 

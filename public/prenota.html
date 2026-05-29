@@ -21,6 +21,22 @@
             <p class="text-sm text-slate-500 mt-1">Compila il modulo, ti contatteremo per confermare.</p>
         </header>
 
+        <a id="callCta" href="tel:+447451263812"
+           class="flex items-center justify-between bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-4 active:bg-slate-50 transition">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h2.28a2 2 0 011.94 1.515l.7 2.8a2 2 0 01-.45 1.84l-1.27 1.27a16 16 0 006.36 6.36l1.27-1.27a2 2 0 011.84-.45l2.8.7A2 2 0 0121 17.72V20a2 2 0 01-2 2h-1C9.716 22 2 14.284 2 5V4a1 1 0 011-1z"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="text-sm font-semibold text-slate-900">Preferisci chiamare?</div>
+                    <div class="text-xs text-slate-500">Il nostro assistente risponde 24/7</div>
+                </div>
+            </div>
+            <div id="callCtaNumber" class="text-sm font-semibold text-indigo-600">+44 7451 263812</div>
+        </a>
+
         <form id="bookingForm" novalidate>
             <!-- Honeypot — invisible to humans, irresistible to bots -->
             <div class="hp" aria-hidden="true">
@@ -420,6 +436,20 @@
 
     // Initial fetch so slots appear as soon as a shift is picked.
     loadAvailability();
+
+    // Refresh the call CTA from the server so a DID porting (env-var change)
+    // takes effect without an HTML edit. Hardcoded fallback above keeps the
+    // CTA usable if the fetch fails.
+    fetch('/public/contact')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data?.voice?.phone) return;
+            const cta = document.getElementById('callCta');
+            const num = document.getElementById('callCtaNumber');
+            if (cta) cta.href = `tel:${data.voice.phone}`;
+            if (num) num.textContent = data.voice.display || data.voice.phone;
+        })
+        .catch(() => { /* keep fallback */ });
 })();
 </script>
 </body>

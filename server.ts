@@ -5125,6 +5125,23 @@ app.get('/public/rooms', async (req, res) => {
     }
 });
 
+// Surfaces the restaurant's reachable phone number (the Vonage DID bound to
+// the ElevenLabs SIP trunk) to the public booking page. Lets us swap the DID
+// at porting time via VONAGE_VOICE_NUMBER alone, no HTML edit needed.
+app.get('/public/contact', (_req, res) => {
+    const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
+    if (!raw) return res.status(404).json({ error: 'not_configured' });
+    const e164 = raw.startsWith('+') ? raw : `+${raw}`;
+    const rest = e164.slice(3);
+    let display = e164;
+    if (e164.startsWith('+39') && rest.length >= 9) {
+        display = `+39 ${rest.slice(0, 3)} ${rest.slice(3)}`;
+    } else if (e164.startsWith('+44') && rest.length >= 10) {
+        display = `+44 ${rest.slice(0, 4)} ${rest.slice(4)}`;
+    }
+    res.json({ voice: { phone: e164, display } });
+});
+
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
     try {
         const body = req.body ?? {};
