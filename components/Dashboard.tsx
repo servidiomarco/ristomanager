@@ -1046,7 +1046,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
-            <div className="flex flex-wrap items-center gap-2 self-stretch w-full md:hidden">
+            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden">
               <DateNavigator
                 value={selectedDateStr}
                 onChange={(dateOnly) => {
@@ -1057,7 +1057,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               />
 
               {/* Separate time chip — always shows live current time */}
-              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 py-2.5">
+              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 h-10 flex-shrink-0">
                 <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
                 <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
                   {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}

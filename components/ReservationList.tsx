@@ -2265,7 +2265,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         <div className="flex flex-col h-full">
           {/* Row 1: Date - Shift */}
           <div className="px-4 pt-2.5 pb-2 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
               <DateNavigator
                 value={selectedDateStr}
                 onChange={(dateOnly) => {
@@ -2275,8 +2275,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 className="flex-1 min-w-0"
               />
 
-              {/* Shift toggle — icon only */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0 w-[108px]">
+              {/* Shift toggle — icon only; top-aligned so it tracks the date pill,
+                  not the chip below. */}
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0 w-[108px] h-10">
                 <button onClick={() => setSelectedShift(Shift.LUNCH)}
                   className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
                     selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
