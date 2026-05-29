@@ -794,6 +794,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     });
   };
 
+  // Relative day label for nearby dates — gives instant context ("Oggi", "Domani", "Ieri")
+  // without forcing the user to compute the offset from today.
+  const relativeDayLabel = (() => {
+    if (isToday) return 'Oggi';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(selectedDateObj);
+    target.setHours(0, 0, 0, 0);
+    const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+    if (diff === 1) return 'Domani';
+    if (diff === -1) return 'Ieri';
+    return null;
+  })();
+
   // --- Actions ---
 
   const handlePaymentAction = (reservation: Reservation) => {
@@ -2312,34 +2326,77 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       ) : (
         /* ===== MOBILE / TABLET: List only (< 1024px) ===== */
         <div className="flex flex-col h-full">
-          {/* Row 1: Date - Shift - Print */}
-          <div className="px-4 py-2.5 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
+          {/* Row 1: Date - Shift */}
+          <div className="px-4 pt-2.5 pb-2 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
             <div className="flex items-center gap-2">
-              {/* Date pill */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-0">
-                {!isToday && (
-                  <button onClick={goToToday} className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0">
-                    Oggi
-                  </button>
-                )}
-                <button onClick={goToPreviousDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno precedente">
+              {/* Date controls: separate prev/next + central tap-to-open pill */}
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={goToPreviousDay}
+                  aria-label="Giorno precedente"
+                  className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
+                >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <div className="relative flex-1 flex justify-center min-w-0">
-                  <div className="flex items-center justify-center px-2 py-1.5 pointer-events-none">
-                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">{formatSelectedDateShort(selectedDateObj)}</span>
-                  </div>
-                  <input ref={dateInputRef} type="date" value={selectedDateStr} onChange={handleDateInputChange}
-                    onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch {} }}
-                    aria-label="Seleziona data" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+
+                <div className="relative flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const el = dateInputRef.current;
+                      if (!el) return;
+                      try {
+                        if (typeof el.showPicker === 'function') el.showPicker();
+                        else el.click();
+                      } catch {
+                        el.click();
+                      }
+                    }}
+                    aria-label="Seleziona data"
+                    className={`w-full h-10 px-3 rounded-full border bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] active:scale-[0.99] transition-all flex items-center justify-center gap-2 ${
+                      isToday
+                        ? 'border-[var(--color-line)]'
+                        : 'border-[var(--color-line-strong)]'
+                    }`}
+                  >
+                    <Calendar className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-fg)]'}`} />
+                    {relativeDayLabel ? (
+                      <span className="flex items-baseline gap-1.5 min-w-0">
+                        <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">{relativeDayLabel}</span>
+                        <span className="text-[11px] text-[var(--color-fg-muted)] capitalize whitespace-nowrap hidden sm:inline">
+                          · {formatSelectedDateShort(selectedDateObj)}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-sm font-semibold text-[var(--color-fg)] capitalize whitespace-nowrap truncate">
+                        {formatSelectedDateShort(selectedDateObj)}
+                      </span>
+                    )}
+                  </button>
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    value={selectedDateStr}
+                    onChange={handleDateInputChange}
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    className="absolute inset-0 w-full h-full opacity-0 pointer-events-none"
+                  />
                 </div>
-                <button onClick={goToNextDay} className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0" aria-label="Giorno successivo">
+
+                <button
+                  type="button"
+                  onClick={goToNextDay}
+                  aria-label="Giorno successivo"
+                  className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
+                >
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
 
               {/* Shift toggle — icon only */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 min-w-[120px]">
+              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0 w-[108px]">
                 <button onClick={() => setSelectedShift(Shift.LUNCH)}
                   className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
                     selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
@@ -2354,6 +2411,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Contextual "Torna a oggi" — appears only when off today; doesn't shift the row above */}
+            {!isToday && (
+              <div className="flex justify-center mt-2 animate-[fadeIn_180ms_ease-out]">
+                <button
+                  type="button"
+                  onClick={goToToday}
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-line)] text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Torna a oggi
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Content: Card-based list */}
