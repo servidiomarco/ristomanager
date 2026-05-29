@@ -10,6 +10,7 @@ import { authApiService } from '../services/authApiService';
 import { socketClient } from '../services/socketClient';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
+import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2, Wheat } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -194,7 +195,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
   const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const now = new Date();
@@ -788,43 +788,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const overdueTodos = todos.filter(t => !t.completed && t.dueDate && t.dueDate < todayStr);
   const pendingCount = todos.filter(t => !t.completed).length;
 
-  // Format date for display
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('it-IT', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  };
-
-  // Navigate to previous/next day
-  const goToPreviousDay = () => {
-    setSelectedDate(prev => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() - 1);
-      return newDate;
-    });
-  };
-
-  const goToNextDay = () => {
-    setSelectedDate(prev => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() + 1);
-      return newDate;
-    });
-  };
-
-  const goToToday = () => {
-    setSelectedDate(new Date());
-  };
-
-  const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    if (!value) return;
-    const [y, m, d] = value.split('-').map(Number);
-    if (y && m && d) setSelectedDate(new Date(y, m - 1, d));
-  };
-
   // Filter reservations for selected date (exclude cancelled bookings from KPIs/occupancy)
   const selectedDayReservations = useMemo(() => {
     return Array.isArray(reservations)
@@ -1084,57 +1047,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
             {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
             <div className="flex flex-wrap items-center gap-2 self-stretch w-full md:hidden">
-              {/* Date pill with fixed-position arrows */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-1 md:flex-none min-w-0">
-                {!isToday && (
-                  <button
-                    onClick={goToToday}
-                    className="px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors"
-                  >
-                    Oggi
-                  </button>
-                )}
-
-                <button
-                  onClick={goToPreviousDay}
-                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                  aria-label="Giorno precedente"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-
-                <div className="relative flex-1 md:w-[200px] md:flex-none flex justify-center min-w-0">
-                  <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
-                    <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
-                      {formatDate(selectedDate)}
-                    </span>
-                  </div>
-                  <input
-                    ref={dateInputRef}
-                    type="date"
-                    value={selectedDateStr}
-                    onChange={handleDateInputChange}
-                    onClick={(e) => {
-                      const input = e.currentTarget;
-                      try {
-                        if (typeof input.showPicker === 'function') input.showPicker();
-                      } catch {
-                        // ignore — fall back to native focus
-                      }
-                    }}
-                    aria-label="Seleziona data"
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                </div>
-
-                <button
-                  onClick={goToNextDay}
-                  className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                  aria-label="Giorno successivo"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+              <DateNavigator
+                value={selectedDateStr}
+                onChange={(dateOnly) => {
+                  const [y, m, d] = dateOnly.split('-').map(Number);
+                  if (y && m && d) setSelectedDate(new Date(y, m - 1, d));
+                }}
+                className="flex-1 min-w-0"
+              />
 
               {/* Separate time chip — always shows live current time */}
               <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 py-2.5">

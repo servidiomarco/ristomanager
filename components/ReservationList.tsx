@@ -11,6 +11,7 @@ import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
@@ -210,7 +211,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }, [initialSearchTerm]);
     const [activeMapRoomId, setActiveMapRoomId] = useState<string | number>('ALL');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   // Tick the header clock once per minute (aligned to start of each minute)
   useEffect(() => {
@@ -743,70 +743,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [newReservationFlashId]);
 
-  // Date Navigation Helpers
-  const selectedDateObj = new Date(selectedDate);
-  const todayStr = formatLocalDate(new Date());
   const selectedDateStr = selectedDate.split('T')[0];
-  const isToday = selectedDateStr === todayStr;
-
-  const goToPreviousDay = () => {
-    const current = new Date(selectedDate);
-    current.setDate(current.getDate() - 1);
-    // Keep the same time
-    const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(formatLocalDate(current) + 'T' + time);
-  };
-
-  const goToNextDay = () => {
-    const current = new Date(selectedDate);
-    current.setDate(current.getDate() + 1);
-    // Keep the same time
-    const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(formatLocalDate(current) + 'T' + time);
-  };
-
-  const goToToday = () => {
-    const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(formatLocalDate(new Date()) + 'T' + time);
-  };
-
-  const handleDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    if (!value) return;
-    const time = selectedDate.split('T')[1] || '12:00';
-    setSelectedDate(`${value}T${time}`);
-  };
-
-  const formatSelectedDate = (date: Date) => {
-    return date.toLocaleDateString('it-IT', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-  };
-
-  const formatSelectedDateShort = (date: Date) => {
-    return date.toLocaleDateString('it-IT', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  };
-
-  // Relative day label for nearby dates — gives instant context ("Oggi", "Domani", "Ieri")
-  // without forcing the user to compute the offset from today.
-  const relativeDayLabel = (() => {
-    if (isToday) return 'Oggi';
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(selectedDateObj);
-    target.setHours(0, 0, 0, 0);
-    const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000);
-    if (diff === 1) return 'Domani';
-    if (diff === -1) return 'Ieri';
-    return null;
-  })();
 
   // --- Actions ---
 
@@ -2329,68 +2266,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Row 1: Date - Shift */}
           <div className="px-4 pt-2.5 pb-2 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
             <div className="flex items-center gap-2">
-              {/* Date controls: separate prev/next + central tap-to-open pill */}
-              <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                <button
-                  type="button"
-                  onClick={goToPreviousDay}
-                  aria-label="Giorno precedente"
-                  className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-
-                <div className="relative flex-1 min-w-0">
-                  {/* Native date input — overlays the visible pill, captures the tap natively
-                      so the platform picker (incl. iOS Safari) opens reliably on icon click. */}
-                  <input
-                    ref={dateInputRef}
-                    type="date"
-                    value={selectedDateStr}
-                    onChange={handleDateInputChange}
-                    onClick={(e) => {
-                      try {
-                        if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker();
-                      } catch {
-                        // ignore — the native click on the input already triggers the picker
-                      }
-                    }}
-                    aria-label="Seleziona data"
-                    className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  />
-                  <div
-                    aria-hidden="true"
-                    className={`pointer-events-none w-full h-10 px-3 rounded-full border bg-[var(--color-surface)] peer-hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center gap-2 ${
-                      isToday
-                        ? 'border-[var(--color-line)]'
-                        : 'border-[var(--color-line-strong)]'
-                    }`}
-                  >
-                    <Calendar className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-fg)]'}`} />
-                    {relativeDayLabel ? (
-                      <span className="flex items-baseline gap-1.5 min-w-0">
-                        <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">{relativeDayLabel}</span>
-                        <span className="text-[11px] text-[var(--color-fg-muted)] capitalize whitespace-nowrap hidden sm:inline">
-                          · {formatSelectedDateShort(selectedDateObj)}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="text-sm font-semibold text-[var(--color-fg)] capitalize whitespace-nowrap truncate">
-                        {formatSelectedDateShort(selectedDateObj)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={goToNextDay}
-                  aria-label="Giorno successivo"
-                  className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+              <DateNavigator
+                value={selectedDateStr}
+                onChange={(dateOnly) => {
+                  const time = selectedDate.split('T')[1] || '12:00';
+                  setSelectedDate(`${dateOnly}T${time}`);
+                }}
+                className="flex-1 min-w-0"
+              />
 
               {/* Shift toggle — icon only */}
               <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0 w-[108px]">
@@ -2408,20 +2291,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               </div>
             </div>
-
-            {/* Contextual "Torna a oggi" — appears only when off today; doesn't shift the row above */}
-            {!isToday && (
-              <div className="flex justify-center mt-2 animate-[fadeIn_180ms_ease-out]">
-                <button
-                  type="button"
-                  onClick={goToToday}
-                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-line)] text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  Torna a oggi
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Content: Card-based list */}

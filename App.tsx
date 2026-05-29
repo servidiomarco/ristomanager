@@ -15,6 +15,7 @@ import { Inventory } from './components/Inventory';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
+import { DateNavigator } from './components/DateNavigator';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -75,7 +76,6 @@ const App: React.FC = () => {
     new Date().getHours() < 17 ? 'LUNCH' : 'DINNER'
   );
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
-  const globalDateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const now = new Date();
@@ -95,16 +95,6 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
-  const globalIsToday = globalDateStr === formatLocalDateGlobal(new Date());
-
-  const goToPreviousDay = () => setGlobalDate(prev => { const d = new Date(prev); d.setDate(d.getDate() - 1); return d; });
-  const goToNextDay = () => setGlobalDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + 1); return d; });
-  const goToToday = () => setGlobalDate(new Date());
-  const handleGlobalDateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const [y, m, d] = e.target.value.split('-').map(Number);
-    if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
-  };
-  const formatDateDisplay = (date: Date) => date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   // Auto-switch from 'ALL' when navigating away from Dashboard
   useEffect(() => {
@@ -1053,47 +1043,15 @@ const App: React.FC = () => {
 
            {/* Desktop date/time/shift control group — takes ~half the header width */}
            <div className={`hidden md:flex items-center gap-2.5 w-1/2 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF].includes(view) ? '!hidden' : ''}`}>
-             {/* Date navigator pill */}
-             <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 min-w-0">
-               {!globalIsToday && (
-                 <button
-                   onClick={goToToday}
-                   className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] rounded-full transition-colors flex-shrink-0"
-                 >
-                   Oggi
-                 </button>
-               )}
-               <button
-                 onClick={goToPreviousDay}
-                 className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                 aria-label="Giorno precedente"
-               >
-                 <ChevronLeft className="h-4 w-4" />
-               </button>
-               <div className="relative w-[200px] flex justify-center min-w-0">
-                 <div className="flex items-center justify-center px-3 py-1.5 rounded-full pointer-events-none">
-                   <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap capitalize">
-                     {formatDateDisplay(globalDate)}
-                   </span>
-                 </div>
-                 <input
-                   ref={globalDateInputRef}
-                   type="date"
-                   value={globalDateStr}
-                   onChange={handleGlobalDateInput}
-                   onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch {} }}
-                   aria-label="Seleziona data"
-                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                 />
-               </div>
-               <button
-                 onClick={goToNextDay}
-                 className="p-1.5 rounded-full text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
-                 aria-label="Giorno successivo"
-               >
-                 <ChevronRight className="h-4 w-4" />
-               </button>
-             </div>
+             <DateNavigator
+               value={globalDateStr}
+               onChange={(dateOnly) => {
+                 const [y, m, d] = dateOnly.split('-').map(Number);
+                 if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+               }}
+               widthClass="w-[200px]"
+               backToToday="inline"
+             />
 
              {/* Live time chip */}
              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2 flex-shrink-0">

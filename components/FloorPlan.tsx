@@ -6,6 +6,7 @@ import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } 
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { DateNavigator } from './DateNavigator';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -875,14 +876,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     >
       {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
       <div className="md:hidden bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
-        <div>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-          />
-        </div>
+        <DateNavigator
+          value={selectedDate}
+          onChange={setSelectedDate}
+          className="flex-1 min-w-[220px]"
+        />
         <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
           <button
             onClick={() => setSelectedShift(Shift.LUNCH)}
