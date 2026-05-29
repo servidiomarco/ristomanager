@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight, RefreshCw, Filter } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, RefreshCw, Filter, Search } from 'lucide-react';
 import { ActivityLog, ActivityAction, ResourceType, LogFilters } from '../types';
 import { logApiService, LogUser } from '../services/logApiService';
 
@@ -51,10 +51,21 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
   const [selectedAction, setSelectedAction] = useState<ActivityAction | undefined>();
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Pagination
   const [page, setPage] = useState(1);
   const [limit] = useState(20);
+
+  // Debounce search input to avoid hammering the API on every keystroke
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [search]);
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -67,6 +78,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
         action: selectedAction,
         from_date: fromDate ? new Date(fromDate).toISOString() : undefined,
         to_date: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
+        search: debouncedSearch || undefined,
         limit,
         offset: (page - 1) * limit
       };
@@ -95,7 +107,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
       fetchLogs();
       fetchUsers();
     }
-  }, [isOpen, page, selectedUserId, selectedResourceType, selectedAction, fromDate, toDate]);
+  }, [isOpen, page, selectedUserId, selectedResourceType, selectedAction, fromDate, toDate, debouncedSearch]);
 
   const resetFilters = () => {
     setSelectedUserId(undefined);
@@ -103,6 +115,8 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
     setSelectedAction(undefined);
     setFromDate('');
     setToDate('');
+    setSearch('');
+    setDebouncedSearch('');
     setPage(1);
   };
 
@@ -163,12 +177,31 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
           <div className="flex items-center gap-2 mb-3">
             <Filter className="w-3.5 h-3.5 text-[var(--color-fg-subtle)]" />
             <span className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Filtri</span>
-            {(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate) && (
+            {(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate || search) && (
               <button
                 onClick={resetFilters}
                 className="text-xs text-[var(--color-fg)] hover:underline ml-2"
               >
                 Azzera filtri
+              </button>
+            )}
+          </div>
+          <div className="relative mb-3">
+            <Search className="w-4 h-4 text-[var(--color-fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cerca in tutte le prenotazioni (nome, email, dettagli)..."
+              className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md pl-9 pr-9 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                title="Cancella ricerca"
+              >
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>

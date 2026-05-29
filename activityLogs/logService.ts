@@ -44,6 +44,7 @@ export interface LogFilters {
   action?: ActivityAction;
   from_date?: string;
   to_date?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 }
@@ -107,6 +108,7 @@ export class LogService {
       action,
       from_date,
       to_date,
+      search,
       limit = 50,
       offset = 0
     } = filters;
@@ -138,6 +140,15 @@ export class LogService {
     if (to_date) {
       conditions.push(`created_at <= $${paramIndex++}`);
       params.push(to_date);
+    }
+
+    const trimmedSearch = search?.trim();
+    if (trimmedSearch) {
+      conditions.push(
+        `(resource_name ILIKE $${paramIndex} OR user_name ILIKE $${paramIndex} OR user_email ILIKE $${paramIndex} OR error_message ILIKE $${paramIndex} OR details::text ILIKE $${paramIndex})`
+      );
+      params.push(`%${trimmedSearch}%`);
+      paramIndex++;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

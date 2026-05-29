@@ -314,6 +314,7 @@ export interface LogFilters {
   action?: ActivityAction;
   from_date?: string;
   to_date?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 }

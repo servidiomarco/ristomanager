@@ -61,6 +61,7 @@ class LogApiService {
     if (filters.action) params.append('action', filters.action);
     if (filters.from_date) params.append('from_date', filters.from_date);
     if (filters.to_date) params.append('to_date', filters.to_date);
+    if (filters.search && filters.search.trim()) params.append('search', filters.search.trim());
     if (filters.limit) params.append('limit', filters.limit.toString());
     if (filters.offset) params.append('offset', filters.offset.toString());
 

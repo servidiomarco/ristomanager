@@ -13,6 +13,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
       action,
       from_date,
       to_date,
+      search,
       limit,
       offset
     } = req.query;
@@ -23,6 +24,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
       action: action as ActivityAction | undefined,
       from_date: from_date as string | undefined,
       to_date: to_date as string | undefined,
+      search: typeof search === 'string' ? search : undefined,
       limit: limit ? parseInt(limit as string, 10) : 50,
       offset: offset ? parseInt(offset as string, 10) : 0
     };
