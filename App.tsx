@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -60,6 +60,7 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
+  const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
   const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
   const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
@@ -1283,8 +1284,9 @@ const App: React.FC = () => {
             canEdit={hasPermission('reservations:full')}
             modalOnly
             autoOpenNew
+            autoOpenNewKind={newReservationKind}
             onAutoOpenNewHandled={() => { /* keep flag until modal closes */ }}
-            onModalClose={() => setAutoOpenNewReservation(false)}
+            onModalClose={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); }}
           />
         )}
 
@@ -1303,7 +1305,8 @@ const App: React.FC = () => {
                 showToast={addToast}
                 canEdit={hasPermission('reservations:full')}
                 autoOpenNew={autoOpenNewReservation}
-                onAutoOpenNewHandled={() => setAutoOpenNewReservation(false)}
+                autoOpenNewKind={newReservationKind}
+                onAutoOpenNewHandled={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); }}
                 initialSearchTerm={reservationsSearchPrefill}
                 onInitialSearchTermHandled={() => setReservationsSearchPrefill(undefined)}
                 globalDate={globalDate}
@@ -1608,8 +1611,8 @@ const App: React.FC = () => {
             >
               <div className="px-6 pt-5 pb-20 grid grid-cols-2 gap-4 justify-items-center" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
                 {[
-                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'banquet', icon: <CalendarDays className="h-7 w-7" />, label: 'Banchetto', action: () => { setView(ViewState.MENU); setMenuInitialTab('BANQUETS'); setAutoOpenNewBanquet(true); setShowCreateSheet(false); } },
+                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
                   { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (

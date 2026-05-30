@@ -120,6 +120,9 @@ interface ReservationListProps {
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   canEdit?: boolean;
   autoOpenNew?: boolean;
+  // Optional pre-fill mode for the new-reservation form. Defaults to 'standard';
+  // 'walkin' opens it with customer="Walk-in", arrival=ARRIVED, time=now.
+  autoOpenNewKind?: 'standard' | 'walkin';
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
   onModalClose?: () => void;
@@ -147,6 +150,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   showToast,
   canEdit = true,
   autoOpenNew = false,
+  autoOpenNewKind = 'standard',
   onAutoOpenNewHandled,
   modalOnly = false,
   onModalClose,
@@ -1008,21 +1012,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
 
-  const handleOpenNew = () => {
-      const newShift = selectedShift === 'ALL' ? Shift.DINNER : selectedShift;
-      const defaultTime = getDefaultTime(newShift);
+  const handleOpenNew = (opts: { walkIn?: boolean } = {}) => {
+      const walkIn = !!opts.walkIn;
+      // For a walk-in we use "now" (and derive the shift from current time), so the
+      // operator only has to pick a table and confirm. For standard bookings we keep
+      // the date/shift currently in view.
+      const now = new Date();
+      const walkInShift: Shift = now.getHours() < 17 ? Shift.LUNCH : Shift.DINNER;
+      const newShift = walkIn
+        ? walkInShift
+        : (selectedShift === 'ALL' ? Shift.DINNER : selectedShift);
       const dateOnly = selectedDate.split('T')[0];
+      const reservationTime = walkIn
+        ? formatLocalDateTime(now)
+        : `${dateOnly}T${getDefaultTime(newShift)}`;
       setFormData({
-        customer_name: '',
+        customer_name: walkIn ? 'Walk-in' : '',
         guests: 2,
         children: 0,
-        reservation_time: `${dateOnly}T${defaultTime}`,
+        reservation_time: reservationTime,
         shift: newShift,
         payment_status: PaymentStatus.PENDING,
         table_id: undefined,
-        enable_reminder: true,
+        enable_reminder: walkIn ? false : true,
         reminder_sent: false,
-        arrival_status: ArrivalStatus.WAITING,
+        arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
         notes: ''
       });
       setSelectedAllergens([]);
@@ -1034,18 +1048,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setIsEditing(false);
       setIsFormOpen(true);
 
-      const existing = loadDraft<{
-        formData: Partial<Reservation>;
-        selectedAllergens: string[];
-        selectedQuickNotes: string[];
-      }>(DRAFT_KEYS.RESERVATION_NEW);
-      setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
+      // Drafts only apply to standard bookings — a walk-in is always "now".
+      if (!walkIn) {
+        const existing = loadDraft<{
+          formData: Partial<Reservation>;
+          selectedAllergens: string[];
+          selectedQuickNotes: string[];
+        }>(DRAFT_KEYS.RESERVATION_NEW);
+        setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
+      } else {
+        setDraftBanner(null);
+      }
   };
 
   // Auto-open new reservation form when triggered from outside (e.g. Dashboard CTA)
   useEffect(() => {
     if (autoOpenNew) {
-      handleOpenNew();
+      handleOpenNew({ walkIn: autoOpenNewKind === 'walkin' });
       onAutoOpenNewHandled?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1874,7 +1893,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
           </p>
           {canEdit && (
-            <button onClick={handleOpenNew}
+            <button onClick={() => handleOpenNew()}
               className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
               <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
             </button>
@@ -2423,7 +2442,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
                 <p className="text-xs text-[var(--color-fg-muted)] mt-1">Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}.</p>
                 {canEdit && (
-                  <button onClick={handleOpenNew}
+                  <button onClick={() => handleOpenNew()}
                     className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
                     <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
                   </button>
