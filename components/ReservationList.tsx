@@ -630,8 +630,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  const filteredReservations = reservations
-    .filter(r => {
+  const resetFilters = () => {
+    setFilterRoomId('ALL');
+    setFilterStatus('ALL');
+    setFilterArrivalStatus('ALL');
+    setFilterGuestRange('ALL');
+    setFilterHasAllergens(false);
+    setFilterHasNotes(false);
+    setFilterNoTable(false);
+    setSortBy('created-asc');
+  };
+
+  // --- Grouped reservation list for split-view ---
+  // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
+  type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
+  const groupedReservations = useMemo((): ReservationGroup[] => {
+    const dateFiltered = reservations.filter(r => {
       const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
       const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
       const matchesRoom = filterRoomId === 'ALL'
@@ -657,65 +671,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         matchesSearch = nameHit || tableHit;
       }
       return matchesDate && matchesShift && matchesRoom && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        // Sort by the original INSERT timestamp. Fall back to id (monotonic)
-        // when created_at is missing — happens only for legacy rows with no
-        // CREATE log entry to backfill from.
-        case 'created-asc': {
-          const at = a.created_at ?? '';
-          const bt = b.created_at ?? '';
-          if (at && bt) return at.localeCompare(bt);
-          if (at) return -1;
-          if (bt) return 1;
-          return a.id - b.id;
-        }
-        case 'created-desc': {
-          const at = a.created_at ?? '';
-          const bt = b.created_at ?? '';
-          if (at && bt) return bt.localeCompare(at);
-          if (at) return -1;
-          if (bt) return 1;
-          return b.id - a.id;
-        }
-        case 'time-asc': return a.reservation_time.localeCompare(b.reservation_time);
-        case 'time-desc': return b.reservation_time.localeCompare(a.reservation_time);
-        case 'name-asc': return (a.customer_name || '').localeCompare(b.customer_name || '', 'it', { sensitivity: 'base' });
-        case 'name-desc': return (b.customer_name || '').localeCompare(a.customer_name || '', 'it', { sensitivity: 'base' });
-        case 'guests-asc': return (a.guests || 0) - (b.guests || 0);
-        case 'guests-desc': return (b.guests || 0) - (a.guests || 0);
-        default: return 0;
-      }
-    });
-
-  const resetFilters = () => {
-    setFilterRoomId('ALL');
-    setFilterStatus('ALL');
-    setFilterArrivalStatus('ALL');
-    setFilterGuestRange('ALL');
-    setFilterHasAllergens(false);
-    setFilterHasNotes(false);
-    setFilterNoTable(false);
-    setSortBy('created-asc');
-  };
-
-  // --- Grouped reservation list for split-view ---
-  // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
-  type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
-  const groupedReservations = useMemo((): ReservationGroup[] => {
-    const dateFiltered = reservations.filter(r => {
-      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
-      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
-      const trimmedSearch = searchTerm.trim().toLowerCase();
-      let matchesSearch = true;
-      if (trimmedSearch) {
-        const nameHit = !!r.customer_name && r.customer_name.toLowerCase().includes(trimmedSearch);
-        const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
-        const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
-        matchesSearch = nameHit || tableHit;
-      }
-      return matchesDate && matchesShift && matchesSearch;
     });
 
     const pending: Reservation[] = [];
@@ -799,7 +754,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
       { key: 'cancelled', label: 'Annullate', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, searchTerm, displayTables, sortBy]);
+  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, searchTerm, displayTables, sortBy]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
