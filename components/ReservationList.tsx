@@ -307,7 +307,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
-  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note' | 'tables'; text: string; x: number; y: number } | null>(null);
+  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note' | 'tables' | 'bookedAt'; text: string; x: number; y: number } | null>(null);
 
   // Desktop breakpoint for split-view (>= 1024px)
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
@@ -1658,9 +1658,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
               </span>
             )}
-            <span className="flex-shrink-0" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-              <Info className="h-3.5 w-3.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" />
-            </span>
+            <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
+              <Info className="h-3.5 w-3.5" />
+            </button>
             {group.key === 'noshow' && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                 <UserX className="h-2.5 w-2.5" /> No show
@@ -2541,9 +2541,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
                                       </span>
                                     )}
-                                    <span className="flex-shrink-0" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-                                      <Info className="h-3.5 w-3.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" />
-                                    </span>
+                                    <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
+                                      <Info className="h-3.5 w-3.5" />
+                                    </button>
                                     {group.key === 'noshow' && (
                                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                                         <UserX className="h-2.5 w-2.5" /> No show
@@ -4020,11 +4020,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   ? <AlertTriangle className="h-4 w-4 text-rose-500 flex-shrink-0" />
                   : tooltipReservation.type === 'tables'
                   ? <MapPin className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                  : tooltipReservation.type === 'bookedAt' ? <Info className="h-4 w-4 text-blue-500 flex-shrink-0" /> : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
                 <span className="text-xs font-semibold text-[var(--color-fg)]">
                   {tooltipReservation.type === 'allergen' ? 'Intolleranze'
                     : tooltipReservation.type === 'tables' ? `Tavoli uniti (${tooltipReservation.text.split('+').filter(Boolean).length})`
-                    : 'Note'}
+                    : tooltipReservation.type === 'bookedAt' ? 'Prenotazione' : 'Note'}
                 </span>
               </div>
               <button type="button" onClick={() => setTooltipReservation(null)}
