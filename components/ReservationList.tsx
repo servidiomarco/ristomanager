@@ -200,6 +200,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (globalShiftFilterProp === 'LUNCH') setSelectedShiftLocal(Shift.LUNCH);
     else if (globalShiftFilterProp === 'DINNER') setSelectedShiftLocal(Shift.DINNER);
   }, [globalShiftFilterProp]);
+  const [filterRoomId, setFilterRoomId] = useState<string | number>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterArrivalStatus, setFilterArrivalStatus] = useState<ArrivalStatus | 'ALL'>('ALL');
   const [filterGuestRange, setFilterGuestRange] = useState<'ALL' | '1-2' | '3-4' | '5-6' | '7+'>('ALL');
@@ -611,6 +612,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Filter Logic for Main List
   const activeFilterCount =
+    (filterRoomId !== 'ALL' ? 1 : 0) +
     (filterStatus !== 'ALL' ? 1 : 0) +
     (filterArrivalStatus !== 'ALL' ? 1 : 0) +
     (filterGuestRange !== 'ALL' ? 1 : 0) +
@@ -632,6 +634,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     .filter(r => {
       const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
       const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
+      const matchesRoom = filterRoomId === 'ALL'
+        ? true
+        : (() => {
+            const table = r.table_id ? displayTables.find(t => t.id === r.table_id) : undefined;
+            return !!table && table.room_id === filterRoomId;
+          })();
       const matchesStatus = filterStatus === 'ALL' ? true : r.payment_status === filterStatus;
       const matchesArrival = filterArrivalStatus === 'ALL'
         ? true
@@ -648,7 +656,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
         matchesSearch = nameHit || tableHit;
       }
-      return matchesDate && matchesShift && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
+      return matchesDate && matchesShift && matchesRoom && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -682,6 +690,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     });
 
   const resetFilters = () => {
+    setFilterRoomId('ALL');
     setFilterStatus('ALL');
     setFilterArrivalStatus('ALL');
     setFilterGuestRange('ALL');
@@ -1975,6 +1984,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="px-5 space-y-4">
               <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Sala</label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setFilterRoomId('ALL')}
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                      filterRoomId === 'ALL'
+                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                    }`}>Tutte</button>
+                  {rooms.filter(rm => !rm.is_closed).map(rm => (
+                    <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                        filterRoomId === rm.id
+                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                      }`}>{rm.name}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
                 <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -2639,6 +2667,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
                 <div className="px-5 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Sala</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterRoomId('ALL')}
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                          filterRoomId === 'ALL'
+                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                            : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                        }`}>Tutte</button>
+                      {rooms.filter(rm => !rm.is_closed).map(rm => (
+                        <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            filterRoomId === rm.id
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          }`}>{rm.name}</button>
+                      ))}
+                    </div>
+                  </div>
                   <div>
                     <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
                     <div className="flex flex-wrap gap-2">
