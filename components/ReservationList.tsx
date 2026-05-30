@@ -197,7 +197,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterHasAllergens, setFilterHasAllergens] = useState(false);
   const [filterHasNotes, setFilterHasNotes] = useState(false);
   const [filterNoTable, setFilterNoTable] = useState(false);
-  const [sortBy, setSortBy] = useState<'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('time-asc');
+  const [sortBy, setSortBy] = useState<'created-asc' | 'created-desc' | 'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('created-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? '');
   // Apply prefill from global header search, then notify the parent to clear it
@@ -643,6 +643,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     })
     .sort((a, b) => {
       switch (sortBy) {
+        // id is monotonically increasing and reflects creation order; using it
+        // avoids a schema migration just to surface "prenotata prima".
+        case 'created-asc': return a.id - b.id;
+        case 'created-desc': return b.id - a.id;
         case 'time-asc': return a.reservation_time.localeCompare(b.reservation_time);
         case 'time-desc': return b.reservation_time.localeCompare(a.reservation_time);
         case 'name-asc': return (a.customer_name || '').localeCompare(b.customer_name || '', 'it', { sensitivity: 'base' });
@@ -660,7 +664,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterHasAllergens(false);
     setFilterHasNotes(false);
     setFilterNoTable(false);
-    setSortBy('time-asc');
+    setSortBy('created-asc');
   };
 
   // --- Grouped reservation list for split-view ---
@@ -1868,6 +1872,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="px-3">
               {[
+                { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
+                { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
                 { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
                 { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
                 { value: 'name-asc' as const, label: 'Nome A → Z' },
@@ -2528,6 +2534,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
                 <div className="px-3">
                   {[
+                    { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
+                    { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
                     { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
                     { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
                     { value: 'name-asc' as const, label: 'Nome A → Z' },
