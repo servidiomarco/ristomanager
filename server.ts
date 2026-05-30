@@ -5165,7 +5165,16 @@ app.get('/public/contact', (_req, res) => {
     res.json({ voice: { phone: e164, display } });
 });
 
+// Kill-switch for the public booking flow. Flip to `false` (or unset the
+// env var) to re-open online bookings; the HTML page reads the same flag
+// through /public/contact so UI and server stay in sync.
+const PUBLIC_BOOKINGS_DISABLED = (process.env.PUBLIC_BOOKINGS_DISABLED ?? 'true').toLowerCase() !== 'false';
+const PUBLIC_BOOKINGS_DISABLED_MESSAGE = 'Le prenotazioni web non sono disponibili al momento.';
+
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
+    if (PUBLIC_BOOKINGS_DISABLED) {
+        return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
+    }
     try {
         const body = req.body ?? {};
 

@@ -21,8 +21,20 @@
             <p class="text-sm text-slate-500 mt-1">Compila il modulo, ti contatteremo per confermare.</p>
         </header>
 
+        <!-- Maintenance card. Shown while online bookings are paused; remove
+             this block and unhide #callCta / #bookingForm to re-open. -->
+        <div id="maintenanceCard" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 text-center">
+            <div class="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+                <svg class="w-7 h-7 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+                </svg>
+            </div>
+            <h2 class="text-lg font-semibold text-slate-900 mb-2">Prenotazioni temporaneamente sospese</h2>
+            <p class="text-sm text-slate-600 leading-relaxed">Le prenotazioni web non sono disponibili al momento.</p>
+        </div>
+
         <a id="callCta" href="tel:+447451263812"
-           class="flex items-center justify-between bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-4 active:bg-slate-50 transition">
+           class="hidden flex items-center justify-between bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-4 active:bg-slate-50 transition">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center">
                     <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -37,7 +49,7 @@
             <div id="callCtaNumber" class="text-sm font-semibold text-indigo-600">+44 7451 263812</div>
         </a>
 
-        <form id="bookingForm" novalidate>
+        <form id="bookingForm" class="hidden" novalidate>
             <!-- Honeypot — invisible to humans, irresistible to bots -->
             <div class="hp" aria-hidden="true">
                 <label>Sito web (lascia vuoto)
@@ -177,6 +189,11 @@
 
 <script>
 (function () {
+    // While the maintenance card is shown, skip availability fetches and
+    // form wiring entirely — keeps the page silent (no network noise, no
+    // console errors from references to hidden inputs).
+    if (document.getElementById('maintenanceCard')) return;
+
     const state = {
         date: '',
         guests: 2,
