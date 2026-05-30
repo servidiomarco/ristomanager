@@ -740,12 +740,47 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
     }
 
-    pending.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-    waiting.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-    arrived.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-    freed.sort((a, b) => b.reservation_time.localeCompare(a.reservation_time));
-    noshow.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-    cancelled.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    // Each group respects the global sort selector so the toolbar actually
+    // does something on the grouped card lists (desktop split + mobile).
+    // 'freed' keeps its reverse-time bias only when sorting by reservation
+    // time, so the most recently departed table surfaces first.
+    const compare = (a: Reservation, b: Reservation): number => {
+      switch (sortBy) {
+        case 'created-asc': {
+          const at = a.created_at ?? '';
+          const bt = b.created_at ?? '';
+          if (at && bt) return at.localeCompare(bt);
+          if (at) return -1;
+          if (bt) return 1;
+          return a.id - b.id;
+        }
+        case 'created-desc': {
+          const at = a.created_at ?? '';
+          const bt = b.created_at ?? '';
+          if (at && bt) return bt.localeCompare(at);
+          if (at) return -1;
+          if (bt) return 1;
+          return b.id - a.id;
+        }
+        case 'time-asc': return a.reservation_time.localeCompare(b.reservation_time);
+        case 'time-desc': return b.reservation_time.localeCompare(a.reservation_time);
+        case 'name-asc': return (a.customer_name || '').localeCompare(b.customer_name || '', 'it', { sensitivity: 'base' });
+        case 'name-desc': return (b.customer_name || '').localeCompare(a.customer_name || '', 'it', { sensitivity: 'base' });
+        case 'guests-asc': return (a.guests || 0) - (b.guests || 0);
+        case 'guests-desc': return (b.guests || 0) - (a.guests || 0);
+        default: return 0;
+      }
+    };
+    pending.sort(compare);
+    waiting.sort(compare);
+    arrived.sort(compare);
+    // Freed: keep "most recently departed first" only when the user is
+    // sorting by reservation time; otherwise honor the global sort.
+    freed.sort(sortBy === 'time-asc'
+      ? (a, b) => b.reservation_time.localeCompare(a.reservation_time)
+      : compare);
+    noshow.sort(compare);
+    cancelled.sort(compare);
 
     return [
       { key: 'pending', label: 'Da confermare', color: 'bg-amber-500', dotClass: 'bg-amber-500', items: pending },
@@ -755,7 +790,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
       { key: 'cancelled', label: 'Annullate', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, searchTerm, displayTables]);
+  }, [reservations, selectedDate, selectedShift, searchTerm, displayTables, sortBy]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
