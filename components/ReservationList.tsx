@@ -306,7 +306,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
-  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note'; text: string; x: number; y: number } | null>(null);
+  const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note' | 'tables'; text: string; x: number; y: number } | null>(null);
 
   // Desktop breakpoint for split-view (>= 1024px)
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
@@ -1568,6 +1568,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setDetailDrawerOpen(false);
   };
 
+  // Renders the table number(s) inside a reservation's table strip. A merged
+  // assignment carries a "74+70+71" name; cramming that into the narrow cell is
+  // unreadable, so for 3+ tables we surface the first number plus a "+N" badge
+  // and expose the full list through a tap/hover tooltip. One or two tables fit
+  // as-is. `textClass` keeps the colour in sync with the strip's state styling.
+  const renderTableStripContent = (res: Reservation, table: Table, tableRoom: Room | null | undefined, textClass: string) => {
+    const names = table.name.split('+').map(n => n.trim()).filter(Boolean);
+    const extraCount = names.length - 1;
+    return (
+      <>
+        {names.length > 2 ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'tables', text: table.name, x: e.clientX, y: e.clientY }); }}
+            className="flex items-center gap-0.5 leading-6 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            title={`Tavoli uniti: ${names.join(', ')}`}
+            aria-label={`${names.length} tavoli uniti: ${names.join(', ')}. Tocca per i dettagli.`}
+          >
+            <span className={`text-base font-bold ${textClass}`}>{names[0]}</span>
+            <span className={`text-[10px] font-bold leading-none px-1 py-0.5 rounded-full bg-white/70 dark:bg-black/25 ${textClass}`}>+{extraCount}</span>
+          </button>
+        ) : (
+          <span className={`text-base font-bold leading-6 ${textClass}`}>{table.name}</span>
+        )}
+        {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
+      </>
+    );
+  };
+
   const renderReservationRow = (res: Reservation, group: ReservationGroup) => {
     const table = displayTables.find(t => t.id === res.table_id);
     const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
@@ -1703,16 +1732,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               : 'bg-[#dbeafe] dark:bg-blue-500/15'
             : 'bg-[var(--color-surface-3)]'
         }`}>
-          {table ? (
-            <>
-              <span className={`text-base font-bold leading-6 ${
-                group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-                  : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-                  : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
-                  : 'text-[#193cb8] dark:text-blue-300'
-              }`}>{table.name}</span>
-              {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
-            </>
+          {table ? renderTableStripContent(res, table, tableRoom,
+            group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+              : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+              : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
+              : 'text-[#193cb8] dark:text-blue-300'
           ) : (
             <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
           )}
@@ -2561,15 +2585,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       : 'bg-[#dbeafe] dark:bg-blue-500/15'
                                     : 'bg-[var(--color-surface-3)]'
                                 }`}>
-                                  {table ? (
-                                    <>
-                                      <span className={`text-base font-bold leading-6 ${
-                                        group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-                                          : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-                                          : 'text-[#193cb8] dark:text-blue-300'
-                                      }`}>{table.name}</span>
-                                      {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
-                                    </>
+                                  {table ? renderTableStripContent(res, table, tableRoom,
+                                    group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                                      : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                                      : 'text-[#193cb8] dark:text-blue-300'
                                   ) : (
                                     <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
                                   )}
@@ -3952,9 +3971,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="flex items-center gap-1.5 mb-1.5">
                 {tooltipReservation.type === 'allergen'
                   ? <AlertTriangle className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                  : tooltipReservation.type === 'tables'
+                  ? <MapPin className="h-4 w-4 text-blue-500 flex-shrink-0" />
                   : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
                 <span className="text-xs font-semibold text-[var(--color-fg)]">
-                  {tooltipReservation.type === 'allergen' ? 'Intolleranze' : 'Note'}
+                  {tooltipReservation.type === 'allergen' ? 'Intolleranze'
+                    : tooltipReservation.type === 'tables' ? `Tavoli uniti (${tooltipReservation.text.split('+').filter(Boolean).length})`
+                    : 'Note'}
                 </span>
               </div>
               <button type="button" onClick={() => setTooltipReservation(null)}
@@ -3962,7 +3985,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">{tooltipReservation.text}</p>
+            {tooltipReservation.type === 'tables' ? (
+              <div className="flex flex-wrap gap-1.5">
+                {tooltipReservation.text.split('+').map(n => n.trim()).filter(Boolean).map((name, i) => (
+                  <span key={i} className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-[#dbeafe] dark:bg-blue-500/15 text-[#193cb8] dark:text-blue-300 text-sm font-bold tabular">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">{tooltipReservation.text}</p>
+            )}
           </div>
         </div>
       )}
