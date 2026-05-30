@@ -1587,7 +1587,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             aria-label={`${names.length} tavoli uniti: ${names.join(', ')}. Tocca per i dettagli.`}
           >
             <span className={`text-base font-bold ${textClass}`}>{names[0]}</span>
-            <span className={`text-[10px] font-bold leading-none px-1 py-0.5 rounded-full bg-white/70 dark:bg-black/25 ${textClass}`}>+{extraCount}</span>
+            <span className={`text-xs font-semibold leading-none ${textClass}`}>(+{extraCount})</span>
           </button>
         ) : (
           <span className={`text-base font-bold leading-6 ${textClass}`}>{table.name}</span>
