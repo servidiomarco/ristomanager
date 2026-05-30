@@ -87,6 +87,15 @@ const formatTime = (isoString: string): string => {
   return '';
 };
 
+// Tooltip label for the booking timestamp icon. Falls back gracefully when
+// created_at is missing (pre-migration rows with no CREATE log to backfill).
+const formatBookedAt = (createdAt?: string | null): string => {
+  if (!createdAt) return 'Data di prenotazione non disponibile';
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return 'Data di prenotazione non disponibile';
+  return `Prenotata il ${d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
 // Helper to calculate lateness in minutes (returns negative if reservation is in the future)
 const getMinutesLate = (reservationTime: string): number => {
   const now = new Date();
@@ -643,10 +652,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     })
     .sort((a, b) => {
       switch (sortBy) {
-        // id is monotonically increasing and reflects creation order; using it
-        // avoids a schema migration just to surface "prenotata prima".
-        case 'created-asc': return a.id - b.id;
-        case 'created-desc': return b.id - a.id;
+        // Sort by the original INSERT timestamp. Fall back to id (monotonic)
+        // when created_at is missing — happens only for legacy rows with no
+        // CREATE log entry to backfill from.
+        case 'created-asc': {
+          const at = a.created_at ?? '';
+          const bt = b.created_at ?? '';
+          if (at && bt) return at.localeCompare(bt);
+          if (at) return -1;
+          if (bt) return 1;
+          return a.id - b.id;
+        }
+        case 'created-desc': {
+          const at = a.created_at ?? '';
+          const bt = b.created_at ?? '';
+          if (at && bt) return bt.localeCompare(at);
+          if (at) return -1;
+          if (bt) return 1;
+          return b.id - a.id;
+        }
         case 'time-asc': return a.reservation_time.localeCompare(b.reservation_time);
         case 'time-desc': return b.reservation_time.localeCompare(a.reservation_time);
         case 'name-asc': return (a.customer_name || '').localeCompare(b.customer_name || '', 'it', { sensitivity: 'base' });
@@ -1561,6 +1585,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
               </span>
             )}
+            <span className="flex-shrink-0" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
+              <Info className="h-3.5 w-3.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" />
+            </span>
             {group.key === 'noshow' && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                 <UserX className="h-2.5 w-2.5" /> No show
@@ -2427,6 +2454,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
                                       </span>
                                     )}
+                                    <span className="flex-shrink-0" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
+                                      <Info className="h-3.5 w-3.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" />
+                                    </span>
                                     {group.key === 'noshow' && (
                                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                                         <UserX className="h-2.5 w-2.5" /> No show

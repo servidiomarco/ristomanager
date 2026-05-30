@@ -361,6 +361,27 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Children sub-count of `guests`. Server enforces 0 <= children <= guests.
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS children INTEGER NOT NULL DEFAULT 0;`);
 
+        // Original booking timestamp. Added without a default so existing rows
+        // stay NULL until backfilled below — that way the migration uses real
+        // CREATE log times instead of stamping every row with the migration time.
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;`);
+        // Backfill from activity_logs: earliest CREATE entry per reservation is
+        // the authoritative booking time. Only touches rows still NULL so the
+        // migration is idempotent.
+        await client.query(`
+            UPDATE reservations r
+            SET created_at = sub.first_created
+            FROM (
+                SELECT resource_id, MIN(created_at) AS first_created
+                FROM activity_logs
+                WHERE resource_type = 'RESERVATION' AND action = 'CREATE' AND resource_id IS NOT NULL
+                GROUP BY resource_id
+            ) sub
+            WHERE r.id = sub.resource_id AND r.created_at IS NULL;
+        `);
+        // New rows always capture insertion time automatically from now on.
+        await client.query(`ALTER TABLE reservations ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP;`);
+
         // Audit table for ElevenLabs voice calls. Stores transcript + summary so
         // staff can review what the agent agreed to. Linked to a reservation
         // when one is created during the call.

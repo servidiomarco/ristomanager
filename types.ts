@@ -178,6 +178,7 @@ export interface Reservation {
   reservation_status?: ReservationStatus;
   created_by_user_id?: number | null;
   created_by_user_name?: string | null;
+  created_at?: string;
 }
 
 export interface Notification {
