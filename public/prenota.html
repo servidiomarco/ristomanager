@@ -21,8 +21,9 @@
             <p class="text-sm text-slate-500 mt-1">Compila il modulo, ti contatteremo per confermare.</p>
         </header>
 
-        <!-- Maintenance card. Shown while online bookings are paused; remove
-             this block and unhide #callCta / #bookingForm to re-open. -->
+        <!-- Maintenance card. Visible by default — the bootstrap script
+             removes it when /public/contact reports bookingsEnabled: true.
+             Safe default: if the fetch fails, bookings stay paused. -->
         <div id="maintenanceCard" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 text-center">
             <div class="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
                 <svg class="w-7 h-7 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,11 +189,30 @@
     </div>
 
 <script>
-(function () {
-    // While the maintenance card is shown, skip availability fetches and
-    // form wiring entirely — keeps the page silent (no network noise, no
-    // console errors from references to hidden inputs).
-    if (document.getElementById('maintenanceCard')) return;
+(async function () {
+    // Bootstrap: ask the server whether bookings are open. If not, leave the
+    // maintenance card visible and skip all form wiring. Otherwise reveal the
+    // form + phone CTA before running the rest of the init. Doing this from
+    // the server keeps "is it on?" in one place — Settings page can flip it
+    // without an HTML edit or redeploy.
+    let contact = null;
+    try {
+        const r = await fetch('/public/contact');
+        if (r.ok) contact = await r.json();
+    } catch { /* network issue → stay on maintenance card (safe default) */ }
+
+    if (!contact?.bookingsEnabled) return;
+
+    const maint = document.getElementById('maintenanceCard');
+    if (maint) maint.remove();
+    document.getElementById('bookingForm').classList.remove('hidden');
+    const ctaEl = document.getElementById('callCta');
+    const numEl = document.getElementById('callCtaNumber');
+    if (ctaEl && contact?.voice?.phone) {
+        ctaEl.href = `tel:${contact.voice.phone}`;
+        if (numEl) numEl.textContent = contact.voice.display || contact.voice.phone;
+        ctaEl.classList.remove('hidden');
+    }
 
     const state = {
         date: '',
@@ -453,20 +473,6 @@
 
     // Initial fetch so slots appear as soon as a shift is picked.
     loadAvailability();
-
-    // Refresh the call CTA from the server so a DID porting (env-var change)
-    // takes effect without an HTML edit. Hardcoded fallback above keeps the
-    // CTA usable if the fetch fails.
-    fetch('/public/contact')
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-            if (!data?.voice?.phone) return;
-            const cta = document.getElementById('callCta');
-            const num = document.getElementById('callCtaNumber');
-            if (cta) cta.href = `tel:${data.voice.phone}`;
-            if (num) num.textContent = data.voice.display || data.voice.phone;
-        })
-        .catch(() => { /* keep fallback */ });
 })();
 </script>
 </body>

@@ -213,6 +213,9 @@ function authorizeElevenLabs(req: express.Request, res: express.Response): boole
 // We also accept flat top-level fields as a fallback.
 app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
         ? req.body.parameters
@@ -266,6 +269,9 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
 // agent reads aloud at the end of the call.
 app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
         ? req.body.parameters
@@ -447,6 +453,9 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
 // so the row remains for audit and can be linked to the conversation.
 app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
         ? req.body.parameters
@@ -5053,6 +5062,90 @@ app.delete('/closures/:id', authenticate, requirePermission('settings:full'), as
 });
 
 // ============================================
+// FEATURE FLAGS (app_settings)
+// ============================================
+// Boolean toggles managed from the Settings page. Used to pause the public
+// booking form and the voice agent without redeploying. Reads hit the DB
+// directly — the endpoints they gate are low-volume (a handful per minute
+// at most), so caching isn't worth the complexity.
+
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled'];
+
+async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
+    try {
+        const result = await queryWithRetry('SELECT value FROM app_settings WHERE key = $1', [key]);
+        if (result.rowCount === 0) return fallback;
+        return Boolean(result.rows[0].value);
+    } catch (err) {
+        console.error(`[feature-flag] failed to read ${key}, falling back to ${fallback}:`, err);
+        return fallback;
+    }
+}
+
+app.get('/settings/features', authenticate, async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            'SELECT key, value FROM app_settings WHERE key = ANY($1)',
+            [FEATURE_FLAG_KEYS]
+        );
+        const flags: Record<string, boolean> = {
+            public_bookings_enabled: false,
+            voice_agent_enabled: true,
+        };
+        for (const row of result.rows) {
+            flags[row.key] = Boolean(row.value);
+        }
+        res.json(flags);
+    } catch (err) {
+        console.error('Error fetching feature flags:', err);
+        res.status(500).json({ error: 'Failed to fetch feature flags' });
+    }
+});
+
+app.put('/settings/features', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const updates: Array<{ key: FeatureFlagKey; value: boolean }> = [];
+    for (const key of FEATURE_FLAG_KEYS) {
+        if (key in body) {
+            if (typeof body[key] !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: `${key} must be boolean` });
+            }
+            updates.push({ key, value: body[key] });
+        }
+    }
+    if (updates.length === 0) {
+        return res.status(400).json({ error: 'no_updates', message: 'No flag updates supplied' });
+    }
+    try {
+        for (const { key, value } of updates) {
+            await queryWithRetry(
+                `INSERT INTO app_settings (key, value, updated_at)
+                 VALUES ($1, $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (key) DO UPDATE
+                   SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+                [key, value]
+            );
+        }
+        const result = await queryWithRetry(
+            'SELECT key, value FROM app_settings WHERE key = ANY($1)',
+            [FEATURE_FLAG_KEYS]
+        );
+        const flags: Record<string, boolean> = {
+            public_bookings_enabled: false,
+            voice_agent_enabled: true,
+        };
+        for (const row of result.rows) {
+            flags[row.key] = Boolean(row.value);
+        }
+        res.json(flags);
+    } catch (err) {
+        console.error('Error updating feature flags:', err);
+        res.status(500).json({ error: 'Failed to update feature flags' });
+    }
+});
+
+// ============================================
 // PUBLIC BOOKING (Google Business link)
 // ============================================
 // Unauthenticated endpoints powering the /prenota mobile page. Two safeguards
@@ -5149,30 +5242,33 @@ app.get('/public/rooms', async (req, res) => {
 });
 
 // Surfaces the restaurant's reachable phone number (the Vonage DID bound to
-// the ElevenLabs SIP trunk) to the public booking page. Lets us swap the DID
-// at porting time via VONAGE_VOICE_NUMBER alone, no HTML edit needed.
-app.get('/public/contact', (_req, res) => {
+// the ElevenLabs SIP trunk) and the public-bookings feature flag to the
+// /prenota page. Lets us swap the DID at porting time via VONAGE_VOICE_NUMBER
+// and pause/resume web bookings from Settings, no HTML edit needed.
+app.get('/public/contact', async (_req, res) => {
+    const bookingsEnabled = await getFeatureFlag('public_bookings_enabled', false);
     const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
-    if (!raw) return res.status(404).json({ error: 'not_configured' });
-    const e164 = raw.startsWith('+') ? raw : `+${raw}`;
-    const rest = e164.slice(3);
-    let display = e164;
-    if (e164.startsWith('+39') && rest.length >= 9) {
-        display = `+39 ${rest.slice(0, 3)} ${rest.slice(3)}`;
-    } else if (e164.startsWith('+44') && rest.length >= 10) {
-        display = `+44 ${rest.slice(0, 4)} ${rest.slice(4)}`;
+    let voice: { phone: string; display: string } | null = null;
+    if (raw) {
+        const e164 = raw.startsWith('+') ? raw : `+${raw}`;
+        const rest = e164.slice(3);
+        let display = e164;
+        if (e164.startsWith('+39') && rest.length >= 9) {
+            display = `+39 ${rest.slice(0, 3)} ${rest.slice(3)}`;
+        } else if (e164.startsWith('+44') && rest.length >= 10) {
+            display = `+44 ${rest.slice(0, 4)} ${rest.slice(4)}`;
+        }
+        voice = { phone: e164, display };
     }
-    res.json({ voice: { phone: e164, display } });
+    res.json({ voice, bookingsEnabled });
 });
 
-// Kill-switch for the public booking flow. Flip to `false` (or unset the
-// env var) to re-open online bookings; the HTML page reads the same flag
-// through /public/contact so UI and server stay in sync.
-const PUBLIC_BOOKINGS_DISABLED = (process.env.PUBLIC_BOOKINGS_DISABLED ?? 'true').toLowerCase() !== 'false';
+// Maintenance message used by both the public form and the API safety net.
 const PUBLIC_BOOKINGS_DISABLED_MESSAGE = 'Le prenotazioni web non sono disponibili al momento.';
+const VOICE_AGENT_DISABLED_MESSAGE = 'Le prenotazioni telefoniche non sono disponibili al momento.';
 
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
-    if (PUBLIC_BOOKINGS_DISABLED) {
+    if (!(await getFeatureFlag('public_bookings_enabled', false))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
     try {

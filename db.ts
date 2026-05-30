@@ -1079,6 +1079,28 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_special_closures_date ON special_closures(date);`);
 
+        // ============================================
+        // FEATURE FLAGS (app_settings)
+        // ============================================
+        // Generic key/value store for runtime feature toggles. Keeps things
+        // simple: BOOLEAN-only for now, one row per flag.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        VARCHAR(100) PRIMARY KEY,
+                value      BOOLEAN NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Seed defaults: public bookings start OFF (mirrors the previous env
+        // var default), voice agent starts ON to avoid silently dropping
+        // existing call traffic when this migration runs in prod.
+        await client.query(`
+            INSERT INTO app_settings (key, value) VALUES
+                ('public_bookings_enabled', false),
+                ('voice_agent_enabled',      true)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

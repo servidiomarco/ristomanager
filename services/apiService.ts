@@ -556,3 +556,22 @@ export const deleteClosure = async (id: number): Promise<void> => {
     headers: getHeaders(false),
   }, false);
 };
+
+export interface FeatureFlags {
+  public_bookings_enabled: boolean;
+  voice_agent_enabled: boolean;
+}
+
+export const getFeatureFlags = async (): Promise<FeatureFlags> => {
+  return apiRequest<FeatureFlags>(`${API_URL}/settings/features`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promise<FeatureFlags> => {
+  return apiRequest<FeatureFlags>(`${API_URL}/settings/features`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
