@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
-import { inferTurnCode } from '../utils/turns.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -337,19 +336,14 @@ async function pickAutoAssignTable(
     date: string,
     shift: Shift,
     guests: number,
-    locationPreference: RoomLocation | undefined,
-    turn: string | null
+    locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const params: any[] = [guests, date, shift, turn];
-    const turnIdx = params.length;
+    const params: any[] = [guests, date, shift];
     let locationFilter = '';
     if (locationPreference) {
         params.push(locationPreference);
         locationFilter = ` AND r.location = $${params.length}`;
     }
-    // A table is eligible if no live reservation shares the same (date, shift, turn).
-    // A NULL turn on either side blocks the whole shift (conservative, matches
-    // findTableConflicts in server.ts).
     const result = await queryWithRetry(`
         SELECT t.id, t.name, r.name AS room_name, r.location
         FROM tables t
@@ -363,7 +357,6 @@ async function pickAutoAssignTable(
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-                AND ($${turnIdx}::text IS NULL OR res.turn IS NULL OR res.turn = $${turnIdx}::text)
           )
         ORDER BY t.seats ASC, t.id ASC
         LIMIT 1
@@ -391,27 +384,24 @@ export async function createVoiceReservation(
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
     const reservationDate = input.reservation_time.slice(0, 10);
 
-    const inferredTurn = inferTurnCode(input.shift, input.reservation_time);
     const assigned = await pickAutoAssignTable(
         reservationDate,
         input.shift,
         input.guests,
-        input.location_preference,
-        inferredTurn
+        input.location_preference
     );
 
     const result = await queryWithRetry(`
         INSERT INTO reservations (
-            customer_name, reservation_time, shift, turn, guests, children, phone,
+            customer_name, reservation_time, shift, guests, children, phone,
             notes, payment_status, arrival_status, source, requires_review, table_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING', 'WAITING', $9, true, $10)
-        RETURNING id, customer_name, reservation_time, shift, turn, guests, children, phone, requires_review, table_id
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9)
+        RETURNING id, customer_name, reservation_time, shift, guests, children, phone, requires_review, table_id
     `, [
         input.customer_name.trim(),
         input.reservation_time,
         input.shift,
-        inferredTurn,
         input.guests,
         children,
         phone,

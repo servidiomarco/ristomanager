@@ -8,7 +8,6 @@ import { isVoiceSupported, startListening, parseReservationText } from '../servi
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
 import { toTitleCase } from '../utils/text';
-import { inferTurnCode, getTurnsForShift, getTurn } from '../utils/turns';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -1143,34 +1142,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return null;
   };
 
-  // Resolve the turn for the form's currently-edited reservation. We prefer an
-  // explicit override on formData, falling back to inference from time+shift.
-  // Used by the table picker so a table booked in T1 is still selectable in T2.
-  const resolveFormTurn = (): string | null => {
-    if (typeof formData.turn === 'string' && formData.turn.trim()) return formData.turn.trim();
-    if (formData.shift && formData.reservation_time) return inferTurnCode(formData.shift, formData.reservation_time);
-    return null;
-  };
-
-  // Two reservations on the same (table, date, shift) coexist iff their turn
-  // codes differ. A NULL turn on either side blocks the whole shift (legacy
-  // rows or "I don't know" callers) — mirrors findTableConflicts in server.ts.
-  const reservationOccupiesTurn = (r: Reservation, targetTurn: string | null): boolean => {
-    if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
-    if (r.reservation_status === ReservationStatus.CANCELLED) return false;
-    if (!targetTurn) return true;
-    if (!r.turn) return true;
-    return r.turn === targetTurn;
-  };
-
-  const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift, checkTurn?: string | null) => {
-    const turn = checkTurn === undefined ? resolveFormTurn() : checkTurn;
+  const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
     const occupiedByReservation = reservations.some(r =>
         r.table_id === table_id &&
         r.reservation_time.split('T')[0] === checkDate &&
         r.shift === checkShift &&
         r.id !== formData.id &&
-        reservationOccupiesTurn(r, turn)
+        r.arrival_status !== ArrivalStatus.DEPARTED
     );
     if (occupiedByReservation) return true;
     return !!getBanquetForTable(table_id, checkDate, checkShift);
@@ -1211,13 +1189,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const getOccupierForTableInForm = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
       if (!formData.reservation_time || !formData.shift) return null;
       const date = formData.reservation_time.split('T')[0];
-      const turn = resolveFormTurn();
       const res = reservations.find(r =>
           r.table_id === table_id &&
           r.reservation_time.split('T')[0] === date &&
           r.shift === formData.shift &&
           r.id !== formData.id &&
-          reservationOccupiesTurn(r, turn)
+          r.arrival_status !== ArrivalStatus.DEPARTED
       );
       if (res) return { kind: 'reservation', data: res };
       const banquet = getBanquetForTable(table_id, date, formData.shift);
@@ -1633,18 +1610,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <span className="text-xs text-[var(--color-fg)] tabular">
               {formatTime(res.reservation_time)}
             </span>
-            {res.turn && getTurnsForShift(res.shift).length > 1 && (() => {
-              const t = getTurn(res.shift, res.turn);
-              if (!t) return null;
-              return (
-                <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)] flex-shrink-0"
-                  title={`${t.label} · ${t.start}–${t.end}`}
-                >
-                  {t.shortLabel}
-                </span>
-              );
-            })()}
             {allergenText && (
               <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
                 className="flex-shrink-0">
@@ -2528,18 +2493,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <span className="text-xs text-[var(--color-fg)] tabular">
                                       {formatTime(res.reservation_time)}
                                     </span>
-                                    {res.turn && getTurnsForShift(res.shift).length > 1 && (() => {
-                                      const t = getTurn(res.shift, res.turn);
-                                      if (!t) return null;
-                                      return (
-                                        <span
-                                          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)] flex-shrink-0"
-                                          title={`${t.label} · ${t.start}–${t.end}`}
-                                        >
-                                          {t.shortLabel}
-                                        </span>
-                                      );
-                                    })()}
                                     {allergenText && (
                                       <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
                                         className="flex-shrink-0">
@@ -2903,7 +2856,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={() => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`, turn: null});
+                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`});
                                             }}
                                             className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
                                         >
@@ -2913,7 +2866,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={() => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`, turn: null});
+                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`});
                                             }}
                                             className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
                                         >
@@ -2943,10 +2896,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
                                             onChange={e => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                // Drop the explicit turn override so the picker reverts to
-                                                // inferring from the new time — keeps both in sync without
-                                                // surprising the operator.
-                                                setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`, turn: null});
+                                                setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
                                             }}
                                         >
                                             {formData.shift === Shift.LUNCH ? (
@@ -2971,39 +2921,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </select>
                                     </div>
                                 </div>
-                                {/* Turn selector — only shown for services with multiple turns
-                                    (e.g. cena with 1°/2°). Clicking a turn snaps the time to
-                                    the turn's default start, keeping reservation_time and turn
-                                    in sync; the table picker then refreshes for the new turn. */}
-                                {formData.shift && getTurnsForShift(formData.shift).length > 1 && (() => {
-                                    const turns = getTurnsForShift(formData.shift);
-                                    const currentTurn = resolveFormTurn();
-                                    return (
-                                        <div>
-                                            <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Turno tavolo</label>
-                                            <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-                                                {turns.map(t => {
-                                                    const active = currentTurn === t.code;
-                                                    return (
-                                                        <button
-                                                            key={t.code}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                                setFormData({ ...formData, turn: t.code, reservation_time: `${currentDate}T${t.start}` });
-                                                            }}
-                                                            className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${active ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                                                            title={`${t.start}–${t.end}`}
-                                                        >
-                                                            {t.label}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            <p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">Un tavolo può ospitare una prenotazione per turno.</p>
-                                        </div>
-                                    );
-                                })()}
                             </div>
 
                             {/* Customer Name with Voice Input */}
