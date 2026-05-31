@@ -34,6 +34,7 @@ import {
     parseFlexibleTime,
 } from './services/elevenlabsService.js';
 import { toTitleCase } from './utils/text.js';
+import { inferTurnCode } from './utils/turns.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -763,18 +764,24 @@ async function findTableConflicts(
     eventDate: string,
     shift: string | null | undefined,
     tableIds: number[],
-    options?: { excludeBanquetId?: number; excludeReservationId?: number }
+    options?: { excludeBanquetId?: number; excludeReservationId?: number; turn?: string | null }
 ): Promise<TableConflict[]> {
     if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
 
     const conflicts: TableConflict[] = [];
 
     const resParams: any[] = [tableIds, eventDate, shift];
+    // Turn-aware: two reservations on the same table+shift coexist iff their
+    // turn codes differ. A NULL turn on either side is conservative — it
+    // blocks the whole shift (legacy rows, or callers that don't know yet).
+    resParams.push(options?.turn ?? null);
+    const turnIdx = resParams.length;
     let resWhere = `r.table_id = ANY($1::int[])
                     AND DATE(r.reservation_time) = $2::date
                     AND r.shift = $3
                     AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
-                    AND COALESCE(r.reservation_status, 'CONFIRMED') <> 'CANCELLED'`;
+                    AND COALESCE(r.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+                    AND ($${turnIdx}::text IS NULL OR r.turn IS NULL OR r.turn = $${turnIdx}::text)`;
     if (options?.excludeReservationId) {
         resParams.push(options.excludeReservationId);
         resWhere += ` AND r.id <> $${resParams.length}`;
@@ -853,14 +860,17 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, turn: turnRaw } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const resolvedTurn = typeof turnRaw === 'string' && turnRaw.trim()
+            ? turnRaw.trim()
+            : (reservation_time && shift ? inferTurnCode(shift as Shift, reservation_time) : null);
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         if (table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)]);
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { turn: resolvedTurn });
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -870,8 +880,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                INSERT INTO reservations (customer_name, reservation_time, shift, turn, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name
@@ -881,6 +891,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 customer_name,
                 reservation_time,
                 shift,
+                resolvedTurn,
                 guests,
                 childrenCount,
                 table_id ?? null,
@@ -959,14 +970,17 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, turn: turnRaw } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const resolvedTurn = typeof turnRaw === 'string' && turnRaw.trim()
+            ? turnRaw.trim()
+            : (reservation_time && shift ? inferTurnCode(shift as Shift, reservation_time) : null);
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         if (table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id) });
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id), turn: resolvedTurn });
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -979,11 +993,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
-                SELECT reservation_status AS prev_status FROM reservations WHERE id = $13
+                SELECT reservation_status AS prev_status FROM reservations WHERE id = $14
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12
-                WHERE id = $13
+                SET customer_name = $1, reservation_time = $2, shift = $3, turn = $4, guests = $5, children = $6, table_id = $7, notes = $8, email = $9, phone = $10, payment_status = $11, arrival_status = $12, reservation_status = $13
+                WHERE id = $14
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status
@@ -993,6 +1007,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 customer_name,
                 reservation_time,
                 shift,
+                resolvedTurn,
                 guests,
                 childrenCount,
                 table_id ?? null,
@@ -4742,12 +4757,14 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         const shift = determineShift(time);
 
         // Create reservation in database
+        const inferredTurn = inferTurnCode(shift as Shift, `${date}T${time}`);
         const result = await queryWithRetry(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            'INSERT INTO reservations (customer_name, reservation_time, shift, turn, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [
                 name,
                 `${date}T${time}`,
                 shift,
+                inferredTurn,
                 guests,
                 phoneNumber,
                 PaymentStatus.PENDING,
@@ -5340,15 +5357,16 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         noteParts.push(userNote || 'Richiesta prenotazione dal sito');
         const notes = noteParts.join(' ');
 
+        const inferredTurn = inferTurnCode(shift as Shift, reservation_time);
         const result = await queryWithRetry(
             `INSERT INTO reservations (
-                customer_name, reservation_time, shift, guests, children,
+                customer_name, reservation_time, shift, turn, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
                 reservation_status, source, requires_review
             )
-            VALUES ($1, $2, $3, $4, 0, NULL, $5, NULL, $6, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
+            VALUES ($1, $2, $3, $4, $5, 0, NULL, $6, NULL, $7, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
             RETURNING *`,
-            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, phoneE164]
+            [customer_name, reservation_time, shift, inferredTurn, Math.trunc(guestsNum), notes, phoneE164]
         );
         const created = result.rows[0];
 

@@ -382,6 +382,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // New rows always capture insertion time automatically from now on.
         await client.query(`ALTER TABLE reservations ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP;`);
 
+        // Service turn within the shift (e.g. 'T1' / 'T2'). Allows a table to
+        // host more than one reservation per shift as long as the turns differ.
+        // Nullable so we can detect legacy rows; backfill assigns T1/T2 by the
+        // booking's local time, matching utils/turns.ts default windows.
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS turn VARCHAR(10);`);
+        await client.query(`
+            UPDATE reservations
+            SET turn = CASE
+                WHEN shift = 'LUNCH' THEN 'T1'
+                WHEN shift = 'DINNER'
+                     AND (reservation_time AT TIME ZONE 'Europe/Rome')::time >= TIME '20:45'
+                     THEN 'T2'
+                WHEN shift = 'DINNER' THEN 'T1'
+                ELSE 'T1'
+            END
+            WHERE turn IS NULL;
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_reservations_table_shift_turn
+            ON reservations(table_id, shift, turn) WHERE table_id IS NOT NULL;`);
+
         // Audit table for ElevenLabs voice calls. Stores transcript + summary so
         // staff can review what the agent agreed to. Linked to a reservation
         // when one is created during the call.

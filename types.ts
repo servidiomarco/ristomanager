@@ -160,6 +160,10 @@ export interface Reservation {
   customer_name: string;
   reservation_time: string;
   shift: Shift;
+  // Service turn within the shift (e.g. 'T1' for primo turno, 'T2' for secondo).
+  // A table can host one reservation per (date, shift, turn). Null/undefined
+  // is treated as "occupies all turns" for legacy rows that pre-date the field.
+  turn?: string | null;
   guests: number;
   children?: number;
   table_id?: number;
