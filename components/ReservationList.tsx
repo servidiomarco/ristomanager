@@ -3489,7 +3489,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
-                                                            {table.seats}
+                                                            {isOccupied && occupier
+                                                                ? (occupier.data.guests ?? 0) + (occupier.data.children ?? 0)
+                                                                : table.seats}
                                                         </div>
                                                         {isOccupied && occupier && (
                                                             <div
