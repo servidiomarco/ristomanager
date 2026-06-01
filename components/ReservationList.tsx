@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -76,6 +76,40 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
     );
   }
   return null;
+};
+
+// Tier 3 attribute: small circular badge showing how the booking arrived
+// (channel). Phone for manually-entered calls, WhatsApp, web for the public
+// booking page, mic for the voice agent. Quiet/secondary by design.
+const renderChannelIcon = (res: Reservation): React.ReactNode => {
+  const source = res.source || ReservationSource.MANUAL;
+  const base = 'inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0';
+  if (source === ReservationSource.WHATSAPP) {
+    return (
+      <span className={`${base} bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400`} title="WhatsApp" aria-label="Canale: WhatsApp">
+        <MessageCircle className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (source === ReservationSource.GOOGLE) {
+    return (
+      <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Web" aria-label="Canale: Web">
+        <Globe className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (source === ReservationSource.VOICE) {
+    return (
+      <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Agente vocale" aria-label="Canale: Agente vocale">
+        <Mic className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Telefono" aria-label="Canale: Telefono">
+      <Phone className="h-3.5 w-3.5" />
+    </span>
+  );
 };
 
 // Helper to format only time
@@ -752,7 +786,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     return [
       { key: 'pending', label: 'Da confermare', color: 'bg-amber-500', dotClass: 'bg-amber-500', items: pending },
-      { key: 'waiting', label: 'In attesa', color: 'bg-blue-500', dotClass: 'bg-blue-500', items: waiting },
+      { key: 'waiting', label: 'In attesa', color: 'bg-[#4D5A87]', dotClass: 'bg-[#4D5A87]', items: waiting },
       { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
       { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
@@ -844,7 +878,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
     pending:   { label: 'Da confermare', dotClass: 'bg-amber-500', chipClass: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-amber-500/25' },
-    waiting:   { label: 'In attesa', dotClass: 'bg-blue-500', chipClass: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30 dark:hover:bg-blue-500/25' },
+    waiting:   { label: 'In attesa', dotClass: 'bg-[#4D5A87]', chipClass: 'bg-[#EDEFF7] text-[#4D5A87] border-[#DCE0EE] hover:bg-[#E3E7F3] dark:bg-[#4D5A87]/25 dark:text-[#B9C2E0] dark:border-[#4D5A87]/40 dark:hover:bg-[#4D5A87]/35' },
     arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
     freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
     noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
@@ -1558,12 +1592,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // unreadable, so for 3+ tables we surface the first number plus a "+N" badge
   // and expose the full list through a tap/hover tooltip. One or two tables fit
   // as-is. `textClass` keeps the colour in sync with the strip's state styling.
-  const renderTableStripContent = (res: Reservation, table: Table, tableRoom: Room | null | undefined, textClass: string) => {
+  // expandTables: when true (mobile cards), every merged table name is shown in
+  // full with wrapping instead of collapsing to "first (+N)" behind a tooltip.
+  const renderTableStripContent = (res: Reservation, table: Table, tableRoom: Room | null | undefined, textClass: string, expandTables = false) => {
     const names = table.name.split('+').map(n => n.trim()).filter(Boolean);
     const extraCount = names.length - 1;
     return (
       <>
-        {names.length > 2 ? (
+        {!expandTables && names.length > 2 ? (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'tables', text: table.name, x: e.clientX, y: e.clientY }); }}
@@ -1575,7 +1611,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <span className={`text-xs font-semibold leading-none ${textClass}`}>(+{extraCount})</span>
           </button>
         ) : (
-          <span className={`text-base font-bold leading-6 ${textClass}`}>{table.name}</span>
+          <span className={`text-base font-bold leading-tight text-center break-words ${textClass}`}>{table.name}</span>
         )}
         {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
       </>
@@ -1607,36 +1643,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       >
         {/* Left content */}
         <div className="flex-1 min-w-0 px-3 py-2">
-          {/* Row 1: Time + indicator icons */}
+          {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
           <div className="flex items-center gap-1.5 h-5">
             <span className="text-xs text-[var(--color-fg)] tabular">
               {formatTime(res.reservation_time)}
             </span>
-            {allergenText && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
-                className="flex-shrink-0">
-                <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
-              </button>
-            )}
-            {noteText && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
-                className="flex-shrink-0">
-                <StickyNote className="h-3.5 w-3.5 text-amber-500" />
-              </button>
-            )}
-            {res.payment_status !== PaymentStatus.PENDING && (
-              <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
-                <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
-              </span>
-            )}
-            {menu && (
-              <span className="flex-shrink-0" title={menu.name}>
-                <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
-              </span>
-            )}
             <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-              <Info className="h-3.5 w-3.5" />
+              <Info className="h-5 w-5" />
             </button>
+            {renderOperatorBadge(res)}
             {group.key === 'noshow' && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
                 <UserX className="h-2.5 w-2.5" /> No show
@@ -1649,15 +1664,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
           </div>
 
-          {/* Row 2: Customer name */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            {renderOperatorBadge(res)}
+          {/* Tier 1 — guest name */}
+          <div className="flex items-center min-w-0 mt-0.5">
             <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
               {toTitleCase(res.customer_name)}
             </p>
           </div>
 
-          {/* Row 3: Actions */}
+          {/* Tier 3 — attributes: channel · dietary · note · payment · menu */}
+          <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+            {renderChannelIcon(res)}
+            {allergenText && (
+              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
+                <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
+              </span>
+            )}
+            {noteText && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] flex-shrink-0" title="Nota" aria-label="Nota">
+                <StickyNote className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {res.payment_status !== PaymentStatus.PENDING && (
+              <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+              </span>
+            )}
+            {menu && (
+              <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={menu.name}>
+                <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+              </span>
+            )}
+          </div>
+
+          {/* Actions row: status (left) · edit + delete (right) */}
           {canEdit && (
             <div className="flex items-center gap-2.5 mt-1.5">
               {(() => {
@@ -1685,19 +1725,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <MapPin className="h-3.5 w-3.5" /> Tavolo
                 </button>
               )}
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
-                <Edit2 className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                  className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                  <Edit2 className="h-3.5 w-3.5" />
+                </button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
+                  className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Covers count */}
+        {/* Tier 1 — covers count */}
         <div className="flex items-start pt-2 pr-3 flex-shrink-0">
           <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
             <Users className="h-3.5 w-3.5" />
@@ -1708,20 +1750,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
         </div>
 
-        {/* Table strip — full height */}
+        {/* Tier 1 — table strip, full height (tinted by status) */}
         <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
           table
             ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
               : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
               : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-              : 'bg-[#dbeafe] dark:bg-blue-500/15'
+              : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
             : 'bg-[var(--color-surface-3)]'
         }`}>
           {table ? renderTableStripContent(res, table, tableRoom,
             group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
               : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
               : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
-              : 'text-[#193cb8] dark:text-blue-300'
+              : 'text-[#4D5A87] dark:text-[#B9C2E0]'
           ) : (
             <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
           )}
@@ -2477,90 +2519,128 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
                             const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
 
-                            const circleColor = group.key === 'freed' ? 'bg-slate-400'
-                              : group.key === 'arrived' ? 'bg-emerald-500'
-                              : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-500'
-                              : 'bg-blue-500';
-
                             return (
                               <div key={res.id}
-                                className={`bg-[var(--color-surface)] rounded-xl border cursor-pointer ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} flex overflow-hidden ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                className={`bg-[var(--color-surface)] rounded-2xl border cursor-pointer p-3.5 ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
                                 onMouseEnter={() => setHoveredReservationId(res.id)}
                                 onMouseLeave={() => setHoveredReservationId(null)}
                                 onClick={() => handleRowClick(res)}>
-                                {/* Left content */}
-                                <div className="flex-1 min-w-0 p-3">
-                                  {/* Row 1: Time + indicator icons */}
-                                  <div className="flex items-center gap-1.5 h-5">
-                                    <span className="text-xs text-[var(--color-fg)] tabular">
-                                      {formatTime(res.reservation_time)}
-                                    </span>
-                                    {allergenText && (
-                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'allergen', text: allergenText, x: e.clientX, y: e.clientY }); }}
-                                        className="flex-shrink-0">
-                                        <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                                {/* Card body: main + rail */}
+                                <div className="flex gap-3">
+                                  {/* Main */}
+                                  <div className="flex-1 min-w-0 flex flex-col">
+                                    {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
+                                    <div className="flex items-center gap-1.5 h-5">
+                                      <span className="text-xs text-[var(--color-fg)] tabular">
+                                        {formatTime(res.reservation_time)}
+                                      </span>
+                                      <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
+                                        <Info className="h-5 w-5" />
                                       </button>
-                                    )}
-                                    {noteText && (
-                                      <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
-                                        className="flex-shrink-0">
-                                        <StickyNote className="h-3.5 w-3.5 text-amber-500" />
-                                      </button>
-                                    )}
-                                    {res.payment_status !== PaymentStatus.PENDING && (
-                                      <span className="flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
-                                        <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
-                                      </span>
-                                    )}
-                                    {menu && (
-                                      <span className="flex-shrink-0" title={menu.name}>
-                                        <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
-                                      </span>
-                                    )}
-                                    <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-                                      <Info className="h-3.5 w-3.5" />
-                                    </button>
-                                    {group.key === 'noshow' && (
-                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                                        <UserX className="h-2.5 w-2.5" /> No show
-                                      </span>
-                                    )}
-                                    {group.key === 'cancelled' && (
-                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                                        <Ban className="h-2.5 w-2.5" /> Annullata
-                                      </span>
-                                    )}
-                                  </div>
+                                      {renderOperatorBadge(res)}
+                                      {group.key === 'noshow' && (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                          <UserX className="h-2.5 w-2.5" /> No show
+                                        </span>
+                                      )}
+                                      {group.key === 'cancelled' && (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
+                                          <Ban className="h-2.5 w-2.5" /> Annullata
+                                        </span>
+                                      )}
+                                    </div>
 
-                                  {/* Row 2: Customer name */}
-                                  <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                                    {renderOperatorBadge(res)}
-                                    <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+                                    {/* Tier 1 — guest name */}
+                                    <p className={`text-[17px] font-medium text-[var(--color-fg)] leading-tight truncate mt-1 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
                                       {toTitleCase(res.customer_name)}
                                     </p>
-                                  </div>
 
-                                  {/* Row 3: Actions */}
-                                  {canEdit && (
-                                    <div className="flex items-center gap-2.5 mt-2">
-                                      {(() => {
-                                        const state = getReservationState(res);
-                                        const meta = RESERVATION_STATE_META[state];
-                                        return (
-                                          <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
-                                            title="Cambia stato">
-                                            {meta.label}
-                                            <ChevronDown className="h-3 w-3 opacity-60" />
-                                          </button>
-                                        );
-                                      })()}
-                                      {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
-                                        <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                                          className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                                          <MapPin className="h-3.5 w-3.5" /> Tavolo
+                                    {/* Tier 3 — attributes: channel · dietary · note · payment · menu (bottom-aligned with table chip) */}
+                                    <div className="flex items-center flex-wrap gap-1.5 mt-auto pt-2">
+                                      {renderChannelIcon(res)}
+                                      {allergenText && (
+                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
+                                          <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
+                                        </span>
+                                      )}
+                                      {noteText && (
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] flex-shrink-0" title="Nota" aria-label="Nota">
+                                          <StickyNote className="h-3.5 w-3.5" />
                                         </button>
                                       )}
+                                      {res.payment_status !== PaymentStatus.PENDING && (
+                                        <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}>
+                                          <CreditCard className="h-3.5 w-3.5 text-emerald-600" />
+                                        </span>
+                                      )}
+                                      {menu && (
+                                        <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={menu.name}>
+                                          <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Tier 1 — rail: party (top) + table chip (bottom-aligned with Tier 3) */}
+                                  <div className="flex flex-col items-end justify-between self-stretch flex-shrink-0">
+                                    <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+                                      <Users className="h-3.5 w-3.5" />
+                                      <span className="text-base font-medium tabular">{res.guests}</span>
+                                      {res.children && res.children > 0 ? (
+                                        <span className="text-[10px] opacity-75">({res.children}b)</span>
+                                      ) : null}
+                                    </div>
+                                    <div className={`min-w-[66px] max-w-[160px] min-h-[60px] px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
+                                      table
+                                        ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+                                          : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+                                          : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
+                                          : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
+                                        : 'bg-[var(--color-surface-3)]'
+                                    }`}>
+                                      {table ? renderTableStripContent(res, table, tableRoom,
+                                        group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                                          : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                                          : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
+                                          : 'text-[#4D5A87] dark:text-[#B9C2E0]',
+                                        true
+                                      ) : (
+                                        <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Actions band: status (left) · edit + delete (right) */}
+                                {canEdit && (
+                                  <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-[var(--color-line)]">
+                                    {(() => {
+                                      const state = getReservationState(res);
+                                      const meta = RESERVATION_STATE_META[state];
+                                      return (
+                                        <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+                                          className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                                          title="Cambia stato">
+                                          {meta.label}
+                                          <ChevronDown className="h-3 w-3 opacity-60" />
+                                        </button>
+                                      );
+                                    })()}
+                                    {(res.reservation_status === ReservationStatus.PENDING) && (
+                                      <button onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
+                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                                        title="Conferma prenotazione">
+                                        <Check className="h-3.5 w-3.5" /> Conferma
+                                      </button>
+                                    )}
+                                    {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                        <MapPin className="h-3.5 w-3.5" /> Tavolo
+                                      </button>
+                                    )}
+                                    <div className="ml-auto -mr-1.5 flex items-center gap-3">
                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                                         className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                                         <Edit2 className="h-3.5 w-3.5" />
@@ -2570,33 +2650,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <Trash2 className="h-3.5 w-3.5" />
                                       </button>
                                     </div>
-                                  )}
-                                </div>
-
-                                {/* Covers count */}
-                                <div className="flex items-start pt-3 pr-3 flex-shrink-0">
-                                  <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
-                                    <Users className="h-3.5 w-3.5" />
-                                    <span className="text-base font-medium tabular">{res.guests}</span>
                                   </div>
-                                </div>
-
-                                {/* Table strip */}
-                                <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
-                                  table
-                                    ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
-                                      : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
-                                      : 'bg-[#dbeafe] dark:bg-blue-500/15'
-                                    : 'bg-[var(--color-surface-3)]'
-                                }`}>
-                                  {table ? renderTableStripContent(res, table, tableRoom,
-                                    group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-                                      : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-                                      : 'text-[#193cb8] dark:text-blue-300'
-                                  ) : (
-                                    <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
-                                  )}
-                                </div>
+                                )}
                               </div>
                             );
                           })}
@@ -3665,8 +3720,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const current = getReservationState(res);
         const options: ReservationStateKey[] = ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled'];
         return (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] px-4" onClick={() => setStateChangeReservation(null)}>
-            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-[var(--color-line)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+              {/* Drag handle (mobile only) */}
+              <div className="flex justify-center pt-3 pb-1 sm:hidden">
+                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              </div>
               <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
                     <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Cambia stato</h3>
