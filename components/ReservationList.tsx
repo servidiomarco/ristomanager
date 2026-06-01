@@ -879,6 +879,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       case 'cancelled':
         update.arrival_status = ArrivalStatus.WAITING;
         update.reservation_status = ReservationStatus.CANCELLED;
+        update.table_id = undefined;
         break;
     }
     onUpdateReservation({ ...res, ...update });
@@ -1194,7 +1195,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           r.reservation_time.split('T')[0] === date &&
           r.shift === formData.shift &&
           r.id !== formData.id &&
-          r.arrival_status !== ArrivalStatus.DEPARTED
+          r.arrival_status !== ArrivalStatus.DEPARTED &&
+          r.reservation_status !== ReservationStatus.CANCELLED
       );
       if (res) return { kind: 'reservation', data: res };
       const banquet = getBanquetForTable(table_id, date, formData.shift);
