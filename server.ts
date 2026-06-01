@@ -965,6 +965,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         const isCancelling = reservation_status === 'CANCELLED';
+        // Cancelling frees the assigned table immediately so it can be reused.
+        const effectiveTableId = isCancelling ? null : (table_id ?? null);
         if (!isCancelling && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
             const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id) });
@@ -977,16 +979,13 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         }
         // Capture the previous reservation_status in the same statement so we
         // can detect transitions (e.g. → CANCELLED) without an extra round-trip
-        // and without a race with concurrent updates. Cancelling also clears
-        // table_id so the assigned table is freed immediately.
+        // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
                 SELECT reservation_status AS prev_status FROM reservations WHERE id = $13
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5,
-                    table_id = CASE WHEN $12 = 'CANCELLED' THEN NULL ELSE $6 END,
-                    notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12
                 WHERE id = $13
                 RETURNING *
             )
@@ -999,7 +998,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 shift,
                 guests,
                 childrenCount,
-                table_id ?? null,
+                effectiveTableId,
                 notes ?? null,
                 email ?? null,
                 phone ?? null,
