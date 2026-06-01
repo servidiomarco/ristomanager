@@ -2107,7 +2107,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     });
     const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
     const reservationCountForDayShift = reservationsForDayShift.length;
-    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id).length;
+    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED).length;
 
     const PADDING = 40;
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -3780,6 +3780,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .filter(r => r.reservation_time.split('T')[0] === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
+            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           return (
@@ -3863,6 +3864,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .filter(r => r.reservation_time.split('T')[0] === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
+            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           const assign = (r: Reservation) => {
