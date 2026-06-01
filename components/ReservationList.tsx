@@ -3490,7 +3490,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             <Users size={8} className="sm:hidden" />
                                                             <Users size={10} className="hidden sm:block" />
                                                             {isOccupied && occupier
-                                                                ? (occupier.data.guests ?? 0) + (occupier.data.children ?? 0)
+                                                                ? (occupier.data.guests ?? 0)
                                                                 : table.seats}
                                                         </div>
                                                         {isOccupied && occupier && (
