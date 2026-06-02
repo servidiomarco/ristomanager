@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Star } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -487,6 +487,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [customerSuggestions, formData.phone]);
 
+  // Decide whether the rubrica's preferred table can be auto-assigned to the
+  // booking currently in the form. Falls through silently if any condition
+  // fails — the form keeps whatever the user already chose, and the floor
+  // card will flag the mismatch later.
+  const resolvePreferredTableForForm = (preferredTableId: number | null | undefined): { tableId: number; tableName: string } | null => {
+    if (preferredTableId == null) return null;
+    const table = tables.find(t => t.id === preferredTableId);
+    if (!table) return null;
+    if (rooms.some(r => r.id === (table as any).room_id && r.is_closed)) return null;
+    const guests = Number(formData.guests || 0);
+    const cap = Number((table as any).max_seats ?? table.seats ?? 0);
+    if (guests > 0 && cap > 0 && guests > cap) return null;
+    if (!formData.reservation_time || !formData.shift) return null;
+    const date = formData.reservation_time.split('T')[0];
+    if (isTableOccupied(table.id as number, date, formData.shift)) return null;
+    return { tableId: table.id as number, tableName: table.name };
+  };
+
+  // Apply rubrica preferences after the user picks (or autocompletes) a
+  // customer: prefill the table when free, and prepend allergie/dietary notes
+  // to the booking notes so the kitchen sees them without an extra click.
+  const applyCustomerPreferences = (c: Customer) => {
+    const dietary = (c.dietary_notes || '').trim();
+    let assigned: { tableId: number; tableName: string } | null = null;
+    setFormData(prev => {
+      const next: typeof prev = { ...prev };
+      if ((prev.table_id == null || prev.table_id === undefined) && c.preferred_table_id) {
+        assigned = resolvePreferredTableForForm(c.preferred_table_id);
+        if (assigned) next.table_id = assigned.tableId;
+      }
+      if (dietary) {
+        const existing = (prev.notes || '').trim();
+        if (!existing.toLowerCase().includes(dietary.toLowerCase())) {
+          next.notes = existing ? `${dietary}\n${existing}` : dietary;
+        }
+      }
+      return next;
+    });
+    if (assigned) {
+      showToast(`Tavolo preferito ${assigned.tableName} assegnato automaticamente.`, 'success');
+    }
+  };
+
   const applyCustomerSuggestion = (c: Customer) => {
     lastSuggestQueryRef.current = activeSuggestField === 'phone' ? (c.phone || '') : c.name;
     setFormData(prev => ({
@@ -498,6 +541,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setMatchedCustomerNoShows(c.no_show_count || 0);
     setActiveSuggestField(null);
     setCustomerSuggestions([]);
+    applyCustomerPreferences(c);
   };
 
   // Per-shift table merges. Use the form's date+shift while the modal is open;
@@ -1665,18 +1709,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
 
           {/* Tier 1 — guest name */}
-          <div className="flex items-center min-w-0 mt-0.5">
+          <div className="flex items-center gap-1.5 min-w-0 mt-0.5">
+            {res.customer_is_vip && (
+              <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+            )}
             <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
               {toTitleCase(res.customer_name)}
             </p>
           </div>
 
-          {/* Tier 3 — attributes: channel · dietary · note · payment · menu */}
+          {/* Tier 3 — attributes: channel · dietary · preferred · note · payment · menu */}
           <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
             {renderChannelIcon(res)}
             {allergenText && (
               <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
                 <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
+              </span>
+            )}
+            {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
+              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+                <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
+              </span>
+            )}
+            {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
+              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+                <Armchair className="h-3 w-3 flex-shrink-0" /> Preferito non disponibile
               </span>
             )}
             {noteText && (
@@ -1793,7 +1850,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name)}</h3>
+              <h3 className="text-base font-semibold text-[var(--color-fg)] inline-flex items-center gap-1.5">
+                {res.customer_is_vip && (
+                  <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+                )}
+                {toTitleCase(res.customer_name)}
+              </h3>
               <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
@@ -1821,6 +1883,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {allergenText && (
               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-medium">
                 <AlertTriangle className="h-2.5 w-2.5" /> {allergenText}
+              </span>
+            )}
+            {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+                <Armchair className="h-2.5 w-2.5" /> Tavolo preferito
+              </span>
+            )}
+            {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+                <Armchair className="h-2.5 w-2.5" /> Preferito non disponibile
               </span>
             )}
           </div>
@@ -2551,16 +2623,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
 
                                     {/* Tier 1 — guest name */}
-                                    <p className={`text-[17px] font-medium text-[var(--color-fg)] leading-tight truncate mt-1 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
-                                      {toTitleCase(res.customer_name)}
-                                    </p>
+                                    <div className={`flex items-center gap-1.5 min-w-0 mt-1 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+                                      {res.customer_is_vip && (
+                                        <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+                                      )}
+                                      <p className="text-[17px] font-medium text-[var(--color-fg)] leading-tight truncate">
+                                        {toTitleCase(res.customer_name)}
+                                      </p>
+                                    </div>
 
-                                    {/* Tier 3 — attributes: channel · dietary · note · payment · menu (bottom-aligned with table chip) */}
+                                    {/* Tier 3 — attributes: channel · dietary · preferred · note · payment · menu (bottom-aligned with table chip) */}
                                     <div className="flex items-center flex-wrap gap-1.5 mt-auto pt-2">
                                       {renderChannelIcon(res)}
                                       {allergenText && (
                                         <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
                                           <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
+                                        </span>
+                                      )}
+                                      {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
+                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+                                          <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
+                                        </span>
+                                      )}
+                                      {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
+                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+                                          <Armchair className="h-3 w-3 flex-shrink-0" /> Preferito non disponibile
                                         </span>
                                       )}
                                       {noteText && (
@@ -4038,6 +4125,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             phone: c.phone || prev.phone || '',
             email: c.email || prev.email || '',
           }));
+          applyCustomerPreferences(c);
         }}
       />
 

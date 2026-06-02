@@ -181,6 +181,11 @@ export interface Reservation {
   created_by_user_id?: number | null;
   created_by_user_name?: string | null;
   created_at?: string;
+  customer_is_vip?: boolean;
+  customer_preferred_table_id?: number | null;
+  customer_preferred_table_name?: string | null;
+  customer_dietary_notes?: string | null;
+  customer_preferences_notes?: string | null;
 }
 
 export interface Notification {
@@ -226,6 +231,10 @@ export interface Customer {
   created_at?: string;
   updated_at?: string;
   no_show_count?: number;
+  preferred_table_id?: number | null;
+  preferences_notes?: string | null;
+  dietary_notes?: string | null;
+  is_vip?: boolean;
 }
 
 // ============================================

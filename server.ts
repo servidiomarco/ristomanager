@@ -838,10 +838,24 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
+        // Enrich each reservation with the matching rubrica entry, joined on the
+        // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
+        // the booking card to render VIP/preferred-table chips without an extra
+        // round-trip per row.
         const result = await queryWithRetry(`
-            SELECT r.*, u.full_name AS created_by_user_name
+            SELECT r.*, u.full_name AS created_by_user_name,
+                   c.is_vip AS customer_is_vip,
+                   c.preferred_table_id AS customer_preferred_table_id,
+                   pt.name AS customer_preferred_table_name,
+                   c.dietary_notes AS customer_dietary_notes,
+                   c.preferences_notes AS customer_preferences_notes
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
+            LEFT JOIN customers c
+                   ON r.phone IS NOT NULL
+                  AND c.phone IS NOT NULL
+                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id
             ORDER BY r.reservation_time DESC
         `);
         res.json(result.rows);
@@ -855,12 +869,47 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
     try {
         const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
-        if (await isTableInClosedRoom(table_id)) {
+
+        // If the client didn't pick a table but the caller is a known rubrica
+        // entry with a preferred_table_id, try to honor that preference. The
+        // preferred table must (a) exist, (b) seat the party, (c) be in an open
+        // room, and (d) be free for the requested date+shift. Any miss leaves
+        // table_id untouched — the booking lands unassigned and the floor card
+        // will surface the "Tavolo preferito non disponibile" chip.
+        let effectiveTableId: number | null = table_id != null ? Number(table_id) : null;
+        if (effectiveTableId == null && phone && String(phone).trim() && reservation_time && shift) {
+            const phoneDigits = String(phone).replace(/\D/g, '');
+            if (phoneDigits) {
+                const customerRow = await queryWithRetry(
+                    `SELECT c.preferred_table_id, t.seats, t.max_seats
+                     FROM customers c
+                     LEFT JOIN tables t ON t.id = c.preferred_table_id
+                     WHERE c.phone IS NOT NULL
+                       AND regexp_replace(c.phone, '\\D', '', 'g') = $1
+                     LIMIT 1`,
+                    [phoneDigits]
+                );
+                const row = customerRow.rows[0];
+                if (row && row.preferred_table_id) {
+                    const capacity = Number(row.max_seats || row.seats || 0);
+                    const fitsGuests = !guests || !capacity || Number(guests) <= capacity;
+                    if (fitsGuests && !(await isTableInClosedRoom(row.preferred_table_id))) {
+                        const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
+                        const conflicts = await findTableConflicts(eventDate, shift, [Number(row.preferred_table_id)]);
+                        if (conflicts.length === 0) {
+                            effectiveTableId = Number(row.preferred_table_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (await isTableInClosedRoom(effectiveTableId)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
-        if (table_id != null && reservation_time && shift) {
+        if (effectiveTableId != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)]);
+            const conflicts = await findTableConflicts(eventDate, shift, [effectiveTableId]);
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -874,16 +923,26 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
             )
-            SELECT ins.*, u.full_name AS created_by_user_name
+            SELECT ins.*, u.full_name AS created_by_user_name,
+                   c.is_vip AS customer_is_vip,
+                   c.preferred_table_id AS customer_preferred_table_id,
+                   pt.name AS customer_preferred_table_name,
+                   c.dietary_notes AS customer_dietary_notes,
+                   c.preferences_notes AS customer_preferences_notes
             FROM ins
-            LEFT JOIN users u ON ins.created_by_user_id = u.id`,
+            LEFT JOIN users u ON ins.created_by_user_id = u.id
+            LEFT JOIN customers c
+                   ON ins.phone IS NOT NULL
+                  AND c.phone IS NOT NULL
+                  AND regexp_replace(ins.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
             [
                 customer_name,
                 reservation_time,
                 shift,
                 guests,
                 childrenCount,
-                table_id ?? null,
+                effectiveTableId,
                 notes ?? null,
                 email ?? null,
                 phone ?? null,
@@ -989,9 +1048,19 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 WHERE id = $13
                 RETURNING *
             )
-            SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status
+            SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status,
+                   c.is_vip AS customer_is_vip,
+                   c.preferred_table_id AS customer_preferred_table_id,
+                   pt.name AS customer_preferred_table_name,
+                   c.dietary_notes AS customer_dietary_notes,
+                   c.preferences_notes AS customer_preferences_notes
             FROM upd
-            LEFT JOIN users u ON upd.created_by_user_id = u.id`,
+            LEFT JOIN users u ON upd.created_by_user_id = u.id
+            LEFT JOIN customers c
+                   ON upd.phone IS NOT NULL
+                  AND c.phone IS NOT NULL
+                  AND regexp_replace(upd.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
             [
                 customer_name,
                 reservation_time,
@@ -2215,6 +2284,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             const term = `%${q.trim().toLowerCase()}%`;
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                        preferred_table_id, preferences_notes, dietary_notes, is_vip,
                         ${noShowSubquery}
                  FROM customers c
                  WHERE phone IS NOT NULL AND TRIM(phone) <> ''
@@ -2227,6 +2297,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         }
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                    preferred_table_id, preferences_notes, dietary_notes, is_vip,
                     ${noShowSubquery}
              FROM customers c
              WHERE phone IS NOT NULL AND TRIM(phone) <> ''
@@ -2243,13 +2314,18 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
 
 app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
-        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
         if (!phone || !String(phone).trim()) {
             return res.status(400).json({ error: 'phone is required' });
         }
+
+        const normalizedPreferredTableId: number | null = preferred_table_id != null && preferred_table_id !== '' && Number.isFinite(Number(preferred_table_id))
+            ? Number(preferred_table_id)
+            : null;
+        const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
 
         // Dedupe on the digit-only form of the phone — strips spaces, "+",
         // dashes, etc. so "+39 333 1234567" and "3331234567" match. Phone
@@ -2258,7 +2334,8 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         const phoneDigits = trimmedPhone.replace(/\D/g, '');
         if (phoneDigits) {
             const existing = await queryWithRetry(
-                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at
+                `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                        preferred_table_id, preferences_notes, dietary_notes, is_vip
                  FROM customers
                  WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
                  LIMIT 1`,
@@ -2270,9 +2347,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (name, phone, email, address, city, postal_code, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+            `INSERT INTO customers (name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -2281,6 +2359,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 city ?? null,
                 postal_code ?? null,
                 notes ?? null,
+                normalizedPreferredTableId,
+                preferences_notes ?? null,
+                dietary_notes ?? null,
+                normalizedIsVip,
             ]
         );
         const newCustomer = result.rows[0];
@@ -2307,13 +2389,17 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
 app.put('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, address, city, postal_code, notes } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
         if (!phone || !String(phone).trim()) {
             return res.status(400).json({ error: 'phone is required' });
         }
+        const normalizedPreferredTableId: number | null = preferred_table_id != null && preferred_table_id !== '' && Number.isFinite(Number(preferred_table_id))
+            ? Number(preferred_table_id)
+            : null;
+        const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
         const result = await queryWithRetry(
             `UPDATE customers SET
                 name = $1,
@@ -2323,9 +2409,14 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                 city = $5,
                 postal_code = $6,
                 notes = $7,
+                preferred_table_id = $8,
+                preferences_notes = $9,
+                dietary_notes = $10,
+                is_vip = $11,
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $8
-             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at`,
+             WHERE id = $12
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
             [
                 normalizeCustomerName(String(name).trim()),
                 phone ? String(phone).trim() : null,
@@ -2334,6 +2425,10 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                 city ?? null,
                 postal_code ?? null,
                 notes ?? null,
+                normalizedPreferredTableId,
+                preferences_notes ?? null,
+                dietary_notes ?? null,
+                normalizedIsVip,
                 id,
             ]
         );

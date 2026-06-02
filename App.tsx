@@ -1371,6 +1371,8 @@ const App: React.FC = () => {
           <CustomerList
             reservations={reservations}
             banquetMenus={banquetMenus}
+            tables={tables}
+            rooms={rooms}
             showToast={addToast}
             autoOpenNew={autoOpenNewCustomer}
             onAutoOpenNewHandled={() => setAutoOpenNewCustomer(false)}

@@ -846,6 +846,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // (phone or email required) without touching customers added manually.
         await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS auto_imported BOOLEAN NOT NULL DEFAULT FALSE;`);
 
+        // Per-customer service preferences used by reservation auto-assignment
+        // and floor-card hints. preferred_table_id is a soft FK (SET NULL on
+        // table deletion) so existing notes survive a floor-plan rework.
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS preferred_table_id INTEGER REFERENCES tables(id) ON DELETE SET NULL;`);
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS preferences_notes TEXT;`);
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS dietary_notes TEXT;`);
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_vip BOOLEAN NOT NULL DEFAULT FALSE;`);
+
         // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
         // because deleting a customer should not destroy the banquet history.
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`);

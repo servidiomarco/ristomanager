@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Customer, Reservation, BanquetMenu, Shift } from '../types';
+import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2 } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle } from 'lucide-react';
 
 interface Props {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
+  tables: Table[];
+  rooms: Room[];
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   autoOpenNew?: boolean;
   onAutoOpenNewHandled?: () => void;
@@ -21,6 +23,10 @@ interface FormState {
   city: string;
   postal_code: string;
   notes: string;
+  preferred_table_id: number | null;
+  preferences_notes: string;
+  dietary_notes: string;
+  is_vip: boolean;
 }
 
 const emptyForm: FormState = {
@@ -31,6 +37,10 @@ const emptyForm: FormState = {
   city: '',
   postal_code: '',
   notes: '',
+  preferred_table_id: null,
+  preferences_notes: '',
+  dietary_notes: '',
+  is_vip: false,
 };
 
 const customerToForm = (c: Customer): FormState => ({
@@ -42,6 +52,10 @@ const customerToForm = (c: Customer): FormState => ({
   city: c.city || '',
   postal_code: c.postal_code || '',
   notes: c.notes || '',
+  preferred_table_id: c.preferred_table_id ?? null,
+  preferences_notes: c.preferences_notes || '',
+  dietary_notes: c.dietary_notes || '',
+  is_vip: c.is_vip === true,
 });
 
 const formatLastVisit = (date: string | undefined): string => {
@@ -60,7 +74,7 @@ const formatReservationDateTime = (isoString: string): { date: string; time: str
   return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
 };
 
-export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, showToast, autoOpenNew, onAutoOpenNewHandled }) => {
+export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tables, rooms, showToast, autoOpenNew, onAutoOpenNewHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
@@ -136,6 +150,38 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
     return result;
   }, [customers, reservations, banquetMenus]);
 
+  // Group active tables by room for the preferred-table picker. Rooms that
+  // contain no visible tables are skipped so the dropdown stays tight.
+  const tablesByRoom = useMemo(() => {
+    const groups: { roomId: number | null; roomName: string; tables: Table[] }[] = [];
+    const visible = tables.filter(t => t && t.id != null);
+    const byRoom = new Map<number | null, Table[]>();
+    for (const t of visible) {
+      const key = (t as any).room_id ?? null;
+      if (!byRoom.has(key)) byRoom.set(key, []);
+      byRoom.get(key)!.push(t);
+    }
+    for (const room of rooms) {
+      const list = byRoom.get(room.id);
+      if (list && list.length > 0) {
+        list.sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
+        groups.push({ roomId: room.id, roomName: room.name, tables: list });
+      }
+    }
+    const orphans = byRoom.get(null);
+    if (orphans && orphans.length > 0) {
+      orphans.sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
+      groups.push({ roomId: null, roomName: 'Altri', tables: orphans });
+    }
+    return groups;
+  }, [tables, rooms]);
+
+  const tableLabel = (id: number | null | undefined): string => {
+    if (id == null) return '';
+    const t = tables.find(x => x.id === id);
+    return t ? t.name : `Tav. ${id}`;
+  };
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const list = !term
@@ -170,6 +216,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
         city: form.city.trim() || null,
         postal_code: form.postal_code.trim() || null,
         notes: form.notes.trim() || null,
+        preferred_table_id: form.preferred_table_id,
+        preferences_notes: form.preferences_notes.trim() || null,
+        dietary_notes: form.dietary_notes.trim() || null,
+        is_vip: form.is_vip,
       };
       if (form.id) {
         const updated = await updateCustomer(form.id, payload);
@@ -241,7 +291,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                     onClick={() => setDetailCustomer(c)}
                     className="text-left flex-1 min-w-0"
                   >
-                    <h3 className="font-bold text-slate-800 truncate">{c.name}</h3>
+                    <h3 className="font-bold text-slate-800 truncate flex items-center gap-1.5">
+                      {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="VIP" />}
+                      <span className="truncate">{c.name}</span>
+                    </h3>
                     {c.city && <p className="text-xs text-slate-500 truncate">{c.city}</p>}
                   </button>
                   {canEdit && (
@@ -286,6 +339,21 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                     </a>
                   )}
                 </div>
+
+                {(c.preferred_table_id || (c.dietary_notes && c.dietary_notes.trim()) || (c.preferences_notes && c.preferences_notes.trim())) && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.preferred_table_id != null && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 px-2 py-0.5 rounded-full">
+                        <Armchair className="h-3 w-3" /> {tableLabel(c.preferred_table_id)}
+                      </span>
+                    )}
+                    {c.dietary_notes && c.dietary_notes.trim() && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-2 py-0.5 rounded-full" title={c.dietary_notes}>
+                        <AlertTriangle className="h-3 w-3" /> Allergie
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {(s && (s.reservations.length || s.banquets.length)) ? (
                   <div className="mt-1 pt-2 border-t border-slate-100 flex items-center gap-3 text-xs text-slate-500">
@@ -399,6 +467,63 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, show
                     rows={3}
                     value={form.notes}
                     onChange={e => setForm({ ...form, notes: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none resize-none"
+                  />
+                </div>
+
+                <div className="pt-3 mt-3 border-t border-[var(--color-line)]">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)] mb-2">Preferenze di servizio</div>
+                  <label className="flex items-center gap-2 cursor-pointer select-none mb-3">
+                    <input
+                      type="checkbox"
+                      checked={form.is_vip}
+                      onChange={e => setForm({ ...form, is_vip: e.target.checked })}
+                      className="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-200"
+                    />
+                    <Star className={`h-4 w-4 ${form.is_vip ? 'text-amber-500 fill-amber-400' : 'text-slate-400'}`} />
+                    <span className="text-sm font-medium text-slate-700">Cliente VIP</span>
+                    <span className="text-xs text-slate-400">— evidenzia la prenotazione in sala</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Tavolo preferito</label>
+                      <select
+                        value={form.preferred_table_id ?? ''}
+                        onChange={e => setForm({ ...form, preferred_table_id: e.target.value === '' ? null : Number(e.target.value) })}
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none bg-white dark:bg-[var(--color-surface)]"
+                      >
+                        <option value="">Nessuna preferenza</option>
+                        {tablesByRoom.map(group => (
+                          <optgroup key={group.roomId ?? 'none'} label={group.roomName}>
+                            {group.tables.map(t => (
+                              <option key={t.id} value={t.id}>
+                                {t.name} · {t.seats} posti
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Note preferenze</label>
+                      <input
+                        type="text"
+                        placeholder="Es. vicino finestra, no rumore"
+                        value={form.preferences_notes}
+                        onChange={e => setForm({ ...form, preferences_notes: e.target.value })}
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Allergie / note alimentari <span className="text-slate-400 font-normal">— precompilate in ogni nuova prenotazione</span></label>
+                  <textarea
+                    rows={2}
+                    placeholder="Es. intolleranza glutine, no crostacei"
+                    value={form.dietary_notes}
+                    onChange={e => setForm({ ...form, dietary_notes: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none resize-none"
                   />
                 </div>
