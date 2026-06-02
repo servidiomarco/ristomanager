@@ -2995,6 +2995,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
                     b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
+                    b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b
              ORDER BY b.event_date NULLS LAST, b.name`
@@ -3008,9 +3009,14 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
 
 app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const childrenPrice = children_price != null && children_price !== '' ? Number(children_price) : null;
+        const normalizedDiscountType: 'PERCENT' | 'AMOUNT' | null =
+            discount_type === 'PERCENT' || discount_type === 'AMOUNT' ? discount_type : null;
+        const normalizedDiscountValue: number | null = normalizedDiscountType && discount_value != null && discount_value !== '' && Number.isFinite(Number(discount_value))
+            ? Math.max(0, Number(discount_value))
+            : null;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -3032,8 +3038,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             }
         }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null]
+            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue]
         );
         const newMenu = result.rows[0];
 
@@ -3069,9 +3075,14 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
 app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids } = req.body;
+        const { name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const childrenPrice = children_price != null && children_price !== '' ? Number(children_price) : null;
+        const normalizedDiscountType: 'PERCENT' | 'AMOUNT' | null =
+            discount_type === 'PERCENT' || discount_type === 'AMOUNT' ? discount_type : null;
+        const normalizedDiscountValue: number | null = normalizedDiscountType && discount_value != null && discount_value !== '' && Number.isFinite(Number(discount_value))
+            ? Math.max(0, Number(discount_value))
+            : null;
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
@@ -3092,8 +3103,8 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             }
         }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16 WHERE id = $17 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16, discount_type = $17, discount_value = $18 WHERE id = $19 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, id]
         );
         const updatedMenu = result.rows[0];
 
@@ -3238,7 +3249,9 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
         const refreshed = await queryWithRetry(
             `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
-                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
+                    b.notes_mise_en_place, b.customer_id, b.table_ids,
+                    b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b WHERE b.id = $1`,
             [id]
@@ -3285,7 +3298,9 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
         const refreshed = await queryWithRetry(
             `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
-                    b.guests, b.notes_courses, b.notes_service, b.notes_mise_en_place, b.customer_id,
+                    b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
+                    b.notes_mise_en_place, b.customer_id, b.table_ids,
+                    b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b WHERE b.id = $1`,
             [id]

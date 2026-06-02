@@ -81,6 +81,26 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   const children = menu.children != null && menu.children > 0 ? menu.children : null;
   const adults = guests != null && children != null ? guests - children : null;
   const childrenPrice = menu.children_price != null ? formatEuro(menu.children_price) : null;
+
+  const adultPriceNum = Number(menu.price_per_person) || 0;
+  const childPriceNum = menu.children_price != null ? Number(menu.children_price) : adultPriceNum;
+  const guestsNum = menu.guests != null ? Number(menu.guests) : 0;
+  const childrenNum = menu.children != null ? Math.min(Number(menu.children), guestsNum) : 0;
+  const adultsNum = Math.max(0, guestsNum - childrenNum);
+  const grossTotalNum = guestsNum > 0 ? adultsNum * adultPriceNum + childrenNum * childPriceNum : 0;
+  let discountAmountNum = 0;
+  if (menu.discount_type && menu.discount_value != null) {
+    const v = Number(menu.discount_value);
+    if (Number.isFinite(v) && v > 0) {
+      discountAmountNum = menu.discount_type === 'PERCENT'
+        ? Math.min(grossTotalNum, grossTotalNum * (v / 100))
+        : Math.min(grossTotalNum, v);
+    }
+  }
+  const netTotalNum = Math.max(0, grossTotalNum - discountAmountNum);
+  const discountLabel = menu.discount_type && menu.discount_value != null && Number(menu.discount_value) > 0
+    ? (menu.discount_type === 'PERCENT' ? `${Number(menu.discount_value)}%` : formatEuro(Number(menu.discount_value)))
+    : null;
   const notesHtml = kitchenMode
     ? renderNoteBlock('Note Portate (Cucina)', menu.notes_courses, 'kitchen-note')
     : [
@@ -368,6 +388,18 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
       <div class="meta-item">
         <span class="meta-label">Acconto</span>
         <span class="meta-value">${deposit}</span>
+      </div>` : ''}
+      ${discountLabel && discountAmountNum > 0 ? `
+      <div class="meta-item">
+        <span class="meta-label">Sconto</span>
+        <span class="meta-value">${escapeHtml(discountLabel)}</span>
+        <span class="meta-sub">−${formatEuro(discountAmountNum)}</span>
+      </div>` : ''}
+      ${guestsNum > 0 && grossTotalNum > 0 ? `
+      <div class="meta-item">
+        <span class="meta-label">Totale</span>
+        <span class="meta-value">${formatEuro(netTotalNum)}</span>
+        ${discountAmountNum > 0 ? `<span class="meta-sub">lordo ${formatEuro(grossTotalNum)}</span>` : ''}
       </div>` : ''}` : ''}
     </div>
   </header>

@@ -35,11 +35,32 @@ const computeBanquetTimeStatus = (menu: BanquetMenu): BanquetTimeStatus => {
 
 type BanquetPaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID';
 
+export const computeBanquetDiscountAmount = (menu: BanquetMenu, gross: number): number => {
+    if (!menu.discount_type || menu.discount_value == null) return 0;
+    const v = Number(menu.discount_value);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (menu.discount_type === 'PERCENT') return Math.min(gross, gross * (v / 100));
+    return Math.min(gross, v);
+};
+
+export const computeBanquetGrossTotal = (menu: BanquetMenu): number => {
+    const guests = Number(menu.guests || 0);
+    const children = Number(menu.children || 0);
+    const adults = Math.max(0, guests - children);
+    const adultPrice = Number(menu.price_per_person || 0);
+    const childPrice = menu.children_price != null ? Number(menu.children_price) : adultPrice;
+    return (adults * adultPrice) + (children * childPrice);
+};
+
+export const computeBanquetTotalDue = (menu: BanquetMenu): number => {
+    const gross = computeBanquetGrossTotal(menu);
+    const discount = computeBanquetDiscountAmount(menu, gross);
+    return Math.max(0, gross - discount);
+};
+
 const computeBanquetPaymentStatus = (menu: BanquetMenu): BanquetPaymentStatus => {
     const paid = Number(menu.total_paid || 0);
-    const guests = Number(menu.guests || 0);
-    const price = Number(menu.price_per_person || 0);
-    const due = guests > 0 && price > 0 ? guests * price : 0;
+    const due = computeBanquetTotalDue(menu);
     if (paid <= 0) return 'UNPAID';
     if (due > 0 && paid + 0.005 >= due) return 'PAID';
     return 'PARTIAL';
@@ -146,7 +167,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       notes_courses: '',
       notes_service: '',
       notes_mise_en_place: '',
-      table_ids: []
+      table_ids: [],
+      discount_type: null,
+      discount_value: null
   });
 
   // Customer picker (rubrica) state for banquet form
@@ -318,7 +341,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           notes_courses: newBanquet.notes_courses?.trim() || undefined,
           notes_service: newBanquet.notes_service?.trim() || undefined,
           notes_mise_en_place: newBanquet.notes_mise_en_place?.trim() || undefined,
-          table_ids: Array.isArray(newBanquet.table_ids) ? newBanquet.table_ids : []
+          table_ids: Array.isArray(newBanquet.table_ids) ? newBanquet.table_ids : [],
+          discount_type: newBanquet.discount_type ?? null,
+          discount_value: newBanquet.discount_type && newBanquet.discount_value != null && newBanquet.discount_value !== ('' as any)
+              ? Math.max(0, Number(newBanquet.discount_value))
+              : null,
       };
 
       try {
@@ -333,7 +360,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         setIsEditingBanquet(false);
         setEditingBanquetId(null);
         setSelectedBanquetCustomer(null);
-        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [] });
+        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [], discount_type: null, discount_value: null });
       } catch (err: any) {
         const msg = err?.message || 'Errore durante il salvataggio';
         const isConflict = err?.status === 409 || /tavolo/i.test(msg);
@@ -366,7 +393,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       notes_courses: menu.notes_courses || '',
       notes_service: menu.notes_service || '',
       notes_mise_en_place: menu.notes_mise_en_place || '',
-      table_ids: Array.isArray(menu.table_ids) ? [...menu.table_ids] : []
+      table_ids: Array.isArray(menu.table_ids) ? [...menu.table_ids] : [],
+      discount_type: menu.discount_type ?? null,
+      discount_value: menu.discount_value != null ? Number(menu.discount_value) : null,
     });
     setSelectedBanquetCustomer(null);
     setBanquetFormErrors([]);
@@ -880,6 +909,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   €{menu.price_per_person}/pax
                                 </span>
                               )}
+                              {canViewBanquetPrice && menu.discount_type && menu.discount_value != null && Number(menu.discount_value) > 0 && (
+                                <span className="inline-flex items-center text-[11px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/15 border border-violet-100 dark:border-violet-500/30 px-2 py-0.5 rounded-full">
+                                  Sconto {menu.discount_type === 'PERCENT' ? `${Number(menu.discount_value)}%` : `€${Number(menu.discount_value).toFixed(2)}`}
+                                </span>
+                              )}
                           </div>
                           <div className="text-xs text-[var(--color-fg-muted)]">
                               {menu.courses && menu.courses.length > 0 ? (
@@ -1344,6 +1378,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           value={newBanquet.deposit_amount ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                       />
+                  </div>
+                  )}
+                  {canViewBanquetPrice && (
+                  <div>
+                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Sconto <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <div className="flex gap-2">
+                          <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden flex-shrink-0">
+                              <button
+                                  type="button"
+                                  onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'PERCENT' ? null : 'PERCENT', discount_value: newBanquet.discount_type === 'PERCENT' ? null : (newBanquet.discount_value ?? null)})}
+                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--color-fg)] text-[var(--color-bg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  aria-pressed={newBanquet.discount_type === 'PERCENT'}
+                              >%</button>
+                              <button
+                                  type="button"
+                                  onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'AMOUNT' ? null : 'AMOUNT', discount_value: newBanquet.discount_type === 'AMOUNT' ? null : (newBanquet.discount_value ?? null)})}
+                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--color-line)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--color-fg)] text-[var(--color-bg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  aria-pressed={newBanquet.discount_type === 'AMOUNT'}
+                              >€</button>
+                          </div>
+                          <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder={newBanquet.discount_type === 'PERCENT' ? 'es. 10' : '0.00'}
+                              disabled={!newBanquet.discount_type}
+                              className="flex-1 min-w-0 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
+                              value={newBanquet.discount_value ?? ''}
+                              onChange={e => setNewBanquet({...newBanquet, discount_value: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                          />
+                      </div>
                   </div>
                   )}
                 </div>

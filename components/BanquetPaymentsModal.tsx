@@ -78,7 +78,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
     return () => { cancelled = true; };
   }, [banquet.id]);
 
-  const totalDue = useMemo(() => {
+  const gross = useMemo(() => {
     const guests = banquet.guests || 0;
     const children = Math.min(banquet.children || 0, guests);
     const adults = Math.max(0, guests - children);
@@ -86,6 +86,16 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
     const childPrice = banquet.children_price != null ? Number(banquet.children_price) : adultPrice;
     return guests > 0 ? adults * adultPrice + children * childPrice : 0;
   }, [banquet.guests, banquet.children, banquet.price_per_person, banquet.children_price]);
+
+  const discountAmount = useMemo(() => {
+    if (!banquet.discount_type || banquet.discount_value == null) return 0;
+    const v = Number(banquet.discount_value);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (banquet.discount_type === 'PERCENT') return Math.min(gross, gross * (v / 100));
+    return Math.min(gross, v);
+  }, [banquet.discount_type, banquet.discount_value, gross]);
+
+  const totalDue = Math.max(0, gross - discountAmount);
 
   const totalPaid = useMemo(
     () => payments.reduce((sum, p) => sum + Number(p.amount), 0),
@@ -183,6 +193,11 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                     }
                     return `${guests} × ${formatEuro(banquet.price_per_person)}`;
                   })()}
+                </div>
+              )}
+              {discountAmount > 0 && (
+                <div className="text-[11px] text-violet-700 dark:text-violet-300 mt-1 font-medium">
+                  Sconto {banquet.discount_type === 'PERCENT' ? `${Number(banquet.discount_value)}%` : formatEuro(Number(banquet.discount_value))}: −{formatEuro(discountAmount)}
                 </div>
               )}
             </div>

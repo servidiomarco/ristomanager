@@ -80,6 +80,8 @@ export interface BanquetMenu {
   customer_id?: number | null;
   total_paid?: number;
   table_ids?: number[];
+  discount_type?: 'PERCENT' | 'AMOUNT' | null;
+  discount_value?: number | null;
 }
 
 export enum PaymentStatus {

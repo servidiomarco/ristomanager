@@ -854,6 +854,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // by overbooking checks against reservations on the same date+shift.
         await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS table_ids INTEGER[];`);
 
+        // Discount on the banquet total. type is 'PERCENT' (0-100) or 'AMOUNT' (€).
+        // NULL means no discount.
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS discount_type VARCHAR(10);`);
+        await client.query(`ALTER TABLE banquet_menus ADD COLUMN IF NOT EXISTS discount_value DECIMAL(10, 2);`);
+
         // Customer permissions for roles
         const customerPermissions = [
             ['OWNER', 'customers:view'], ['OWNER', 'customers:full'],
