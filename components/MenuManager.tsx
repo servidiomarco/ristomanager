@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -91,6 +91,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
+  type BanquetSortBy = 'date-asc' | 'date-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc';
+  const [banquetSortBy, setBanquetSortBy] = useState<BanquetSortBy>('date-asc');
+  const [showBanquetSortModal, setShowBanquetSortModal] = useState(false);
+  const [expandedBanquetGroups, setExpandedBanquetGroups] = useState<Set<'upcoming' | 'past'>>(new Set(['upcoming']));
+  const toggleBanquetGroup = (key: 'upcoming' | 'past') => {
+    setExpandedBanquetGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
@@ -505,6 +516,38 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     return map;
   }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId]);
 
+  const groupedBanquets = useMemo(() => {
+    const today = formatLocalDate(new Date());
+    const compare = (a: BanquetMenu, b: BanquetMenu) => {
+      switch (banquetSortBy) {
+        case 'date-asc':    return (a.event_date || '').localeCompare(b.event_date || '');
+        case 'date-desc':   return (b.event_date || '').localeCompare(a.event_date || '');
+        case 'name-asc':    return (a.name || '').localeCompare(b.name || '', 'it', { sensitivity: 'base' });
+        case 'name-desc':   return (b.name || '').localeCompare(a.name || '', 'it', { sensitivity: 'base' });
+        case 'guests-asc':  return (Number(a.guests) || 0) - (Number(b.guests) || 0);
+        case 'guests-desc': return (Number(b.guests) || 0) - (Number(a.guests) || 0);
+      }
+    };
+    const upcoming: BanquetMenu[] = [];
+    const past: BanquetMenu[] = [];
+    for (const b of banquetMenus) {
+      if (b.event_date && b.event_date < today) past.push(b);
+      else upcoming.push(b);
+    }
+    upcoming.sort(compare);
+    past.sort(compare);
+    return { upcoming, past };
+  }, [banquetMenus, banquetSortBy]);
+
+  const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
+    { value: 'date-asc',    label: 'Data evento (prima → dopo)' },
+    { value: 'date-desc',   label: 'Data evento (dopo → prima)' },
+    { value: 'name-asc',    label: 'Nome A → Z' },
+    { value: 'name-desc',   label: 'Nome Z → A' },
+    { value: 'guests-asc',  label: 'Coperti (meno → più)' },
+    { value: 'guests-desc', label: 'Coperti (più → meno)' },
+  ];
+
   const filteredDishes = dishes.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.category.toLowerCase().includes(searchTerm.toLowerCase());
@@ -698,9 +741,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'BANQUETS' && (
         <div className="space-y-6">
-          {banquetView === 'LIST' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              {banquetMenus.map(menu => {
+          {banquetView === 'LIST' && banquetMenus.length > 0 && (
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBanquetSortModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 h-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors text-xs font-medium text-[var(--color-fg-muted)]"
+                aria-label="Ordina banchetti"
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                <span>{BANQUET_SORT_OPTIONS.find(o => o.value === banquetSortBy)?.label}</span>
+              </button>
+            </div>
+          )}
+          {banquetView === 'LIST' && (() => {
+            const renderBanquetCard = (menu: BanquetMenu) => {
                 const timeStatus = computeBanquetTimeStatus(menu);
                 const cardAccent = timeStatus === 'PAST'
                   ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
@@ -839,14 +894,46 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       </div>
                   </div>
                 );
-              })}
-              {banquetMenus.length === 0 && (
-                  <div className="col-span-full text-center py-12 text-[var(--color-fg-muted)]">
-                      Non hai ancora creato menu per banchetti.
+            };
+            return (
+              <div className="space-y-6">
+                {banquetMenus.length === 0 && (
+                  <div className="text-center py-12 text-[var(--color-fg-muted)]">
+                    Non hai ancora creato menu per banchetti.
                   </div>
-              )}
-          </div>
-          )}
+                )}
+                {([
+                  { key: 'upcoming' as const, label: 'Prossimi', dotClass: 'bg-emerald-500', items: groupedBanquets.upcoming },
+                  { key: 'past' as const,     label: 'Passati',  dotClass: 'bg-slate-400',  items: groupedBanquets.past },
+                ]).filter(g => g.items.length > 0).map(group => {
+                  const totalGuests = group.items.reduce((s, b) => s + (Number(b.guests) || 0), 0);
+                  const isOpen = expandedBanquetGroups.has(group.key);
+                  return (
+                    <div key={group.key}>
+                      <button
+                        type="button"
+                        onClick={() => toggleBanquetGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors mb-3"
+                      >
+                        <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
+                        <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
+                        <span className="text-xs text-[var(--color-fg-muted)] font-medium">
+                          {group.items.length} {group.items.length === 1 ? 'banchetto' : 'banchetti'}
+                          {totalGuests > 0 && ` · ${totalGuests} coperti`}
+                        </span>
+                        <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                          {group.items.map(renderBanquetCard)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {banquetView === 'CALENDAR' && (
             <BanquetCalendar
@@ -1692,6 +1779,35 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           setNewBanquet(prev => ({ ...prev, customer_id: c.id }));
         }}
       />
+
+      {showBanquetSortModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={() => setShowBanquetSortModal(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full sm:max-w-sm bg-[var(--color-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2 sm:hidden">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-2 pt-2 sm:pt-5">
+              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+            </div>
+            <div className="px-3">
+              {BANQUET_SORT_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { setBanquetSortBy(opt.value); setShowBanquetSortModal(false); }}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
+                    banquetSortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                  }`}
+                >
+                  {opt.label}
+                  {banquetSortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
