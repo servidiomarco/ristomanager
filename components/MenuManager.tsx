@@ -1388,13 +1388,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               <button
                                   type="button"
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'PERCENT' ? null : 'PERCENT', discount_value: newBanquet.discount_type === 'PERCENT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--color-fg)] text-[var(--color-bg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
                                   aria-pressed={newBanquet.discount_type === 'PERCENT'}
                               >%</button>
                               <button
                                   type="button"
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'AMOUNT' ? null : 'AMOUNT', discount_value: newBanquet.discount_type === 'AMOUNT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--color-line)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--color-fg)] text-[var(--color-bg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--color-line)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
                                   aria-pressed={newBanquet.discount_type === 'AMOUNT'}
                               >€</button>
                           </div>
