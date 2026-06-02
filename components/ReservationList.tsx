@@ -7,6 +7,8 @@ import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
+import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { computeAutoLayout } from '../utils/tableLayout';
 import { toTitleCase } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
@@ -1472,7 +1474,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const freeTablesCount = totalTablesInFilter - occupiedTablesInFilter;
 
   // Render logic for Map Table
-  const renderMapTable = (table: Table) => {
+  const renderMapTable = (table: Table, layoutPositions?: Map<number, { x: number; y: number }>) => {
       const occupier = getOccupierForTable(table.id);
       const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
       const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
@@ -1486,40 +1488,39 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         table.name.toLowerCase().includes(trimmedSearch)
       ));
 
-      // Uniform table sizes on the map. The seat count is shown inside the
-      // card, so we don't need to scale rectangles by capacity.
-      const baseSize = window.innerWidth < 768 ? 50 : 100;
-
-      let widthPx: number;
-      let heightPx: number;
-      let borderRadius: string;
-      if (table.shape === TableShape.CIRCLE) {
-          widthPx = baseSize; heightPx = baseSize; borderRadius = '50%';
-      } else {
-          widthPx = baseSize; heightPx = baseSize; borderRadius = '8px';
+      // Map reservation/banquet occupancy → glyph display status
+      let displayStatus: TableDisplayStatus = 'libera';
+      let captionTime = '';
+      let captionIcon: 'clock' | null = null;
+      if (reservation) {
+          if (isArrived) {
+              // Arrived tables show capacity only — no clock/timer.
+              displayStatus = 'arrivato';
+          } else {
+              displayStatus = 'attesa';
+              captionIcon = 'clock';
+              const timePart = reservation.reservation_time.split('T')[1];
+              if (timePart) captionTime = timePart.substring(0, 5);
+          }
+      } else if (banquet) {
+          displayStatus = 'attesa';
       }
 
-      // Anchor the reservation pill below the rotated bounding box so it
-      // always sits horizontally below the visible table at any rotation.
-      const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
-      const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
-      const pillTopPx = heightPx / 2 + rotatedHalfH + 6;
+      const dims = getGlyphDimensions(table.shape, table.seats);
+      const { width: svgW, height: svgH } = dims;
 
-      const shapeClasses = `flex flex-col items-center justify-center border shadow-[var(--shadow-xs)] transition-all select-none
-          ${isArrived
-              ? 'bg-orange-50 border-orange-300 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300 dark:ring-orange-500/30'
-              : reservation
-                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300 dark:ring-rose-500/30'
-                  : banquet
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc] dark:ring-[#4f46e5]/40'
-                      : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-          }
-          ${isHidden ? 'opacity-40 grayscale' : ''}
-      `;
+      // Anchor caption + pill below the rotated bounding box so they always
+      // sit horizontally below the visible table at any rotation.
+      const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
+      const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
+      const captionTopPx = svgH / 2 + rotatedHalfH + 2;
+      const pillTopPx = captionTopPx + 18;
 
       const isHighlighted = selectedReservation?.table_id === table.id && detailDrawerOpen;
       const hoveredRes = hoveredReservationId ? reservations.find(r => r.id === hoveredReservationId) : null;
       const isHoverMatch = hoveredRes?.table_id === table.id;
+
+      const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
       const tooltipText = isHidden
           ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
@@ -1529,15 +1530,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   ? `Banchetto: ${banquet.name}`
                   : 'Libero — clicca per assegnare una prenotazione';
 
+      const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
+
       return (
         <div
             key={table.id}
-            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isHighlighted ? 'z-30' : ''}`}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isHighlighted ? 'z-30' : ''} ${isHidden ? 'opacity-40 grayscale' : ''} ${canEdit || reservation ? 'cursor-pointer' : 'cursor-default'}`}
             style={{
-                left: table.x,
-                top: table.y,
-                width: `${widthPx}px`,
-                height: `${heightPx}px`,
+                left: pos.x,
+                top: pos.y,
+                width: `${svgW}px`,
+                height: `${svgH}px`,
             }}
             title={tooltipText}
             onClick={() => {
@@ -1551,64 +1554,87 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={`${shapeClasses} ${isHighlighted ? 'outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
-                style={{
-                    width: `${widthPx}px`,
-                    height: `${heightPx}px`,
-                    borderRadius,
-                    transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
-                }}
+                className={`${isHighlighted ? 'rounded-[12px] outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-[12px] outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
+                style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}
             >
-                {isHidden && (
-                    <div className="absolute -top-2 -left-2 bg-slate-500 text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff]">
-                        <EyeOff size={8} />
-                    </div>
-                )}
-                <span className="font-bold text-lg sm:text-xl tracking-tight truncate px-1 max-w-full leading-tight">{table.name}</span>
-                {reservation ? (
-                    <span className="flex items-center gap-1 text-lg sm:text-xl font-bold leading-tight">
-                        <Users size={18} /> {reservation.guests}
-                        {reservation.children && reservation.children > 0 ? (
-                            <span className="text-xs font-normal opacity-75 ml-0.5">({reservation.children}b)</span>
-                        ) : null}
-                    </span>
-                ) : banquet ? (
-                    <span className="flex items-center gap-1 text-xs sm:text-sm font-semibold">
-                        <BookOpen size={14} />
-                    </span>
-                ) : (
-                    <span className="text-xs sm:text-sm flex items-center gap-1 opacity-80">
-                        <Armchair size={12} /> {table.seats}
-                    </span>
+                <TableGlyph
+                    name={table.name}
+                    seats={table.seats}
+                    shape={table.shape}
+                    status={displayStatus}
+                />
+            </div>
+
+            {isHidden && (
+                <div className="absolute bg-slate-500 text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff] pointer-events-none" style={{ top: -4, left: -4 }}>
+                    <EyeOff size={8} />
+                </div>
+            )}
+            {banquet && (
+                <div className="absolute bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }}>
+                    <BookOpen size={8} />
+                </div>
+            )}
+
+            {/* Caption: covers + time indicator */}
+            <div
+                className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1"
+                style={{ top: captionTopPx, fontSize: 11 }}
+            >
+                <Armchair size={13} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+                <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
+                {captionIcon && captionTime && (
+                    <>
+                        <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
+                        <span className="inline-flex items-center gap-0.5" style={{ color: accentVar }}>
+                            {captionIcon === 'clock' && (
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+                                </svg>
+                            )}
+                            {captionTime}
+                        </span>
+                    </>
                 )}
             </div>
             {reservation && (
                 <div
                     style={{ top: pillTopPx }}
-                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-sm sm:text-base font-medium pl-1 pr-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
+                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1 text-[#ffffff] text-[10px] font-medium pl-0.5 pr-1.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[130px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
                     title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
                 >
                     {reservation.source === ReservationSource.VOICE ? (
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                            <Mic className="h-3 w-3" />
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            <Mic className="h-2.5 w-2.5" />
                         </span>
                     ) : reservation.created_by_user_name ? (
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[10px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[7px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
                     ) : (
-                        <span className="pl-2" />
+                        <span className="pl-1" />
                     )}
                     <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
+                    <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+                        <Users size={10} /> {reservation.guests}
+                        {reservation.children && reservation.children > 0 ? (
+                            <span className="text-[9px] opacity-80">({reservation.children}b)</span>
+                        ) : null}
+                    </span>
                 </div>
             )}
             {banquet && (
                 <div
                     style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-sm sm:text-base font-medium px-3 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff]"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[130px] bg-[#4f46e5] text-[#ffffff]"
                 >
-                    <BookOpen size={14} className="flex-shrink-0" />
+                    <BookOpen size={11} className="flex-shrink-0" />
                     <span className="truncate">{banquet.name}</span>
+                    {banquet.guests != null && (
+                        <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+                            <Users size={10} /> {banquet.guests}
+                        </span>
+                    )}
                 </div>
             )}
         </div>
@@ -1676,7 +1702,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return (
       <div
         key={res.id}
-        className={`w-full flex border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
+        className={`w-full flex flex-col border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
           ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
           ${isFlashing ? 'animate-flash-row' : ''}
           ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''}
@@ -1685,8 +1711,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         onMouseLeave={() => setHoveredReservationId(null)}
         onClick={() => handleRowClick(res)}
       >
+        {/* Main content: tiers 1–3 (left) + party/table rail (right) */}
+        <div className="flex">
         {/* Left content */}
-        <div className="flex-1 min-w-0 px-3 py-2">
+        <div className="flex-1 min-w-0 px-3 pt-2">
           {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
           <div className="flex items-center gap-1.5 h-5">
             <span className="text-xs text-[var(--color-fg)] tabular">
@@ -1754,77 +1782,77 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
           </div>
 
-          {/* Actions row: status (left) · edit + delete (right) */}
-          {canEdit && (
-            <div className="flex items-center gap-2.5 mt-1.5">
-              {(() => {
-                const state = getReservationState(res);
-                const meta = RESERVATION_STATE_META[state];
-                return (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                    className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
-                    title="Cambia stato">
-                    {meta.label}
-                    <ChevronDown className="h-3 w-3 opacity-60" />
-                  </button>
-                );
-              })()}
-              {(res.reservation_status === ReservationStatus.PENDING) && (
-                <button type="button" onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-                  title="Conferma prenotazione">
-                  <Check className="h-3.5 w-3.5" /> Conferma
-                </button>
-              )}
-              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
-                <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                  className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                  <MapPin className="h-3.5 w-3.5" /> Tavolo
-                </button>
-              )}
-              <div className="flex items-center gap-3">
-                <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                  className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
-                  <Edit2 className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                  className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Tier 1 — covers count */}
-        <div className="flex items-start pt-2 pr-3 flex-shrink-0">
-          <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
-            <Users className="h-3.5 w-3.5" />
-            <span className="text-base font-medium tabular">{res.guests}</span>
-            {res.children && res.children > 0 ? (
-                <span className="text-[10px] opacity-75">({res.children}b)</span>
-            ) : null}
+          {/* Rail: party (top) + table chip (bottom-aligned with tier 3) */}
+          <div className="flex flex-col items-end justify-between self-stretch flex-shrink-0 py-2 pr-2 gap-2">
+            <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
+              <Users className="h-3.5 w-3.5" />
+              <span className="text-base font-medium tabular">{res.guests}</span>
+              {res.children && res.children > 0 ? (
+                  <span className="text-[10px] opacity-75">({res.children}b)</span>
+              ) : null}
+            </div>
+            <div className={`min-w-[60px] max-w-[120px] min-h-[56px] px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
+              table
+                ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
+                  : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
+                  : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
+                  : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
+                : 'bg-[var(--color-surface-3)]'
+            }`}>
+              {table ? renderTableStripContent(res, table, tableRoom,
+                group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
+                  : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
+                  : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-[#4D5A87] dark:text-[#B9C2E0]'
+              ) : (
+                <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Tier 1 — table strip, full height (tinted by status) */}
-        <div className={`w-16 flex-shrink-0 flex flex-col items-center justify-center my-2 mr-2 rounded-md ${
-          table
-            ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
-              : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
-              : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-              : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
-            : 'bg-[var(--color-surface-3)]'
-        }`}>
-          {table ? renderTableStripContent(res, table, tableRoom,
-            group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-              : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-              : group.key === 'noshow' ? 'text-rose-700 dark:text-rose-300'
-              : 'text-[#4D5A87] dark:text-[#B9C2E0]'
-          ) : (
-            <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
-          )}
-        </div>
+        {/* Actions band: status (left) · edit + delete (right) */}
+        {canEdit && (
+          <div className="flex items-center gap-2.5 px-3 pt-1.5 pb-2">
+            {(() => {
+              const state = getReservationState(res);
+              const meta = RESERVATION_STATE_META[state];
+              return (
+                <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+                  className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                  title="Cambia stato">
+                  {meta.label}
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </button>
+              );
+            })()}
+            {(res.reservation_status === ReservationStatus.PENDING) && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
+                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                title="Conferma prenotazione">
+                <Check className="h-3.5 w-3.5" /> Conferma
+              </button>
+            )}
+            {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                <MapPin className="h-3.5 w-3.5" /> Tavolo
+              </button>
+            )}
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
+                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2181,25 +2209,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const reservationCountForDayShift = reservationsForDayShift.length;
     const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED).length;
 
-    const PADDING = 40;
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const baseSize = isMobile ? 45 : 80;
-    const baseWidth = isMobile ? 60 : 100;
-    const seatMultiplier = isMobile ? 8 : 15;
-    let maxRight = 0;
-    let maxBottom = 0;
-    for (const t of tablesInRoom) {
-      let w: number, h: number;
-      if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) { w = baseSize; h = baseSize; }
-      else { w = Math.max(baseWidth, t.seats * seatMultiplier); h = baseSize; }
-      maxRight = Math.max(maxRight, t.x + w);
-      maxBottom = Math.max(maxBottom, t.y + h);
-    }
-    const extentWidth = (tablesInRoom.length === 0 ? 800 : maxRight) + PADDING;
-    const extentHeight = (tablesInRoom.length === 0 ? 600 : maxBottom) + PADDING;
+    // Lay tables out into tidy flowing rows at render time, shaped to the canvas.
+    // Computed fresh from the tables actually shown (after merges / hidden
+    // overrides), so every date stays neat regardless of merge state.
+    const layoutAspect = mapCanvasSize.width > 0 && mapCanvasSize.height > 0
+      ? Math.min(2.6, Math.max(0.6, mapCanvasSize.width / mapCanvasSize.height))
+      : 1.6;
+    const mapLayout = computeAutoLayout(tablesInRoom, layoutAspect);
+    const extentWidth = mapLayout.width;
+    const extentHeight = mapLayout.height;
+    // Fit into the canvas minus a safe margin so tables never touch the edges
+    // or collide with the floating Legenda button in the corner.
+    const FIT_M = 28;
     const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
-      ? Math.min(mapCanvasSize.width / extentWidth, mapCanvasSize.height / extentHeight, 1)
+      ? Math.min(
+          Math.max(1, mapCanvasSize.width - FIT_M * 2) / extentWidth,
+          Math.max(1, mapCanvasSize.height - FIT_M * 2) / extentHeight,
+          1.4
+        )
       : 1;
+    // Center the scaled content so leftover space is even on all sides.
+    const offsetX = (!isMobile && mapCanvasSize.width > 0)
+      ? Math.max(0, (mapCanvasSize.width - extentWidth * scale) / 2) : 0;
+    const offsetY = (!isMobile && mapCanvasSize.height > 0)
+      ? Math.max(0, (mapCanvasSize.height - extentHeight * scale) / 2) : 0;
 
     return (
       <div className="flex flex-col h-full">
@@ -2413,8 +2447,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
             )}
-            <div style={{ width: extentWidth, height: extentHeight, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
-              {tablesInRoom.map(renderMapTable)}
+            <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
+              {tablesInRoom.map(t => renderMapTable(t, mapLayout.positions))}
             </div>
 
             {/* Legend */}
@@ -2428,10 +2462,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
                   onClick={(e) => e.stopPropagation()}>
                   <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-[var(--color-surface)] border border-emerald-300 rounded-sm"></div> Libero</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-rose-50 border border-rose-300 dark:bg-rose-500/15 dark:border-rose-500/40 rounded-sm"></div> Occupato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-orange-50 border border-orange-300 dark:bg-orange-500/15 dark:border-orange-500/40 rounded-sm"></div> Arrivato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 bg-indigo-50 border border-indigo-300 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 rounded-sm"></div> Banchetto</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato</div>
+                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border flex items-center justify-center" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}><BookOpen size={8} style={{ color: '#4f46e5' }} /></div> Banchetto</div>
                   <div className="border-t border-[var(--color-line)] mt-1 pt-2">
                     <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
                     <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)</div>
@@ -3627,15 +3661,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </div>
                                                         )}
 
-                                                        <div className={`text-xs sm:text-sm font-semibold truncate ${isSelectedForMerge || isSelected ? 'text-[var(--color-fg)]' : isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg)]'}`}>
-                                                            {table.name}
-                                                        </div>
-                                                        <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
-                                                            <Users size={8} className="sm:hidden" />
-                                                            <Users size={10} className="hidden sm:block" />
-                                                            {isOccupied && occupier
-                                                                ? (occupier.data.guests ?? 0)
-                                                                : table.seats}
+                                                        <div className="flex flex-col items-center gap-1">
+                                                            <TableGlyph
+                                                                name={table.name}
+                                                                seats={table.seats}
+                                                                shape={table.shape}
+                                                                status="libera"
+                                                                fit
+                                                            />
+                                                            <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
+                                                                <Armchair size={8} className="sm:hidden" />
+                                                                <Armchair size={10} className="hidden sm:block" />
+                                                                {table.seats}
+                                                            </div>
                                                         </div>
                                                         {isOccupied && occupier && (
                                                             <div
