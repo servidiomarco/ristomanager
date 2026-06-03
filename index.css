@@ -191,6 +191,49 @@
 }
 
 /* ===========================================================================
+   Table glyph tokens
+   ========================================================================= */
+:root {
+  --tg-libera-bg: #FFFFFF;
+  --tg-libera-stroke: #D6D4CA;
+  --tg-libera-chair: #C2C0B6;
+  --tg-libera-name: #5F5E5A;
+  --tg-attesa-bg: #ECEEF7;
+  --tg-attesa-stroke: #C3C9E4;
+  --tg-attesa-chair: #3D4E8C;
+  --tg-attesa-name: #2A3666;
+  --tg-attesa-accent: #3D4E8C;
+  --tg-attesa-pill-bg: #3D4E8C;
+  --tg-arrivato-bg: #E7F4E9;
+  --tg-arrivato-stroke: #B7E0BE;
+  --tg-arrivato-chair: #2B9D5B;
+  --tg-arrivato-name: #1A5E33;
+  --tg-arrivato-accent: #1F7A43;
+  --tg-arrivato-pill-bg: #1F7A43;
+  --tg-covers: #8C8B83;
+}
+
+.dark {
+  --tg-libera-bg: #262A30;
+  --tg-libera-stroke: #3C4047;
+  --tg-libera-chair: #5A5D64;
+  --tg-libera-name: #BDBBB1;
+  --tg-attesa-bg: #23284A;
+  --tg-attesa-stroke: #3D4E8C;
+  --tg-attesa-chair: #9AA6D6;
+  --tg-attesa-name: #C3C9E4;
+  --tg-attesa-accent: #9AA6D6;
+  --tg-attesa-pill-bg: #4A5C9E;
+  --tg-arrivato-bg: #1B3A22;
+  --tg-arrivato-stroke: #2F6B40;
+  --tg-arrivato-chair: #4FBE7A;
+  --tg-arrivato-name: #BEE6C7;
+  --tg-arrivato-accent: #7FD79A;
+  --tg-arrivato-pill-bg: #2F8F50;
+  --tg-covers: #A09E95;
+}
+
+/* ===========================================================================
    Base typography & resets
    ========================================================================= */
 html { font-family: var(--font-sans); }

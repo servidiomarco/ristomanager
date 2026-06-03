@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
+import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { computeAutoLayout } from '../utils/tableLayout';
+import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -89,6 +92,36 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+
+  // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
+  // re-enables drag-to-position so the floor plan can mirror the real room.
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
+    if (typeof window === 'undefined') return 'auto';
+    try {
+      const saved = window.localStorage.getItem('floorPlan.layoutMode');
+      return saved === 'manual' ? 'manual' : 'auto';
+    } catch { return 'auto'; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('floorPlan.layoutMode', layoutMode); } catch {}
+  }, [layoutMode]);
+
+  // Portrait orientation gate (floor-plan only, mobile/touch devices)
+  const [isPortrait, setIsPortrait] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    return isMobile && window.matchMedia('(orientation: portrait)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (!isMobile) return;
+    const mql = window.matchMedia('(orientation: portrait)');
+    const handler = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   // Refresh merges from the server for the current date+shift. Used after
   // local merge/split actions so the originating client updates immediately
@@ -304,41 +337,67 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Apply per-shift hide override unless the user toggled "show hidden".
     .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
-  // Compute the natural bounding box of the room from current tables, then
-  // a scale factor that shrinks the room to fit the available canvas size.
+  // Lay tables out into tidy flowing rows at render time, shaped to the canvas.
+  // Positions are computed fresh from the tables actually shown (after merges /
+  // hidden overrides), so every date stays neat regardless of merge state.
+  const layoutAspect = canvasSize.width > 0 && canvasSize.height > 0
+    ? Math.min(2.6, Math.max(0.6, canvasSize.width / canvasSize.height))
+    : 1.6;
+  const autoLayout = useMemo(
+    () => computeAutoLayout(currentTables, layoutAspect),
+    [currentTables, layoutAspect]
+  );
+  // Bounding box used to size the inner canvas. In auto mode it comes from
+  // the tidy layout; in manual mode it's the extent of the saved x/y plus the
+  // glyph footprint so dragged tables never escape the scaled wrapper.
   const roomExtent = useMemo(() => {
-    const PADDING = 40;
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const baseSize = isMobile ? 45 : 80;
-    const baseWidth = isMobile ? 60 : 100;
-    const seatMultiplier = isMobile ? 8 : 15;
-
+    if (layoutMode === 'auto') {
+      return { width: autoLayout.width, height: autoLayout.height };
+    }
+    // Manual mode: natural bounding box of the saved positions. Combined with
+    // contentOffset=(0,0) and scale≤1 below this matches the pre-PR floor
+    // plan: tables render at their real size and only shrink if they overflow
+    // the canvas.
+    const PADDING = 60;
     if (currentTables.length === 0) return { width: 800, height: 600 };
-
     let maxRight = 0;
     let maxBottom = 0;
     for (const t of currentTables) {
-      let w: number, h: number;
-      if (t.shape === TableShape.CIRCLE || t.shape === TableShape.SQUARE) {
-        w = baseSize; h = baseSize;
-      } else {
-        w = Math.max(baseWidth, t.seats * seatMultiplier);
-        h = baseSize;
-      }
+      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
       maxRight = Math.max(maxRight, t.x + w);
       maxBottom = Math.max(maxBottom, t.y + h);
     }
     return { width: maxRight + PADDING, height: maxBottom + PADDING };
-  }, [currentTables]);
+  }, [layoutMode, autoLayout, currentTables]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
-    const sx = canvasSize.width / roomExtent.width;
-    const sy = canvasSize.height / roomExtent.height;
-    return Math.min(sx, sy, 1);
-  }, [canvasSize, roomExtent]);
+    // Fit into the canvas minus a safe margin so tables never touch the edges
+    // or collide with the floating Legenda button in the corner.
+    const M = 28;
+    const availW = Math.max(1, canvasSize.width - M * 2);
+    const availH = Math.max(1, canvasSize.height - M * 2);
+    const sx = availW / roomExtent.width;
+    const sy = availH / roomExtent.height;
+    // Allow zoom-in so a sparse room actually fills the canvas. Manual mode
+    // still caps lower than auto so the drag math (which mixes scaleRef with
+    // pointer deltas) stays predictable on dense rooms.
+    return Math.min(sx, sy, layoutMode === 'manual' ? 1.5 : 2);
+  }, [canvasSize, roomExtent, layoutMode]);
 
   useEffect(() => { scaleRef.current = scale; }, [scale]);
+
+  // Center the scaled room within the canvas so leftover space is even.
+  // In manual mode we pin the offset to (0,0): re-centering when the
+  // bounding box grows would visually drag every table back toward its
+  // original spot, which feels like the drop didn't take.
+  const contentOffset = useMemo(() => {
+    if (layoutMode === 'manual') return { x: 0, y: 0 };
+    return {
+      x: Math.max(0, (canvasSize.width - roomExtent.width * scale) / 2),
+      y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
+    };
+  }, [canvasSize, roomExtent, scale, layoutMode]);
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -462,7 +521,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         setSelectedTables([tableId]);
     }
 
-    // Initialize drag using refs
+    // In auto mode positions are computed at render time, so press only
+    // selects. In manual mode arm a real drag against the saved x/y.
+    if (layoutMode !== 'manual') return;
+
     dragStateRef.current = {
       isDragging: true,
       tableId: tableId,
@@ -571,7 +633,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         return;
     }
 
-    const touch = e.touches[0];
     const table = tables.find(t => t.id === tableId);
 
     if (table?.is_locked || (table?.temp_lock_expires_at && table.temp_lock_expires_at > Date.now())) {
@@ -582,7 +643,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         setSelectedTables([tableId]);
     }
 
-    // Initialize drag using refs
+    // In auto mode positions are computed at render time; in manual mode
+    // arm a real drag.
+    if (layoutMode !== 'manual') return;
+
+    const touch = e.touches[0];
     dragStateRef.current = {
       isDragging: true,
       tableId: tableId,
@@ -711,7 +776,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const renderTableShape = (table: Table) => {
-    // Ensure table.id is a valid number
     if (!table.id || typeof table.id !== 'number') {
       console.error('Invalid table ID:', table);
       return null;
@@ -719,145 +783,170 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const isSelected = selectedTables.includes(table.id);
     const banquet = banquetByTableId.get(table.id);
-    const dynamicStatus: TableStatus = banquet ? TableStatus.RESERVED : getDynamicTableStatus(table);
     const reservation = getActiveReservation(table);
     const isMerged = table.merged_with && table.merged_with.length > 0;
     const isHidden = hiddenTableIds.has(table.id);
+    const now = Date.now();
+    const isTempLocked = !!(table.temp_lock_expires_at && table.temp_lock_expires_at > now);
 
-    // Calculate remaining time if temp locked
-    let timerDisplay = null;
-    if (table.temp_lock_expires_at && table.temp_lock_expires_at > Date.now()) {
-        const remainingSeconds = Math.ceil((table.temp_lock_expires_at - Date.now()) / 1000);
-        const mm = Math.floor(remainingSeconds / 60).toString().padStart(2, '0');
-        const ss = (remainingSeconds % 60).toString().padStart(2, '0');
-        timerDisplay = `${mm}:${ss}`;
+    let timerDisplay: string | null = null;
+    if (isTempLocked) {
+      const remainingSeconds = Math.ceil((table.temp_lock_expires_at! - now) / 1000);
+      const mm = Math.floor(remainingSeconds / 60).toString().padStart(2, '0');
+      const ss = (remainingSeconds % 60).toString().padStart(2, '0');
+      timerDisplay = `${mm}:${ss}`;
     }
 
-    const statusColors = {
-      [TableStatus.FREE]: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
-      [TableStatus.OCCUPIED]: 'bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300',
-      [TableStatus.RESERVED]: 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300',
-      [TableStatus.DIRTY]: 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg-muted)]'
-    };
+    // Map reservation state → display status
+    let displayStatus: TableDisplayStatus = 'libera';
+    let captionTime = '';
+    let captionIcon: 'clock' | null = null;
 
-    const shapeClasses = `flex flex-col items-center justify-center border transition-shadow select-none ${statusColors[dynamicStatus]} ${isSelected && canEdit ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''} ${!canEdit ? 'cursor-default' : table.is_locked || timerDisplay ? 'cursor-not-allowed opacity-90' : 'cursor-grab active:cursor-grabbing hover:shadow-[var(--shadow-xs)]'} ${isHidden ? 'opacity-40 grayscale' : ''}`;
-
-    // Responsive table sizes - smaller on mobile and tablets (< 768px)
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const baseSize = isMobile ? 45 : 80;
-    const baseWidth = isMobile ? 60 : 100;
-    const seatMultiplier = isMobile ? 8 : 15;
-
-    let widthPx: number;
-    let heightPx: number;
-    let borderRadius: string;
-
-    if (table.shape === TableShape.CIRCLE) {
-      widthPx = baseSize;
-      heightPx = baseSize;
-      borderRadius = '50%';
-    } else if (table.shape === TableShape.SQUARE) {
-      widthPx = baseSize;
-      heightPx = baseSize;
-      borderRadius = '8px';
-    } else {
-      widthPx = Math.max(baseWidth, table.seats * seatMultiplier);
-      heightPx = baseSize;
-      borderRadius = '8px';
+    if (banquet) {
+      displayStatus = 'attesa';
+    } else if (isTempLocked) {
+      displayStatus = 'attesa';
+    } else if (reservation && reservation.reservation_status !== ReservationStatus.NO_SHOW) {
+      if (reservation.arrival_status === ArrivalStatus.ARRIVED) {
+        // Arrived tables show capacity only — no clock/timer.
+        displayStatus = 'arrivato';
+      } else {
+        displayStatus = 'attesa';
+        captionIcon = 'clock';
+        const timePart = reservation.reservation_time.split('T')[1];
+        if (timePart) captionTime = timePart.substring(0, 5);
+      }
     }
 
-    const shapeStyles = { width: `${widthPx}px`, height: `${heightPx}px`, borderRadius };
+    const dims = getGlyphDimensions(table.shape, table.seats);
+    const { width: svgW, height: svgH } = dims;
 
-    // Distance from wrapper top to the bottom of the rotated bounding box —
-    // used to anchor the reservation pill below the visual table at any angle.
     const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
-    const rotatedHalfH = (Math.abs(widthPx * Math.sin(rotationRad)) + Math.abs(heightPx * Math.cos(rotationRad))) / 2;
-    const pillTopPx = heightPx / 2 + rotatedHalfH + 4;
+    const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
+    const captionTopPx = svgH / 2 + rotatedHalfH + 6;
+    const pillTopPx = captionTopPx + 32;
+
+    const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
+
+    const pos = layoutMode === 'manual'
+      ? { x: table.x, y: table.y }
+      : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
+
+    const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
 
     return (
       <div
         key={table.id}
-        className="absolute"
+        className={`absolute select-none ${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
         style={{
-          left: table.x,
-          top: table.y,
-          width: shapeStyles.width,
-          height: shapeStyles.height,
+          left: pos.x,
+          top: pos.y,
+          width: svgW,
+          height: svgH,
           zIndex: isSelected ? 10 : 1
         }}
-        onMouseDown={(e) => {
-          const element = e.currentTarget as HTMLDivElement;
-          handleMouseDown(e, table.id, element);
-        }}
-        onTouchStart={(e) => {
-          const element = e.currentTarget as HTMLDivElement;
-          handleTouchStart(e, table.id, element);
-        }}
+        onMouseDown={(e) => handleMouseDown(e, table.id, e.currentTarget as HTMLDivElement)}
+        onTouchStart={(e) => handleTouchStart(e, table.id, e.currentTarget as HTMLDivElement)}
       >
+        <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
+          <TableGlyph
+            name={table.name}
+            seats={table.seats}
+            shape={table.shape}
+            status={displayStatus}
+            isSelected={isSelected && canEdit}
+          />
+        </div>
+
+        {/* Caption: covers + time indicator */}
         <div
-          className={shapeClasses}
-          style={{
-            ...shapeStyles,
-            transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined,
-          }}
+          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+          style={{ top: captionTopPx, fontSize: 18 }}
         >
-          <span className="font-semibold text-sm flex items-center gap-1">
-              {table.is_locked && <Lock size={10} className="opacity-60" />}
-              {table.name}
-          </span>
-
-          <span className="text-xs flex items-center gap-1 opacity-80">
-             <Armchair size={10} /> {table.seats}
-          </span>
-
-          {dynamicStatus === TableStatus.OCCUPIED && (
-               <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-[var(--color-surface)] animate-pulse"></div>
-          )}
-
-          {/* Timer Badge */}
-          {timerDisplay && (
-              <div className="absolute -top-2.5 -right-2 bg-amber-500 text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
-                  <Timer size={8} /> {timerDisplay}
-              </div>
-          )}
-
-          {/* Merged Table Badge */}
-          {isMerged && !timerDisplay && (
-              <div className="absolute -top-2 -left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
-                  <Combine size={8} />
-              </div>
-          )}
-
-          {/* Hidden-for-shift Badge */}
-          {isHidden && (
-              <div className="absolute -top-2 -left-2 bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]">
-                  <EyeOff size={8} />
-              </div>
-          )}
-
-          {/* Banquet Badge */}
-          {banquet && !timerDisplay && (
-              <div className="absolute -top-2 -right-2 bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)]" title={`Banchetto: ${banquet.name}`}>
-                  <BookOpen size={8} />
-              </div>
+          <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+          <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
+          {captionIcon && captionTime && (
+            <>
+              <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
+              <span className="inline-flex items-center gap-1" style={{ color: accentVar }}>
+                {captionIcon === 'clock' && (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+                  </svg>
+                )}
+                {captionTime}
+              </span>
+            </>
           )}
         </div>
 
-        {/* Banquet Name — takes precedence over reservation when table is in a banquet */}
+        {/* Timer Badge */}
+        {timerDisplay && (
+          <div className="absolute bg-amber-500 text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }}>
+            <Timer size={8} /> {timerDisplay}
+          </div>
+        )}
+
+        {/* Merged Table Badge */}
+        {isMerged && !timerDisplay && (
+          <div className="absolute bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, left: -4 }}>
+            <Combine size={8} />
+          </div>
+        )}
+
+        {/* Hidden-for-shift Badge */}
+        {isHidden && (
+          <div className="absolute bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, left: -4 }}>
+            <EyeOff size={8} />
+          </div>
+        )}
+
+        {/* Banquet Badge */}
+        {banquet && !timerDisplay && (
+          <div className="absolute bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }} title={`Banchetto: ${banquet.name}`}>
+            <BookOpen size={8} />
+          </div>
+        )}
+
+        {/* Banquet Name or Reservation Name pill */}
         {banquet && !timerDisplay ? (
           <div
             style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[#4f46e5] border border-[#4338ca] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[#ffffff] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[15px] font-medium px-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff] pointer-events-none"
             title={banquet.name}
           >
-            {banquet.name}
+            <BookOpen size={17} className="flex-shrink-0" />
+            <span className="truncate">{banquet.name}</span>
+            {banquet.guests != null && (
+              <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+                <Users size={16} /> {banquet.guests}
+              </span>
+            )}
           </div>
         ) : reservation && !timerDisplay ? (
           <div
-            style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[var(--color-surface)]/95 border border-[var(--color-line)] shadow-[var(--shadow-xs)] rounded text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap max-w-[140px] truncate pointer-events-none"
+            style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
+            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[15px] font-medium pl-1 pr-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] pointer-events-none"
+            title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
           >
-            {reservation.customer_name}
+            {reservation.source === ReservationSource.VOICE ? (
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                <Mic className="h-3.5 w-3.5" />
+              </span>
+            ) : reservation.created_by_user_name ? (
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[11px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                {getInitials(reservation.created_by_user_name)}
+              </span>
+            ) : (
+              <span className="pl-1" />
+            )}
+            <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
+            <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+              <Users size={16} /> {reservation.guests}
+              {reservation.children && reservation.children > 0 ? (
+                <span className="text-[13px] opacity-80">({reservation.children}b)</span>
+              ) : null}
+            </span>
           </div>
         ) : null}
       </div>
@@ -866,9 +955,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
 
+  // Portrait orientation gate — block floor plan on mobile portrait
+  if (isPortrait) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-64px)] p-8 text-center bg-[var(--color-surface-2)]">
+        <RotateCw className="h-16 w-16 text-[var(--color-fg-subtle)] mb-6" />
+        <h2 className="text-lg font-semibold text-[var(--color-fg)] mb-2">Ruota il dispositivo</h2>
+        <p className="text-sm text-[var(--color-fg-muted)] max-w-[280px]">
+          Ruota il dispositivo in orizzontale per vedere sala e tavoli
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="flex flex-col h-[calc(100vh-64px)] p-4 gap-4"
+      className="flex flex-col h-[calc(100vh-64px)] p-2 gap-2 sm:p-4 sm:gap-4"
       onMouseUp={handleMouseUp}
       onMouseMove={handleMouseMove}
       onTouchMove={handleTouchMove}
@@ -1025,6 +1127,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             title="Modalità Selezione Multipla"
           >
               <CheckSquare className="h-4 w-4" />
+          </button>
+
+          <button
+            onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
+            className={`p-1.5 rounded-md border transition ${
+                layoutMode === 'manual'
+                ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc]'
+                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+            }`}
+            title={layoutMode === 'manual' ? 'Layout manuale: trascina per posizionare. Clicca per tornare ad auto-tidy.' : 'Layout auto-tidy: posizioni ordinate per numero. Clicca per attivare drag manuale.'}
+          >
+              {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
           </button>
 
           {selectedTables.length > 0 && (
@@ -1253,7 +1367,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             style={{
                 width: `${roomExtent.width}px`,
                 height: `${roomExtent.height}px`,
-                transform: `scale(${scale})`,
+                transform: `translate(${contentOffset.x}px, ${contentOffset.y}px) scale(${scale})`,
                 transformOrigin: 'top left'
             }}
           >
@@ -1305,15 +1419,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 >
                     <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-sm"></div> Libero
+                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-sm relative">
-                            <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
-                        </div> Occupato (In corso)
+                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-sm"></div> Riservato (Prossime 2h)
+                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato
                     </div>
                     <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
                         <Lock size={12} /> Tavolo Bloccato
