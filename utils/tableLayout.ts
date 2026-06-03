@@ -16,12 +16,12 @@ export function computeAutoLayout(tables: Table[], targetAspect = 1.6): AutoLayo
   const positions = new Map<number, { x: number; y: number }>();
   if (tables.length === 0) return { positions, width: 800, height: 600 };
 
-  const ORIGIN_X = 24;
-  const ORIGIN_Y = 24;
-  const GUTTER_X = 30;     // horizontal space between cells
-  const ROW_EXTRA = 50;    // caption + name pill below each glyph
-  const ROW_GAP = 16;      // breathing room between rows
-  const MIN_CELL_W = 116;  // floor so narrow tables still leave room for the pill
+  const ORIGIN_X = 32;
+  const ORIGIN_Y = 32;
+  const GUTTER_X = 46;     // horizontal space between cells
+  const ROW_EXTRA = 92;    // caption + name pill below each glyph
+  const ROW_GAP = 24;      // breathing room between rows
+  const MIN_CELL_W = 184;  // floor so narrow tables still leave room for the pill
                            // (cell pitch ≥ MIN_CELL_W + GUTTER_X keeps capped
                            //  name pills from intersecting their neighbours)
 

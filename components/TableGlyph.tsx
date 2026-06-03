@@ -3,17 +3,18 @@ import { TableShape } from '../types';
 
 export type TableDisplayStatus = 'libera' | 'attesa' | 'arrivato';
 
-const PITCH = 16;
-const CHAIR_W = 12;
-const CHAIR_H = 7;
-const CHAIR_R = 3;
-const GAP = 2;
-const BODY_H = 40;
-const BODY_R = 9;
+const PITCH = 26;
+const CHAIR_W = 20;
+const CHAIR_H = 11;
+const CHAIR_R = 5;
+const GAP = 4;
+const BODY_H = 66;
+const BODY_R = 15;
+const NAME_FONT_SIZE = 22;
 
 export function getGlyphDimensions(shape: TableShape, seats: number) {
   if (shape === TableShape.CIRCLE) {
-    const diameter = Math.max(44, 20 + seats * 6);
+    const diameter = Math.max(74, 34 + seats * 10);
     const r = diameter / 2;
     const chairDist = r + GAP + CHAIR_H / 2;
     const totalR = chairDist + CHAIR_H / 2 + 2;
@@ -22,8 +23,8 @@ export function getGlyphDimensions(shape: TableShape, seats: number) {
   }
   const topChairs = Math.ceil(seats / 2);
   const maxChairs = Math.max(topChairs, Math.floor(seats / 2));
-  const bodyW = Math.max(38, maxChairs * PITCH + 10);
-  const svgW = bodyW + 16;
+  const bodyW = Math.max(64, maxChairs * PITCH + 16);
+  const svgW = bodyW + 24;
   const bodyY = CHAIR_H + GAP + 2;
   const svgH = bodyY + BODY_H + GAP + CHAIR_H + 2;
   return { width: svgW, height: svgH };
@@ -47,7 +48,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
   const nm = `var(--tg-${status}-name)`;
 
   if (shape === TableShape.CIRCLE) {
-    const diameter = Math.max(44, 20 + seats * 6);
+    const diameter = Math.max(74, 34 + seats * 10);
     const r = diameter / 2;
     const chairDist = r + GAP + CHAIR_H / 2;
     const totalR = chairDist + CHAIR_H / 2 + 2;
@@ -78,8 +79,8 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
             />
           );
         })}
-        <text x={cx} y={cy + 4.5} textAnchor="middle"
-          style={{ fill: nm, fontSize: 13, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
+        <text x={cx} y={cy + 5.5} textAnchor="middle"
+          style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
       </svg>
     );
   }
@@ -88,10 +89,10 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
   const topChairs = Math.ceil(seats / 2);
   const botChairs = Math.floor(seats / 2);
   const maxChairs = Math.max(topChairs, botChairs);
-  const bodyW = Math.max(38, maxChairs * PITCH + 10);
-  const bodyX = 8;
+  const bodyW = Math.max(64, maxChairs * PITCH + 16);
+  const bodyX = 12;
   const bodyY = CHAIR_H + GAP + 2;
-  const svgW = bodyW + 16;
+  const svgW = bodyW + 24;
   const svgH = bodyY + BODY_H + GAP + CHAIR_H + 2;
 
   return (
@@ -120,8 +121,8 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
             width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} />
         );
       })}
-      <text x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 4.5} textAnchor="middle"
-        style={{ fill: nm, fontSize: 13, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
+      <text x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 5.5} textAnchor="middle"
+        style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
     </svg>
   );
 };

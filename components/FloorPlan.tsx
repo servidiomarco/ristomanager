@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
@@ -91,6 +92,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+
+  // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
+  // re-enables drag-to-position so the floor plan can mirror the real room.
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
+    if (typeof window === 'undefined') return 'auto';
+    try {
+      const saved = window.localStorage.getItem('floorPlan.layoutMode');
+      return saved === 'manual' ? 'manual' : 'auto';
+    } catch { return 'auto'; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('floorPlan.layoutMode', layoutMode); } catch {}
+  }, [layoutMode]);
 
   // Portrait orientation gate (floor-plan only, mobile/touch devices)
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -333,10 +347,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     () => computeAutoLayout(currentTables, layoutAspect),
     [currentTables, layoutAspect]
   );
-  const roomExtent = useMemo(
-    () => ({ width: autoLayout.width, height: autoLayout.height }),
-    [autoLayout]
-  );
+  // Bounding box used to size the inner canvas. In auto mode it comes from
+  // the tidy layout; in manual mode it's the extent of the saved x/y plus the
+  // glyph footprint so dragged tables never escape the scaled wrapper.
+  const roomExtent = useMemo(() => {
+    if (layoutMode === 'auto') {
+      return { width: autoLayout.width, height: autoLayout.height };
+    }
+    // Manual mode: natural bounding box of the saved positions. Combined with
+    // contentOffset=(0,0) and scale≤1 below this matches the pre-PR floor
+    // plan: tables render at their real size and only shrink if they overflow
+    // the canvas.
+    const PADDING = 60;
+    if (currentTables.length === 0) return { width: 800, height: 600 };
+    let maxRight = 0;
+    let maxBottom = 0;
+    for (const t of currentTables) {
+      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
+      maxRight = Math.max(maxRight, t.x + w);
+      maxBottom = Math.max(maxBottom, t.y + h);
+    }
+    return { width: maxRight + PADDING, height: maxBottom + PADDING };
+  }, [layoutMode, autoLayout, currentTables]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
@@ -347,18 +379,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const availH = Math.max(1, canvasSize.height - M * 2);
     const sx = availW / roomExtent.width;
     const sy = availH / roomExtent.height;
-    // Allow modest zoom-in (up to 1.4×) so a sparse room fills the canvas
-    // instead of sitting tiny in the top-left.
-    return Math.min(sx, sy, 1.4);
-  }, [canvasSize, roomExtent]);
+    // Allow zoom-in so a sparse room actually fills the canvas. Manual mode
+    // still caps lower than auto so the drag math (which mixes scaleRef with
+    // pointer deltas) stays predictable on dense rooms.
+    return Math.min(sx, sy, layoutMode === 'manual' ? 1.5 : 2);
+  }, [canvasSize, roomExtent, layoutMode]);
 
   useEffect(() => { scaleRef.current = scale; }, [scale]);
 
   // Center the scaled room within the canvas so leftover space is even.
-  const contentOffset = useMemo(() => ({
-    x: Math.max(0, (canvasSize.width - roomExtent.width * scale) / 2),
-    y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
-  }), [canvasSize, roomExtent, scale]);
+  // In manual mode we pin the offset to (0,0): re-centering when the
+  // bounding box grows would visually drag every table back toward its
+  // original spot, which feels like the drop didn't take.
+  const contentOffset = useMemo(() => {
+    if (layoutMode === 'manual') return { x: 0, y: 0 };
+    return {
+      x: Math.max(0, (canvasSize.width - roomExtent.width * scale) / 2),
+      y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
+    };
+  }, [canvasSize, roomExtent, scale, layoutMode]);
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -478,11 +517,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         return;
     }
 
-    // Tables are auto-arranged at render time, so positions are not draggable;
-    // a press just selects the table for the edit toolbar (merge/hide/rotate…).
     if (!selectedTables.includes(tableId)) {
         setSelectedTables([tableId]);
     }
+
+    // In auto mode positions are computed at render time, so press only
+    // selects. In manual mode arm a real drag against the saved x/y.
+    if (layoutMode !== 'manual') return;
+
+    dragStateRef.current = {
+      isDragging: true,
+      tableId: tableId,
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      originalPos: table ? { x: table.x, y: table.y } : null
+    };
+    draggedElementRef.current = element;
+    setIsDragging(true);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -586,11 +639,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         return;
     }
 
-    // Tables are auto-arranged at render time, so positions are not draggable;
-    // a tap just selects the table for the edit toolbar (merge/hide/rotate…).
     if (!selectedTables.includes(tableId)) {
         setSelectedTables([tableId]);
     }
+
+    // In auto mode positions are computed at render time; in manual mode
+    // arm a real drag.
+    if (layoutMode !== 'manual') return;
+
+    const touch = e.touches[0];
+    dragStateRef.current = {
+      isDragging: true,
+      tableId: tableId,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      currentX: touch.clientX,
+      currentY: touch.clientY,
+      originalPos: table ? { x: table.x, y: table.y } : null
+    };
+    draggedElementRef.current = element;
+    setIsDragging(true);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -755,17 +823,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
     const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
-    const captionTopPx = svgH / 2 + rotatedHalfH + 2;
-    const pillTopPx = captionTopPx + 18;
+    const captionTopPx = svgH / 2 + rotatedHalfH + 6;
+    const pillTopPx = captionTopPx + 32;
 
     const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
-    const pos = autoLayout.positions.get(table.id) || { x: table.x, y: table.y };
+    const pos = layoutMode === 'manual'
+      ? { x: table.x, y: table.y }
+      : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
+
+    const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
 
     return (
       <div
         key={table.id}
-        className={`absolute select-none ${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
+        className={`absolute select-none ${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
         style={{
           left: pos.x,
           top: pos.y,
@@ -788,17 +860,17 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Caption: covers + time indicator */}
         <div
-          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1"
-          style={{ top: captionTopPx, fontSize: 11 }}
+          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+          style={{ top: captionTopPx, fontSize: 18 }}
         >
-          <Armchair size={13} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+          <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
           <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
           {captionIcon && captionTime && (
             <>
               <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
-              <span className="inline-flex items-center gap-0.5" style={{ color: accentVar }}>
+              <span className="inline-flex items-center gap-1" style={{ color: accentVar }}>
                 {captionIcon === 'clock' && (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
                   </svg>
                 )}
@@ -840,23 +912,40 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {banquet && !timerDisplay ? (
           <div
             style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 px-1 py-0.5 bg-[#4f46e5] border border-[#4338ca] shadow-[var(--shadow-xs)] rounded text-[9px] font-semibold text-[#ffffff] whitespace-nowrap max-w-[124px] flex items-center gap-0.5 pointer-events-none"
+            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[15px] font-medium px-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff] pointer-events-none"
             title={banquet.name}
           >
+            <BookOpen size={17} className="flex-shrink-0" />
             <span className="truncate">{banquet.name}</span>
             {banquet.guests != null && (
-              <span className="flex-shrink-0 opacity-75">&middot; {banquet.guests}</span>
+              <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+                <Users size={16} /> {banquet.guests}
+              </span>
             )}
           </div>
         ) : reservation && !timerDisplay ? (
           <div
-            style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 px-1 py-0.5 bg-[var(--color-surface)]/95 border border-[var(--color-line)] shadow-[var(--shadow-xs)] rounded text-[9px] font-semibold text-[var(--color-fg)] whitespace-nowrap max-w-[124px] flex items-center gap-0.5 pointer-events-none"
-            title={reservation.customer_name}
+            style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
+            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[15px] font-medium pl-1 pr-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] pointer-events-none"
+            title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
           >
-            <span className="truncate">{reservation.customer_name}</span>
-            <span className="flex-shrink-0 text-[var(--color-fg-muted)]">
-              &middot; {reservation.guests}{reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''}
+            {reservation.source === ReservationSource.VOICE ? (
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                <Mic className="h-3.5 w-3.5" />
+              </span>
+            ) : reservation.created_by_user_name ? (
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[11px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                {getInitials(reservation.created_by_user_name)}
+              </span>
+            ) : (
+              <span className="pl-1" />
+            )}
+            <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
+            <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+              <Users size={16} /> {reservation.guests}
+              {reservation.children && reservation.children > 0 ? (
+                <span className="text-[13px] opacity-80">({reservation.children}b)</span>
+              ) : null}
             </span>
           </div>
         ) : null}
@@ -1038,6 +1127,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             title="Modalità Selezione Multipla"
           >
               <CheckSquare className="h-4 w-4" />
+          </button>
+
+          <button
+            onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
+            className={`p-1.5 rounded-md border transition ${
+                layoutMode === 'manual'
+                ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc]'
+                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+            }`}
+            title={layoutMode === 'manual' ? 'Layout manuale: trascina per posizionare. Clicca per tornare ad auto-tidy.' : 'Layout auto-tidy: posizioni ordinate per numero. Clicca per attivare drag manuale.'}
+          >
+              {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
           </button>
 
           {selectedTables.length > 0 && (

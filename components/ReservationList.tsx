@@ -9,7 +9,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { toTitleCase } from '../utils/text';
+import { toTitleCase, getInitials } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -43,15 +43,6 @@ const formatDateTime = (isoString: string): string => {
 };
 
 // Two-letter initials from a full name (falls back to '?' on empty)
-const getInitials = (name?: string | null): string => {
-  if (!name) return '?';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  const first = parts[0][0] || '';
-  const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : '';
-  return (first + last).toUpperCase();
-};
-
 // Small circular badge showing who took the reservation:
 // voice-agent bookings get a Mic icon, manual bookings get user initials.
 const renderOperatorBadge = (res: Reservation): React.ReactNode => {
@@ -379,6 +370,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // canvas element mounts/unmounts (e.g. when viewMode or isPhone changes).
   const [mapCanvasNode, setMapCanvasNode] = useState<HTMLDivElement | null>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
+  // Mirror the layout mode chosen in Sale & Tavoli so both maps stay in sync.
+  // 'auto' = tidy rows via computeAutoLayout; 'manual' = saved x/y positions.
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
+    if (typeof window === 'undefined') return 'auto';
+    try {
+      const saved = window.localStorage.getItem('floorPlan.layoutMode');
+      return saved === 'manual' ? 'manual' : 'auto';
+    } catch { return 'auto'; }
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sync = () => {
+      try {
+        const saved = window.localStorage.getItem('floorPlan.layoutMode');
+        setLayoutMode(saved === 'manual' ? 'manual' : 'auto');
+      } catch {}
+    };
+    // Re-check when the tab regains focus so toggles made elsewhere stick.
+    window.addEventListener('focus', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
   useEffect(() => {
     if (!mapCanvasNode) {
       setMapCanvasSize({ width: 0, height: 0 });
@@ -1513,8 +1529,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // sit horizontally below the visible table at any rotation.
       const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
       const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
-      const captionTopPx = svgH / 2 + rotatedHalfH + 2;
-      const pillTopPx = captionTopPx + 18;
+      const captionTopPx = svgH / 2 + rotatedHalfH + 6;
+      const pillTopPx = captionTopPx + 32;
 
       const isHighlighted = selectedReservation?.table_id === table.id && detailDrawerOpen;
       const hoveredRes = hoveredReservationId ? reservations.find(r => r.id === hoveredReservationId) : null;
@@ -1578,17 +1594,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
             {/* Caption: covers + time indicator */}
             <div
-                className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1"
-                style={{ top: captionTopPx, fontSize: 11 }}
+                className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+                style={{ top: captionTopPx, fontSize: 18 }}
             >
-                <Armchair size={13} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+                <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
                 <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
                 {captionIcon && captionTime && (
                     <>
                         <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
-                        <span className="inline-flex items-center gap-0.5" style={{ color: accentVar }}>
+                        <span className="inline-flex items-center gap-1" style={{ color: accentVar }}>
                             {captionIcon === 'clock' && (
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
                                 </svg>
                             )}
@@ -1599,16 +1615,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             {reservation && (
                 <div
-                    style={{ top: pillTopPx }}
-                    className={`absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1 text-[#ffffff] text-[10px] font-medium pl-0.5 pr-1.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[130px] ${isArrived ? 'bg-orange-600' : 'bg-[#e11d48]'}`}
+                    style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[15px] font-medium pl-1 pr-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px]"
                     title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
                 >
                     {reservation.source === ReservationSource.VOICE ? (
-                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                            <Mic className="h-2.5 w-2.5" />
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            <Mic className="h-3.5 w-3.5" />
                         </span>
                     ) : reservation.created_by_user_name ? (
-                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[7px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[11px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
                     ) : (
@@ -1616,9 +1632,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
                     <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                        <Users size={10} /> {reservation.guests}
+                        <Users size={16} /> {reservation.guests}
                         {reservation.children && reservation.children > 0 ? (
-                            <span className="text-[9px] opacity-80">({reservation.children}b)</span>
+                            <span className="text-[13px] opacity-80">({reservation.children}b)</span>
                         ) : null}
                     </span>
                 </div>
@@ -1626,13 +1642,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {banquet && (
                 <div
                     style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[130px] bg-[#4f46e5] text-[#ffffff]"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[15px] font-medium px-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff]"
                 >
-                    <BookOpen size={11} className="flex-shrink-0" />
+                    <BookOpen size={17} className="flex-shrink-0" />
                     <span className="truncate">{banquet.name}</span>
                     {banquet.guests != null && (
                         <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                            <Users size={10} /> {banquet.guests}
+                            <Users size={16} /> {banquet.guests}
                         </span>
                     )}
                 </div>
@@ -2210,23 +2226,45 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED).length;
 
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // Lay tables out into tidy flowing rows at render time, shaped to the canvas.
-    // Computed fresh from the tables actually shown (after merges / hidden
-    // overrides), so every date stays neat regardless of merge state.
+    // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
+    //  - auto: tidy flowing rows via computeAutoLayout, shaped to the canvas
+    //  - manual: the saved x/y of each table, so this map shows the same
+    //    planimetry the user drew in the editor.
     const layoutAspect = mapCanvasSize.width > 0 && mapCanvasSize.height > 0
       ? Math.min(2.6, Math.max(0.6, mapCanvasSize.width / mapCanvasSize.height))
       : 1.6;
     const mapLayout = computeAutoLayout(tablesInRoom, layoutAspect);
-    const extentWidth = mapLayout.width;
-    const extentHeight = mapLayout.height;
+    let extentWidth: number;
+    let extentHeight: number;
+    let layoutPositions: Map<number, { x: number; y: number }> | undefined;
+    if (layoutMode === 'manual' && tablesInRoom.length > 0) {
+      const MANUAL_PADDING = 60;
+      let maxRight = 0;
+      let maxBottom = 0;
+      for (const t of tablesInRoom) {
+        const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
+        maxRight = Math.max(maxRight, t.x + w);
+        maxBottom = Math.max(maxBottom, t.y + h);
+      }
+      extentWidth = maxRight + MANUAL_PADDING;
+      extentHeight = maxBottom + MANUAL_PADDING;
+      layoutPositions = undefined; // renderMapTable falls back to table.x/y
+    } else {
+      extentWidth = mapLayout.width;
+      extentHeight = mapLayout.height;
+      layoutPositions = mapLayout.positions;
+    }
     // Fit into the canvas minus a safe margin so tables never touch the edges
-    // or collide with the floating Legenda button in the corner.
+    // or collide with the floating Legenda button in the corner. Manual layout
+    // mirrors Sale & Tavoli: never zoom past 1:1 — the user laid the room out
+    // at real size and an artificial zoom would skew their intent.
     const FIT_M = 28;
+    const scaleCap = layoutMode === 'manual' ? 1.5 : 2;
     const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
       ? Math.min(
           Math.max(1, mapCanvasSize.width - FIT_M * 2) / extentWidth,
           Math.max(1, mapCanvasSize.height - FIT_M * 2) / extentHeight,
-          1.4
+          scaleCap
         )
       : 1;
     // Center the scaled content so leftover space is even on all sides.
@@ -2448,7 +2486,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
             )}
             <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
-              {tablesInRoom.map(t => renderMapTable(t, mapLayout.positions))}
+              {tablesInRoom.map(t => renderMapTable(t, layoutPositions))}
             </div>
 
             {/* Legend */}
