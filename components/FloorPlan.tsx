@@ -4,6 +4,7 @@ import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, S
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
@@ -284,6 +285,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     currentX: number;
     currentY: number;
     originalPos: { x: number; y: number } | null;
+    // Snapped, clamped candidate drop position and whether it conflicts.
+    candidateX: number;
+    candidateY: number;
+    conflict: boolean;
   }>({
     isDragging: false,
     tableId: null,
@@ -291,8 +296,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     startY: 0,
     currentX: 0,
     currentY: 0,
-    originalPos: null
+    originalPos: null,
+    candidateX: 0,
+    candidateY: 0,
+    conflict: false
   });
+
+  // Id of the table currently showing the red "invalid" (overlapping) state
+  // during a drag. Toggled only when the conflict status flips, so dragging
+  // stays cheap.
+  const [dragConflictId, setDragConflictId] = useState<number | null>(null);
+  // Signature of the overlap set the user has dismissed, so the load-time
+  // banner reappears whenever the set of colliding tables actually changes.
+  const [dismissedOverlapSig, setDismissedOverlapSig] = useState<string | null>(null);
 
   const draggedElementRef = useRef<HTMLDivElement | null>(null);
   
@@ -398,6 +414,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
     };
   }, [canvasSize, roomExtent, scale, layoutMode]);
+
+  // Detect pre-existing overlaps among the visible tables of the active room.
+  // Only meaningful in manual mode (auto-tidy never overlaps). Older layouts
+  // were spaced before chairs were added, so some saved positions now collide —
+  // we flag them rather than moving anything.
+  const overlapPairs = useMemo(() => {
+    if (layoutMode !== 'manual') return [];
+    return findOverlappingPairs(currentTables);
+  }, [layoutMode, currentTables]);
+
+  // Stable signature of the colliding set so a dismissed banner reappears only
+  // when the actual set of overlaps changes.
+  const overlapSig = useMemo(
+    () => overlapPairs
+      .map(([a, b]) => [a.id, b.id].sort((x, y) => x - y).join('-'))
+      .sort()
+      .join('|'),
+    [overlapPairs]
+  );
+  const showOverlapBanner = overlapPairs.length > 0 && overlapSig !== dismissedOverlapSig;
 
   // Auto-select first room if active room is deleted
   useEffect(() => {
@@ -532,81 +568,99 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       startY: e.clientY,
       currentX: e.clientX,
       currentY: e.clientY,
-      originalPos: table ? { x: table.x, y: table.y } : null
+      originalPos: table ? { x: table.x, y: table.y } : null,
+      candidateX: table ? table.x : 0,
+      candidateY: table ? table.y : 0,
+      conflict: false
     };
     draggedElementRef.current = element;
     setIsDragging(true);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  // Shared drag-move logic for mouse + touch. Snaps the candidate position to
+  // the grid, tests its footprint against every other table, shows the invalid
+  // state on conflict, and renders the (snapped) move.
+  const applyDragMove = (clientX: number, clientY: number) => {
     const dragState = dragStateRef.current;
-    if (!dragState.isDragging || !draggedElementRef.current) return;
+    if (!dragState.isDragging || !draggedElementRef.current || !dragState.originalPos) return;
+    const id = dragState.tableId;
+    if (id == null) return;
 
     const s = scaleRef.current || 1;
-    const deltaX = (e.clientX - dragState.startX) / s;
-    const deltaY = (e.clientY - dragState.startY) / s;
+    const deltaX = (clientX - dragState.startX) / s;
+    const deltaY = (clientY - dragState.startY) / s;
 
-    // Apply CSS transform for smooth visual dragging (no React re-render).
-    // Translation is in unscaled coords; the scaled wrapper maps it to screen.
-    // Translate must come first so the matrix's tx/ty entries match the
-    // unrotated drag delta (rotation last preserves values[4]/values[5]).
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    // Snap the candidate drop to the grid, then clamp to the canvas.
+    const candX = Math.max(0, snapToGrid(dragState.originalPos.x + deltaX));
+    const candY = Math.max(0, snapToGrid(dragState.originalPos.y + deltaY));
+
+    // Test the dragged table's footprint against the others (at their saved
+    // positions). Use the displayed table for shape/seats/rotation.
+    const dragTable = currentTables.find(t => t.id === id) || tables.find(t => t.id === id);
+    const conflict = dragTable
+      ? collidesWithOthers(dragTable, candX, candY, currentTables).length > 0
+      : false;
+
+    dragState.candidateX = candX;
+    dragState.candidateY = candY;
+    if (conflict !== dragState.conflict) {
+      dragState.conflict = conflict;
+      setDragConflictId(conflict ? id : null);
+    }
+
+    // Move visually to the snapped candidate. Transform is in unscaled coords;
+    // the scaled wrapper maps it to screen.
+    const visDX = candX - dragState.originalPos.x;
+    const visDY = candY - dragState.originalPos.y;
+    draggedElementRef.current.style.transform = `translate(${visDX}px, ${visDY}px)`;
     draggedElementRef.current.style.zIndex = '100';
 
-    dragState.currentX = e.clientX;
-    dragState.currentY = e.clientY;
+    dragState.currentX = clientX;
+    dragState.currentY = clientY;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragStateRef.current.isDragging) return;
+    applyDragMove(e.clientX, e.clientY);
   };
 
   const handleMouseUp = () => {
     const dragState = dragStateRef.current;
 
-    // Save final position to backend if we were dragging
     if (dragState.isDragging && dragState.tableId !== null && canvasRef.current) {
         const table = tables.find(t => t.id === dragState.tableId);
+        const el = draggedElementRef.current;
 
-        if (table && dragState.originalPos && draggedElementRef.current) {
+        if (table && dragState.originalPos && el) {
             // Validate table.id is a proper number
             if (typeof table.id !== 'number' || isNaN(table.id)) {
                 console.error('Invalid table ID in handleMouseUp:', table.id, table);
                 return;
             }
 
-            // Parse the current transform to get the translation
-            const transform = window.getComputedStyle(draggedElementRef.current).transform;
-            let translateX = 0;
-            let translateY = 0;
-
-            if (transform && transform !== 'none') {
-                const matrix = transform.match(/matrix\((.+)\)/);
-                if (matrix) {
-                    const values = matrix[1].split(', ');
-                    translateX = parseFloat(values[4]) || 0;
-                    translateY = parseFloat(values[5]) || 0;
-                }
+            if (dragState.conflict) {
+                // Invalid drop — spring back to the last valid position. Do not
+                // persist, and never move the other tables. Drive the transition
+                // via inline style: React re-renders on release and rewrites
+                // className, so a CSS class would be stripped mid-animation.
+                el.style.transition = 'transform 0.22s ease';
+                el.style.transform = 'translate(0px, 0px)';
+                const settleEl = el;
+                window.setTimeout(() => {
+                    settleEl.style.transition = '';
+                    settleEl.style.transform = '';
+                    settleEl.style.zIndex = '';
+                }, 240);
+            } else {
+                // Valid drop — persist the snapped, clamped candidate position.
+                const updatedTable = { ...table, x: dragState.candidateX, y: dragState.candidateY };
+                // Force synchronous update to prevent snap-back
+                flushSync(() => {
+                    onUpdateTable(updatedTable);
+                });
+                el.style.transform = '';
+                el.style.zIndex = '';
             }
-
-            // Calculate final position: original position + transform delta
-            const finalX = Math.round(dragState.originalPos.x + translateX);
-            const finalY = Math.round(dragState.originalPos.y + translateY);
-
-            // Ensure positions don't go negative
-            const clampedX = Math.max(0, finalX);
-            const clampedY = Math.max(0, finalY);
-
-            const updatedTable = {
-                ...table,
-                x: clampedX,
-                y: clampedY
-            };
-
-            // Force synchronous update to prevent snap-back
-            flushSync(() => {
-                onUpdateTable(updatedTable);
-            });
-
-            // Clear transform after DOM has been updated with new position
-            draggedElementRef.current.style.transform = '';
-            draggedElementRef.current.style.zIndex = '';
         }
     }
 
@@ -618,10 +672,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       startY: 0,
       currentX: 0,
       currentY: 0,
-      originalPos: null
+      originalPos: null,
+      candidateX: 0,
+      candidateY: 0,
+      conflict: false
     };
     draggedElementRef.current = null;
     setIsDragging(false);
+    setDragConflictId(null);
   };
 
   // Touch event handlers for mobile
@@ -655,26 +713,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       startY: touch.clientY,
       currentX: touch.clientX,
       currentY: touch.clientY,
-      originalPos: table ? { x: table.x, y: table.y } : null
+      originalPos: table ? { x: table.x, y: table.y } : null,
+      candidateX: table ? table.x : 0,
+      candidateY: table ? table.y : 0,
+      conflict: false
     };
     draggedElementRef.current = element;
     setIsDragging(true);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    const dragState = dragStateRef.current;
-    if (!dragState.isDragging || !draggedElementRef.current) return;
-
+    if (!dragStateRef.current.isDragging) return;
     const touch = e.touches[0];
-    const s = scaleRef.current || 1;
-    const deltaX = (touch.clientX - dragState.startX) / s;
-    const deltaY = (touch.clientY - dragState.startY) / s;
-
-    draggedElementRef.current.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-    draggedElementRef.current.style.zIndex = '100';
-
-    dragState.currentX = touch.clientX;
-    dragState.currentY = touch.clientY;
+    applyDragMove(touch.clientX, touch.clientY);
   };
 
   const handleTouchEnd = () => {
@@ -717,14 +768,35 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setSelectedTables([]);
   };
 
+  // Returns true if applying `proposed` (same id, changed seats/rotation) would
+  // make its footprint overlap another table in the active room. Only meaningful
+  // in manual mode, where positions are the saved x/y. Auto mode reflows and can
+  // never overlap, so it's always allowed there.
+  const editWouldOverlap = (proposed: Table): boolean => {
+      if (layoutMode !== 'manual') return false;
+      return collidesWithOthers(proposed, proposed.x, proposed.y, currentTables).length > 0;
+  };
+
   const handleSeatsChange = (newSeats: number) => {
       if (newSeats < 1) return;
+      const blocked: string[] = [];
       selectedTables.forEach(id => {
           const table = tables.find(t => t.id === id);
           if (table && !table.is_locked) {
-              onUpdateTable({ ...table, seats: newSeats });
+              const proposed = { ...table, seats: newSeats };
+              if (editWouldOverlap(proposed)) {
+                  blocked.push(table.name);
+                  return;
+              }
+              onUpdateTable(proposed);
           }
       });
+      if (blocked.length > 0) {
+          setAlertModal({
+              message: `Impossibile ingrandire ${blocked.length > 1 ? 'i tavoli' : 'il tavolo'} ${blocked.join(', ')}: si sovrapporrebbe a un tavolo vicino. Spostalo prima di aggiungere coperti.`,
+              type: 'warning'
+          });
+      }
   };
 
   const handleNameChange = (newName: string) => {
@@ -734,13 +806,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handleRotate = (delta: number) => {
+      const blocked: string[] = [];
       selectedTables.forEach(id => {
           const table = tables.find(t => t.id === id);
           if (table && !table.is_locked) {
               const next = (((table.rotation || 0) + delta) % 360 + 360) % 360;
-              onUpdateTable({ ...table, rotation: next });
+              const proposed = { ...table, rotation: next };
+              if (editWouldOverlap(proposed)) {
+                  blocked.push(table.name);
+                  return;
+              }
+              onUpdateTable(proposed);
           }
       });
+      if (blocked.length > 0) {
+          setAlertModal({
+              message: `Impossibile ruotare ${blocked.length > 1 ? 'i tavoli' : 'il tavolo'} ${blocked.join(', ')}: si sovrapporrebbe a un tavolo vicino. Spostalo prima di ruotarlo.`,
+              type: 'warning'
+          });
+      }
   };
 
   // New Room Handler (Inline)
@@ -821,6 +905,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const dims = getGlyphDimensions(table.shape, table.seats);
     const { width: svgW, height: svgH } = dims;
 
+    // Overlap state: this table is being dragged into a colliding position.
+    const isInvalidDrag = dragConflictId === table.id;
+    // Footprint box (body + chair overhang + clearance), rotation-aware,
+    // expressed relative to the glyph box's top-left for the overlay below.
+    const fp = getTableFootprint(table, 0, 0, FLOOR_CLEARANCE);
+
     const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
     const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
     const captionTopPx = svgH / 2 + rotatedHalfH + 6;
@@ -837,7 +927,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return (
       <div
         key={table.id}
-        className={`absolute select-none ${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
+        className={`absolute select-none ${isInvalidDrag ? 'floor-table-invalid ' : ''}${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
         style={{
           left: pos.x,
           top: pos.y,
@@ -848,6 +938,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         onMouseDown={(e) => handleMouseDown(e, table.id, e.currentTarget as HTMLDivElement)}
         onTouchStart={(e) => handleTouchStart(e, table.id, e.currentTarget as HTMLDivElement)}
       >
+        {/* Footprint (clearance) box — only visible while this table is invalid */}
+        {isDraggable && (
+          <div
+            className="floor-table-footprint"
+            style={{ left: fp.x, top: fp.y, width: fp.w, height: fp.h }}
+          />
+        )}
         <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
           <TableGlyph
             name={table.name}
@@ -1351,6 +1448,31 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </div>
         )}
       </div>
+
+      {/* Overlap warning banner — flags pre-existing collisions in this room.
+          Nothing is moved automatically; the user resolves them by dragging. */}
+      {showOverlapBanner && (
+        <div className="bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-lg px-3 py-2.5 flex items-start gap-2.5 z-20 animate-in fade-in slide-in-from-top-1">
+          <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 text-xs text-rose-800 dark:text-rose-200">
+            <span className="font-semibold">
+              {overlapPairs.length === 1 ? 'Un tavolo si sovrappone' : `${overlapPairs.length} sovrapposizioni di tavoli`} in questa sala.
+            </span>{' '}
+            <span className="text-rose-700 dark:text-rose-300">
+              Trascina per separarli: {overlapPairs.map(([a, b]) => `${a.name} ↔ ${b.name}`).join(', ')}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDismissedOverlapSig(overlapSig)}
+            className="p-1 rounded-md text-rose-500 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/25 transition-colors flex-shrink-0"
+            aria-label="Ignora avviso"
+            title="Ignora avviso"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Canvas */}
       <div
