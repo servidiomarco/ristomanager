@@ -1831,7 +1831,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
         {/* Actions band: status (left) · edit + delete (right) */}
         {canEdit && (
-          <div className="flex items-center gap-2.5 px-3 pt-1.5 pb-2">
+          <div className="flex items-center gap-2.5 mx-3 pt-3 pb-2 mt-1.5 border-t border-[var(--color-line)]">
             {(() => {
               const state = getReservationState(res);
               const meta = RESERVATION_STATE_META[state];
@@ -1857,7 +1857,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <MapPin className="h-3.5 w-3.5" /> Tavolo
               </button>
             )}
-            <div className="flex items-center gap-3">
+            <div className="ml-auto -mr-1.5 flex items-center gap-3">
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                 className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                 <Edit2 className="h-3.5 w-3.5" />
