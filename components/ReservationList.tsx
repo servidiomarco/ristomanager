@@ -1616,15 +1616,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {reservation && (
                 <div
                     style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[15px] font-medium pl-1 pr-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px]"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[17px] font-medium pl-1.5 pr-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px]"
                     title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
                 >
                     {reservation.source === ReservationSource.VOICE ? (
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                            <Mic className="h-3.5 w-3.5" />
+                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                            <Mic className="h-4 w-4" />
                         </span>
                     ) : reservation.created_by_user_name ? (
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[11px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
+                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[12px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
                             {getInitials(reservation.created_by_user_name)}
                         </span>
                     ) : (
@@ -1632,9 +1632,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
                     <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                        <Users size={16} /> {reservation.guests}
+                        <Users size={18} /> {reservation.guests}
                         {reservation.children && reservation.children > 0 ? (
-                            <span className="text-[13px] opacity-80">({reservation.children}b)</span>
+                            <span className="text-[14px] opacity-80">({reservation.children}b)</span>
                         ) : null}
                     </span>
                 </div>
@@ -1642,13 +1642,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {banquet && (
                 <div
                     style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[15px] font-medium px-2.5 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[220px] bg-[#4f46e5] text-[#ffffff]"
+                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[17px] font-medium px-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px] bg-[#4f46e5] text-[#ffffff]"
                 >
-                    <BookOpen size={17} className="flex-shrink-0" />
+                    <BookOpen size={19} className="flex-shrink-0" />
                     <span className="truncate">{banquet.name}</span>
                     {banquet.guests != null && (
                         <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                            <Users size={16} /> {banquet.guests}
+                            <Users size={18} /> {banquet.guests}
                         </span>
                     )}
                 </div>
@@ -1857,7 +1857,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <MapPin className="h-3.5 w-3.5" /> Tavolo
               </button>
             )}
-            <div className="flex items-center gap-3">
+            <div className="ml-auto -mr-1.5 flex items-center gap-3">
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                 className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
                 <Edit2 className="h-3.5 w-3.5" />
@@ -2066,16 +2066,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {/* Group header */}
               <button type="button" onClick={() => toggleGroup(group.key)}
                 className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10">
-                <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
-                <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
-                <span className="text-xs text-[var(--color-fg-muted)] font-medium">
+                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${group.dotClass}`} />
+                <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap flex-shrink-0">{group.label}</span>
+                <span className="text-xs text-[var(--color-fg-muted)] font-medium whitespace-nowrap truncate min-w-0">
                   {group.items.length} {group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · {group.items.reduce((s, r) => s + (r.guests || 0), 0)} coperti
                   {(() => {
                     const totalChildren = group.items.reduce((s, r) => s + (r.children || 0), 0);
                     return totalChildren > 0 ? ` (${totalChildren} bambin${totalChildren === 1 ? 'o' : 'i'})` : '';
                   })()}
                 </span>
-                <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
+                <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto flex-shrink-0 transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
               </button>
               {/* Group items */}
               {expandedGroups.has(group.key) && (
@@ -2531,8 +2531,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         <div className="flex flex-col h-full">
           {/* Split view */}
           <div className="flex flex-1 min-h-0">
-            {/* Left column — Reservation list (25%) */}
-            <div className="w-[25%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
+            {/* Left column — Reservation list (20%) */}
+            <div className="w-[20%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
               {renderGroupedList()}
             </div>
 

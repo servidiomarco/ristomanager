@@ -63,7 +63,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
           <circle cx={cx} cy={cy} r={r + 3} fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
         )}
         <circle className="dark:hidden" cx={cx} cy={cy + 2} r={r} fill="#000" opacity={0.08} />
-        <circle cx={cx} cy={cy} r={r} style={{ fill: bg, stroke: st }} strokeWidth={1} />
+        <circle className="tg-body" cx={cx} cy={cy} r={r} style={{ fill: bg, stroke: st }} strokeWidth={1} />
         {Array.from({ length: seats }, (_, i) => {
           const angle = (2 * Math.PI * i) / seats - Math.PI / 2;
           const chairCx = cx + chairDist * Math.cos(angle);
@@ -72,6 +72,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
           return (
             <rect
               key={i}
+              className="tg-chair"
               x={-CHAIR_W / 2} y={-CHAIR_H / 2}
               width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R}
               style={{ fill: ch }}
@@ -79,7 +80,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
             />
           );
         })}
-        <text x={cx} y={cy + 5.5} textAnchor="middle"
+        <text className="tg-name" x={cx} y={cy + 5.5} textAnchor="middle"
           style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
       </svg>
     );
@@ -103,13 +104,13 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
           fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
       )}
       <rect className="dark:hidden" x={bodyX} y={bodyY + 2.5} width={bodyW} height={BODY_H} rx={BODY_R} fill="#000" opacity={0.08} />
-      <rect x={bodyX} y={bodyY} width={bodyW} height={BODY_H} rx={BODY_R}
+      <rect className="tg-body" x={bodyX} y={bodyY} width={bodyW} height={BODY_H} rx={BODY_R}
         style={{ fill: bg, stroke: st }} strokeWidth={1} />
       {Array.from({ length: topChairs }, (_, i) => {
         const span = (topChairs - 1) * PITCH;
         const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
         return (
-          <rect key={`t${i}`} x={sx - CHAIR_W / 2} y={bodyY - GAP - CHAIR_H}
+          <rect key={`t${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY - GAP - CHAIR_H}
             width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} />
         );
       })}
@@ -117,11 +118,11 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         const span = (botChairs - 1) * PITCH;
         const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
         return (
-          <rect key={`b${i}`} x={sx - CHAIR_W / 2} y={bodyY + BODY_H + GAP}
+          <rect key={`b${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY + BODY_H + GAP}
             width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} />
         );
       })}
-      <text x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 5.5} textAnchor="middle"
+      <text className="tg-name" x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 5.5} textAnchor="middle"
         style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
     </svg>
   );

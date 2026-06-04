@@ -234,6 +234,30 @@
 }
 
 /* ===========================================================================
+   Floor editor — overlap prevention
+   A dragged (or edited) table whose footprint would collide with another goes
+   into an invalid state: body + chairs turn red and a dashed clearance box
+   appears. `!important` overrides the glyph's inline fills.
+   ========================================================================= */
+.floor-table-invalid .tg-body  { fill: #FCEBEB !important; stroke: #E24B4A !important; }
+.dark .floor-table-invalid .tg-body { fill: rgba(226,75,74,0.18) !important; stroke: #E24B4A !important; }
+.floor-table-invalid .tg-chair { fill: #E24B4A !important; }
+.floor-table-invalid .tg-name  { fill: #A32D2D !important; }
+.dark .floor-table-invalid .tg-name { fill: #F2B8B8 !important; }
+
+/* Dashed clearance box around the colliding table (its footprint). Hidden by
+   default; revealed only while that table is in the invalid state. */
+.floor-table-footprint {
+  position: absolute;
+  border: 1px dashed #E24B4A;
+  background: rgba(226, 75, 74, 0.07);
+  border-radius: 13px;
+  opacity: 0;
+  pointer-events: none;
+}
+.floor-table-invalid .floor-table-footprint { opacity: 1; }
+
+/* ===========================================================================
    Base typography & resets
    ========================================================================= */
 html { font-family: var(--font-sans); }
