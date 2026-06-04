@@ -1578,6 +1578,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     seats={table.seats}
                     shape={table.shape}
                     status={displayStatus}
+                    party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
                 />
             </div>
 

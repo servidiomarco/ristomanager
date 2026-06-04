@@ -12,6 +12,10 @@ const BODY_H = 66;
 const BODY_R = 15;
 const NAME_FONT_SIZE = 22;
 
+// Opacity applied to the empty chairs of an occupied table (capacity − party).
+// Lit chairs render at full weight; tune this single value to taste.
+const DIMMED_CHAIR_OPACITY = 0.25;
+
 export function getGlyphDimensions(shape: TableShape, seats: number) {
   if (shape === TableShape.CIRCLE) {
     const diameter = Math.max(74, 34 + seats * 10);
@@ -36,16 +40,25 @@ interface TableGlyphProps {
   shape: TableShape;
   status: TableDisplayStatus;
   isSelected?: boolean;
+  // Size of the seated/assigned party. On an occupied table, this many chairs
+  // light up at full weight and the rest dim — purely visual occupancy feedback.
+  party?: number;
   // When true, the glyph scales down to fit its container width (capped at its
   // natural size) — used inside the fixed-cell table pickers.
   fit?: boolean;
 }
 
-export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, status, isSelected, fit }) => {
+export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, status, isSelected, party, fit }) => {
   const bg = `var(--tg-${status}-bg)`;
   const st = `var(--tg-${status}-stroke)`;
   const ch = `var(--tg-${status}-chair)`;
   const nm = `var(--tg-${status}-name)`;
+
+  // How many chairs render lit. A free table (or one with no party data) keeps
+  // every chair at full weight; otherwise only `party` chairs (capped at the
+  // table's capacity) stay lit and the remaining seats dim.
+  const litCount = status !== 'libera' && party && party > 0 ? Math.min(party, seats) : seats;
+  const chairOpacity = (index: number) => (index < litCount ? 1 : DIMMED_CHAIR_OPACITY);
 
   if (shape === TableShape.CIRCLE) {
     const diameter = Math.max(74, 34 + seats * 10);
@@ -75,7 +88,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
               className="tg-chair"
               x={-CHAIR_W / 2} y={-CHAIR_H / 2}
               width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R}
-              style={{ fill: ch }}
+              style={{ fill: ch }} opacity={chairOpacity(i)}
               transform={`translate(${chairCx},${chairCy}) rotate(${rotDeg})`}
             />
           );
@@ -96,6 +109,11 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
   const svgW = bodyW + 24;
   const svgH = bodyY + BODY_H + GAP + CHAIR_H + 2;
 
+  // Spread the lit chairs balanced across the two edges (top gets the spare on
+  // odd counts), each edge filling left-to-right.
+  const litTop = Math.min(topChairs, Math.ceil(litCount / 2));
+  const litBot = litCount - litTop;
+
   return (
     <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="block"
       style={fit ? { width: '100%', height: 'auto', maxWidth: svgW, margin: '0 auto' } : undefined}>
@@ -111,7 +129,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
         return (
           <rect key={`t${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY - GAP - CHAIR_H}
-            width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} />
+            width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} opacity={i < litTop ? 1 : DIMMED_CHAIR_OPACITY} />
         );
       })}
       {Array.from({ length: botChairs }, (_, i) => {
@@ -119,7 +137,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
         return (
           <rect key={`b${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY + BODY_H + GAP}
-            width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} />
+            width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} opacity={i < litBot ? 1 : DIMMED_CHAIR_OPACITY} />
         );
       })}
       <text className="tg-name" x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 5.5} textAnchor="middle"

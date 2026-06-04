@@ -951,6 +951,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             seats={table.seats}
             shape={table.shape}
             status={displayStatus}
+            party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
             isSelected={isSelected && canEdit}
           />
         </div>
