@@ -980,7 +980,7 @@ const App: React.FC = () => {
                 <span className="text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]">
                   {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                 </span>
-                <span className="font-medium">Modalità scura</span>
+                <span className="font-medium text-[13px] tracking-tight">Modalità scura</span>
               </span>
               <span
                 aria-hidden
