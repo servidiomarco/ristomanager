@@ -46,18 +46,21 @@ interface TableGlyphProps {
   // When true, the glyph scales down to fit its container width (capped at its
   // natural size) — used inside the fixed-cell table pickers.
   fit?: boolean;
+  // Override the chair colour (keeps body/name from `status`). Used by the
+  // wrapped reservation card: white body + status-coloured chairs.
+  chairColor?: string;
 }
 
-export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, status, isSelected, party, fit }) => {
+export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, status, isSelected, party, fit, chairColor }) => {
   const bg = `var(--tg-${status}-bg)`;
   const st = `var(--tg-${status}-stroke)`;
-  const ch = `var(--tg-${status}-chair)`;
+  const ch = chairColor ?? `var(--tg-${status}-chair)`;
   const nm = `var(--tg-${status}-name)`;
 
   // How many chairs render lit. A free table (or one with no party data) keeps
   // every chair at full weight; otherwise only `party` chairs (capped at the
   // table's capacity) stay lit and the remaining seats dim.
-  const litCount = status !== 'libera' && party && party > 0 ? Math.min(party, seats) : seats;
+  const litCount = party && party > 0 ? Math.min(party, seats) : seats;
   const chairOpacity = (index: number) => (index < litCount ? 1 : DIMMED_CHAIR_OPACITY);
 
   if (shape === TableShape.CIRCLE) {

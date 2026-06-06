@@ -211,6 +211,13 @@
   --tg-arrivato-accent: #1F7A43;
   --tg-arrivato-pill-bg: #1F7A43;
   --tg-covers: #8C8B83;
+
+  /* Banquet / event (violet) — used by the table picker banquet container */
+  --color-banquet-bg: #f5f3ff;
+  --color-banquet-border: #ddd6fe;
+  --color-banquet-fg: #6d28d9;
+  --color-banquet-fg-strong: #5b21b6;
+  --color-banquet-accent: #7c3aed;
 }
 
 .dark {
@@ -231,6 +238,13 @@
   --tg-arrivato-accent: #7FD79A;
   --tg-arrivato-pill-bg: #2F8F50;
   --tg-covers: #A09E95;
+
+  /* Banquet / event (violet) — dark mode */
+  --color-banquet-bg: rgba(124, 58, 237, 0.14);
+  --color-banquet-border: rgba(124, 58, 237, 0.38);
+  --color-banquet-fg: #c4b5fd;
+  --color-banquet-fg-strong: #ddd6fe;
+  --color-banquet-accent: #a78bfa;
 }
 
 /* ===========================================================================

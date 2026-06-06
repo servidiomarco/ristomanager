@@ -18,12 +18,12 @@ export function computeAutoLayout(tables: Table[], targetAspect = 1.6): AutoLayo
 
   const ORIGIN_X = 32;
   const ORIGIN_Y = 32;
-  const GUTTER_X = 46;     // horizontal space between cells
-  const ROW_EXTRA = 92;    // caption + name pill below each glyph
-  const ROW_GAP = 24;      // breathing room between rows
-  const MIN_CELL_W = 184;  // floor so narrow tables still leave room for the pill
-                           // (cell pitch ≥ MIN_CELL_W + GUTTER_X keeps capped
-                           //  name pills from intersecting their neighbours)
+  const GUTTER_X = 56;     // horizontal space between cells
+  const ROW_EXTRA = 150;   // capacity + name + covers·time stacked below the glyph
+                           // inside the wrapped reservation card
+  const ROW_GAP = 40;      // breathing room between rows
+  const MIN_CELL_W = 230;  // floor so the wrapped card never reaches its neighbour
+                           // (cell pitch ≥ card width + GUTTER_X)
 
   const sorted = [...tables].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -31,7 +31,9 @@ export function computeAutoLayout(tables: Table[], targetAspect = 1.6): AutoLayo
 
   const cells = sorted.map(t => {
     const d = getGlyphDimensions(t.shape, t.seats);
-    return { id: t.id, gw: d.width, gh: d.height, w: Math.max(MIN_CELL_W, d.width) };
+    // Cell wide enough for the wrapped card (≈ glyph width + card padding),
+    // floored at MIN_CELL_W so adjacent cards keep clear horizontally.
+    return { id: t.id, gw: d.width, gh: d.height, w: Math.max(MIN_CELL_W, d.width + 56) };
   });
 
   // Wrap width that targets the canvas aspect (width/height): wider canvas →

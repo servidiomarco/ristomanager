@@ -9,6 +9,8 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { buildFloorLabels } from '../utils/labelPlacement';
+import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
@@ -1548,6 +1550,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
 
+      // Reserved tables render as a wrapped card (table glyph + info), like the
+      // booking modal — centred on the table's position.
+      if (reservation) {
+        const cardStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
+        const cardTime = reservation.reservation_time.split('T')[1]?.slice(0, 5) || null;
+        const cardW = Math.max(svgW + 24, 170);
+        return (
+          <div
+            key={table.id}
+            className={`absolute cursor-pointer ${isHighlighted ? 'z-30' : (isSearchMatch || isHoverMatch) ? 'z-20' : 'z-10'} ${isHidden ? 'opacity-40 grayscale' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-2xl outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
+            style={{ left: pos.x + svgW / 2, top: pos.y, transform: 'translateX(-50%)' }}
+            title={tooltipText}
+            onClick={() => handleEditClick(reservation)}
+          >
+            <ReservationCard
+              width={cardW}
+              selected={isHighlighted}
+              status={cardStatus}
+              tableLabel={table.name}
+              shape={table.shape}
+              seats={table.seats}
+              rotation={table.rotation}
+              name={reservation.customer_name}
+              capacity={table.seats}
+              covers={reservation.guests}
+              childrenCount={reservation.children}
+              time={cardTime}
+            />
+          </div>
+        );
+      }
+
       return (
         <div
             key={table.id}
@@ -1587,71 +1621,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <EyeOff size={8} />
                 </div>
             )}
-            {banquet && (
-                <div className="absolute bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }}>
-                    <BookOpen size={8} />
-                </div>
-            )}
-
-            {/* Caption: covers + time indicator */}
-            <div
-                className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
-                style={{ top: captionTopPx, fontSize: 18 }}
-            >
-                <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
-                <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
-                {captionIcon && captionTime && (
-                    <>
-                        <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
-                        <span className="inline-flex items-center gap-1" style={{ color: accentVar }}>
-                            {captionIcon === 'clock' && (
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-                                </svg>
-                            )}
-                            {captionTime}
-                        </span>
-                    </>
-                )}
-            </div>
-            {reservation && (
+            {/* Capacity chip (seat + N) under the table — only for tables without a
+                reservation card (free + banquet). Reserved tables show capacity in the card. */}
+            {!reservation && (
                 <div
-                    style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[17px] font-medium pl-1.5 pr-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px]"
-                    title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
+                    className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+                    style={{ top: captionTopPx, fontSize: 18 }}
                 >
-                    {reservation.source === ReservationSource.VOICE ? (
-                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                            <Mic className="h-4 w-4" />
-                        </span>
-                    ) : reservation.created_by_user_name ? (
-                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[12px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                            {getInitials(reservation.created_by_user_name)}
-                        </span>
-                    ) : (
-                        <span className="pl-1" />
-                    )}
-                    <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
-                    <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                        <Users size={18} /> {reservation.guests}
-                        {reservation.children && reservation.children > 0 ? (
-                            <span className="text-[14px] opacity-80">({reservation.children}b)</span>
-                        ) : null}
-                    </span>
-                </div>
-            )}
-            {banquet && (
-                <div
-                    style={{ top: pillTopPx }}
-                    className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[17px] font-medium px-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px] bg-[#4f46e5] text-[#ffffff]"
-                >
-                    <BookOpen size={19} className="flex-shrink-0" />
-                    <span className="truncate">{banquet.name}</span>
-                    {banquet.guests != null && (
-                        <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                            <Users size={18} /> {banquet.guests}
-                        </span>
-                    )}
+                    <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+                    <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
                 </div>
             )}
         </div>
@@ -2234,12 +2212,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const layoutAspect = mapCanvasSize.width > 0 && mapCanvasSize.height > 0
       ? Math.min(2.6, Math.max(0.6, mapCanvasSize.width / mapCanvasSize.height))
       : 1.6;
+    // Mirror the layout chosen in Sale & Tavoli so both views match:
+    //  - manual: the saved x/y of each table (the real planimetry)
+    //  - auto: tidy spaced rows via computeAutoLayout
     const mapLayout = computeAutoLayout(tablesInRoom, layoutAspect);
     let extentWidth: number;
     let extentHeight: number;
     let layoutPositions: Map<number, { x: number; y: number }> | undefined;
     if (layoutMode === 'manual' && tablesInRoom.length > 0) {
-      const MANUAL_PADDING = 60;
+      // Pad the extent for the wrapped card's overhang (wider than the glyph and
+      // extending below it) so edge cards aren't clipped.
       let maxRight = 0;
       let maxBottom = 0;
       for (const t of tablesInRoom) {
@@ -2247,14 +2229,48 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         maxRight = Math.max(maxRight, t.x + w);
         maxBottom = Math.max(maxBottom, t.y + h);
       }
-      extentWidth = maxRight + MANUAL_PADDING;
-      extentHeight = maxBottom + MANUAL_PADDING;
+      extentWidth = maxRight + 90;
+      extentHeight = maxBottom + 160;
       layoutPositions = undefined; // renderMapTable falls back to table.x/y
     } else {
       extentWidth = mapLayout.width;
       extentHeight = mapLayout.height;
       layoutPositions = mapLayout.positions;
     }
+
+    // Collision-aware reservation cards + banquet hulls/labels for this room.
+    const labelTables = tablesInRoom.map(t => {
+      const p = layoutPositions?.get(t.id) || { x: t.x, y: t.y };
+      return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: p.x, y: p.y };
+    });
+    const seatsById = new Map(tablesInRoom.map(t => [t.id, t.seats]));
+    const resCardTableIds: number[] = [];
+    const banquetTableIds = new Map<number, number[]>();
+    const banquetDataById = new Map<number, BanquetMenu>();
+    const reservationByTableId = new Map<number, Reservation>();
+    for (const t of tablesInRoom) {
+      const occ = getOccupierForTable(t.id);
+      if (occ?.kind === 'reservation') {
+        resCardTableIds.push(t.id);
+        reservationByTableId.set(t.id, occ.data);
+      } else if (occ?.kind === 'banquet') {
+        const arr = banquetTableIds.get(occ.data.id) || [];
+        arr.push(t.id);
+        banquetTableIds.set(occ.data.id, arr);
+        banquetDataById.set(occ.data.id, occ.data);
+      }
+    }
+    const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
+    const mapSelectedTableId = detailDrawerOpen ? (selectedReservation?.table_id ?? null) : null;
+    // Reservation info is now drawn as a card wrapping each table (see renderMapTable);
+    // buildFloorLabels only handles banquet hulls + their labels here.
+    const floorLabels = buildFloorLabels({
+      tables: labelTables,
+      reservationTableIds: [],
+      banquets: banquetGroups,
+      selectedTableId: mapSelectedTableId,
+    });
+
     // Fit into the canvas minus a safe margin so tables never touch the edges
     // or collide with the floating Legenda button in the corner. Manual layout
     // mirrors Sale & Tavoli: never zoom past 1:1 — the user laid the room out
@@ -2487,7 +2503,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
             )}
             <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
+              {/* Banquet hulls (behind tables) */}
+              {floorLabels.hulls.map((h, i) => (
+                <div key={`hull-${h.banquetId}-${i}`}
+                  className="absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none"
+                  style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
+              ))}
               {tablesInRoom.map(t => renderMapTable(t, layoutPositions))}
+              {/* Banquet event labels (one per cluster) */}
+              {floorLabels.banquetLabels.map((bl, i) => {
+                const data = banquetDataById.get(bl.banquetId);
+                if (!data) return null;
+                return (
+                  <div key={`blabel-${bl.banquetId}-${i}`} className="absolute" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
+                    <BanquetLabel width={bl.w} name={data.name} guests={data.guests} />
+                  </div>
+                );
+              })}
             </div>
 
             {/* Legend */}
@@ -3460,7 +3492,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         </div>
 
                         {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col h-full border-t lg:border-t-0 lg:border-l border-[var(--color-line)] pt-6 lg:pt-0 lg:pl-8">
+                        <div className="lg:col-span-7 flex flex-col h-full bg-[var(--color-surface-2)] rounded-2xl p-3 sm:p-4 lg:p-5">
                              {/* Section Header */}
                              <div className="flex items-center gap-3 pb-4 mb-4 border-b border-[var(--color-line)]">
                                 <MapPin className="h-4 w-4 text-[var(--color-fg-muted)]" />
@@ -3612,143 +3644,192 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  </div>
                              </div>
 
-                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--color-fg-muted)] mb-3 px-1">
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 rounded"></div> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></div> Capienza Insufficiente</div>
-                                 <div className="flex items-center gap-1.5">
-                                     <div className="w-3 h-3 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] rounded-full flex items-center justify-center">
-                                         <Combine size={6} />
-                                     </div>
-                                     Tavolo Unito
-                                 </div>
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] sm:text-[11px] text-[var(--color-fg-muted)] mb-3 px-1">
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></span> Libero</div>
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface)] border-2 border-emerald-500 rounded"></span> Consigliato</div>
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-fg)] rounded"></span> Selezionato</div>
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 rounded"></span> Occupato</div>
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></span> Capienza insuff.</div>
+                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-banquet-bg)] border border-[var(--color-banquet-border)] rounded"></span> Evento / Banchetto</div>
                              </div>
 
-                             <div className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] px-2 pb-2 sm:px-4 sm:pb-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
+                             <div className="flex-1 rounded-lg overflow-y-auto max-h-[320px] sm:max-h-[440px] relative">
                                 {isLoadingMerges && (
-                                    <div className="absolute inset-0 z-20 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                                    <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
                                         <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
                                             <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
                                             <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
                                         </div>
                                     </div>
                                 )}
-                                {displayedRooms.map(room => (
-                                    <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-3 sticky top-0 z-20 -mx-2 sm:-mx-4 px-3 sm:px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-line)]">{room.name}</h4>
-                                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-x-2 gap-y-7 sm:gap-x-3 sm:gap-y-8">
-                                                                                         {displayTables
-                                                .filter(t => t.room_id === room.id)
-                                                .filter(t => !displayTables.some(other =>
-                                                    other.merged_with && other.merged_with.length > 0 &&
-                                                    other.merged_with.map(id => Number(id)).includes(Number(t.id))
-                                                ))
-                                                .filter(t => !hiddenTableIds.has(t.id))
-                                                .map(table => {
-                                                const occupier = getOccupierForTableInForm(table.id);
-                                                const isOccupied = !!occupier;
-                                                const occupierIsBanquet = occupier?.kind === 'banquet';
-                                                const occupierLabel = occupier
-                                                  ? occupier.kind === 'reservation'
-                                                    ? formatShortName(occupier.data.customer_name)
-                                                    : occupier.data.name
-                                                  : '';
-                                                // Total covers (already includes children) + children breakdown for the pill.
-                                                const occupierGuests = occupier?.data.guests;
-                                                const occupierChildren = occupier?.kind === 'reservation' ? occupier.data.children : undefined;
+                                {displayedRooms.map(room => {
+                                    const baseRoomTables = displayTables
+                                        .filter(t => t.room_id === room.id)
+                                        .filter(t => !displayTables.some(other =>
+                                            other.merged_with && other.merged_with.length > 0 &&
+                                            other.merged_with.map(id => Number(id)).includes(Number(t.id))
+                                        ))
+                                        .filter(t => !hiddenTableIds.has(t.id));
+
+                                    // Partition the room's tables: banquet tables collapse into one
+                                    // grouped container per event; the rest render as selectable cards.
+                                    const banquetGroups = new Map<number, { banquet: BanquetMenu; tables: typeof baseRoomTables }>();
+                                    const normalEntries: { table: (typeof baseRoomTables)[number]; reservation: Reservation | null }[] = [];
+                                    baseRoomTables.forEach(table => {
+                                        const occupier = getOccupierForTableInForm(table.id);
+                                        if (occupier?.kind === 'banquet') {
+                                            const g = banquetGroups.get(occupier.data.id) ?? { banquet: occupier.data, tables: [] };
+                                            g.tables.push(table);
+                                            banquetGroups.set(occupier.data.id, g);
+                                        } else {
+                                            normalEntries.push({ table, reservation: occupier?.kind === 'reservation' ? occupier.data : null });
+                                        }
+                                    });
+
+                                    const tavoliCount = baseRoomTables.length;
+                                    const eventiCount = banquetGroups.size;
+                                    const occupatiCount = normalEntries.filter(e => e.reservation).length;
+                                    const guests = formData.guests || 1;
+
+                                    return (
+                                    <div key={room.id} className="mb-3 sm:mb-4 last:mb-0 bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 sm:p-4">
+                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] sticky top-0 z-20 -mx-3 sm:-mx-4 -mt-3 sm:-mt-4 mb-3 px-3 sm:px-4 pt-3 sm:pt-4 pb-2 bg-[var(--color-surface)] border-b border-[var(--color-line)] rounded-t-xl">
+                                            {room.name}
+                                            <span className="font-normal text-[var(--color-fg-muted)]">
+                                                {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
+                                                {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
+                                                {occupatiCount > 0 ? ` · ${occupatiCount} ${occupatiCount === 1 ? 'occupato' : 'occupati'}` : ''}
+                                            </span>
+                                        </h4>
+
+                                        {/* Banquet / event containers — one grouped card per event */}
+                                        {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
+                                            <div key={`banq-${banquet.id}`} className="mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3">
+                                                <div className="flex items-start gap-2 mb-3">
+                                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-banquet-accent)] text-white">
+                                                        <Calendar size={14} />
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-semibold text-[var(--color-banquet-fg-strong)] truncate">{banquet.name}</p>
+                                                        <p className="text-xs text-[var(--color-banquet-fg)]">
+                                                            {bTables.length} {bTables.length === 1 ? 'tavolo' : 'tavoli'} · {banquet.guests ?? 0} coperti · {banquet.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
+                                                    {bTables.map(t => (
+                                                        <div key={t.id} className="flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--color-banquet-border)] px-2 py-2 text-center">
+                                                            <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
+                                                            <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-banquet-fg)]">
+                                                                <Armchair size={11} /> {t.seats}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        {/* Selectable tables */}
+                                        {normalEntries.length > 0 && (
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-3 sm:gap-x-3 sm:gap-y-4 pt-2">
+                                            {normalEntries.map(({ table, reservation }) => {
+                                                const isOccupied = !!reservation;
+                                                const occLabel = reservation ? formatShortName(reservation.customer_name) : '';
+                                                const occGuests = reservation?.guests;
+                                                const occTime = reservation ? reservation.reservation_time.split('T')[1]?.slice(0, 5) ?? '' : '';
                                                 const isSelected = formData.table_id === table.id;
                                                 const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
-                                                const fitsGuests = table.seats >= (formData.guests || 1);
                                                 const isMerged = table.merged_with && table.merged_with.length > 0;
+                                                const insufficient = table.seats < guests;
+                                                const recommended = !isOccupied && table.seats >= guests && table.seats <= guests + 1;
 
                                                 return (
                                                     <button
                                                         key={table.id}
                                                         type="button"
-                                                        disabled={isOccupied || (!fitsGuests && !mergeMode)}
+                                                        disabled={isOccupied || (insufficient && !mergeMode)}
                                                         onClick={(e) => {
                                                             if (mergeMode || e.ctrlKey || e.metaKey) {
-                                                                // Multi-select mode for merging
                                                                 e.preventDefault();
                                                                 setSelectedTablesForMerge(prev =>
                                                                     prev.includes(table.id)
                                                                         ? prev.filter(id => id !== table.id)
                                                                         : [...prev, table.id]
                                                                 );
+                                                            } else if (formData.table_id === table.id) {
+                                                                // Toggle off: clicking the selected table again clears it.
+                                                                setFormData(prev => ({ ...prev, table_id: undefined }));
                                                             } else {
-                                                                // Normal single select for reservation - with validation
                                                                 handleTableSelection(table);
                                                             }
                                                         }}
-                                                        className={`
-                                                            relative w-full p-2 sm:p-3 rounded-md border text-center transition-colors group
-                                                            ${isSelectedForMerge
+                                                        className={`relative flex w-full min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-xl border p-2 sm:p-3 text-center transition-all ${
+                                                            isSelectedForMerge
                                                                 ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500 z-10'
                                                                 : isSelected
-                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
+                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-fg)] z-10'
                                                                     : isOccupied
-                                                                        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/15 opacity-90 cursor-not-allowed'
-                                                                        : fitsGuests
-                                                                            ? 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
-                                                                            : 'border-[var(--color-line)] bg-[var(--color-surface-3)] opacity-50 cursor-not-allowed'
-                                                            }
-                                                        `}
+                                                                        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/15 cursor-not-allowed'
+                                                                        : recommended
+                                                                            ? 'border-emerald-500 bg-[var(--color-surface)] ring-1 ring-emerald-500 hover:bg-[var(--color-surface-hover)]'
+                                                                            : insufficient
+                                                                                ? 'border-[var(--color-line)] bg-[var(--color-surface)] cursor-not-allowed'
+                                                                                : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                                        }`}
                                                     >
-                                                        {/* Merged Table Badge */}
-                                                        {isMerged && !isOccupied && (
-                                                            <div className="absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[8px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.5 rounded-full shadow-[var(--shadow-xs)] flex items-center gap-0.5 z-20">
-                                                                <Combine size={6} className="sm:hidden" />
-                                                                <Combine size={8} className="hidden sm:block" />
+                                                        {recommended && !isSelected && !isSelectedForMerge && (
+                                                            <span className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded-full bg-emerald-500 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-white shadow-[var(--shadow-xs)]">
+                                                                Consigliato
+                                                            </span>
+                                                        )}
+
+                                                        {isMerged && !isSelectedForMerge && (
+                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--shadow-xs)] ${isSelected ? 'bg-[var(--color-surface)] text-[var(--color-fg)]' : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'}`}>
+                                                                <Combine size={8} />
+                                                            </span>
+                                                        )}
+
+                                                        <TableGlyph
+                                                            name={table.name}
+                                                            seats={table.seats}
+                                                            shape={table.shape}
+                                                            status="libera"
+                                                            fit
+                                                        />
+
+                                                        {/* Capacity (chair icon) — shown on every table */}
+                                                        <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs ${isSelected ? 'text-[var(--color-fg-on-brand)]/80' : 'text-[var(--color-fg-muted)]'}`}>
+                                                            <Armchair size={11} /> {table.seats}
+                                                        </span>
+
+                                                        {/* Occupied footer: actual covers (people icon) + time */}
+                                                        {isOccupied && (
+                                                            <div className="mt-1 w-full border-t border-rose-200/70 dark:border-rose-500/30 pt-1">
+                                                                <p className="truncate text-[11px] sm:text-xs font-medium text-[var(--color-fg)]">{occLabel}</p>
+                                                                <p className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-[var(--color-fg-muted)]">
+                                                                    <Users size={10} /> {occGuests}{occTime ? ` · ${occTime}` : ''}
+                                                                </p>
                                                             </div>
                                                         )}
 
-                                                        <div className="flex flex-col items-center gap-1 w-full">
-                                                            <TableGlyph
-                                                                name={table.name}
-                                                                seats={table.seats}
-                                                                shape={table.shape}
-                                                                status="libera"
-                                                                fit
-                                                            />
-                                                            <div className={`text-[11px] sm:text-[13px] flex justify-center items-center gap-0.5 sm:gap-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
-                                                                <Armchair size={11} className="sm:hidden" />
-                                                                <Armchair size={13} className="hidden sm:block" />
-                                                                {table.seats}
-                                                            </div>
-                                                        </div>
-                                                        {isOccupied && occupier && (
-                                                            <div
-                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1 whitespace-nowrap text-[#ffffff] text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full shadow-[var(--shadow-xs)] ${occupierIsBanquet ? 'max-w-[170px] sm:max-w-[88%] bg-[#4f46e5]' : 'max-w-[170px] bg-[#e11d48]'}`}
-                                                                title={occupierIsBanquet ? undefined : `Prenotazione: ${occupierLabel}`}
-                                                            >
-                                                                <span className={`truncate min-w-0 ${occupierIsBanquet ? 'max-w-[4.5rem] sm:max-w-[6.5rem]' : ''}`}>{occupierLabel}</span>
-                                                                {occupierGuests != null && (
-                                                                    <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                                                                        <Users size={12} /> {occupierGuests}
-                                                                        {occupierChildren && occupierChildren > 0 ? (
-                                                                            <span className="text-[10px] opacity-80">({occupierChildren}b)</span>
-                                                                        ) : null}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        )}
                                                         {isSelected && !isSelectedForMerge && (
-                                                            <div className="absolute -top-2 -right-2 bg-[var(--color-fg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
-                                                                <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full m-1" />
-                                                            </div>
+                                                            <span className="absolute top-1.5 right-1.5 z-20 text-[var(--color-fg-on-brand)]">
+                                                                <Check size={15} strokeWidth={3} />
+                                                            </span>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <div className="absolute -top-2 -right-2 bg-indigo-600 rounded-full p-1 shadow-[var(--shadow-xs)] z-20 flex items-center justify-center">
+                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-indigo-600 p-1 shadow-[var(--shadow-xs)]">
                                                                 <Combine size={10} className="text-white" />
-                                                            </div>
+                                                            </span>
                                                         )}
                                                     </button>
                                                 );
                                             })}
                                         </div>
+                                        )}
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 {displayedRooms.length === 0 && (
                                     <div className="text-center py-10 text-[var(--color-fg-subtle)]">
                                         Nessuna sala trovata.
