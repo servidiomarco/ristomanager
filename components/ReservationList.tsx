@@ -9,7 +9,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { toTitleCase, getInitials } from '../utils/text';
+import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -3625,7 +3625,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  </div>
                              </div>
 
-                             <div className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] p-2 sm:p-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
+                             <div className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] px-2 pb-2 sm:px-4 sm:pb-4 overflow-y-auto max-h-[300px] sm:max-h-[400px] relative">
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-20 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
                                         <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
@@ -3636,8 +3636,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 )}
                                 {displayedRooms.map(room => (
                                     <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
-                                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
+                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-3 sticky top-0 z-20 -mx-2 sm:-mx-4 px-3 sm:px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-line)]">{room.name}</h4>
+                                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-x-2 gap-y-7 sm:gap-x-3 sm:gap-y-8">
                                                                                          {displayTables
                                                 .filter(t => t.room_id === room.id)
                                                 .filter(t => !displayTables.some(other =>
@@ -3651,9 +3651,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 const occupierIsBanquet = occupier?.kind === 'banquet';
                                                 const occupierLabel = occupier
                                                   ? occupier.kind === 'reservation'
-                                                    ? toTitleCase(occupier.data.customer_name)
+                                                    ? formatShortName(occupier.data.customer_name)
                                                     : occupier.data.name
                                                   : '';
+                                                // Total covers (already includes children) + children breakdown for the pill.
+                                                const occupierGuests = occupier?.data.guests;
+                                                const occupierChildren = occupier?.kind === 'reservation' ? occupier.data.children : undefined;
                                                 const isSelected = formData.table_id === table.id;
                                                 const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
                                                 const fitsGuests = table.seats >= (formData.guests || 1);
@@ -3679,7 +3682,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             }
                                                         }}
                                                         className={`
-                                                            relative p-2 sm:p-3 rounded-md border text-center transition-colors group
+                                                            relative w-full p-2 sm:p-3 rounded-md border text-center transition-colors group
                                                             ${isSelectedForMerge
                                                                 ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500 z-10'
                                                                 : isSelected
@@ -3700,7 +3703,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </div>
                                                         )}
 
-                                                        <div className="flex flex-col items-center gap-1">
+                                                        <div className="flex flex-col items-center gap-1 w-full">
                                                             <TableGlyph
                                                                 name={table.name}
                                                                 seats={table.seats}
@@ -3708,18 +3711,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                 status="libera"
                                                                 fit
                                                             />
-                                                            <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
-                                                                <Armchair size={8} className="sm:hidden" />
-                                                                <Armchair size={10} className="hidden sm:block" />
+                                                            <div className={`text-[11px] sm:text-[13px] flex justify-center items-center gap-0.5 sm:gap-1 ${isOccupied ? 'text-rose-700 dark:text-rose-400' : 'text-[var(--color-fg-muted)]'}`}>
+                                                                <Armchair size={11} className="sm:hidden" />
+                                                                <Armchair size={13} className="hidden sm:block" />
                                                                 {table.seats}
                                                             </div>
                                                         </div>
                                                         {isOccupied && occupier && (
                                                             <div
-                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-[#ffffff] text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10 ${occupierIsBanquet ? 'bg-[#4f46e5]' : 'bg-[#e11d48]'}`}
-                                                                title={occupierIsBanquet ? `Banchetto: ${occupierLabel}` : `Prenotazione: ${occupierLabel}`}
+                                                                className={`absolute -bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1 whitespace-nowrap text-[#ffffff] text-[11px] sm:text-xs font-medium px-2.5 py-0.5 rounded-full shadow-[var(--shadow-xs)] ${occupierIsBanquet ? 'max-w-[170px] sm:max-w-[88%] bg-[#4f46e5]' : 'max-w-[170px] bg-[#e11d48]'}`}
+                                                                title={occupierIsBanquet ? undefined : `Prenotazione: ${occupierLabel}`}
                                                             >
-                                                                {occupierLabel}
+                                                                <span className={`truncate min-w-0 ${occupierIsBanquet ? 'max-w-[4.5rem] sm:max-w-[6.5rem]' : ''}`}>{occupierLabel}</span>
+                                                                {occupierGuests != null && (
+                                                                    <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
+                                                                        <Users size={12} /> {occupierGuests}
+                                                                        {occupierChildren && occupierChildren > 0 ? (
+                                                                            <span className="text-[10px] opacity-80">({occupierChildren}b)</span>
+                                                                        ) : null}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {isSelected && !isSelectedForMerge && (
