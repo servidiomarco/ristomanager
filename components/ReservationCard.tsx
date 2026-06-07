@@ -73,6 +73,48 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
   );
 };
 
+export interface ReservationInfoPillProps {
+  width: number;
+  selected?: boolean;
+  status: 'attesa' | 'arrivato';
+  name: string;
+  covers: number;
+  childrenCount?: number | null;
+  time?: string | null;
+}
+
+// Compact floating pill used as a fallback when the wrap-card would overlap a
+// neighbour table (e.g. merged tables in tight manual layouts). Carries the
+// reservation info without the glyph; the table is drawn separately in its
+// usual spot, tinted by status. The collision-aware placement engine
+// (utils/labelPlacement.ts) decides where to park it.
+export const ReservationInfoPill: React.FC<ReservationInfoPillProps> = ({
+  width, selected, status, name, covers, childrenCount, time,
+}) => {
+  const p = PALETTE[status];
+  return (
+    <div
+      style={{ width, background: p.bg, borderColor: p.stroke }}
+      className={`flex flex-col items-center rounded-2xl border px-3 py-2 text-center shadow-[var(--shadow-md)] ${selected ? 'ring-2 ring-[var(--color-fg)] ring-offset-1' : ''}`}
+    >
+      <div className="w-full truncate text-[20px] font-semibold leading-tight" style={{ color: p.name }}>
+        {formatShortName(name)}
+      </div>
+      <div className="mt-1 flex items-center justify-center gap-2 whitespace-nowrap text-[19px] font-semibold leading-tight" style={{ color: p.name }}>
+        <Users size={20} className="flex-shrink-0 opacity-80" />
+        <span>{covers}{childrenCount && childrenCount > 0 ? ` (${childrenCount}b)` : ''}</span>
+        {time && (
+          <>
+            <span className="opacity-40">·</span>
+            <Clock size={20} className="flex-shrink-0 opacity-80" />
+            <span>{time}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export interface BanquetLabelProps {
   width: number;
   name: string;

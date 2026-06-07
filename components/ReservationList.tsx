@@ -9,9 +9,9 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { buildFloorLabels } from '../utils/labelPlacement';
+import { buildFloorLabels, findWrapCardConflicts, RES_PILL_H } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
-import { ReservationCard, BanquetLabel } from './ReservationCard';
+import { ReservationCard, BanquetLabel, ReservationInfoPill } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
@@ -1493,7 +1493,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const freeTablesCount = totalTablesInFilter - occupiedTablesInFilter;
 
   // Render logic for Map Table
-  const renderMapTable = (table: Table, layoutPositions?: Map<number, { x: number; y: number }>) => {
+  const renderMapTable = (
+    table: Table,
+    layoutPositions?: Map<number, { x: number; y: number }>,
+    conflictingReservationIds?: Set<number>,
+  ) => {
       const occupier = getOccupierForTable(table.id);
       const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
       const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
@@ -1552,8 +1556,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
 
       // Reserved tables render as a wrapped card (table glyph + info), like the
-      // booking modal — centred on the table's position.
-      if (reservation) {
+      // booking modal — centred on the table's position. If the card would
+      // cover a neighbouring table, fall through to the default branch (glyph
+      // only) and rely on a floating ReservationInfoPill placed by
+      // buildFloorLabels.
+      const wrapCardConflict = !!conflictingReservationIds?.has(table.id);
+      if (reservation && !wrapCardConflict) {
         const cardStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
         const cardTime = reservation.reservation_time.split('T')[1]?.slice(0, 5) || null;
         const cardW = Math.max(svgW + 24, 200);
@@ -1622,9 +1630,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <EyeOff size={8} />
                 </div>
             )}
-            {/* Capacity chip (seat + N) under the table — only for tables without a
-                reservation card (free + banquet). Reserved tables show capacity in the card. */}
-            {!reservation && (
+            {/* Capacity chip (seat + N) under the table — for tables without a
+                wrap reservation card (free + banquet + fallback-pill reservations).
+                Reserved tables with a wrap card show capacity in the card. */}
+            {(!reservation || wrapCardConflict) && (
                 <div
                     className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
                     style={{ top: captionTopPx, fontSize: 18 }}
@@ -2263,13 +2272,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
     const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
     const mapSelectedTableId = detailDrawerOpen ? (selectedReservation?.table_id ?? null) : null;
-    // Reservation info is now drawn as a card wrapping each table (see renderMapTable);
-    // buildFloorLabels only handles banquet hulls + their labels here.
+    // Reservation info is normally drawn as a card wrapping each table (see
+    // renderMapTable). When that wrap-card would cover a neighbouring table
+    // (typical with merged tables in tight manual layouts), we fall back to a
+    // floating compact pill placed by buildFloorLabels.
+    const cardWFor = (t: { shape: TableShape; seats: number }) =>
+      Math.max(getGlyphDimensions(t.shape, t.seats).width + 24, 200);
+    const conflictingReservationIds = findWrapCardConflicts(
+      labelTables,
+      reservationByTableId.keys(),
+      cardWFor,
+    );
     const floorLabels = buildFloorLabels({
       tables: labelTables,
-      reservationTableIds: [],
+      reservationTableIds: [...conflictingReservationIds],
       banquets: banquetGroups,
       selectedTableId: mapSelectedTableId,
+      cardHeight: RES_PILL_H,
     });
     // Scoped sequential color assignment so two banquets in the same room are
     // guaranteed distinct (id % palette could collide; e.g. ids 5 and 10).
@@ -2514,7 +2533,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   className={`${banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                   style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
               ))}
-              {tablesInRoom.map(t => renderMapTable(t, layoutPositions))}
+              {tablesInRoom.map(t => renderMapTable(t, layoutPositions, conflictingReservationIds))}
+              {/* Floating reservation info pills — fallback for reservations
+                  whose wrap-card would have covered a neighbour table. */}
+              {[...floorLabels.reservationCards.entries()].map(([tid, cp]) => {
+                const r = reservationByTableId.get(tid);
+                if (!r) return null;
+                const status = r.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
+                const time = r.reservation_time.split('T')[1]?.slice(0, 5) || null;
+                const isHighlighted = selectedReservation?.id === r.id && detailDrawerOpen;
+                return (
+                  <div
+                    key={`rpill-${tid}`}
+                    className="absolute cursor-pointer"
+                    style={{ left: cp.x, top: cp.y, zIndex: 16 }}
+                    onClick={() => handleEditClick(r)}
+                    title={`Occupato da: ${toTitleCase(r.customer_name)}`}
+                  >
+                    <ReservationInfoPill
+                      width={cp.w}
+                      selected={isHighlighted}
+                      status={status}
+                      name={r.customer_name}
+                      covers={r.guests}
+                      childrenCount={r.children}
+                      time={time}
+                    />
+                  </div>
+                );
+              })}
               {/* Banquet event labels (one per banquet) */}
               {floorLabels.banquetLabels.map((bl, i) => {
                 const data = banquetDataById.get(bl.banquetId);
@@ -4139,6 +4186,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           };
 
           const isHidden = hiddenTableIds.has(table.id);
+          const isMerged = !!(table.merged_with && table.merged_with.length > 0);
 
           return (
             <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAssignTableModal(null)}>
@@ -4158,6 +4206,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {canEdit && isMerged && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await onSplitTable(table.id, dateOnly, effectiveShift);
+                            await refreshMerges(dateOnly, effectiveShift);
+                            showToast('Tavoli divisi con successo', 'success');
+                            setAssignTableModal(null);
+                          } catch {
+                            showToast('Errore durante la divisione dei tavoli', 'error');
+                          }
+                        }}
+                        className="p-2 rounded-lg text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/15 transition-colors"
+                        title={`Dividi i tavoli uniti (${table.name})`}
+                      >
+                        <Scissors className="h-5 w-5" />
+                      </button>
+                    )}
                     {canEdit && (
                       <button
                         onClick={async () => {
