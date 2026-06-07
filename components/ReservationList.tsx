@@ -10,7 +10,7 @@ import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
-import { banquetColorClass } from '../utils/banquetColors';
+import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
@@ -2271,6 +2271,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       banquets: banquetGroups,
       selectedTableId: mapSelectedTableId,
     });
+    // Scoped sequential color assignment so two banquets in the same room are
+    // guaranteed distinct (id % palette could collide; e.g. ids 5 and 10).
+    const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
 
     // Fit into the canvas minus a safe margin so tables never touch the edges
     // or collide with the floating Legenda button in the corner. Manual layout
@@ -2508,7 +2511,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   events in the same room are visually distinct. */}
               {floorLabels.hulls.map((h, i) => (
                 <div key={`hull-${h.banquetId}-${i}`}
-                  className={`${banquetColorClass(h.banquetId)} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
+                  className={`${banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                   style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
               ))}
               {tablesInRoom.map(t => renderMapTable(t, layoutPositions))}
@@ -2516,9 +2519,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {floorLabels.banquetLabels.map((bl, i) => {
                 const data = banquetDataById.get(bl.banquetId);
                 if (!data) return null;
+                const colorClass = banquetColorByBanquetId.get(bl.banquetId) || 'banquet-color-0';
                 return (
                   <div key={`blabel-${bl.banquetId}-${i}`} className="absolute" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
-                    <BanquetLabel width={bl.w} name={data.name} guests={data.guests} banquetId={bl.banquetId} />
+                    <BanquetLabel width={bl.w} name={data.name} guests={data.guests} colorClass={colorClass} />
                   </div>
                 );
               })}
@@ -3692,6 +3696,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const eventiCount = banquetGroups.size;
                                     const occupatiCount = normalEntries.filter(e => e.reservation).length;
                                     const guests = formData.guests || 1;
+                                    // Sequential per-room color assignment so the modal matches the floor plan.
+                                    const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
 
                                     return (
                                     <div key={room.id} className="mb-3 sm:mb-4 last:mb-0 bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 sm:p-4">
@@ -3707,7 +3713,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         {/* Banquet / event containers — one grouped card per event,
                                             tinted with the same per-banquet color used on the floor plan. */}
                                         {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
-                                            <div key={`banq-${banquet.id}`} className={`${banquetColorClass(banquet.id)} mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3`}>
+                                            <div key={`banq-${banquet.id}`} className={`${modalBanquetColorByBanquetId.get(banquet.id) || 'banquet-color-0'} mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3`}>
                                                 <div className="flex items-start gap-2 mb-3">
                                                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-banquet-accent)] text-white">
                                                         <Calendar size={14} />

@@ -8,10 +8,16 @@
 
 const PALETTE_SIZE = 5;
 
-export function getBanquetColorIndex(banquetId: number): number {
-  return ((banquetId % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE;
-}
-
-export function banquetColorClass(banquetId: number): string {
-  return `banquet-color-${getBanquetColorIndex(banquetId)}`;
+// Assigns a color class to each banquet currently visible in a view by
+// sequential order (sorted by id) — NOT by id modulo. Two distinct banquets
+// in the same scope are guaranteed distinct as long as the scope has
+// ≤ PALETTE_SIZE banquets; beyond that the palette cycles. Build the map per
+// view scope (room map, booking modal) so colors are stable within a render.
+export function buildBanquetColorClassMap(banquetIds: Iterable<number>): Map<number, string> {
+  const unique = [...new Set([...banquetIds])].sort((a, b) => a - b);
+  const m = new Map<number, string>();
+  unique.forEach((id, i) => {
+    m.set(id, `banquet-color-${i % PALETTE_SIZE}`);
+  });
+  return m;
 }

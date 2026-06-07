@@ -5,7 +5,7 @@ import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, C
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
-import { banquetColorClass } from '../utils/banquetColors';
+import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
@@ -538,7 +538,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       banquets: banquetGroups,
       selectedTableId,
     });
-    return { ...result, banquetDataById, banquetGroups };
+    // Assign a stable color class to each banquet present in this room — scoped
+    // sequential so two distinct banquets never collide (unlike id % palette).
+    const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
+    return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
 
@@ -1504,7 +1507,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
               <div key={`hull-${h.banquetId}-${i}`}
-                className={`${banquetColorClass(h.banquetId)} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
+                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
@@ -1512,9 +1515,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {floorLabels.banquetLabels.map((bl, i) => {
               const data = floorLabels.banquetDataById.get(bl.banquetId);
               if (!data) return null;
+              const colorClass = floorLabels.banquetColorByBanquetId.get(bl.banquetId) || 'banquet-color-0';
               return (
                 <div key={`blabel-${bl.banquetId}-${i}`} className="absolute pointer-events-none" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
-                  <BanquetLabel width={bl.w} name={data.name} guests={data.guests} banquetId={bl.banquetId} />
+                  <BanquetLabel width={bl.w} name={data.name} guests={data.guests} colorClass={colorClass} />
                 </div>
               );
             })}

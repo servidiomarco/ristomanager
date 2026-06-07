@@ -2,7 +2,6 @@ import React from 'react';
 import { Users, Clock, Armchair, BookOpen } from 'lucide-react';
 import { TableShape } from '../types';
 import { formatShortName } from '../utils/text';
-import { banquetColorClass } from '../utils/banquetColors';
 import { TableGlyph } from './TableGlyph';
 
 export type CardStatus = 'attesa' | 'arrivato' | 'banchetto';
@@ -78,17 +77,17 @@ export interface BanquetLabelProps {
   width: number;
   name: string;
   guests?: number | null;
-  banquetId: number;            // drives the per-banquet color variant
+  colorClass: string;           // banquet-color-N class assigned by the parent view
 }
 
 // Single event label for a banquet: name + covers (one per banquet, anchored
 // to the primary cluster's hull — see utils/labelPlacement.ts). The
 // banquet-color-X wrapper class redefines --color-banquet-* so the label tint
 // matches the hulls of the same banquet.
-export const BanquetLabel: React.FC<BanquetLabelProps> = ({ width, name, guests, banquetId }) => (
+export const BanquetLabel: React.FC<BanquetLabelProps> = ({ width, name, guests, colorClass }) => (
   <div
     style={{ width }}
-    className={`${banquetColorClass(banquetId)} flex items-center gap-2 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-3 py-2 shadow-[var(--shadow-sm)]`}
+    className={`${colorClass} flex items-center gap-2 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-3 py-2 shadow-[var(--shadow-sm)]`}
   >
     <BookOpen size={18} className="flex-shrink-0 text-[var(--color-banquet-accent)]" />
     <span className="truncate text-[16px] font-semibold text-[var(--color-banquet-fg-strong)]">{name}</span>
