@@ -10,6 +10,7 @@ import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
+import { banquetColorClass } from '../utils/banquetColors';
 import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
@@ -2503,20 +2504,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
             )}
             <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
-              {/* Banquet hulls (behind tables) */}
+              {/* Banquet hulls (behind tables) — tinted per banquet so two
+                  events in the same room are visually distinct. */}
               {floorLabels.hulls.map((h, i) => (
                 <div key={`hull-${h.banquetId}-${i}`}
-                  className="absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none"
+                  className={`${banquetColorClass(h.banquetId)} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                   style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
               ))}
               {tablesInRoom.map(t => renderMapTable(t, layoutPositions))}
-              {/* Banquet event labels (one per cluster) */}
+              {/* Banquet event labels (one per banquet) */}
               {floorLabels.banquetLabels.map((bl, i) => {
                 const data = banquetDataById.get(bl.banquetId);
                 if (!data) return null;
                 return (
                   <div key={`blabel-${bl.banquetId}-${i}`} className="absolute" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
-                    <BanquetLabel width={bl.w} name={data.name} guests={data.guests} />
+                    <BanquetLabel width={bl.w} name={data.name} guests={data.guests} banquetId={bl.banquetId} />
                   </div>
                 );
               })}
@@ -3702,9 +3704,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             </span>
                                         </h4>
 
-                                        {/* Banquet / event containers — one grouped card per event */}
+                                        {/* Banquet / event containers — one grouped card per event,
+                                            tinted with the same per-banquet color used on the floor plan. */}
                                         {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
-                                            <div key={`banq-${banquet.id}`} className="mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3">
+                                            <div key={`banq-${banquet.id}`} className={`${banquetColorClass(banquet.id)} mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3`}>
                                                 <div className="flex items-start gap-2 mb-3">
                                                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-banquet-accent)] text-white">
                                                         <Calendar size={14} />

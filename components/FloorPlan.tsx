@@ -5,6 +5,7 @@ import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, C
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
+import { banquetColorClass } from '../utils/banquetColors';
 import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
@@ -1499,20 +1500,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 transformOrigin: 'top left'
             }}
           >
-            {/* Banquet hulls (behind tables) */}
+            {/* Banquet hulls (behind tables) — tinted per banquet so two events
+                in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
               <div key={`hull-${h.banquetId}-${i}`}
-                className="absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none"
+                className={`${banquetColorClass(h.banquetId)} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
-            {/* Banquet event labels (one per cluster) */}
+            {/* Banquet event labels (one per banquet) */}
             {floorLabels.banquetLabels.map((bl, i) => {
               const data = floorLabels.banquetDataById.get(bl.banquetId);
               if (!data) return null;
               return (
                 <div key={`blabel-${bl.banquetId}-${i}`} className="absolute pointer-events-none" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
-                  <BanquetLabel width={bl.w} name={data.name} guests={data.guests} />
+                  <BanquetLabel width={bl.w} name={data.name} guests={data.guests} banquetId={bl.banquetId} />
                 </div>
               );
             })}

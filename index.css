@@ -248,6 +248,88 @@
 }
 
 /* ===========================================================================
+   Per-banquet color variants — applied on hull / label / modal container
+   wrappers so two banquets in the same room read as distinct events. The
+   class redefines --color-banquet-* on its subtree; existing utility classes
+   like bg-[var(--color-banquet-bg)] inside pick up the override automatically.
+   ========================================================================= */
+/* 0 — violet (matches default) */
+.banquet-color-0 {
+  --color-banquet-bg: #f5f3ff;
+  --color-banquet-border: #ddd6fe;
+  --color-banquet-fg: #6d28d9;
+  --color-banquet-fg-strong: #5b21b6;
+  --color-banquet-accent: #7c3aed;
+}
+.dark .banquet-color-0 {
+  --color-banquet-bg: rgba(124, 58, 237, 0.14);
+  --color-banquet-border: rgba(124, 58, 237, 0.38);
+  --color-banquet-fg: #c4b5fd;
+  --color-banquet-fg-strong: #ddd6fe;
+  --color-banquet-accent: #a78bfa;
+}
+/* 1 — amber */
+.banquet-color-1 {
+  --color-banquet-bg: #fffbeb;
+  --color-banquet-border: #fde68a;
+  --color-banquet-fg: #b45309;
+  --color-banquet-fg-strong: #78350f;
+  --color-banquet-accent: #d97706;
+}
+.dark .banquet-color-1 {
+  --color-banquet-bg: rgba(217, 119, 6, 0.16);
+  --color-banquet-border: rgba(217, 119, 6, 0.42);
+  --color-banquet-fg: #fcd34d;
+  --color-banquet-fg-strong: #fde68a;
+  --color-banquet-accent: #fbbf24;
+}
+/* 2 — rose */
+.banquet-color-2 {
+  --color-banquet-bg: #fff1f2;
+  --color-banquet-border: #fecdd3;
+  --color-banquet-fg: #be123c;
+  --color-banquet-fg-strong: #881337;
+  --color-banquet-accent: #e11d48;
+}
+.dark .banquet-color-2 {
+  --color-banquet-bg: rgba(225, 29, 72, 0.14);
+  --color-banquet-border: rgba(225, 29, 72, 0.38);
+  --color-banquet-fg: #fda4af;
+  --color-banquet-fg-strong: #fecdd3;
+  --color-banquet-accent: #fb7185;
+}
+/* 3 — fuchsia */
+.banquet-color-3 {
+  --color-banquet-bg: #fdf4ff;
+  --color-banquet-border: #f5d0fe;
+  --color-banquet-fg: #a21caf;
+  --color-banquet-fg-strong: #701a75;
+  --color-banquet-accent: #c026d3;
+}
+.dark .banquet-color-3 {
+  --color-banquet-bg: rgba(192, 38, 211, 0.14);
+  --color-banquet-border: rgba(192, 38, 211, 0.38);
+  --color-banquet-fg: #f0abfc;
+  --color-banquet-fg-strong: #f5d0fe;
+  --color-banquet-accent: #e879f9;
+}
+/* 4 — teal */
+.banquet-color-4 {
+  --color-banquet-bg: #f0fdfa;
+  --color-banquet-border: #99f6e4;
+  --color-banquet-fg: #0f766e;
+  --color-banquet-fg-strong: #115e59;
+  --color-banquet-accent: #0d9488;
+}
+.dark .banquet-color-4 {
+  --color-banquet-bg: rgba(13, 148, 136, 0.16);
+  --color-banquet-border: rgba(13, 148, 136, 0.42);
+  --color-banquet-fg: #5eead4;
+  --color-banquet-fg-strong: #99f6e4;
+  --color-banquet-accent: #2dd4bf;
+}
+
+/* ===========================================================================
    Floor editor — overlap prevention
    A dragged (or edited) table whose footprint would collide with another goes
    into an invalid state: body + chairs turn red and a dashed clearance box
