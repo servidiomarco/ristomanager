@@ -31,25 +31,21 @@ export interface CardPlacement {
   anchor: { x: number; y: number }; // table/hull edge point the card belongs to
 }
 
-export interface Connector { x1: number; y1: number; x2: number; y2: number; }
-
 export interface BanquetHull {
   banquetId: number;
   box: Box;
-  hasLabel: boolean;            // the single cluster that carries the event label
 }
 
 export interface FloorLabelsResult {
   hulls: BanquetHull[];
   reservationCards: Map<number, CardPlacement>;        // by tableId
-  banquetLabels: Array<CardPlacement & { banquetId: number }>; // one per cluster
-  connectors: Connector[];
+  banquetLabels: Array<CardPlacement & { banquetId: number }>; // ONE per banquet
 }
 
 // --- Tunables --------------------------------------------------------------
 export const CHIP_H = 26;             // capacity chip strip height below the table
 export const CARD_H = 92;             // reservation card height (capacity + name + covers)
-export const BANQUET_LABEL_H = 38;    // banquet event label height (1 line)
+export const BANQUET_LABEL_H = 48;    // banquet event label height (1 line, bigger font)
 const RES_CARD_MIN_W = 160;           // legible minimum card width
 const RES_CARD_MAX_W = 260;
 const GAP = 10;                       // gap between an anchor and its attached card
@@ -58,8 +54,8 @@ const MAX_NUDGE_RING = 28;            // how far the ring search goes
 const PAD = 3;                        // extra clearance so things never touch
 const CLUSTER_GAP = 48;              // max edge gap to merge banquet tables into one hull
 const HULL_PAD = 12;                  // padding around a banquet cluster hull
-const BANQUET_LABEL_MIN_W = 120;
-const BANQUET_LABEL_MAX_W = 320;
+const BANQUET_LABEL_MIN_W = 240;     // wide enough so event names don't truncate to "C..."
+const BANQUET_LABEL_MAX_W = 380;
 
 export function boxesOverlap(a: Box, b: Box, pad = 0): boolean {
   return (
@@ -209,9 +205,12 @@ export function buildFloorLabels(opts: {
 
   const obstacles: Box[] = opts.tables.map(tablePhysicalBox);
 
-  // --- banquet hulls -------------------------------------------------------
-  // One tinted hull per proximity cluster; each cluster carries the event
-  // label so multiple banquets (and split banquets) are always identifiable.
+  // --- banquet hulls + labels ----------------------------------------------
+  // One tinted hull per proximity cluster (so spread banquets read as one
+  // event visually), but exactly ONE label per banquet — anchored to the
+  // PRIMARY cluster (most tables, ties broken by area). Repeating the same
+  // truncated pill over every cluster only added noise; the violet tint and
+  // single legible label are enough to identify the event.
   const hulls: BanquetHull[] = [];
   const banquetLabelSpecs: CardSpec[] = [];
   const specKeyToBanquet = new Map<string, number>();
@@ -219,21 +218,33 @@ export function buildFloorLabels(opts: {
     const memberTables = b.tableIds.map(id => byId.get(id)).filter((t): t is FloorTable => !!t);
     if (memberTables.length === 0) continue;
     const clusters = clusterTables(memberTables);
-    clusters.forEach((c, i) => {
-      const box = hullBox(c);
+    const clusterBoxes = clusters.map(hullBox);
+    for (const box of clusterBoxes) {
       obstacles.push(box);
-      hulls.push({ banquetId: b.id, box, hasLabel: true });
-      const key = `b${b.id}#${i}`;
-      specKeyToBanquet.set(key, b.id);
-      const w = Math.min(BANQUET_LABEL_MAX_W, Math.max(BANQUET_LABEL_MIN_W, box.w));
-      banquetLabelSpecs.push({
-        key,
-        anchor: box,
-        centerX: box.x + box.w / 2,
-        w,
-        h: BANQUET_LABEL_H,
-        selected: false,
-      });
+      hulls.push({ banquetId: b.id, box });
+    }
+    // Pick the primary cluster: most tables, then largest area.
+    let primaryIdx = 0;
+    for (let i = 1; i < clusters.length; i++) {
+      const a = clusters[primaryIdx];
+      const c = clusters[i];
+      const areaA = clusterBoxes[primaryIdx].w * clusterBoxes[primaryIdx].h;
+      const areaC = clusterBoxes[i].w * clusterBoxes[i].h;
+      if (c.length > a.length || (c.length === a.length && areaC > areaA)) {
+        primaryIdx = i;
+      }
+    }
+    const anchor = clusterBoxes[primaryIdx];
+    const key = `b${b.id}`;
+    specKeyToBanquet.set(key, b.id);
+    const w = Math.min(BANQUET_LABEL_MAX_W, Math.max(BANQUET_LABEL_MIN_W, anchor.w));
+    banquetLabelSpecs.push({
+      key,
+      anchor,
+      centerX: anchor.x + anchor.w / 2,
+      w,
+      h: BANQUET_LABEL_H,
+      selected: false,
     });
   }
 
@@ -264,7 +275,6 @@ export function buildFloorLabels(opts: {
   const placed: Box[] = [];
   const reservationCards = new Map<number, CardPlacement>();
   const banquetLabels: Array<CardPlacement & { banquetId: number }> = [];
-  const connectors: Connector[] = [];
 
   for (const spec of ordered) {
     const p = placeOne(spec, obstacles, placed);
@@ -274,11 +284,7 @@ export function buildFloorLabels(opts: {
     } else {
       banquetLabels.push({ ...p, banquetId: specKeyToBanquet.get(spec.key)! });
     }
-    if (!p.attached) {
-      const cardEdgeY = p.anchor.y > p.y ? p.y + p.h : p.y; // edge facing the table
-      connectors.push({ x1: p.anchor.x, y1: p.anchor.y, x2: p.x + p.w / 2, y2: cardEdgeY });
-    }
   }
 
-  return { hulls, reservationCards, banquetLabels, connectors };
+  return { hulls, reservationCards, banquetLabels };
 }
