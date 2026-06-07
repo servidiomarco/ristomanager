@@ -1556,7 +1556,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (reservation) {
         const cardStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
         const cardTime = reservation.reservation_time.split('T')[1]?.slice(0, 5) || null;
-        const cardW = Math.max(svgW + 24, 170);
+        const cardW = Math.max(svgW + 24, 200);
         return (
           <div
             key={table.id}

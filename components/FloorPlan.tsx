@@ -997,7 +997,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
              interactive box but events still bubble so dragging keeps working. */
           <div className="absolute left-1/2 top-0 -translate-x-1/2">
             <ReservationCard
-              width={Math.max(svgW + 24, 170)}
+              width={Math.max(svgW + 24, 200)}
               selected={isSelected && canEdit}
               status={reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa'}
               tableLabel={table.name}

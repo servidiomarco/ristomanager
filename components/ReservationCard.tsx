@@ -46,23 +46,23 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
       <div style={{ transform: rotation ? `rotate(${rotation}deg)` : undefined }}>
         <TableGlyph name={tableLabel} seats={seats} shape={shape} status="libera" party={covers ?? undefined} chairColor={p.chair} />
       </div>
-      <div className="mt-1 flex items-center justify-center gap-1.5 text-[15px] font-medium" style={{ color: 'var(--tg-covers)' }}>
-        <Armchair size={17} className="flex-shrink-0" />
+      <div className="mt-1 flex items-center justify-center gap-1.5 text-[17px] font-medium" style={{ color: 'var(--tg-covers)' }}>
+        <Armchair size={20} className="flex-shrink-0" />
         <span>{capacity}</span>
       </div>
       {hasInfo && (
         <>
           <div className="my-1.5 w-full border-t" style={{ borderColor: p.stroke }} />
-          <div className="w-full truncate text-[17px] font-semibold leading-tight" style={{ color: p.name }}>
+          <div className="w-full truncate text-[20px] font-semibold leading-tight" style={{ color: p.name }}>
             {formatShortName(name!)}
           </div>
-          <div className="mt-1 flex items-center justify-center gap-1.5 whitespace-nowrap text-[15px] leading-tight" style={{ color: p.name }}>
-            <Users size={16} className="flex-shrink-0 opacity-70" />
+          <div className="mt-1.5 flex items-center justify-center gap-2 whitespace-nowrap text-[19px] font-semibold leading-tight" style={{ color: p.name }}>
+            <Users size={20} className="flex-shrink-0 opacity-80" />
             <span>{covers}{childrenCount && childrenCount > 0 ? ` (${childrenCount}b)` : ''}</span>
             {time && (
               <>
                 <span className="opacity-40">·</span>
-                <Clock size={16} className="flex-shrink-0 opacity-70" />
+                <Clock size={20} className="flex-shrink-0 opacity-80" />
                 <span>{time}</span>
               </>
             )}
