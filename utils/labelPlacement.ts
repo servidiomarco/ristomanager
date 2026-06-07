@@ -45,7 +45,7 @@ export interface FloorLabelsResult {
 // --- Tunables --------------------------------------------------------------
 export const CHIP_H = 26;             // capacity chip strip height below the table
 export const CARD_H = 92;             // reservation card height (capacity + name + covers)
-export const BANQUET_LABEL_H = 56;    // banquet event label height (1 line, 18px font)
+export const BANQUET_LABEL_H = 64;    // banquet event label height (1 line, 20px font)
 const RES_CARD_MIN_W = 160;           // legible minimum card width
 const RES_CARD_MAX_W = 260;
 const GAP = 10;                       // gap between an anchor and its attached card
