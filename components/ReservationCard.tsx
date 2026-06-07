@@ -87,12 +87,12 @@ export interface BanquetLabelProps {
 export const BanquetLabel: React.FC<BanquetLabelProps> = ({ width, name, guests, colorClass }) => (
   <div
     style={{ width }}
-    className={`${colorClass} flex items-center gap-2 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-3 py-2 shadow-[var(--shadow-sm)]`}
+    className={`${colorClass} flex items-center gap-2 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-3.5 py-2.5 shadow-[var(--shadow-sm)]`}
   >
-    <BookOpen size={18} className="flex-shrink-0 text-[var(--color-banquet-accent)]" />
-    <span className="truncate text-[16px] font-semibold text-[var(--color-banquet-fg-strong)]">{name}</span>
+    <BookOpen size={20} className="flex-shrink-0 text-[var(--color-banquet-accent)]" />
+    <span className="truncate text-[18px] font-semibold text-[var(--color-banquet-fg-strong)]">{name}</span>
     {guests != null && (
-      <span className="flex-shrink-0 whitespace-nowrap text-[15px] font-medium text-[var(--color-banquet-fg)]">
+      <span className="flex-shrink-0 whitespace-nowrap text-[17px] font-medium text-[var(--color-banquet-fg)]">
         · {guests} coperti
       </span>
     )}

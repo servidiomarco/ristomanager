@@ -45,7 +45,7 @@ export interface FloorLabelsResult {
 // --- Tunables --------------------------------------------------------------
 export const CHIP_H = 26;             // capacity chip strip height below the table
 export const CARD_H = 92;             // reservation card height (capacity + name + covers)
-export const BANQUET_LABEL_H = 48;    // banquet event label height (1 line, bigger font)
+export const BANQUET_LABEL_H = 56;    // banquet event label height (1 line, 18px font)
 const RES_CARD_MIN_W = 160;           // legible minimum card width
 const RES_CARD_MAX_W = 260;
 const GAP = 10;                       // gap between an anchor and its attached card
@@ -54,8 +54,8 @@ const MAX_NUDGE_RING = 28;            // how far the ring search goes
 const PAD = 3;                        // extra clearance so things never touch
 const CLUSTER_GAP = 48;              // max edge gap to merge banquet tables into one hull
 const HULL_PAD = 12;                  // padding around a banquet cluster hull
-const BANQUET_LABEL_MIN_W = 240;     // wide enough so event names don't truncate to "C..."
-const BANQUET_LABEL_MAX_W = 380;
+const BANQUET_LABEL_MIN_W = 290;     // wide enough so event names don't truncate at 18px
+const BANQUET_LABEL_MAX_W = 440;
 
 export function boxesOverlap(a: Box, b: Box, pad = 0): boolean {
   return (
