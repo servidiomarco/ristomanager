@@ -14,11 +14,11 @@ export interface BanquetLabelProps {
 // matches the hulls of the same banquet.
 export const BanquetLabel: React.FC<BanquetLabelProps> = ({ width, name, guests, colorClass }) => (
   <div
-    style={{ width }}
-    className={`${colorClass} flex items-center gap-2.5 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-4 py-3 shadow-[var(--shadow-sm)]`}
+    style={{ minWidth: width }}
+    className={`${colorClass} inline-flex items-center gap-2.5 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] px-4 py-3 shadow-[var(--shadow-sm)]`}
   >
     <BookOpen size={22} className="flex-shrink-0 text-[var(--color-banquet-accent)]" />
-    <span className="min-w-0 flex-1 truncate text-[20px] font-semibold text-[var(--color-banquet-fg-strong)]">{name}</span>
+    <span className="whitespace-nowrap text-[20px] font-semibold text-[var(--color-banquet-fg-strong)]">{name}</span>
     {guests != null && (
       <span className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-[19px] font-semibold text-[var(--color-banquet-fg)]">
         <Users size={20} className="opacity-80" />

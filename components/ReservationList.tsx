@@ -342,6 +342,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
+  // Long-press support for touch (no hover on iPad). Holding a tavolo ~450ms
+  // shows the name pill peek; tap continues to open the detail drawer. The
+  // wasLongPressRef flag suppresses the synthetic click that follows touchend.
+  const longPressTimerRef = useRef<number | null>(null);
+  const wasLongPressRef = useRef(false);
+  const longPressHideTimerRef = useRef<number | null>(null);
+  const startMapLongPress = (tableId: number) => {
+    wasLongPressRef.current = false;
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    if (longPressHideTimerRef.current) window.clearTimeout(longPressHideTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      wasLongPressRef.current = true;
+      setHoveredMapTableId(tableId);
+    }, 450);
+  };
+  const cancelMapLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+  const endMapLongPress = () => {
+    cancelMapLongPress();
+    if (wasLongPressRef.current) {
+      if (longPressHideTimerRef.current) window.clearTimeout(longPressHideTimerRef.current);
+      longPressHideTimerRef.current = window.setTimeout(() => setHoveredMapTableId(null), 1200);
+    }
+  };
   const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note' | 'tables' | 'bookedAt'; text: string; x: number; y: number } | null>(null);
 
   // Desktop breakpoint for split-view (>= 1024px)
@@ -1566,7 +1594,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             title={tooltipText}
             onMouseEnter={() => setHoveredMapTableId(table.id)}
             onMouseLeave={() => setHoveredMapTableId(prev => prev === table.id ? null : prev)}
-            onClick={() => {
+            onTouchStart={() => startMapLongPress(table.id)}
+            onTouchEnd={endMapLongPress}
+            onTouchMove={cancelMapLongPress}
+            onTouchCancel={cancelMapLongPress}
+            onClick={(e) => {
+                if (wasLongPressRef.current) {
+                    wasLongPressRef.current = false;
+                    e.preventDefault();
+                    return;
+                }
                 if (reservation) {
                     handleEditClick(reservation);
                 } else if (banquet) {
