@@ -342,6 +342,54 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
+  // Mobile-only fullscreen map view: hides the reservation list, shows only
+  // the room tabs + planimetria, and tries to lock landscape. On iOS Safari
+  // (which can't lock orientation programmatically) we fall back to rotating
+  // the overlay 90° via CSS so the canvas reads landscape in portrait.
+  const [mobileMapFullscreen, setMobileMapFullscreen] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(() =>
+    typeof window !== 'undefined' && window.innerHeight > window.innerWidth
+  );
+  useEffect(() => {
+    if (!mobileMapFullscreen) return;
+    const update = () => setIsPortrait(window.innerHeight > window.innerWidth);
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, [mobileMapFullscreen]);
+  const openMobileMap = async () => {
+    setMobileMapFullscreen(true);
+    try {
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (el.requestFullscreen) {
+        await el.requestFullscreen().catch(() => undefined);
+      } else if (el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen();
+      }
+      const orient = (window.screen as Screen & {
+        orientation?: { lock?: (o: string) => Promise<void> };
+      }).orientation;
+      if (orient?.lock) await orient.lock('landscape').catch(() => undefined);
+    } catch { /* iOS Safari: handled by CSS rotation fallback */ }
+  };
+  const closeMobileMap = () => {
+    setMobileMapFullscreen(false);
+    try {
+      const orient = (window.screen as Screen & {
+        orientation?: { unlock?: () => void };
+      }).orientation;
+      orient?.unlock?.();
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => undefined);
+      }
+    } catch { /* noop */ }
+  };
   // Long-press support for touch (no hover on iPad). Holding a tavolo ~450ms
   // shows the name pill peek; tap continues to open the detail drawer. The
   // wasLongPressRef flag suppresses the synthetic click that follows touchend.
@@ -2303,20 +2351,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     // or collide with the floating Legenda button in the corner. Manual layout
     // mirrors Sale & Tavoli: never zoom past 1:1 — the user laid the room out
     // at real size and an artificial zoom would skew their intent.
-    const FIT_M = 28;
+    // Extra side breathing room in the mobile fullscreen overlay so tables
+    // don't slam against the screen edges in landscape.
+    const FIT_M_X = mobileMapFullscreen ? 72 : 28;
+    const FIT_M_Y = 28;
     const scaleCap = layoutMode === 'manual' ? 1.5 : 2;
-    const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
+    const enableFit = (!isMobile || mobileMapFullscreen) && mapCanvasSize.width > 0 && mapCanvasSize.height > 0;
+    const scale = enableFit
       ? Math.min(
-          Math.max(1, mapCanvasSize.width - FIT_M * 2) / extentWidth,
-          Math.max(1, mapCanvasSize.height - FIT_M * 2) / extentHeight,
+          Math.max(1, mapCanvasSize.width - FIT_M_X * 2) / extentWidth,
+          Math.max(1, mapCanvasSize.height - FIT_M_Y * 2) / extentHeight,
           scaleCap
         )
       : 1;
     // Center the scaled content so leftover space is even on all sides.
-    const offsetX = (!isMobile && mapCanvasSize.width > 0)
-      ? Math.max(0, (mapCanvasSize.width - extentWidth * scale) / 2) : 0;
-    const offsetY = (!isMobile && mapCanvasSize.height > 0)
-      ? Math.max(0, (mapCanvasSize.height - extentHeight * scale) / 2) : 0;
+    const offsetX = enableFit ? Math.max(0, (mapCanvasSize.width - extentWidth * scale) / 2) : 0;
+    const offsetY = enableFit ? Math.max(0, (mapCanvasSize.height - extentHeight * scale) / 2) : 0;
 
     return (
       <div className="flex flex-col h-full">
@@ -2410,8 +2460,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           </div>
         </div>
 
-        {/* Map canvas */}
-        {isPhone ? (
+        {/* Map canvas — fullscreen overlay always shows the planimetria,
+            even on phones where the inline view falls back to a list. */}
+        {isPhone && !mobileMapFullscreen ? (
           <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative m-3">
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
@@ -2675,6 +2726,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {activeFilterCount}
                   </span>
                 )}
+              </button>
+
+              {/* Map fullscreen — opens the planimetria in landscape */}
+              <button type="button" onClick={openMobileMap}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Mappa tavoli">
+                <MapIcon className="h-3.5 w-3.5" />
               </button>
 
               {/* Print */}
@@ -4393,6 +4451,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* Mobile map fullscreen overlay — landscape-locked. If the device
+          rejected the orientation lock (iOS Safari) we rotate the overlay
+          ourselves so the planimetria still reads landscape in portrait. */}
+      {mobileMapFullscreen && createPortal(
+        <div className="fixed inset-0 z-[80] bg-[var(--color-surface-2)]" role="dialog" aria-label="Mappa tavoli a schermo intero">
+          <div
+            className="flex flex-col bg-[var(--color-surface-2)]"
+            style={
+              isPortrait
+                ? {
+                    position: 'absolute',
+                    top: 0,
+                    left: '100vw',
+                    width: '100vh',
+                    height: '100vw',
+                    transform: 'rotate(90deg)',
+                    transformOrigin: 'top left',
+                  }
+                : { position: 'absolute', inset: 0 }
+            }
+          >
+            <button type="button" onClick={closeMobileMap}
+              className="absolute top-3 right-3 z-[5] h-10 w-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] shadow-[var(--shadow-md)] flex items-center justify-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+              aria-label="Chiudi mappa">
+              <X className="h-4 w-4" />
+            </button>
+            {renderMapPanel()}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
