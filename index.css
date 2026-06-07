@@ -211,6 +211,15 @@
   --tg-arrivato-accent: #1F7A43;
   --tg-arrivato-pill-bg: #1F7A43;
   --tg-covers: #8C8B83;
+
+  /* Banquet / event — default tint (amber, matches banquet-color-0). Each
+     view applies a .banquet-color-N class to scope a distinct color per
+     event; this default is used by the legend swatch and any unscoped use. */
+  --color-banquet-bg: #fef3c7;
+  --color-banquet-border: #fcd34d;
+  --color-banquet-fg: #b45309;
+  --color-banquet-fg-strong: #78350f;
+  --color-banquet-accent: #d97706;
 }
 
 .dark {
@@ -231,6 +240,98 @@
   --tg-arrivato-accent: #7FD79A;
   --tg-arrivato-pill-bg: #2F8F50;
   --tg-covers: #A09E95;
+
+  /* Banquet / event — default tint (amber, dark mode) */
+  --color-banquet-bg: rgba(217, 119, 6, 0.18);
+  --color-banquet-border: rgba(217, 119, 6, 0.45);
+  --color-banquet-fg: #fcd34d;
+  --color-banquet-fg-strong: #fde68a;
+  --color-banquet-accent: #fbbf24;
+}
+
+/* ===========================================================================
+   Per-banquet color variants — applied on hull / label / modal container
+   wrappers so two banquets in the same room read as distinct events. The
+   class redefines --color-banquet-* on its subtree; existing utility classes
+   like bg-[var(--color-banquet-bg)] inside pick up the override automatically.
+   Palette: only warm hues (amber → fuchsia). Anything cool (violet, teal,
+   green, blue) would confuse with --tg-attesa-bg (pale blue-violet) and
+   --tg-arrivato-bg (pale green) used on reservation cards.
+   ========================================================================= */
+/* 0 — amber */
+.banquet-color-0 {
+  --color-banquet-bg: #fef3c7;
+  --color-banquet-border: #fcd34d;
+  --color-banquet-fg: #b45309;
+  --color-banquet-fg-strong: #78350f;
+  --color-banquet-accent: #d97706;
+}
+.dark .banquet-color-0 {
+  --color-banquet-bg: rgba(217, 119, 6, 0.18);
+  --color-banquet-border: rgba(217, 119, 6, 0.45);
+  --color-banquet-fg: #fcd34d;
+  --color-banquet-fg-strong: #fde68a;
+  --color-banquet-accent: #fbbf24;
+}
+/* 1 — orange */
+.banquet-color-1 {
+  --color-banquet-bg: #fed7aa;
+  --color-banquet-border: #fdba74;
+  --color-banquet-fg: #c2410c;
+  --color-banquet-fg-strong: #7c2d12;
+  --color-banquet-accent: #ea580c;
+}
+.dark .banquet-color-1 {
+  --color-banquet-bg: rgba(234, 88, 12, 0.18);
+  --color-banquet-border: rgba(234, 88, 12, 0.45);
+  --color-banquet-fg: #fdba74;
+  --color-banquet-fg-strong: #fed7aa;
+  --color-banquet-accent: #fb923c;
+}
+/* 2 — rose */
+.banquet-color-2 {
+  --color-banquet-bg: #ffe4e6;
+  --color-banquet-border: #fda4af;
+  --color-banquet-fg: #be123c;
+  --color-banquet-fg-strong: #881337;
+  --color-banquet-accent: #e11d48;
+}
+.dark .banquet-color-2 {
+  --color-banquet-bg: rgba(225, 29, 72, 0.16);
+  --color-banquet-border: rgba(225, 29, 72, 0.42);
+  --color-banquet-fg: #fda4af;
+  --color-banquet-fg-strong: #fecdd3;
+  --color-banquet-accent: #fb7185;
+}
+/* 3 — fuchsia */
+.banquet-color-3 {
+  --color-banquet-bg: #fae8ff;
+  --color-banquet-border: #f0abfc;
+  --color-banquet-fg: #a21caf;
+  --color-banquet-fg-strong: #701a75;
+  --color-banquet-accent: #c026d3;
+}
+.dark .banquet-color-3 {
+  --color-banquet-bg: rgba(192, 38, 211, 0.16);
+  --color-banquet-border: rgba(192, 38, 211, 0.42);
+  --color-banquet-fg: #f0abfc;
+  --color-banquet-fg-strong: #f5d0fe;
+  --color-banquet-accent: #e879f9;
+}
+/* 4 — yellow (golden) */
+.banquet-color-4 {
+  --color-banquet-bg: #fef9c3;
+  --color-banquet-border: #fde047;
+  --color-banquet-fg: #a16207;
+  --color-banquet-fg-strong: #713f12;
+  --color-banquet-accent: #ca8a04;
+}
+.dark .banquet-color-4 {
+  --color-banquet-bg: rgba(202, 138, 4, 0.18);
+  --color-banquet-border: rgba(202, 138, 4, 0.45);
+  --color-banquet-fg: #fde047;
+  --color-banquet-fg-strong: #fef08a;
+  --color-banquet-accent: #facc15;
 }
 
 /* ===========================================================================

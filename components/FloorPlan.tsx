@@ -4,6 +4,9 @@ import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, S
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { buildFloorLabels } from '../utils/labelPlacement';
+import { buildBanquetColorClassMap } from '../utils/banquetColors';
+import { ReservationCard, BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
@@ -500,6 +503,48 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       });
   };
 
+  // Collision-aware reservation cards + banquet hulls/labels for the floor.
+  const floorLabels = useMemo(() => {
+    const labelTables = currentTables.map(t => {
+      const pos = layoutMode === 'manual'
+        ? { x: t.x, y: t.y }
+        : (autoLayout.positions.get(t.id) || { x: t.x, y: t.y });
+      return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: pos.x, y: pos.y };
+    });
+    const reservationByTableId = new Map<number, Reservation>();
+    const banquetDataById = new Map<number, BanquetMenu>();
+    const banquetTableIds = new Map<number, number[]>();
+    for (const t of currentTables) {
+      const b = banquetByTableId.get(t.id);
+      if (b) {
+        banquetDataById.set(b.id, b);
+        const arr = banquetTableIds.get(b.id) || [];
+        arr.push(t.id);
+        banquetTableIds.set(b.id, arr);
+      } else {
+        const r = getActiveReservation(t);
+        if (r && r.reservation_status !== ReservationStatus.NO_SHOW) {
+          reservationByTableId.set(t.id, r);
+        }
+      }
+    }
+    const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
+    const selectedTableId = selectedTables.length === 1 ? selectedTables[0] : null;
+    // Reservation info is now drawn as a card wrapping each table (renderTableShape);
+    // buildFloorLabels only handles banquet hulls + their labels here.
+    const result = buildFloorLabels({
+      tables: labelTables,
+      reservationTableIds: [],
+      banquets: banquetGroups,
+      selectedTableId,
+    });
+    // Assign a stable color class to each banquet present in this room — scoped
+    // sequential so two distinct banquets never collide (unlike id % palette).
+    const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
+    return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
+
   const getDynamicTableStatus = (table: Table): TableStatus => {
     const now = Date.now();
 
@@ -923,6 +968,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
 
     const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
+    const isReservedCard = !!(reservation && reservation.reservation_status !== ReservationStatus.NO_SHOW);
 
     return (
       <div
@@ -933,7 +979,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           top: pos.y,
           width: svgW,
           height: svgH,
-          zIndex: isSelected ? 10 : 1
+          zIndex: isSelected ? 30 : (isReservedCard ? 5 : 1)
         }}
         onMouseDown={(e) => handleMouseDown(e, table.id, e.currentTarget as HTMLDivElement)}
         onTouchStart={(e) => handleTouchStart(e, table.id, e.currentTarget as HTMLDivElement)}
@@ -945,38 +991,49 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             style={{ left: fp.x, top: fp.y, width: fp.w, height: fp.h }}
           />
         )}
-        <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
-          <TableGlyph
-            name={table.name}
-            seats={table.seats}
-            shape={table.shape}
-            status={displayStatus}
-            party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
-            isSelected={isSelected && canEdit}
-          />
-        </div>
+        {isReservedCard && reservation ? (
+          /* Reserved tables: the glyph is wrapped in a card (glyph + capacity +
+             name + covers·time), centred on the table. It overflows the
+             interactive box but events still bubble so dragging keeps working. */
+          <div className="absolute left-1/2 top-0 -translate-x-1/2">
+            <ReservationCard
+              width={Math.max(svgW + 24, 200)}
+              selected={isSelected && canEdit}
+              status={reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa'}
+              tableLabel={table.name}
+              shape={table.shape}
+              seats={table.seats}
+              rotation={table.rotation}
+              name={reservation.customer_name}
+              capacity={table.seats}
+              covers={reservation.guests}
+              childrenCount={reservation.children}
+              time={reservation.reservation_time.split('T')[1]?.slice(0, 5) || null}
+            />
+          </div>
+        ) : (
+          <>
+            <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
+              <TableGlyph
+                name={table.name}
+                seats={table.seats}
+                shape={table.shape}
+                status={displayStatus}
+                party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
+                isSelected={isSelected && canEdit}
+              />
+            </div>
 
-        {/* Caption: covers + time indicator */}
-        <div
-          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
-          style={{ top: captionTopPx, fontSize: 18 }}
-        >
-          <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
-          <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
-          {captionIcon && captionTime && (
-            <>
-              <span style={{ color: 'var(--tg-covers)', opacity: 0.5 }}>&middot;</span>
-              <span className="inline-flex items-center gap-1" style={{ color: accentVar }}>
-                {captionIcon === 'clock' && (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ stroke: accentVar }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-                  </svg>
-                )}
-                {captionTime}
-              </span>
-            </>
-          )}
-        </div>
+            {/* Capacity chip (seat + N) under free / banquet tables. */}
+            <div
+              className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+              style={{ top: captionTopPx, fontSize: 18 }}
+            >
+              <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+              <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
+            </div>
+          </>
+        )}
 
         {/* Timer Badge */}
         {timerDisplay && (
@@ -999,54 +1056,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
         )}
 
-        {/* Banquet Badge */}
-        {banquet && !timerDisplay && (
-          <div className="absolute bg-[#4f46e5] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }} title={`Banchetto: ${banquet.name}`}>
-            <BookOpen size={8} />
-          </div>
-        )}
-
-        {/* Banquet Name or Reservation Name pill */}
-        {banquet && !timerDisplay ? (
-          <div
-            style={{ top: pillTopPx }}
-            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[17px] font-medium px-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px] bg-[#4f46e5] text-[#ffffff] pointer-events-none"
-            title={banquet.name}
-          >
-            <BookOpen size={19} className="flex-shrink-0" />
-            <span className="truncate">{banquet.name}</span>
-            {banquet.guests != null && (
-              <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-                <Users size={18} /> {banquet.guests}
-              </span>
-            )}
-          </div>
-        ) : reservation && !timerDisplay ? (
-          <div
-            style={{ top: pillTopPx, backgroundColor: `var(--tg-${displayStatus}-pill-bg)` }}
-            className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 text-[#ffffff] text-[17px] font-medium pl-1.5 pr-3 py-1.5 rounded-full whitespace-nowrap shadow-[var(--shadow-sm)] max-w-[240px] pointer-events-none"
-            title={reservation.source === ReservationSource.VOICE ? "Presa dall'agente vocale" : (reservation.created_by_user_name ? `Presa da ${toTitleCase(reservation.created_by_user_name)}` : undefined)}
-          >
-            {reservation.source === ReservationSource.VOICE ? (
-              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                <Mic className="h-4 w-4" />
-              </span>
-            ) : reservation.created_by_user_name ? (
-              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white dark:bg-white/20 text-[var(--color-fg)] dark:text-white text-[12px] font-bold border border-[var(--color-line)] dark:border-white/30 flex-shrink-0">
-                {getInitials(reservation.created_by_user_name)}
-              </span>
-            ) : (
-              <span className="pl-1" />
-            )}
-            <span className="truncate">{toTitleCase(reservation.customer_name)}</span>
-            <span className="flex-shrink-0 inline-flex items-center gap-0.5 opacity-90">
-              <Users size={18} /> {reservation.guests}
-              {reservation.children && reservation.children > 0 ? (
-                <span className="text-[14px] opacity-80">({reservation.children}b)</span>
-              ) : null}
-            </span>
-          </div>
-        ) : null}
       </div>
     );
   };
@@ -1494,7 +1503,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 transformOrigin: 'top left'
             }}
           >
+            {/* Banquet hulls (behind tables) — tinted per banquet so two events
+                in the same room are visually distinct. */}
+            {floorLabels.hulls.map((h, i) => (
+              <div key={`hull-${h.banquetId}-${i}`}
+                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
+                style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
+            ))}
             {currentTables.map(renderTableShape)}
+            {/* Banquet event labels (one per banquet) */}
+            {floorLabels.banquetLabels.map((bl, i) => {
+              const data = floorLabels.banquetDataById.get(bl.banquetId);
+              if (!data) return null;
+              const colorClass = floorLabels.banquetColorByBanquetId.get(bl.banquetId) || 'banquet-color-0';
+              return (
+                <div key={`blabel-${bl.banquetId}-${i}`} className="absolute pointer-events-none" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
+                  <BanquetLabel width={bl.w} name={data.name} guests={data.guests} colorClass={colorClass} />
+                </div>
+              );
+            })}
           </div>
 
           {isLoadingMerges && (
