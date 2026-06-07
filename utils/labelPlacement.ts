@@ -46,11 +46,6 @@ export interface FloorLabelsResult {
 export const CHIP_H = 26;             // capacity chip strip height below the table
 export const CARD_H = 92;             // reservation card height (capacity + name + covers)
 export const BANQUET_LABEL_H = 64;    // banquet event label height (1 line, 20px font)
-export const RES_PILL_H = 76;         // compact floating info pill (name + covers·time)
-// Estimated vertical chrome of a wrap-card (the card that wraps the table glyph
-// itself): py-2.5 ×2 + capacity row + divider + name + covers/time. Used to
-// project the candidate card box for collision detection against neighbours.
-export const WRAP_CARD_CHROME_H = 116;
 const RES_CARD_MIN_W = 160;           // legible minimum card width
 const RES_CARD_MAX_W = 260;
 const GAP = 10;                       // gap between an anchor and its attached card
@@ -88,45 +83,6 @@ function rotatedGlyphBox(t: FloorTable): Box {
 export function tablePhysicalBox(t: FloorTable): Box {
   const g = rotatedGlyphBox(t);
   return { x: g.x, y: g.y, w: g.w, h: g.h + 6 + CHIP_H };
-}
-
-// Where a wrap-card (ReservationCard wrapping the table glyph) would land if
-// rendered for table `t` with width `cardW`. The card is centred horizontally
-// on the unrotated glyph centre (matching the render code) and extends
-// downward by the glyph height plus the card chrome (capacity row + divider +
-// name + covers/time + paddings).
-export function wrapCardBox(t: FloorTable, cardW: number): Box {
-  const { width: gw, height: gh } = getGlyphDimensions(t.shape, t.seats);
-  return {
-    x: t.x + gw / 2 - cardW / 2,
-    y: t.y,
-    w: cardW,
-    h: gh + WRAP_CARD_CHROME_H,
-  };
-}
-
-// Returns the subset of reserved-table ids whose wrap-card would overlap any
-// OTHER table's physical footprint. Those reservations should fall back to a
-// floating compact pill (collision-placed) instead of wrapping the glyph.
-export function findWrapCardConflicts(
-  tables: FloorTable[],
-  reservedIds: Iterable<number>,
-  cardWFn: (t: FloorTable) => number,
-): Set<number> {
-  const conflicts = new Set<number>();
-  const byId = new Map(tables.map(t => [t.id, t]));
-  const physBoxes = new Map(tables.map(t => [t.id, tablePhysicalBox(t)]));
-  for (const rid of reservedIds) {
-    const t = byId.get(rid);
-    if (!t) continue;
-    const card = wrapCardBox(t, cardWFn(t));
-    for (const other of tables) {
-      if (other.id === t.id) continue;
-      const ob = physBoxes.get(other.id)!;
-      if (boxesOverlap(card, ob)) { conflicts.add(rid); break; }
-    }
-  }
-  return conflicts;
 }
 
 interface CardSpec {

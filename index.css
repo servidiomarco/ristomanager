@@ -489,6 +489,19 @@ body {
   animation: search-pulse-ring 1.2s ease-out infinite;
 }
 
+/* Hover pulse — tinted by the table's status accent via --pulse-color. Used
+   when the user mouses over an occupied table on the floor-plan map. */
+@keyframes hover-pulse-ring {
+  0% { box-shadow: 0 0 0 0 var(--pulse-color, rgba(96, 165, 250, 0.55)); }
+  70% { box-shadow: 0 0 0 12px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.animate-hover-pulse {
+  animation: hover-pulse-ring 1.4s ease-out infinite;
+  border-radius: 12px;
+}
+
 @keyframes flash-row {
   0% { background-color: rgba(59, 130, 246, 0.15); }
   100% { background-color: transparent; }

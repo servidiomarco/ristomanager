@@ -9,9 +9,9 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { buildFloorLabels, findWrapCardConflicts, RES_PILL_H } from '../utils/labelPlacement';
+import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
-import { ReservationCard, BanquetLabel, ReservationInfoPill } from './ReservationCard';
+import { BanquetLabel } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
@@ -341,6 +341,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
+  const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
   const [tooltipReservation, setTooltipReservation] = useState<{ id: number; type: 'allergen' | 'note' | 'tables' | 'bookedAt'; text: string; x: number; y: number } | null>(null);
 
   // Desktop breakpoint for split-view (>= 1024px)
@@ -1496,7 +1497,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const renderMapTable = (
     table: Table,
     layoutPositions?: Map<number, { x: number; y: number }>,
-    conflictingReservationIds?: Set<number>,
+    mapScale: number = 1,
   ) => {
       const occupier = getOccupierForTable(table.id);
       const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
@@ -1513,88 +1514,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       // Map reservation/banquet occupancy → glyph display status
       let displayStatus: TableDisplayStatus = 'libera';
-      let captionTime = '';
-      let captionIcon: 'clock' | null = null;
       if (reservation) {
-          if (isArrived) {
-              // Arrived tables show capacity only — no clock/timer.
-              displayStatus = 'arrivato';
-          } else {
-              displayStatus = 'attesa';
-              captionIcon = 'clock';
-              const timePart = reservation.reservation_time.split('T')[1];
-              if (timePart) captionTime = timePart.substring(0, 5);
-          }
+          displayStatus = isArrived ? 'arrivato' : 'attesa';
       } else if (banquet) {
           displayStatus = 'attesa';
       }
+      const reservationTime = reservation
+          ? reservation.reservation_time.split('T')[1]?.slice(0, 5) || null
+          : null;
 
       const dims = getGlyphDimensions(table.shape, table.seats);
       const { width: svgW, height: svgH } = dims;
 
-      // Anchor caption + pill below the rotated bounding box so they always
-      // sit horizontally below the visible table at any rotation.
       const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
       const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
       const captionTopPx = svgH / 2 + rotatedHalfH + 6;
-      const pillTopPx = captionTopPx + 32;
 
       const isHighlighted = selectedReservation?.table_id === table.id && detailDrawerOpen;
       const hoveredRes = hoveredReservationId ? reservations.find(r => r.id === hoveredReservationId) : null;
       const isHoverMatch = hoveredRes?.table_id === table.id;
+      const isMapHovered = hoveredMapTableId === table.id;
 
       const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
+      const hoverPillName = reservation
+          ? toTitleCase(reservation.customer_name)
+          : banquet
+              ? banquet.name
+              : null;
+      const showHoverPill = isMapHovered && !!hoverPillName && !isHighlighted && !isHoverMatch;
 
       const tooltipText = isHidden
           ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
           : reservation
-              ? `Occupato da: ${toTitleCase(reservation.customer_name)}`
+              ? `Occupato da: ${toTitleCase(reservation.customer_name)} · ${reservation.guests}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''} coperti${reservationTime ? ` · ${reservationTime}` : ''}`
               : banquet
                   ? `Banchetto: ${banquet.name}`
                   : 'Libero — clicca per assegnare una prenotazione';
 
       const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
 
-      // Reserved tables render as a wrapped card (table glyph + info), like the
-      // booking modal — centred on the table's position. If the card would
-      // cover a neighbouring table, fall through to the default branch (glyph
-      // only) and rely on a floating ReservationInfoPill placed by
-      // buildFloorLabels.
-      const wrapCardConflict = !!conflictingReservationIds?.has(table.id);
-      if (reservation && !wrapCardConflict) {
-        const cardStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
-        const cardTime = reservation.reservation_time.split('T')[1]?.slice(0, 5) || null;
-        const cardW = Math.max(svgW + 24, 200);
-        return (
-          <div
-            key={table.id}
-            className={`absolute cursor-pointer ${isHighlighted ? 'z-30' : (isSearchMatch || isHoverMatch) ? 'z-20' : 'z-10'} ${isHidden ? 'opacity-40 grayscale' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-2xl outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
-            style={{ left: pos.x + svgW / 2, top: pos.y, transform: 'translateX(-50%)' }}
-            title={tooltipText}
-            onClick={() => handleEditClick(reservation)}
-          >
-            <ReservationCard
-              width={cardW}
-              selected={isHighlighted}
-              status={cardStatus}
-              tableLabel={table.name}
-              shape={table.shape}
-              seats={table.seats}
-              rotation={table.rotation}
-              name={reservation.customer_name}
-              capacity={table.seats}
-              covers={reservation.guests}
-              childrenCount={reservation.children}
-              time={cardTime}
-            />
-          </div>
-        );
-      }
-
       return (
         <div
             key={table.id}
-            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isHighlighted ? 'z-30' : ''} ${isHidden ? 'opacity-40 grayscale' : ''} ${canEdit || reservation ? 'cursor-pointer' : 'cursor-default'}`}
+            className={`absolute ${isOccupied ? 'z-10' : ''} ${(isSearchMatch || isHoverMatch) ? 'z-20' : ''} ${isMapHovered ? 'z-[25]' : ''} ${isHighlighted ? 'z-30' : ''} ${isHidden ? 'opacity-40 grayscale' : ''} ${canEdit || reservation ? 'cursor-pointer' : 'cursor-default'}`}
             style={{
                 left: pos.x,
                 top: pos.y,
@@ -1602,6 +1564,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 height: `${svgH}px`,
             }}
             title={tooltipText}
+            onMouseEnter={() => setHoveredMapTableId(table.id)}
+            onMouseLeave={() => setHoveredMapTableId(prev => prev === table.id ? null : prev)}
             onClick={() => {
                 if (reservation) {
                     handleEditClick(reservation);
@@ -1613,8 +1577,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={`${isHighlighted ? 'rounded-[12px] outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-[12px] outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''}`}
-                style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}
+                className={`${isHighlighted ? 'rounded-[12px] outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-[12px] outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''} ${isMapHovered && isOccupied && !isHighlighted && !isHoverMatch ? 'animate-hover-pulse' : ''}`}
+                style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined, ['--pulse-color' as string]: accentVar }}
             >
                 <TableGlyph
                     name={table.name}
@@ -1630,18 +1594,37 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <EyeOff size={8} />
                 </div>
             )}
-            {/* Capacity chip (seat + N) under the table — for tables without a
-                wrap reservation card (free + banquet + fallback-pill reservations).
-                Reserved tables with a wrap card show capacity in the card. */}
-            {(!reservation || wrapCardConflict) && (
-                <div
-                    className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
-                    style={{ top: captionTopPx, fontSize: 18 }}
-                >
-                    <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
-                    <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
-                </div>
-            )}
+            {/* Capacity chip (seat + N) under the table. Always shown — the
+                floor plan is now a status canvas, so details live in the
+                tooltip / detail drawer rather than overlaying the glyph. */}
+            <div
+                className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+                style={{ top: captionTopPx, fontSize: 18 }}
+            >
+                <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+                <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
+            </div>
+            {showHoverPill && (() => {
+                // Counter-scale so the pill stays at a constant screen size
+                // even when the canvas is zoomed out (dense rooms like Veranda
+                // render at scale ~0.4, which made the pill unreadable).
+                const invScale = Math.min(2.2, Math.max(1, 1 / Math.max(0.0001, mapScale)));
+                return (
+                    <div
+                        className="absolute left-1/2 px-2 py-0.5 rounded-full border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--shadow-md)]"
+                        style={{
+                            top: -8,
+                            background: accentVar || 'var(--color-surface)',
+                            color: '#fff',
+                            borderColor: 'var(--color-surface)',
+                            transform: `translate(-50%, -100%) scale(${invScale})`,
+                            transformOrigin: 'bottom center',
+                        }}
+                    >
+                        {hoverPillName}
+                    </div>
+                );
+            })()}
         </div>
       );
   };
@@ -2253,17 +2236,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const p = layoutPositions?.get(t.id) || { x: t.x, y: t.y };
       return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: p.x, y: p.y };
     });
-    const seatsById = new Map(tablesInRoom.map(t => [t.id, t.seats]));
-    const resCardTableIds: number[] = [];
     const banquetTableIds = new Map<number, number[]>();
     const banquetDataById = new Map<number, BanquetMenu>();
-    const reservationByTableId = new Map<number, Reservation>();
     for (const t of tablesInRoom) {
       const occ = getOccupierForTable(t.id);
-      if (occ?.kind === 'reservation') {
-        resCardTableIds.push(t.id);
-        reservationByTableId.set(t.id, occ.data);
-      } else if (occ?.kind === 'banquet') {
+      if (occ?.kind === 'banquet') {
         const arr = banquetTableIds.get(occ.data.id) || [];
         arr.push(t.id);
         banquetTableIds.set(occ.data.id, arr);
@@ -2272,23 +2249,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
     const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
     const mapSelectedTableId = detailDrawerOpen ? (selectedReservation?.table_id ?? null) : null;
-    // Reservation info is normally drawn as a card wrapping each table (see
-    // renderMapTable). When that wrap-card would cover a neighbouring table
-    // (typical with merged tables in tight manual layouts), we fall back to a
-    // floating compact pill placed by buildFloorLabels.
-    const cardWFor = (t: { shape: TableShape; seats: number }) =>
-      Math.max(getGlyphDimensions(t.shape, t.seats).width + 24, 200);
-    const conflictingReservationIds = findWrapCardConflicts(
-      labelTables,
-      reservationByTableId.keys(),
-      cardWFor,
-    );
+    // The floor plan is a pure status canvas: glyphs carry status tint + a
+    // corner time chip; reservation details live in the tooltip / detail
+    // drawer. So buildFloorLabels only needs to position banquet labels.
     const floorLabels = buildFloorLabels({
       tables: labelTables,
-      reservationTableIds: [...conflictingReservationIds],
+      reservationTableIds: [],
       banquets: banquetGroups,
       selectedTableId: mapSelectedTableId,
-      cardHeight: RES_PILL_H,
     });
     // Scoped sequential color assignment so two banquets in the same room are
     // guaranteed distinct (id % palette could collide; e.g. ids 5 and 10).
@@ -2533,35 +2501,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   className={`${banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
                   style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
               ))}
-              {tablesInRoom.map(t => renderMapTable(t, layoutPositions, conflictingReservationIds))}
-              {/* Floating reservation info pills — fallback for reservations
-                  whose wrap-card would have covered a neighbour table. */}
-              {[...floorLabels.reservationCards.entries()].map(([tid, cp]) => {
-                const r = reservationByTableId.get(tid);
-                if (!r) return null;
-                const status = r.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
-                const time = r.reservation_time.split('T')[1]?.slice(0, 5) || null;
-                const isHighlighted = selectedReservation?.id === r.id && detailDrawerOpen;
-                return (
-                  <div
-                    key={`rpill-${tid}`}
-                    className="absolute cursor-pointer"
-                    style={{ left: cp.x, top: cp.y, zIndex: 16 }}
-                    onClick={() => handleEditClick(r)}
-                    title={`Occupato da: ${toTitleCase(r.customer_name)}`}
-                  >
-                    <ReservationInfoPill
-                      width={cp.w}
-                      selected={isHighlighted}
-                      status={status}
-                      name={r.customer_name}
-                      covers={r.guests}
-                      childrenCount={r.children}
-                      time={time}
-                    />
-                  </div>
-                );
-              })}
+              {tablesInRoom.map(t => renderMapTable(t, layoutPositions, scale))}
               {/* Banquet event labels (one per banquet) */}
               {floorLabels.banquetLabels.map((bl, i) => {
                 const data = banquetDataById.get(bl.banquetId);

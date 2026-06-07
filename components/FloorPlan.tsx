@@ -4,9 +4,9 @@ import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, S
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { buildFloorLabels, findWrapCardConflicts, RES_PILL_H } from '../utils/labelPlacement';
+import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
-import { ReservationCard, BanquetLabel, ReservationInfoPill } from './ReservationCard';
+import { BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
@@ -530,29 +530,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
     const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
     const selectedTableId = selectedTables.length === 1 ? selectedTables[0] : null;
-    // Reservation info is normally drawn as a card wrapping each table
-    // (renderTableShape). When that wrap-card would overlap a NEIGHBOUR table
-    // (typical with merged wide tables in tight manual layouts), we fall back
-    // to a compact floating pill placed by buildFloorLabels. Compute the
-    // candidate card width the same way renderTableShape does.
-    const cardWFor = (t: { shape: TableShape; seats: number }) =>
-      Math.max(getGlyphDimensions(t.shape, t.seats).width + 24, 200);
-    const conflictingReservationIds = findWrapCardConflicts(
-      labelTables,
-      reservationByTableId.keys(),
-      cardWFor,
-    );
+    // Floor plan = status canvas. Reservation details (name/covers/time) are
+    // no longer drawn over the canvas — only the status tint on the glyph plus
+    // a small time chip. Names are reachable via tooltip / detail drawer.
     const result = buildFloorLabels({
       tables: labelTables,
-      reservationTableIds: [...conflictingReservationIds],
+      reservationTableIds: [],
       banquets: banquetGroups,
       selectedTableId,
-      cardHeight: RES_PILL_H,
     });
     // Assign a stable color class to each banquet present in this room — scoped
     // sequential so two distinct banquets never collide (unlike id % palette).
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
-    return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId, conflictingReservationIds, reservationByTableId };
+    return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
 
@@ -939,23 +929,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // Map reservation state → display status
     let displayStatus: TableDisplayStatus = 'libera';
-    let captionTime = '';
-    let captionIcon: 'clock' | null = null;
-
     if (banquet) {
       displayStatus = 'attesa';
     } else if (isTempLocked) {
       displayStatus = 'attesa';
     } else if (reservation && reservation.reservation_status !== ReservationStatus.NO_SHOW) {
-      if (reservation.arrival_status === ArrivalStatus.ARRIVED) {
-        // Arrived tables show capacity only — no clock/timer.
-        displayStatus = 'arrivato';
-      } else {
-        displayStatus = 'attesa';
-        captionIcon = 'clock';
-        const timePart = reservation.reservation_time.split('T')[1];
-        if (timePart) captionTime = timePart.substring(0, 5);
-      }
+      displayStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
     }
 
     const dims = getGlyphDimensions(table.shape, table.seats);
@@ -970,7 +949,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
     const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
     const captionTopPx = svgH / 2 + rotatedHalfH + 6;
-    const pillTopPx = captionTopPx + 32;
 
     const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
@@ -979,10 +957,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
 
     const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
-    // Wrap-card normally; fall back to glyph + floating pill when the card
-    // would cover a neighbour (e.g. merged tables in tight layouts).
-    const wrapCardConflict = floorLabels.conflictingReservationIds.has(table.id);
-    const isReservedCard = !!(reservation && reservation.reservation_status !== ReservationStatus.NO_SHOW) && !wrapCardConflict;
 
     return (
       <div
@@ -993,7 +967,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           top: pos.y,
           width: svgW,
           height: svgH,
-          zIndex: isSelected ? 30 : (isReservedCard ? 5 : 1)
+          zIndex: isSelected ? 30 : 1
         }}
         onMouseDown={(e) => handleMouseDown(e, table.id, e.currentTarget as HTMLDivElement)}
         onTouchStart={(e) => handleTouchStart(e, table.id, e.currentTarget as HTMLDivElement)}
@@ -1005,49 +979,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             style={{ left: fp.x, top: fp.y, width: fp.w, height: fp.h }}
           />
         )}
-        {isReservedCard && reservation ? (
-          /* Reserved tables: the glyph is wrapped in a card (glyph + capacity +
-             name + covers·time), centred on the table. It overflows the
-             interactive box but events still bubble so dragging keeps working. */
-          <div className="absolute left-1/2 top-0 -translate-x-1/2">
-            <ReservationCard
-              width={Math.max(svgW + 24, 200)}
-              selected={isSelected && canEdit}
-              status={reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa'}
-              tableLabel={table.name}
-              shape={table.shape}
-              seats={table.seats}
-              rotation={table.rotation}
-              name={reservation.customer_name}
-              capacity={table.seats}
-              covers={reservation.guests}
-              childrenCount={reservation.children}
-              time={reservation.reservation_time.split('T')[1]?.slice(0, 5) || null}
-            />
-          </div>
-        ) : (
-          <>
-            <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
-              <TableGlyph
-                name={table.name}
-                seats={table.seats}
-                shape={table.shape}
-                status={displayStatus}
-                party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
-                isSelected={isSelected && canEdit}
-              />
-            </div>
+        <div style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined }}>
+          <TableGlyph
+            name={table.name}
+            seats={table.seats}
+            shape={table.shape}
+            status={displayStatus}
+            party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
+            isSelected={isSelected && canEdit}
+          />
+        </div>
 
-            {/* Capacity chip (seat + N) under free / banquet tables. */}
-            <div
-              className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
-              style={{ top: captionTopPx, fontSize: 18 }}
-            >
-              <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
-              <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
-            </div>
-          </>
-        )}
+        {/* Capacity chip — always shown below the table. */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none flex items-center gap-1.5"
+          style={{ top: captionTopPx, fontSize: 18 }}
+        >
+          <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
+          <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
+        </div>
 
         {/* Timer Badge */}
         {timerDisplay && (
@@ -1525,27 +1475,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
-            {/* Floating reservation info pills — fallback for reservations whose
-                wrap-card would have covered a neighbouring table. */}
-            {[...floorLabels.reservationCards.entries()].map(([tid, cp]) => {
-              const r = floorLabels.reservationByTableId.get(tid);
-              if (!r) return null;
-              const status = r.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
-              const time = r.reservation_time.split('T')[1]?.slice(0, 5) || null;
-              return (
-                <div key={`rpill-${tid}`} className="absolute" style={{ left: cp.x, top: cp.y, zIndex: 16 }}>
-                  <ReservationInfoPill
-                    width={cp.w}
-                    selected={selectedTables.includes(tid) && canEdit}
-                    status={status}
-                    name={r.customer_name}
-                    covers={r.guests}
-                    childrenCount={r.children}
-                    time={time}
-                  />
-                </div>
-              );
-            })}
             {/* Banquet event labels (one per banquet) */}
             {floorLabels.banquetLabels.map((bl, i) => {
               const data = floorLabels.banquetDataById.get(bl.banquetId);
