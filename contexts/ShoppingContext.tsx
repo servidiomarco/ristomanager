@@ -14,8 +14,8 @@ interface ShoppingContextType {
   deleteItem: (id: string) => Promise<void>;
   clearChecked: () => Promise<void>;
   refresh: () => Promise<void>;
-  addSupplier: (input: { name: string; category: ShoppingCategory; phone?: string; note?: string }) => Promise<Supplier>;
-  updateSupplier: (id: string, patch: { name?: string; phone?: string | null; note?: string | null }) => Promise<Supplier>;
+  addSupplier: (input: { name: string; categories: ShoppingCategory[]; phone?: string; note?: string }) => Promise<Supplier>;
+  updateSupplier: (id: string, patch: { name?: string; categories?: ShoppingCategory[]; phone?: string | null; note?: string | null }) => Promise<Supplier>;
   deleteSupplier: (id: string) => Promise<void>;
 }
 
@@ -96,8 +96,17 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
     const handleSupplierUpdated = (supplier: Supplier) => {
       setSuppliers(prev => prev.map(s => (s.id === supplier.id ? supplier : s)));
-      // Reflect the new supplier name onto items that reference it
-      setItems(prev => prev.map(i => (i.supplierId === supplier.id ? { ...i, supplierName: supplier.name } : i)));
+      // Reflect the new supplier name onto items that reference it, and orphan items
+      // whose category is no longer in the supplier's categories (mirrors backend cleanup).
+      setItems(prev =>
+        prev.map(i => {
+          if (i.supplierId !== supplier.id) return i;
+          if (!supplier.categories.includes(i.category)) {
+            return { ...i, supplierId: null, supplierName: null };
+          }
+          return { ...i, supplierName: supplier.name };
+        }),
+      );
     };
     const handleSupplierDeleted = ({ id }: { id: string }) => {
       setSuppliers(prev => prev.filter(s => s.id !== id));
@@ -166,7 +175,7 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const addSupplier = useCallback(
-    async (input: { name: string; category: ShoppingCategory; phone?: string; note?: string }) => {
+    async (input: { name: string; categories: ShoppingCategory[]; phone?: string; note?: string }) => {
       const created = await supplierApiService.create(input);
       setSuppliers(prev => (prev.some(s => s.id === created.id) ? prev : [...prev, created]));
       return created;
@@ -175,10 +184,19 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const updateSupplier = useCallback(
-    async (id: string, patch: { name?: string; phone?: string | null; note?: string | null }) => {
+    async (id: string, patch: { name?: string; categories?: ShoppingCategory[]; phone?: string | null; note?: string | null }) => {
       const updated = await supplierApiService.update(id, patch);
       setSuppliers(prev => prev.map(s => (s.id === id ? updated : s)));
-      setItems(prev => prev.map(i => (i.supplierId === id ? { ...i, supplierName: updated.name } : i)));
+      setItems(prev =>
+        prev.map(i => {
+          if (i.supplierId !== id) return i;
+          // If the supplier no longer serves this item's category, the backend has cleared supplier_id.
+          if (!updated.categories.includes(i.category)) {
+            return { ...i, supplierId: null, supplierName: null };
+          }
+          return { ...i, supplierName: updated.name };
+        }),
+      );
       return updated;
     },
     [],

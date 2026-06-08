@@ -142,40 +142,48 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierModalCategory, setSupplierModalCategory] = useState<ShoppingCategory | undefined>(undefined);
   const [openMenuCategory, setOpenMenuCategory] = useState<ShoppingCategory | null>(null);
+  const [supplierMenuOpen, setSupplierMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close the per-category dropdown on outside click
+  // Close the per-category / global supplier dropdowns on outside click
   useEffect(() => {
-    if (!openMenuCategory) return;
+    if (!openMenuCategory && !supplierMenuOpen) return;
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpenMenuCategory(null);
+        setSupplierMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
-  }, [openMenuCategory]);
+  }, [openMenuCategory, supplierMenuOpen]);
 
-  // Suppliers grouped by category for fast lookup
+  // Suppliers grouped by category for fast lookup (a supplier serving N categories appears in N buckets)
   const suppliersByCategory = useMemo(() => {
     const map: Record<ShoppingCategory, typeof suppliers> = { CUCINA: [], BAR: [], ALTRO: [] };
-    suppliers.forEach(s => map[s.category].push(s));
+    suppliers.forEach(s => s.categories.forEach(c => map[c].push(s)));
     Object.values(map).forEach(list => list.sort((a, b) => a.name.localeCompare(b.name, 'it')));
     return map;
   }, [suppliers]);
+
+  // All suppliers, sorted by name (used by the global "Fornitori" dropdown)
+  const allSuppliersSorted = useMemo(
+    () => [...suppliers].sort((a, b) => a.name.localeCompare(b.name, 'it')),
+    [suppliers],
+  );
 
   // When the user picks a category for "new item", reset supplier if it no longer matches
   useEffect(() => {
     if (!newItemSupplierId) return;
     const s = suppliers.find(x => x.id === newItemSupplierId);
-    if (!s || s.category !== newItemCategory) setNewItemSupplierId('');
+    if (!s || !s.categories.includes(newItemCategory)) setNewItemSupplierId('');
   }, [newItemCategory, newItemSupplierId, suppliers]);
 
   // Same for the edit form
   useEffect(() => {
     if (!editSupplierId) return;
     const s = suppliers.find(x => x.id === editSupplierId);
-    if (!s || s.category !== editCategory) setEditSupplierId('');
+    if (!s || !s.categories.includes(editCategory)) setEditSupplierId('');
   }, [editCategory, editSupplierId, suppliers]);
 
   // Reset supplier filter if it doesn't match the current category filter
@@ -183,7 +191,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     if (supplierFilter === 'ALL' || supplierFilter === NO_SUPPLIER) return;
     if (categoryFilter === 'ALL') return;
     const s = suppliers.find(x => x.id === supplierFilter);
-    if (!s || s.category !== categoryFilter) setSupplierFilter('ALL');
+    if (!s || !s.categories.includes(categoryFilter)) setSupplierFilter('ALL');
   }, [categoryFilter, supplierFilter, suppliers]);
 
   useEffect(() => {
@@ -382,33 +390,49 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     });
   };
 
-  const printForSupplier = (supplierId: string) => {
+  // When `scope` is a category, filter items to that category; otherwise include all
+  // items linked to the supplier across every category the supplier serves.
+  const printForSupplier = (supplierId: string, scope?: ShoppingCategory) => {
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier) return;
-    const list = items.filter(i => i.supplierId === supplierId && !i.checked);
+    const list = items.filter(
+      i => i.supplierId === supplierId && !i.checked && (!scope || i.category === scope),
+    );
     if (list.length === 0) return;
     const subtitleBits: string[] = [];
     if (supplier.phone) subtitleBits.push(supplier.phone);
     if (supplier.note) subtitleBits.push(supplier.note);
+    const scopeLabel = scope
+      ? SHOPPING_CATEGORY_LABELS[scope]
+      : supplier.categories.map(c => SHOPPING_CATEGORY_LABELS[c]).join(' + ');
+    const accent = scope
+      ? CATEGORY_ACCENT[scope]
+      : supplier.categories.length === 1
+        ? CATEGORY_ACCENT[supplier.categories[0]]
+        : undefined;
     printShoppingList(list, {
       title: supplier.name,
-      eyebrow: `Lista della spesa · ${SHOPPING_CATEGORY_LABELS[supplier.category]} · Fornitore`,
+      eyebrow: `Lista della spesa · ${scopeLabel} · Fornitore`,
       subtitle: subtitleBits.join(' · ') || undefined,
-      accent: CATEGORY_ACCENT[supplier.category],
+      accent,
       date: todayStr,
+      groupByCategory: !scope && supplier.categories.length > 1,
     });
   };
 
-  const shareForSupplier = async (supplierId: string) => {
+  const shareForSupplier = async (supplierId: string, scope?: ShoppingCategory) => {
     const supplier = suppliers.find(s => s.id === supplierId);
     if (!supplier) return;
-    const list = items.filter(i => i.supplierId === supplierId && !i.checked);
+    const list = items.filter(
+      i => i.supplierId === supplierId && !i.checked && (!scope || i.category === scope),
+    );
     if (list.length === 0) return;
     await shareShoppingList(list, {
       title: `Lista della spesa — ${supplier.name}`,
       subtitle: supplier.note || undefined,
       date: todayStr,
       whatsappPhone: supplier.phone || undefined,
+      groupByCategory: !scope && supplier.categories.length > 1,
     });
   };
 
@@ -499,8 +523,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                               hint={s.phone || undefined}
                               count={supItems.length}
                               icon={<Truck className="h-3.5 w-3.5 text-[var(--color-fg-subtle)]" />}
-                              onShare={() => { shareForSupplier(s.id); setOpenMenuCategory(null); }}
-                              onPrint={() => { printForSupplier(s.id); setOpenMenuCategory(null); }}
+                              onShare={() => { shareForSupplier(s.id, cat); setOpenMenuCategory(null); }}
+                              onPrint={() => { printForSupplier(s.id, cat); setOpenMenuCategory(null); }}
                             />
                           );
                         })}
@@ -528,15 +552,68 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 </div>
               );
             })}
-            <button
-              type="button"
-              onClick={() => openSupplierModal(categoryFilter !== 'ALL' ? categoryFilter : undefined)}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
-              title="Gestisci fornitori"
-            >
-              <Truck className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Fornitori</span>
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => { setSupplierMenuOpen(o => !o); setOpenMenuCategory(null); }}
+                aria-haspopup="menu"
+                aria-expanded={supplierMenuOpen}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  supplierMenuOpen
+                    ? 'bg-[var(--color-fg)] text-[var(--color-surface)] border-[var(--color-fg)]'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                }`}
+                title="Fornitori — stampa, condividi o gestisci"
+              >
+                <Truck className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Fornitori</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+              {supplierMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full mt-1 z-20 min-w-[260px] max-w-[88vw] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-md)] overflow-hidden"
+                >
+                  <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] border-b border-[var(--color-line)]">
+                    Per fornitore · stampa e condivisione
+                  </div>
+                  <div className="py-1 max-h-[60vh] overflow-y-auto">
+                    {allSuppliersSorted.length === 0 ? (
+                      <p className="px-3 py-2 text-xs text-[var(--color-fg-subtle)]">
+                        Nessun fornitore. Aggiungine uno dal pulsante qui sotto.
+                      </p>
+                    ) : (
+                      allSuppliersSorted.map(s => {
+                        const supItems = items.filter(i => i.supplierId === s.id && !i.checked);
+                        if (supItems.length === 0) return null;
+                        const catLabel = s.categories.map(c => SHOPPING_CATEGORY_LABELS[c]).join(' · ');
+                        return (
+                          <MenuRow
+                            key={s.id}
+                            label={s.name}
+                            hint={catLabel}
+                            count={supItems.length}
+                            icon={<Truck className="h-3.5 w-3.5 text-[var(--color-fg-subtle)]" />}
+                            onShare={() => { shareForSupplier(s.id); setSupplierMenuOpen(false); }}
+                            onPrint={() => { printForSupplier(s.id); setSupplierMenuOpen(false); }}
+                          />
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="border-t border-[var(--color-line)]">
+                    <button
+                      type="button"
+                      onClick={() => { setSupplierMenuOpen(false); openSupplierModal(); }}
+                      className="w-full text-left px-3 py-2 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] inline-flex items-center gap-2"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Gestisci fornitori
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             {!selectionMode && totalCount > 0 && (
               <button
                 type="button"

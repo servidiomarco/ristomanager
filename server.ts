@@ -3904,14 +3904,15 @@ app.post('/shopping', authenticate, async (req, res) => {
 
         const finalCategory = category || 'ALTRO';
 
-        // If a supplier is provided, validate it exists and belongs to the same category
+        // If a supplier is provided, validate it exists and serves the same category
         if (supplierId) {
-            const supRes = await queryWithRetry('SELECT category FROM suppliers WHERE id = $1', [supplierId]);
+            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1', [supplierId]);
             if (supRes.rows.length === 0) {
                 return res.status(400).json({ error: 'Supplier not found' });
             }
-            if (supRes.rows[0].category !== finalCategory) {
-                return res.status(400).json({ error: 'Supplier does not belong to the selected category' });
+            const supCategories: string[] = supRes.rows[0].categories || [];
+            if (!supCategories.includes(finalCategory)) {
+                return res.status(400).json({ error: 'Supplier does not serve the selected category' });
             }
         }
 
@@ -3992,9 +3993,9 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'At least one of name, category, supplierId, or quantity/unit is required' });
         }
 
-        // When supplierId is provided (non-null), ensure it matches the (possibly new) category
+        // When supplierId is provided (non-null), ensure it serves the (possibly new) category
         if (supplierId) {
-            const supRes = await queryWithRetry('SELECT category FROM suppliers WHERE id = $1', [supplierId]);
+            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1', [supplierId]);
             if (supRes.rows.length === 0) {
                 return res.status(400).json({ error: 'Supplier not found' });
             }
@@ -4007,8 +4008,9 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
                 }
                 effectiveCategory = itemRes.rows[0].category;
             }
-            if (supRes.rows[0].category !== effectiveCategory) {
-                return res.status(400).json({ error: 'Supplier does not belong to the selected category' });
+            const supCategories: string[] = supRes.rows[0].categories || [];
+            if (!supCategories.includes(effectiveCategory)) {
+                return res.status(400).json({ error: 'Supplier does not serve the selected category' });
             }
         }
 
@@ -4160,9 +4162,31 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
-// SUPPLIERS (fornitori, scoped per shopping category)
+// SUPPLIERS (fornitori, possono appartenere a 1+ shopping categories)
 // ============================================
 const VALID_SUPPLIER_CATEGORIES = ['CUCINA', 'BAR', 'ALTRO'] as const;
+type SupplierCategory = (typeof VALID_SUPPLIER_CATEGORIES)[number];
+
+const normalizeCategoriesInput = (input: unknown): { categories?: SupplierCategory[]; error?: string } => {
+    if (!Array.isArray(input)) {
+        return { error: 'categories must be a non-empty array of CUCINA, BAR, or ALTRO' };
+    }
+    const cleaned: SupplierCategory[] = [];
+    const seen = new Set<string>();
+    for (const c of input) {
+        if (typeof c !== 'string' || !VALID_SUPPLIER_CATEGORIES.includes(c as SupplierCategory)) {
+            return { error: 'categories must contain only CUCINA, BAR, or ALTRO' };
+        }
+        if (!seen.has(c)) {
+            seen.add(c);
+            cleaned.push(c as SupplierCategory);
+        }
+    }
+    if (cleaned.length === 0) {
+        return { error: 'categories must be a non-empty array of CUCINA, BAR, or ALTRO' };
+    }
+    return { categories: cleaned };
+};
 
 app.get('/suppliers', authenticate, async (_req, res) => {
     try {
@@ -4170,18 +4194,12 @@ app.get('/suppliers', authenticate, async (_req, res) => {
             SELECT
                 id,
                 name,
-                category,
+                categories,
                 phone,
                 note,
                 created_at as "createdAt"
             FROM suppliers
-            ORDER BY
-                CASE category
-                    WHEN 'CUCINA' THEN 1
-                    WHEN 'BAR' THEN 2
-                    WHEN 'ALTRO' THEN 3
-                END,
-                LOWER(name) ASC
+            ORDER BY LOWER(name) ASC
         `);
         res.json(result.rows);
     } catch (err) {
@@ -4192,29 +4210,25 @@ app.get('/suppliers', authenticate, async (_req, res) => {
 
 app.post('/suppliers', authenticate, async (req, res) => {
     try {
-        const { name, category, phone, note } = req.body;
+        const { name, categories, phone, note } = req.body;
         if (!name || typeof name !== 'string' || !name.trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
-        if (!VALID_SUPPLIER_CATEGORIES.includes(category)) {
-            return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
-        }
+        const norm = normalizeCategoriesInput(categories);
+        if (norm.error) return res.status(400).json({ error: norm.error });
 
         const result = await queryWithRetry(`
-            INSERT INTO suppliers (name, category, phone, note)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, name, category, phone, note, created_at as "createdAt"
-        `, [name.trim(), category, phone?.trim() || null, note?.trim() || null]);
+            INSERT INTO suppliers (name, categories, phone, note)
+            VALUES ($1, $2::varchar(20)[], $3, $4)
+            RETURNING id, name, categories, phone, note, created_at as "createdAt"
+        `, [name.trim(), norm.categories, phone?.trim() || null, note?.trim() || null]);
 
         const supplier = result.rows[0];
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('supplier:created', supplier, socketId);
 
         res.status(201).json(supplier);
-    } catch (err: any) {
-        if (err?.code === '23505') {
-            return res.status(409).json({ error: 'Esiste già un fornitore con questo nome in questa categoria' });
-        }
+    } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
     }
@@ -4223,26 +4237,33 @@ app.post('/suppliers', authenticate, async (req, res) => {
 app.put('/suppliers/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, phone, note } = req.body;
+        const { name, categories, phone, note } = req.body;
 
         if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
             return res.status(400).json({ error: 'name must be a non-empty string' });
         }
-        if (name === undefined && phone === undefined && note === undefined) {
-            return res.status(400).json({ error: 'At least one of name, phone, or note is required' });
+        let normalizedCategories: SupplierCategory[] | undefined;
+        if (categories !== undefined) {
+            const norm = normalizeCategoriesInput(categories);
+            if (norm.error) return res.status(400).json({ error: norm.error });
+            normalizedCategories = norm.categories;
+        }
+        if (name === undefined && categories === undefined && phone === undefined && note === undefined) {
+            return res.status(400).json({ error: 'At least one of name, categories, phone, or note is required' });
         }
 
         const sets: string[] = [];
         const params: any[] = [];
         let p = 1;
         if (name !== undefined) { sets.push(`name = $${p++}`); params.push(name.trim()); }
+        if (normalizedCategories !== undefined) { sets.push(`categories = $${p++}::varchar(20)[]`); params.push(normalizedCategories); }
         if (phone !== undefined) { sets.push(`phone = $${p++}`); params.push(phone?.trim() || null); }
         if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
         params.push(id);
 
         const result = await queryWithRetry(
             `UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${p}
-             RETURNING id, name, category, phone, note, created_at as "createdAt"`,
+             RETURNING id, name, categories, phone, note, created_at as "createdAt"`,
             params
         );
 
@@ -4254,11 +4275,18 @@ app.put('/suppliers/:id', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('supplier:updated', supplier, socketId);
 
-        res.json(supplier);
-    } catch (err: any) {
-        if (err?.code === '23505') {
-            return res.status(409).json({ error: 'Esiste già un fornitore con questo nome in questa categoria' });
+        // If categories were narrowed, orphan supplier_id on items whose category is no longer served
+        if (normalizedCategories !== undefined) {
+            await queryWithRetry(
+                `UPDATE shopping_items
+                 SET supplier_id = NULL
+                 WHERE supplier_id = $1 AND NOT (category = ANY ($2::varchar(20)[]))`,
+                [id, normalizedCategories]
+            );
         }
+
+        res.json(supplier);
+    } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
     }
