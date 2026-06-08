@@ -6,8 +6,8 @@ import { printShoppingList, shareShoppingList } from '../utils/printShoppingList
 import { SupplierManagementModal } from './SupplierManagementModal';
 import {
   ShoppingCart, ChefHat, Coffee, Package, Plus, Check, Trash2, Edit2,
-  Loader2, Clock, X, Search, Printer, Share2, ChevronDown, Wheat, CheckSquare, Square,
-  Truck, Settings2,
+  Loader2, Clock, X, Search, Printer, Share2, ChevronDown, Wheat,
+  CheckCircle2, Circle, Truck, Settings2, ListChecks,
 } from 'lucide-react';
 
 interface ShoppingListPageProps {
@@ -117,6 +117,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
 
   // Supplier UI state
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
@@ -280,11 +281,17 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
       return next;
     });
   };
-  const clearSelection = () => setSelected(new Set());
+  const exitSelectionMode = () => {
+    setSelected(new Set());
+    setSelectionMode(false);
+  };
+  const enterSelectionMode = () => {
+    setSelectionMode(true);
+  };
   const bulkDelete = async () => {
     if (selected.size === 0) return;
     const ids = Array.from(selected);
-    clearSelection();
+    exitSelectionMode();
     await Promise.all(ids.map(id => deleteItem(id)));
   };
 
@@ -496,6 +503,17 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               <Truck className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Fornitori</span>
             </button>
+            {!selectionMode && totalCount > 0 && (
+              <button
+                type="button"
+                onClick={enterSelectionMode}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+                title="Seleziona prodotti per stampare o condividere"
+              >
+                <ListChecks className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Seleziona</span>
+              </button>
+            )}
             {checkedCount > 0 && (
               <button
                 onClick={clearChecked}
@@ -637,17 +655,23 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           )}
         </div>
 
-        {/* Bulk actions */}
-        {selected.size > 0 && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-[var(--color-fg)] text-[var(--color-surface)] flex-wrap">
-            <span className="text-sm font-medium tabular">{selected.size} selezionati</span>
+        {/* Selection mode toolbar */}
+        {selectionMode && (
+          <div className="sticky top-2 z-10 flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-[var(--color-fg)] text-[var(--color-surface)] flex-wrap shadow-[var(--shadow-md)]">
+            <span className="text-sm font-medium tabular">
+              {selected.size === 0 ? 'Tocca i prodotti da selezionare' : `${selected.size} selezionati`}
+            </span>
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={clearSelection} className="text-xs px-2 py-1 rounded hover:bg-[var(--color-surface)]/10">
+              <button
+                onClick={exitSelectionMode}
+                className="text-xs px-2 py-1 rounded hover:bg-[var(--color-surface)]/10"
+              >
                 Annulla
               </button>
               <button
                 onClick={shareSelected}
-                className="text-xs px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white inline-flex items-center gap-1.5"
+                disabled={selected.size === 0}
+                className="text-xs px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center gap-1.5"
                 title="Condividi i prodotti selezionati"
               >
                 <Share2 className="h-3.5 w-3.5" />
@@ -655,13 +679,18 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               </button>
               <button
                 onClick={printSelected}
-                className="text-xs px-2 py-1 rounded bg-[var(--color-surface)]/15 hover:bg-[var(--color-surface)]/25 text-[var(--color-surface)] inline-flex items-center gap-1.5"
+                disabled={selected.size === 0}
+                className="text-xs px-2 py-1 rounded bg-[var(--color-surface)]/15 hover:bg-[var(--color-surface)]/25 disabled:opacity-40 disabled:cursor-not-allowed text-[var(--color-surface)] inline-flex items-center gap-1.5"
                 title="Stampa i prodotti selezionati"
               >
                 <Printer className="h-3.5 w-3.5" />
                 Stampa
               </button>
-              <button onClick={bulkDelete} className="text-xs px-2 py-1 rounded bg-rose-500 hover:bg-rose-600 text-white inline-flex items-center gap-1.5">
+              <button
+                onClick={bulkDelete}
+                disabled={selected.size === 0}
+                className="text-xs px-2 py-1 rounded bg-rose-500 hover:bg-rose-600 disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center gap-1.5"
+              >
                 <Trash2 className="h-3.5 w-3.5" />
                 Elimina
               </button>
@@ -765,29 +794,35 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                       return (
                         <div
                           key={item.id}
+                          onClick={selectionMode ? () => toggleSelect(item.id) : undefined}
                           className={`group flex items-center gap-3 py-2 px-2 rounded-md transition-colors ${
-                            isSelected ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
+                            selectionMode
+                              ? `cursor-pointer ${isSelected ? 'bg-indigo-50 dark:bg-indigo-500/15' : 'hover:bg-[var(--color-surface-hover)]'}`
+                              : 'hover:bg-[var(--color-surface-hover)]'
                           }`}
                           title={meta}
                         >
-                          <button
-                            onClick={() => toggleSelect(item.id)}
-                            className={`flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] ${selected.size > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}
-                            title="Seleziona"
-                          >
-                            {isSelected ? <CheckSquare className="h-4 w-4 text-[var(--color-fg)]" /> : <Square className="h-4 w-4" />}
-                          </button>
-                          <button
-                            onClick={() => toggleItem(item.id)}
-                            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
-                              item.checked
-                                ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
-                                : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
-                            }`}
-                          >
-                            {item.checked && <Check className="h-2.5 w-2.5" />}
-                          </button>
-                          <span className={`flex-1 min-w-0 text-sm ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
+                          {selectionMode ? (
+                            <span
+                              className={`flex-shrink-0 transition-colors ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-[var(--color-fg-subtle)]'}`}
+                              aria-hidden="true"
+                            >
+                              {isSelected ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => toggleItem(item.id)}
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
+                                item.checked
+                                  ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
+                                  : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
+                              }`}
+                              title={item.checked ? 'Segna come da fare' : 'Segna come comprato'}
+                            >
+                              {item.checked && <Check className="h-2.5 w-2.5" />}
+                            </button>
+                          )}
+                          <span className={`flex-1 min-w-0 text-sm ${item.checked && !selectionMode ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
                             {item.name}
                           </span>
                           {item.supplierName && (
@@ -796,23 +831,27 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                               <span className="truncate">{item.supplierName}</span>
                             </span>
                           )}
-                          <span className="hidden sm:inline text-[11px] text-[var(--color-fg-subtle)] tabular flex-shrink-0">
-                            {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
-                          </span>
-                          <button
-                            onClick={() => startEdit(item)}
-                            className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
-                            title="Modifica"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => deleteItem(item.id)}
-                            className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
-                            title="Elimina"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          {!selectionMode && (
+                            <>
+                              <span className="hidden sm:inline text-[11px] text-[var(--color-fg-subtle)] tabular flex-shrink-0">
+                                {item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}
+                              </span>
+                              <button
+                                onClick={() => startEdit(item)}
+                                className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
+                                title="Modifica"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => deleteItem(item.id)}
+                                className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
+                                title="Elimina"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       );
                     })}
