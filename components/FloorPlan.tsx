@@ -1454,7 +1454,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         className={`flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
-            backgroundImage: 'radial-gradient(rgba(148,163,184,0.4) 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
         }}
       >

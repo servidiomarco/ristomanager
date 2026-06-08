@@ -31,6 +31,11 @@
   --color-line: #e5e7eb;
   --color-line-strong: #d1d5db;
 
+  /* Floor-map dotted canvas background — faint enough to recede behind
+     the table tiles while still giving room extent + a snap reference.
+     Dot size/spacing are fixed in the components; only this color changes. */
+  --floor-dot: rgba(148, 163, 184, 0.16);
+
   /* ---------- Text ---------- */
   --color-fg: #111827;
   --color-fg-muted: #6b7280;
@@ -138,6 +143,10 @@
 
   --color-line: #334155;
   --color-line-strong: #475569;
+
+  /* Slightly lower alpha in dark mode: light dots on a dark canvas read
+     stronger at equal opacity, so trim it to keep them equally quiet. */
+  --floor-dot: rgba(148, 163, 184, 0.13);
 
   --color-fg: #f9fafb;
   --color-fg-muted: #94a3b8;
