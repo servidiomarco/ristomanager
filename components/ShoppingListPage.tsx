@@ -1029,7 +1029,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 />
               </div>
               {/* Controls — second line on mobile, inline on sm+ via display:contents */}
-              <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto sm:contents">
+              <div className="flex flex-wrap items-center gap-2 min-w-0 w-full sm:w-auto sm:contents">
                 <input
                   type="text"
                   inputMode="decimal"
@@ -1068,7 +1068,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                   <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
                 </div>
                 {suppliersByCategory[newItemCategory].length > 0 && (
-                  <div className="relative min-w-0 flex-1 sm:flex-none">
+                  <div className="relative flex-1 min-w-[120px] sm:flex-none sm:min-w-0">
                     <select
                       value={newItemSupplierId}
                       onChange={e => setNewItemSupplierId(e.target.value)}
