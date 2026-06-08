@@ -14,6 +14,17 @@ export interface ShoppingItem {
   createdAt?: string;
   createdByUserId?: number;
   createdByUserName?: string;
+  supplierId?: string | null;
+  supplierName?: string | null;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  category: ShoppingCategory;
+  phone?: string | null;
+  note?: string | null;
+  createdAt?: string;
 }
 
 // Helper function to get headers with socket ID and auth token
@@ -99,7 +110,7 @@ class ShoppingApiService {
   /**
    * Create a new shopping item
    */
-  async createItem(item: { name: string; category: ShoppingCategory; date: string }): Promise<ShoppingItem> {
+  async createItem(item: { name: string; category: ShoppingCategory; date: string; supplierId?: string | null }): Promise<ShoppingItem> {
     return apiRequest<ShoppingItem>(`${API_URL}/shopping`, {
       method: 'POST',
       headers: getHeaders(),
@@ -108,9 +119,9 @@ class ShoppingApiService {
   }
 
   /**
-   * Update name and/or category of a shopping item
+   * Update name, category and/or supplier of a shopping item
    */
-  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory }): Promise<ShoppingItem> {
+  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory; supplierId?: string | null }): Promise<ShoppingItem> {
     return apiRequest<ShoppingItem>(`${API_URL}/shopping/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
@@ -153,3 +164,36 @@ class ShoppingApiService {
 }
 
 export const shoppingApiService = new ShoppingApiService();
+
+class SupplierApiService {
+  async getAll(): Promise<Supplier[]> {
+    return apiRequest<Supplier[]>(`${API_URL}/suppliers`, {
+      headers: getHeaders(false),
+    });
+  }
+
+  async create(input: { name: string; category: ShoppingCategory; phone?: string; note?: string }): Promise<Supplier> {
+    return apiRequest<Supplier>(`${API_URL}/suppliers`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(input),
+    });
+  }
+
+  async update(id: string, updates: { name?: string; phone?: string | null; note?: string | null }): Promise<Supplier> {
+    return apiRequest<Supplier>(`${API_URL}/suppliers/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async delete(id: string): Promise<void> {
+    return apiRequest<void>(`${API_URL}/suppliers/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(false),
+    }, false);
+  }
+}
+
+export const supplierApiService = new SupplierApiService();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -12,6 +12,8 @@ import { ActivityLogs } from './components/ActivityLogs';
 import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
+import { ShoppingListPage } from './components/ShoppingListPage';
+import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
@@ -901,6 +903,24 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.ATTIVITA) && (
+            <SidebarItem
+              icon={<ListChecks size={20} />}
+              label="Attività"
+              active={view === ViewState.ATTIVITA}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.ATTIVITA); }}
+              collapsed={sidebarCollapsed}
+            />
+          )}
+          {canAccessView(ViewState.LISTA_DELLA_SPESA) && (
+            <SidebarItem
+              icon={<ShoppingCart size={20} />}
+              label="Lista della Spesa"
+              active={view === ViewState.LISTA_DELLA_SPESA}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.LISTA_DELLA_SPESA); }}
+              collapsed={sidebarCollapsed}
+            />
+          )}
 
           {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers()) && !sidebarCollapsed && (
             <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
@@ -1257,8 +1277,8 @@ const App: React.FC = () => {
             onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
             onNavigateToReservations={() => { setSidebarCollapsed(true); setView(ViewState.RESERVATIONS); }}
             onNavigateToInventario={() => { setSidebarCollapsed(false); setView(ViewState.INVENTARIO); }}
-            autoOpenNewShoppingItem={autoOpenNewShoppingItem}
-            onAutoOpenNewShoppingItemHandled={() => setAutoOpenNewShoppingItem(false)}
+            onNavigateToShoppingList={() => setView(ViewState.LISTA_DELLA_SPESA)}
+            onNavigateToAttivita={() => setView(ViewState.ATTIVITA)}
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
             onDateChange={setGlobalDate}
@@ -1383,6 +1403,22 @@ const App: React.FC = () => {
           <Inventory showToast={addToast} autoOpenNewProduct={autoOpenNewProduct} onAutoOpenNewProductHandled={() => setAutoOpenNewProduct(false)} />
         )}
 
+        {view === ViewState.LISTA_DELLA_SPESA && (
+          <ShoppingListPage
+            reservations={reservations}
+            banquetMenus={banquetMenus}
+            autoOpenNewShoppingItem={autoOpenNewShoppingItem}
+            onAutoOpenNewShoppingItemHandled={() => setAutoOpenNewShoppingItem(false)}
+          />
+        )}
+
+        {view === ViewState.ATTIVITA && (
+          <AttivitaPage
+            banquetMenus={banquetMenus}
+            dishes={dishes}
+          />
+        )}
+
         {view === ViewState.SETTINGS && (
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
             <div className="mb-2" />
@@ -1421,6 +1457,8 @@ const App: React.FC = () => {
                       [ViewState.STAFF]: 'Personale',
                       [ViewState.CLIENTI]: 'Clienti',
                       [ViewState.INVENTARIO]: 'Inventario',
+                      [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
+                      [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
                     };
@@ -1615,7 +1653,7 @@ const App: React.FC = () => {
                 {[
                   { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
-                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.DASHBOARD); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
+                  { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
                   { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button

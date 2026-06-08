@@ -734,6 +734,33 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // SUPPLIERS TABLE (fornitori, scoped per shopping category)
+        // ============================================
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                category VARCHAR(20) NOT NULL CHECK (category IN ('CUCINA', 'BAR', 'ALTRO')),
+                phone VARCHAR(50),
+                note TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (category, name)
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_suppliers_category ON suppliers(category);
+        `);
+
+        // Link shopping items to an optional supplier (ON DELETE SET NULL keeps items orphan-safe)
+        await client.query(`
+            ALTER TABLE shopping_items
+            ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_shopping_items_supplier_id ON shopping_items(supplier_id);
+        `);
+
+        // ============================================
         // STAFF MEMBERS TABLE
         // ============================================
         await client.query(`
