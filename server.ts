@@ -3836,7 +3836,9 @@ app.get('/shopping', authenticate, async (req, res) => {
                 si.created_by_user_id as "createdByUserId",
                 si.created_by_user_name as "createdByUserName",
                 si.supplier_id as "supplierId",
-                s.name as "supplierName"
+                s.name as "supplierName",
+                si.quantity::float8 as quantity,
+                si.unit as unit
             FROM shopping_items si
             LEFT JOIN suppliers s ON s.id = si.supplier_id
         `;
@@ -3865,9 +3867,34 @@ app.get('/shopping', authenticate, async (req, res) => {
     }
 });
 
+const VALID_UNITS = ['kg', 'g', 'l', 'ml', 'pz', 'conf', 'cassetta', 'cartone'] as const;
+type Unit = (typeof VALID_UNITS)[number];
+
+// Coerces incoming quantity/unit into a clean pair: both set, or both NULL.
+const normalizeQuantityUnit = (q: unknown, u: unknown): { quantity: number | null; unit: Unit | null; error?: string } => {
+    const hasQ = q !== undefined && q !== null && q !== '';
+    const hasU = u !== undefined && u !== null && u !== '';
+    if (!hasQ && !hasU) return { quantity: null, unit: null };
+    let qty: number | null = null;
+    if (hasQ) {
+        const n = typeof q === 'number' ? q : parseFloat(String(q).replace(',', '.'));
+        if (!isFinite(n) || n < 0) return { quantity: null, unit: null, error: 'quantity must be a non-negative number' };
+        qty = n > 0 ? n : null;
+    }
+    let unit: Unit | null = null;
+    if (hasU) {
+        if (!VALID_UNITS.includes(u as Unit)) return { quantity: null, unit: null, error: `unit must be one of ${VALID_UNITS.join(', ')}` };
+        unit = u as Unit;
+    }
+    // Pair them: if only one is set, fill the other sensibly.
+    if (qty != null && unit == null) unit = 'pz';
+    if (qty == null && unit != null) unit = null;
+    return { quantity: qty, unit };
+};
+
 app.post('/shopping', authenticate, async (req, res) => {
     try {
-        const { name, category, date, supplierId } = req.body;
+        const { name, category, date, supplierId, quantity, unit } = req.body;
 
         console.log('🛒 POST /shopping - req.user:', req.user);
 
@@ -3888,14 +3915,17 @@ app.post('/shopping', authenticate, async (req, res) => {
             }
         }
 
+        const qu = normalizeQuantityUnit(quantity, unit);
+        if (qu.error) return res.status(400).json({ error: qu.error });
+
         const creatorEmail = req.user?.email || null;
         console.log('🛒 Creator email:', creatorEmail);
 
         const inserted = await queryWithRetry(`
-            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name, supplier_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name, supplier_id, quantity, unit)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
-        `, [name, finalCategory, date, req.user?.userId || null, creatorEmail, supplierId || null]);
+        `, [name, finalCategory, date, req.user?.userId || null, creatorEmail, supplierId || null, qu.quantity, qu.unit]);
 
         const newId = inserted.rows[0].id;
 
@@ -3910,7 +3940,9 @@ app.post('/shopping', authenticate, async (req, res) => {
                 si.created_by_user_id as "createdByUserId",
                 si.created_by_user_name as "createdByUserName",
                 si.supplier_id as "supplierId",
-                s.name as "supplierName"
+                s.name as "supplierName",
+                si.quantity::float8 as quantity,
+                si.unit as unit
             FROM shopping_items si
             LEFT JOIN suppliers s ON s.id = si.supplier_id
             WHERE si.id = $1
@@ -3940,7 +3972,7 @@ app.post('/shopping', authenticate, async (req, res) => {
 app.put('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, category, supplierId } = req.body;
+        const { name, category, supplierId, quantity, unit } = req.body;
 
         if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
             return res.status(400).json({ error: 'name must be a non-empty string' });
@@ -3948,8 +3980,16 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
         if (category !== undefined && !['CUCINA', 'BAR', 'ALTRO'].includes(category)) {
             return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
         }
-        if (name === undefined && category === undefined && supplierId === undefined) {
-            return res.status(400).json({ error: 'At least one of name, category, or supplierId is required' });
+        // quantity / unit are paired: if either is touched, treat as a unit-and-quantity edit
+        const quantityTouched = quantity !== undefined || unit !== undefined;
+        let normalizedQU: { quantity: number | null; unit: Unit | null } | null = null;
+        if (quantityTouched) {
+            const qu = normalizeQuantityUnit(quantity, unit);
+            if (qu.error) return res.status(400).json({ error: qu.error });
+            normalizedQU = { quantity: qu.quantity, unit: qu.unit };
+        }
+        if (name === undefined && category === undefined && supplierId === undefined && !quantityTouched) {
+            return res.status(400).json({ error: 'At least one of name, category, supplierId, or quantity/unit is required' });
         }
 
         // When supplierId is provided (non-null), ensure it matches the (possibly new) category
@@ -3983,6 +4023,10 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
         if (category !== undefined && supplierId === undefined) {
             sets.push(`supplier_id = NULL`);
         }
+        if (normalizedQU) {
+            sets.push(`quantity = $${p++}`); params.push(normalizedQU.quantity);
+            sets.push(`unit = $${p++}`); params.push(normalizedQU.unit);
+        }
         params.push(id);
 
         const updateRes = await queryWithRetry(
@@ -4005,7 +4049,9 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
                 si.created_by_user_id as "createdByUserId",
                 si.created_by_user_name as "createdByUserName",
                 si.supplier_id as "supplierId",
-                s.name as "supplierName"
+                s.name as "supplierName",
+                si.quantity::float8 as quantity,
+                si.unit as unit
             FROM shopping_items si
             LEFT JOIN suppliers s ON s.id = si.supplier_id
             WHERE si.id = $1
@@ -4049,7 +4095,9 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
                 si.created_by_user_id as "createdByUserId",
                 si.created_by_user_name as "createdByUserName",
                 si.supplier_id as "supplierId",
-                s.name as "supplierName"
+                s.name as "supplierName",
+                si.quantity::float8 as quantity,
+                si.unit as unit
             FROM shopping_items si
             LEFT JOIN suppliers s ON s.id = si.supplier_id
             WHERE si.id = $1

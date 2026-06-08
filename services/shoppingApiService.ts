@@ -5,6 +5,10 @@ const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production
 
 export type ShoppingCategory = 'CUCINA' | 'BAR' | 'ALTRO';
 
+export type ShoppingUnit = 'kg' | 'g' | 'l' | 'ml' | 'pz' | 'conf' | 'cassetta' | 'cartone';
+
+export const SHOPPING_UNITS: ShoppingUnit[] = ['pz', 'kg', 'g', 'l', 'ml', 'conf', 'cassetta', 'cartone'];
+
 export interface ShoppingItem {
   id: string;
   name: string;
@@ -16,6 +20,8 @@ export interface ShoppingItem {
   createdByUserName?: string;
   supplierId?: string | null;
   supplierName?: string | null;
+  quantity?: number | null;
+  unit?: ShoppingUnit | null;
 }
 
 export interface Supplier {
@@ -110,7 +116,7 @@ class ShoppingApiService {
   /**
    * Create a new shopping item
    */
-  async createItem(item: { name: string; category: ShoppingCategory; date: string; supplierId?: string | null }): Promise<ShoppingItem> {
+  async createItem(item: { name: string; category: ShoppingCategory; date: string; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }): Promise<ShoppingItem> {
     return apiRequest<ShoppingItem>(`${API_URL}/shopping`, {
       method: 'POST',
       headers: getHeaders(),
@@ -119,9 +125,9 @@ class ShoppingApiService {
   }
 
   /**
-   * Update name, category and/or supplier of a shopping item
+   * Update name, category, supplier, quantity and/or unit of a shopping item
    */
-  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory; supplierId?: string | null }): Promise<ShoppingItem> {
+  async updateItem(id: string, updates: { name?: string; category?: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }): Promise<ShoppingItem> {
     return apiRequest<ShoppingItem>(`${API_URL}/shopping/${id}`, {
       method: 'PUT',
       headers: getHeaders(),

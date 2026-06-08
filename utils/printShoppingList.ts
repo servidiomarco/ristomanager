@@ -42,6 +42,13 @@ const formatCreatedAt = (iso?: string): string => {
   return `${day} ${time}`;
 };
 
+// Italian-style: 1.5 → "1,5 kg".
+const formatQty = (q?: number | null, u?: string | null): string => {
+  if (q == null || q <= 0 || !u) return '';
+  const s = q.toString().replace('.', ',');
+  return `${s} ${u}`;
+};
+
 const normalizePhoneForWhatsApp = (raw: string): string => {
   // wa.me wants digits only, with country code. Best-effort: strip non-digits, keep leading 39 if present.
   const digits = raw.replace(/\D+/g, '');
@@ -78,12 +85,14 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
     const author = item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo';
     const when = formatCreatedAt(item.createdAt);
     const supplierTag = item.supplierName ? `<span class="tag">${escapeHtml(item.supplierName)}</span>` : '';
+    const qty = formatQty(item.quantity, item.unit);
+    const qtyTag = qty ? `<span class="qty">${escapeHtml(qty)}</span>` : '';
     const meta = [author, when].filter(Boolean).join(' • ');
     return `
       <li class="${item.checked ? 'checked' : ''}">
         <span class="box">${item.checked ? '&#10003;' : ''}</span>
         <div class="content">
-          <div class="name">${escapeHtml(item.name)}${supplierTag}</div>
+          <div class="name">${qtyTag}${escapeHtml(item.name)}${supplierTag}</div>
           ${meta ? `<div class="meta">${escapeHtml(meta)}</div>` : ''}
         </div>
       </li>
@@ -170,6 +179,19 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
   li.checked .box { background: #e2e8f0; border-color: #64748b; }
   .content { flex: 1 1 auto; min-width: 0; }
   .name { font-size: 15px; font-weight: 500; color: #1e293b; }
+  .qty {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 1px 6px;
+    background: #f1f5f9;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    vertical-align: middle;
+  }
   .tag {
     display: inline-block;
     margin-left: 8px;
@@ -261,6 +283,14 @@ const buildShareText = (items: ShoppingItem[], options: ShareOptions): string =>
     return lines.join('\n');
   }
 
+  const renderLine = (item: ShoppingItem): string => {
+    const mark = item.checked ? '☑' : '☐';
+    const qty = formatQty(item.quantity, item.unit);
+    const qtyTag = qty ? `*${qty}* ` : '';
+    const sup = item.supplierName ? ` _(${item.supplierName})_` : '';
+    return `${mark} ${qtyTag}${item.name}${sup}`;
+  };
+
   if (options.groupByCategory) {
     const order: ShoppingCategory[] = ['CUCINA', 'BAR', 'ALTRO'];
     for (const cat of order) {
@@ -268,17 +298,13 @@ const buildShareText = (items: ShoppingItem[], options: ShareOptions): string =>
       if (sub.length === 0) continue;
       lines.push(`*${CATEGORY_LABELS[cat]}*`);
       for (const item of sub) {
-        const mark = item.checked ? '☑' : '☐';
-        const sup = item.supplierName ? ` _(${item.supplierName})_` : '';
-        lines.push(`${mark} ${item.name}${sup}`);
+        lines.push(renderLine(item));
       }
       lines.push('');
     }
   } else {
     for (const item of items) {
-      const mark = item.checked ? '☑' : '☐';
-      const sup = item.supplierName ? ` _(${item.supplierName})_` : '';
-      lines.push(`${mark} ${item.name}${sup}`);
+      lines.push(renderLine(item));
     }
   }
   return lines.join('\n').trimEnd();
