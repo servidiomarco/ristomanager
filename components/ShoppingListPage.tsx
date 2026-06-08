@@ -1010,83 +1010,89 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
         {/* Add item — sticky at bottom of page */}
         <div className="sticky bottom-3 sm:bottom-4">
           <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl shadow-[var(--shadow-md)] p-3 relative">
-            <div className="flex items-center gap-2">
-              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={newItemName}
-                onChange={e => { setNewItemName(e.target.value); setShowSuggestions(true); }}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
-                }}
-                placeholder="Aggiungi prodotto..."
-                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={newItemQty}
-                onChange={e => setNewItemQty(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
-                }}
-                placeholder="Qtà"
-                className="w-14 flex-shrink-0 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-2 py-1 text-xs font-medium text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] tabular text-center"
-                title="Quantità (opzionale)"
-              />
-              <div className="relative flex-shrink-0">
-                <select
-                  value={newItemUnit}
-                  onChange={e => setNewItemUnit(e.target.value as ShoppingUnit)}
-                  className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
-                  title="Unità"
-                >
-                  {SHOPPING_UNITS.map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Product name — own full-width line on mobile, flexes inline on sm+ */}
+              <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto sm:flex-1">
+                <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={newItemName}
+                  onChange={e => { setNewItemName(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
+                  }}
+                  placeholder="Aggiungi prodotto..."
+                  className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+                />
               </div>
-              <div className="relative flex-shrink-0">
-                <select
-                  value={newItemCategory}
-                  onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
-                  className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
-                >
-                  <option value="CUCINA">Cucina</option>
-                  <option value="BAR">Bar</option>
-                  <option value="ALTRO">Altro</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
-              </div>
-              {suppliersByCategory[newItemCategory].length > 0 && (
+              {/* Controls — second line on mobile, inline on sm+ via display:contents */}
+              <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto sm:contents">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={newItemQty}
+                  onChange={e => setNewItemQty(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
+                  }}
+                  placeholder="Qtà"
+                  className="w-14 flex-shrink-0 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-2 py-1 text-xs font-medium text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] tabular text-center"
+                  title="Quantità (opzionale)"
+                />
                 <div className="relative flex-shrink-0">
                   <select
-                    value={newItemSupplierId}
-                    onChange={e => setNewItemSupplierId(e.target.value)}
-                    className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer max-w-[140px]"
-                    title="Fornitore (opzionale)"
+                    value={newItemUnit}
+                    onChange={e => setNewItemUnit(e.target.value as ShoppingUnit)}
+                    className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
+                    title="Unità"
                   >
-                    <option value="">Senza fornitore</option>
-                    {suppliersByCategory[newItemCategory].map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+                    {SHOPPING_UNITS.map(u => (
+                      <option key={u} value={u}>{u}</option>
                     ))}
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
                 </div>
-              )}
-              <button
-                type="button"
-                onClick={() => handleAdd()}
-                disabled={!newItemName.trim() || isAdding}
-                aria-label="Aggiungi prodotto"
-                className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-              >
-                {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              </button>
+                <div className="relative flex-shrink-0">
+                  <select
+                    value={newItemCategory}
+                    onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
+                    className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
+                  >
+                    <option value="CUCINA">Cucina</option>
+                    <option value="BAR">Bar</option>
+                    <option value="ALTRO">Altro</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+                </div>
+                {suppliersByCategory[newItemCategory].length > 0 && (
+                  <div className="relative min-w-0 flex-1 sm:flex-none">
+                    <select
+                      value={newItemSupplierId}
+                      onChange={e => setNewItemSupplierId(e.target.value)}
+                      className="w-full bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer sm:max-w-[140px]"
+                      title="Fornitore (opzionale)"
+                    >
+                      <option value="">Senza fornitore</option>
+                      {suppliersByCategory[newItemCategory].map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleAdd()}
+                  disabled={!newItemName.trim() || isAdding}
+                  aria-label="Aggiungi prodotto"
+                  className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                >
+                  {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             {showSuggestions && suggestions.length > 0 && (
