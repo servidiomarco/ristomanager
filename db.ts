@@ -760,6 +760,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_shopping_items_supplier_id ON shopping_items(supplier_id);
         `);
 
+        // Optional quantity + unit. Both nullable: items without a quantity render as before.
+        await client.query(`
+            ALTER TABLE shopping_items
+            ADD COLUMN IF NOT EXISTS quantity NUMERIC(10, 3);
+        `);
+        await client.query(`
+            ALTER TABLE shopping_items
+            ADD COLUMN IF NOT EXISTS unit VARCHAR(20)
+            CHECK (unit IS NULL OR unit IN ('kg', 'g', 'l', 'ml', 'pz', 'conf', 'cassetta', 'cartone'));
+        `);
+
         // ============================================
         // STAFF MEMBERS TABLE
         // ============================================

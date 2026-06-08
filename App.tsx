@@ -1712,6 +1712,26 @@ const App: React.FC = () => {
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}
+                {canAccessView(ViewState.ATTIVITA) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.ATTIVITA); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.ATTIVITA ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <ListChecks className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Attività</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canAccessView(ViewState.LISTA_DELLA_SPESA) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.LISTA_DELLA_SPESA); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.LISTA_DELLA_SPESA ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <ShoppingCart className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Lista della Spesa</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
                 {canAccessView(ViewState.STAFF) && (
                   <button
                     onClick={() => { setShowMoreMenu(false); setView(ViewState.STAFF); }}

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useShopping } from '../contexts/ShoppingContext';
-import { ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { ShoppingItem, ShoppingCategory, ShoppingUnit, SHOPPING_UNITS } from '../services/shoppingApiService';
 import { Reservation, BanquetMenu, ReservationStatus } from '../types';
 import { printShoppingList, shareShoppingList } from '../utils/printShoppingList';
 import { SupplierManagementModal } from './SupplierManagementModal';
@@ -90,6 +90,21 @@ const formatLocalDate = (date: Date): string => {
   return `${y}-${m}-${d}`;
 };
 
+// Parse a localized number string ("1,5" or "1.5") into a positive float, or null when empty/invalid.
+const parseQty = (text: string): number | null => {
+  const t = text.trim().replace(',', '.');
+  if (!t) return null;
+  const n = parseFloat(t);
+  return isFinite(n) && n > 0 ? n : null;
+};
+
+// Italian-style formatter: 1.5 → "1,5 kg", 2 → "2 pz".
+const formatQty = (q?: number | null, u?: string | null): string => {
+  if (q == null || q <= 0 || !u) return '';
+  const s = q.toString().replace('.', ',');
+  return `${s} ${u}`;
+};
+
 export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   reservations,
   banquetMenus,
@@ -106,6 +121,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
   const [newItemSupplierId, setNewItemSupplierId] = useState<string | ''>('');
+  const [newItemQty, setNewItemQty] = useState('');
+  const [newItemUnit, setNewItemUnit] = useState<ShoppingUnit>('pz');
   const [isAdding, setIsAdding] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +131,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const [editName, setEditName] = useState('');
   const [editCategory, setEditCategory] = useState<ShoppingCategory>('CUCINA');
   const [editSupplierId, setEditSupplierId] = useState<string | ''>('');
+  const [editQty, setEditQty] = useState('');
+  const [editUnit, setEditUnit] = useState<ShoppingUnit>('pz');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -234,8 +253,16 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     if (!name || isAdding) return;
     try {
       setIsAdding(true);
-      await addItem({ name, category: newItemCategory, supplierId: newItemSupplierId || null });
+      const qty = parseQty(newItemQty);
+      await addItem({
+        name,
+        category: newItemCategory,
+        supplierId: newItemSupplierId || null,
+        quantity: qty,
+        unit: qty != null ? newItemUnit : null,
+      });
       setNewItemName('');
+      setNewItemQty('');
       setShowSuggestions(false);
       inputRef.current?.focus();
     } finally {
@@ -248,11 +275,14 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     setEditName(item.name);
     setEditCategory(item.category);
     setEditSupplierId(item.supplierId || '');
+    setEditQty(item.quantity != null && item.quantity > 0 ? String(item.quantity).replace('.', ',') : '');
+    setEditUnit(item.unit || 'pz');
   };
   const cancelEdit = () => {
     setEditingId(null);
     setEditName('');
     setEditSupplierId('');
+    setEditQty('');
   };
   const saveEdit = async () => {
     if (!editingId || isSavingEdit) return;
@@ -260,14 +290,18 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     if (!trimmed) return;
     try {
       setIsSavingEdit(true);
+      const qty = parseQty(editQty);
       await updateItem(editingId, {
         name: trimmed,
         category: editCategory,
         supplierId: editSupplierId || null,
+        quantity: qty,
+        unit: qty != null ? editUnit : null,
       });
       setEditingId(null);
       setEditName('');
       setEditSupplierId('');
+      setEditQty('');
     } finally {
       setIsSavingEdit(false);
     }
@@ -750,6 +784,29 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                               className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-fg)]"
                             />
                             <div className="flex items-center gap-2 flex-wrap">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={editQty}
+                                onChange={e => setEditQty(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') saveEdit();
+                                  if (e.key === 'Escape') cancelEdit();
+                                }}
+                                placeholder="Qtà"
+                                className="w-16 text-xs bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--color-fg)] tabular"
+                                title="Quantità (opzionale)"
+                              />
+                              <select
+                                value={editUnit}
+                                onChange={e => setEditUnit(e.target.value as ShoppingUnit)}
+                                className="text-xs bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+                                title="Unità"
+                              >
+                                {SHOPPING_UNITS.map(u => (
+                                  <option key={u} value={u}>{u}</option>
+                                ))}
+                              </select>
                               <select
                                 value={editCategory}
                                 onChange={e => setEditCategory(e.target.value as ShoppingCategory)}
@@ -822,8 +879,19 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                               {item.checked && <Check className="h-2.5 w-2.5" />}
                             </button>
                           )}
-                          <span className={`flex-1 min-w-0 text-sm ${item.checked && !selectionMode ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
-                            {item.name}
+                          <span className={`flex-1 min-w-0 text-sm flex items-center gap-2 ${item.checked && !selectionMode ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
+                            {item.quantity != null && item.quantity > 0 && item.unit && (
+                              <span
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold tabular flex-shrink-0 ${
+                                  item.checked && !selectionMode
+                                    ? 'bg-[var(--color-surface-2)] text-[var(--color-fg-subtle)]'
+                                    : 'bg-[var(--color-surface-2)] text-[var(--color-fg)] border border-[var(--color-line)]'
+                                }`}
+                              >
+                                {formatQty(item.quantity, item.unit)}
+                              </span>
+                            )}
+                            <span className="truncate">{item.name}</span>
                           </span>
                           {item.supplierName && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 flex-shrink-0 max-w-[120px] truncate">
@@ -880,6 +948,31 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 placeholder="Aggiungi prodotto..."
                 className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
               />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newItemQty}
+                onChange={e => setNewItemQty(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
+                }}
+                placeholder="Qtà"
+                className="w-14 flex-shrink-0 bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-2 py-1 text-xs font-medium text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] tabular text-center"
+                title="Quantità (opzionale)"
+              />
+              <div className="relative flex-shrink-0">
+                <select
+                  value={newItemUnit}
+                  onChange={e => setNewItemUnit(e.target.value as ShoppingUnit)}
+                  className="bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
+                  title="Unità"
+                >
+                  {SHOPPING_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
+              </div>
               <div className="relative flex-shrink-0">
                 <select
                   value={newItemCategory}

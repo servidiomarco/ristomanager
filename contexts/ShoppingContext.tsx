@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { shoppingApiService, supplierApiService, ShoppingItem, ShoppingCategory, Supplier } from '../services/shoppingApiService';
+import { shoppingApiService, supplierApiService, ShoppingItem, ShoppingCategory, Supplier, ShoppingUnit } from '../services/shoppingApiService';
 import { socketClient } from '../services/socketClient';
 import { useAuth } from './AuthContext';
 
@@ -8,8 +8,8 @@ interface ShoppingContextType {
   loading: boolean;
   history: string[];
   suppliers: Supplier[];
-  addItem: (input: { name: string; category: ShoppingCategory; supplierId?: string | null }) => Promise<void>;
-  updateItem: (id: string, patch: { name?: string; category?: ShoppingCategory; supplierId?: string | null }) => Promise<void>;
+  addItem: (input: { name: string; category: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }) => Promise<void>;
+  updateItem: (id: string, patch: { name?: string; category?: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }) => Promise<void>;
   toggleItem: (id: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   clearChecked: () => Promise<void>;
@@ -125,7 +125,7 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [socketConnected, isAuthenticated]);
 
   const addItem = useCallback(
-    async ({ name, category, supplierId }: { name: string; category: ShoppingCategory; supplierId?: string | null }) => {
+    async ({ name, category, supplierId, quantity, unit }: { name: string; category: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }) => {
       const trimmed = name.trim();
       if (!trimmed) return;
       // Don't append locally — the socket echo (including to the sender) handles it.
@@ -135,13 +135,15 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category,
         date: formatLocalDate(new Date()),
         supplierId: supplierId ?? null,
+        quantity: quantity ?? null,
+        unit: unit ?? null,
       });
     },
     [],
   );
 
   const updateItem = useCallback(
-    async (id: string, patch: { name?: string; category?: ShoppingCategory; supplierId?: string | null }) => {
+    async (id: string, patch: { name?: string; category?: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }) => {
       const updated = await shoppingApiService.updateItem(id, patch);
       setItems(prev => prev.map(i => (i.id === updated.id ? updated : i)));
     },
