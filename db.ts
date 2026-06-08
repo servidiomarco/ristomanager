@@ -734,21 +734,42 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
-        // SUPPLIERS TABLE (fornitori, scoped per shopping category)
+        // SUPPLIERS TABLE (fornitori, può appartenere a 1+ shopping categories)
         // ============================================
         await client.query(`
             CREATE TABLE IF NOT EXISTS suppliers (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 name VARCHAR(255) NOT NULL,
-                category VARCHAR(20) NOT NULL CHECK (category IN ('CUCINA', 'BAR', 'ALTRO')),
+                categories VARCHAR(20)[] NOT NULL DEFAULT ARRAY[]::VARCHAR(20)[],
                 phone VARCHAR(50),
                 note TEXT,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (category, name)
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // Migrate from the legacy single-category schema if needed.
+        // If "category" column still exists, copy it into "categories" then drop it.
         await client.query(`
-            CREATE INDEX IF NOT EXISTS idx_suppliers_category ON suppliers(category);
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'suppliers' AND column_name = 'category'
+                ) THEN
+                    ALTER TABLE suppliers
+                        ADD COLUMN IF NOT EXISTS categories VARCHAR(20)[]
+                        NOT NULL DEFAULT ARRAY[]::VARCHAR(20)[];
+                    UPDATE suppliers
+                        SET categories = ARRAY[category]::VARCHAR(20)[]
+                        WHERE categories IS NULL OR cardinality(categories) = 0;
+                    ALTER TABLE suppliers DROP CONSTRAINT IF EXISTS suppliers_category_name_key;
+                    ALTER TABLE suppliers DROP COLUMN category;
+                END IF;
+            END $$;
+        `);
+
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_suppliers_categories ON suppliers USING GIN(categories);
         `);
 
         // Link shopping items to an optional supplier (ON DELETE SET NULL keeps items orphan-safe)

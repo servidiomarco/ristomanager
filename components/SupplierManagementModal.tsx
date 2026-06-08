@@ -18,9 +18,65 @@ const CATEGORY_LABELS: Record<ShoppingCategory, string> = {
 };
 
 const CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
-  CUCINA: <ChefHat className="h-4 w-4" />,
-  BAR: <Coffee className="h-4 w-4" />,
-  ALTRO: <Package className="h-4 w-4" />,
+  CUCINA: <ChefHat className="h-3.5 w-3.5" />,
+  BAR: <Coffee className="h-3.5 w-3.5" />,
+  ALTRO: <Package className="h-3.5 w-3.5" />,
+};
+
+const sortedCategories = (cats: ShoppingCategory[]): ShoppingCategory[] =>
+  CATEGORIES.filter(c => cats.includes(c));
+
+const CategoryChips: React.FC<{ categories: ShoppingCategory[] }> = ({ categories }) => (
+  <div className="flex flex-wrap items-center gap-1 mt-1">
+    {sortedCategories(categories).map(c => (
+      <span
+        key={c}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] border border-[var(--color-line)]"
+      >
+        {CATEGORY_ICONS[c]}
+        {CATEGORY_LABELS[c]}
+      </span>
+    ))}
+  </div>
+);
+
+const CategoryCheckboxes: React.FC<{
+  value: ShoppingCategory[];
+  onChange: (next: ShoppingCategory[]) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled }) => {
+  const toggle = (c: ShoppingCategory) => {
+    if (value.includes(c)) {
+      const next = value.filter(x => x !== c);
+      if (next.length === 0) return; // require at least one
+      onChange(next);
+    } else {
+      onChange([...value, c]);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {CATEGORIES.map(c => {
+        const on = value.includes(c);
+        return (
+          <button
+            key={c}
+            type="button"
+            disabled={disabled}
+            onClick={() => toggle(c)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+              on
+                ? 'bg-[var(--color-fg)] text-[var(--color-surface)] border-[var(--color-fg)]'
+                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+            } disabled:opacity-50`}
+          >
+            {CATEGORY_ICONS[c]}
+            {CATEGORY_LABELS[c]}
+          </button>
+        );
+      })}
+    </div>
+  );
 };
 
 export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = ({
@@ -29,12 +85,14 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
   initialCategory,
 }) => {
   const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useShopping();
-  const [activeCategory, setActiveCategory] = useState<ShoppingCategory>(initialCategory || 'CUCINA');
 
   // Add form
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newNote, setNewNote] = useState('');
+  const [newCategories, setNewCategories] = useState<ShoppingCategory[]>(
+    initialCategory ? [initialCategory] : ['CUCINA'],
+  );
   const [isAdding, setIsAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -43,6 +101,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editNote, setEditNote] = useState('');
+  const [editCategories, setEditCategories] = useState<ShoppingCategory[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -51,15 +110,12 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
   const [isDeleting, setIsDeleting] = useState(false);
 
   React.useEffect(() => {
-    if (open && initialCategory) setActiveCategory(initialCategory);
+    if (open && initialCategory) setNewCategories([initialCategory]);
   }, [open, initialCategory]);
 
-  const suppliersInCategory = useMemo(
-    () =>
-      suppliers
-        .filter(s => s.category === activeCategory)
-        .sort((a, b) => a.name.localeCompare(b.name, 'it')),
-    [suppliers, activeCategory],
+  const sortedSuppliers = useMemo(
+    () => [...suppliers].sort((a, b) => a.name.localeCompare(b.name, 'it')),
+    [suppliers],
   );
 
   if (!open) return null;
@@ -68,18 +124,19 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
     setNewName('');
     setNewPhone('');
     setNewNote('');
+    setNewCategories(initialCategory ? [initialCategory] : ['CUCINA']);
     setAddError(null);
   };
 
   const handleAdd = async () => {
     const name = newName.trim();
-    if (!name || isAdding) return;
+    if (!name || isAdding || newCategories.length === 0) return;
     try {
       setIsAdding(true);
       setAddError(null);
       await addSupplier({
         name,
-        category: activeCategory,
+        categories: newCategories,
         phone: newPhone.trim() || undefined,
         note: newNote.trim() || undefined,
       });
@@ -96,6 +153,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
     setEditName(s.name);
     setEditPhone(s.phone || '');
     setEditNote(s.note || '');
+    setEditCategories(s.categories.length > 0 ? [...s.categories] : ['CUCINA']);
     setEditError(null);
   };
 
@@ -104,18 +162,20 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
     setEditName('');
     setEditPhone('');
     setEditNote('');
+    setEditCategories([]);
     setEditError(null);
   };
 
   const saveEdit = async () => {
     if (!editingId || isSaving) return;
     const name = editName.trim();
-    if (!name) return;
+    if (!name || editCategories.length === 0) return;
     try {
       setIsSaving(true);
       setEditError(null);
       await updateSupplier(editingId, {
         name,
+        categories: editCategories,
         phone: editPhone.trim() || null,
         note: editNote.trim() || null,
       });
@@ -149,7 +209,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
         <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
           <div>
             <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Gestione fornitori</h3>
-            <p className="text-xs text-[var(--color-fg-muted)]">Crea o modifica i fornitori per categoria</p>
+            <p className="text-xs text-[var(--color-fg-muted)]">Un fornitore può servire più categorie</p>
           </div>
           <button
             onClick={onClose}
@@ -159,41 +219,14 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
           </button>
         </div>
 
-        {/* Category tabs */}
-        <div className="flex items-center gap-1.5 p-3 border-b border-[var(--color-line)] overflow-x-auto">
-          {CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => {
-                setActiveCategory(cat);
-                cancelEdit();
-                resetAddForm();
-                setPendingDeleteId(null);
-              }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap transition-colors ${
-                activeCategory === cat
-                  ? 'bg-[var(--color-fg)] text-[var(--color-surface)] border-[var(--color-fg)]'
-                  : 'bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
-              }`}
-            >
-              {CATEGORY_ICONS[cat]}
-              {CATEGORY_LABELS[cat]}
-              <span className="tabular opacity-70">
-                ({suppliers.filter(s => s.category === cat).length})
-              </span>
-            </button>
-          ))}
-        </div>
-
         {/* Supplier list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {suppliersInCategory.length === 0 ? (
+          {sortedSuppliers.length === 0 ? (
             <p className="py-8 text-center text-sm text-[var(--color-fg-subtle)]">
-              Nessun fornitore in questa categoria. Aggiungine uno qui sotto.
+              Nessun fornitore. Aggiungine uno qui sotto.
             </p>
           ) : (
-            suppliersInCategory.map(s => {
+            sortedSuppliers.map(s => {
               const isEditing = editingId === s.id;
               const isPendingDelete = pendingDeleteId === s.id;
               if (isEditing) {
@@ -210,6 +243,16 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       autoFocus
                       className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--color-fg)]"
                     />
+                    <div>
+                      <p className="text-[11px] font-medium text-[var(--color-fg-muted)] uppercase tracking-wide mb-1.5">
+                        Categorie servite
+                      </p>
+                      <CategoryCheckboxes
+                        value={editCategories}
+                        onChange={setEditCategories}
+                        disabled={isSaving}
+                      />
+                    </div>
                     <input
                       type="tel"
                       value={editPhone}
@@ -235,7 +278,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       </button>
                       <button
                         onClick={saveEdit}
-                        disabled={!editName.trim() || isSaving}
+                        disabled={!editName.trim() || editCategories.length === 0 || isSaving}
                         className="text-xs px-3 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] inline-flex items-center gap-1.5 disabled:opacity-40 hover:opacity-90"
                       >
                         {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
@@ -253,8 +296,9 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[var(--color-fg)] truncate">{s.name}</p>
+                      <CategoryChips categories={s.categories} />
                       {s.phone && (
-                        <p className="text-xs text-[var(--color-fg-muted)] tabular mt-0.5">{s.phone}</p>
+                        <p className="text-xs text-[var(--color-fg-muted)] tabular mt-1">{s.phone}</p>
                       )}
                       {s.note && (
                         <p className="text-xs text-[var(--color-fg-subtle)] mt-1 whitespace-pre-wrap break-words">
@@ -312,7 +356,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
         {/* Add form */}
         <div className="border-t border-[var(--color-line)] p-3 sm:p-4 space-y-2 bg-[var(--color-surface-2)]">
           <p className="text-xs font-medium text-[var(--color-fg-muted)] uppercase tracking-wide">
-            Aggiungi a {CATEGORY_LABELS[activeCategory]}
+            Aggiungi fornitore
           </p>
           <input
             type="text"
@@ -327,6 +371,16 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
             placeholder="Nome fornitore"
             className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2.5 py-2 focus:outline-none focus:border-[var(--color-fg)]"
           />
+          <div>
+            <p className="text-[11px] font-medium text-[var(--color-fg-muted)] uppercase tracking-wide mb-1.5">
+              Categorie servite
+            </p>
+            <CategoryCheckboxes
+              value={newCategories}
+              onChange={setNewCategories}
+              disabled={isAdding}
+            />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               type="tel"
@@ -347,7 +401,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
           <div className="flex justify-end">
             <button
               onClick={handleAdd}
-              disabled={!newName.trim() || isAdding}
+              disabled={!newName.trim() || newCategories.length === 0 || isAdding}
               className="text-sm px-3 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] inline-flex items-center gap-2 disabled:opacity-40 hover:opacity-90"
             >
               {isAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}

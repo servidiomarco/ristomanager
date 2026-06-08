@@ -27,7 +27,7 @@ export interface ShoppingItem {
 export interface Supplier {
   id: string;
   name: string;
-  category: ShoppingCategory;
+  categories: ShoppingCategory[];
   phone?: string | null;
   note?: string | null;
   createdAt?: string;
@@ -178,7 +178,7 @@ class SupplierApiService {
     });
   }
 
-  async create(input: { name: string; category: ShoppingCategory; phone?: string; note?: string }): Promise<Supplier> {
+  async create(input: { name: string; categories: ShoppingCategory[]; phone?: string; note?: string }): Promise<Supplier> {
     return apiRequest<Supplier>(`${API_URL}/suppliers`, {
       method: 'POST',
       headers: getHeaders(),
@@ -186,7 +186,7 @@ class SupplierApiService {
     });
   }
 
-  async update(id: string, updates: { name?: string; phone?: string | null; note?: string | null }): Promise<Supplier> {
+  async update(id: string, updates: { name?: string; categories?: ShoppingCategory[]; phone?: string | null; note?: string | null }): Promise<Supplier> {
     return apiRequest<Supplier>(`${API_URL}/suppliers/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
