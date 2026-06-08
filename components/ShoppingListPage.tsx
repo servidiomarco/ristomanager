@@ -473,7 +473,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               {checkedCount}/{totalCount} completati
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap" ref={menuRef}>
+          <div className="flex items-center gap-2 flex-wrap relative" ref={menuRef}>
             {ALL_CATEGORIES.map(cat => {
               const catItems = items.filter(i => i.category === cat && !i.checked);
               if (catItems.length === 0) return null;
@@ -481,7 +481,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               const hasNoSupplierItems = catItems.some(i => !i.supplierId);
               const isOpen = openMenuCategory === cat;
               return (
-                <div key={cat} className="relative">
+                <div key={cat}>
                   <button
                     type="button"
                     onClick={() => setOpenMenuCategory(isOpen ? null : cat)}
@@ -501,7 +501,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                   {isOpen && (
                     <div
                       role="menu"
-                      className="absolute right-0 sm:right-0 left-auto top-full mt-1 z-20 min-w-[260px] max-w-[88vw] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-md)] overflow-hidden"
+                      className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-1 z-20 min-w-[260px] max-w-[calc(100vw-2rem)] sm:max-w-[88vw] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-md)] overflow-hidden"
                     >
                       <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] border-b border-[var(--color-line)]">
                         {SHOPPING_CATEGORY_LABELS[cat]} · stampa e condivisione
@@ -552,7 +552,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 </div>
               );
             })}
-            <div className="relative">
+            <div>
               <button
                 type="button"
                 onClick={() => { setSupplierMenuOpen(o => !o); setOpenMenuCategory(null); }}
@@ -572,7 +572,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               {supplierMenuOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 top-full mt-1 z-20 min-w-[260px] max-w-[88vw] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-md)] overflow-hidden"
+                  className="absolute left-0 right-auto sm:left-auto sm:right-0 top-full mt-1 z-20 min-w-[260px] max-w-[calc(100vw-2rem)] sm:max-w-[88vw] bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-md)] overflow-hidden"
                 >
                   <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] border-b border-[var(--color-line)]">
                     Per fornitore · stampa e condivisione
