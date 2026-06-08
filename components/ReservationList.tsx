@@ -1543,7 +1543,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // Map reservation/banquet occupancy → glyph display status
       let displayStatus: TableDisplayStatus = 'libera';
       if (reservation) {
-          displayStatus = isArrived ? 'arrivato' : 'attesa';
+          if (reservation.reservation_status === ReservationStatus.NO_SHOW) {
+              displayStatus = 'noshow';
+          } else {
+              displayStatus = isArrived ? 'arrivato' : 'attesa';
+          }
       } else if (banquet) {
           displayStatus = 'attesa';
       }
@@ -1622,7 +1626,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     seats={table.seats}
                     shape={table.shape}
                     status={displayStatus}
-                    party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
+                    party={reservation
+                      ? (reservation.reservation_status === ReservationStatus.NO_SHOW ? 0 : reservation.guests)
+                      : banquet ? (banquet.guests ?? 0) : 0}
                 />
             </div>
 

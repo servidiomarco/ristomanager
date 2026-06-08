@@ -1,7 +1,7 @@
 import React from 'react';
 import { TableShape } from '../types';
 
-export type TableDisplayStatus = 'libera' | 'attesa' | 'arrivato';
+export type TableDisplayStatus = 'libera' | 'attesa' | 'arrivato' | 'noshow';
 
 const PITCH = 26;
 const CHAIR_W = 20;

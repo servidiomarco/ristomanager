@@ -523,7 +523,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         banquetTableIds.set(b.id, arr);
       } else {
         const r = getActiveReservation(t);
-        if (r && r.reservation_status !== ReservationStatus.NO_SHOW) {
+        // No-show is still tracked so the glyph can render in its no-show tint;
+        // it just won't light up chairs (party=0 below) since nobody arrived.
+        if (r) {
           reservationByTableId.set(t.id, r);
         }
       }
@@ -933,8 +935,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       displayStatus = 'attesa';
     } else if (isTempLocked) {
       displayStatus = 'attesa';
-    } else if (reservation && reservation.reservation_status !== ReservationStatus.NO_SHOW) {
-      displayStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
+    } else if (reservation) {
+      if (reservation.reservation_status === ReservationStatus.NO_SHOW) {
+        displayStatus = 'noshow';
+      } else {
+        displayStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
+      }
     }
 
     const dims = getGlyphDimensions(table.shape, table.seats);
@@ -985,7 +991,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             seats={table.seats}
             shape={table.shape}
             status={displayStatus}
-            party={reservation ? reservation.guests : banquet ? (banquet.guests ?? 0) : 0}
+            party={reservation
+              ? (reservation.reservation_status === ReservationStatus.NO_SHOW ? 0 : reservation.guests)
+              : banquet ? (banquet.guests ?? 0) : 0}
             isSelected={isSelected && canEdit}
           />
         </div>

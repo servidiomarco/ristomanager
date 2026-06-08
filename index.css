@@ -219,6 +219,12 @@
   --tg-arrivato-name: #1A5E33;
   --tg-arrivato-accent: #1F7A43;
   --tg-arrivato-pill-bg: #1F7A43;
+  --tg-noshow-bg: #FFE4E6;
+  --tg-noshow-stroke: #FECDD3;
+  --tg-noshow-chair: #BE123C;
+  --tg-noshow-name: #9F1239;
+  --tg-noshow-accent: #BE123C;
+  --tg-noshow-pill-bg: #BE123C;
   --tg-covers: #8C8B83;
 
   /* Banquet / event — default tint (amber, matches banquet-color-0). Each
@@ -248,6 +254,12 @@
   --tg-arrivato-name: #BEE6C7;
   --tg-arrivato-accent: #7FD79A;
   --tg-arrivato-pill-bg: #2F8F50;
+  --tg-noshow-bg: #3A1B22;
+  --tg-noshow-stroke: #6B2F3F;
+  --tg-noshow-chair: #F87171;
+  --tg-noshow-name: #FECDD3;
+  --tg-noshow-accent: #FB7185;
+  --tg-noshow-pill-bg: #9F1239;
   --tg-covers: #A09E95;
 
   /* Banquet / event — default tint (amber, dark mode) */
