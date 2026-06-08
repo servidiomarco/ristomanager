@@ -3827,31 +3827,34 @@ app.get('/shopping', authenticate, async (req, res) => {
         const { date } = req.query;
         let query = `
             SELECT
-                id,
-                name,
-                category,
-                checked,
-                TO_CHAR(date, 'YYYY-MM-DD') as date,
-                created_at as "createdAt",
-                created_by_user_id as "createdByUserId",
-                created_by_user_name as "createdByUserName"
-            FROM shopping_items
+                si.id,
+                si.name,
+                si.category,
+                si.checked,
+                TO_CHAR(si.date, 'YYYY-MM-DD') as date,
+                si.created_at as "createdAt",
+                si.created_by_user_id as "createdByUserId",
+                si.created_by_user_name as "createdByUserName",
+                si.supplier_id as "supplierId",
+                s.name as "supplierName"
+            FROM shopping_items si
+            LEFT JOIN suppliers s ON s.id = si.supplier_id
         `;
         const params: string[] = [];
 
         if (date) {
-            query += ' WHERE date = $1';
+            query += ' WHERE si.date = $1';
             params.push(date as string);
         }
 
         query += `
             ORDER BY
-                CASE category
+                CASE si.category
                     WHEN 'CUCINA' THEN 1
                     WHEN 'BAR' THEN 2
                     WHEN 'ALTRO' THEN 3
                 END,
-                created_at ASC
+                si.created_at ASC
         `;
 
         const result = await queryWithRetry(query, params);
@@ -3864,7 +3867,7 @@ app.get('/shopping', authenticate, async (req, res) => {
 
 app.post('/shopping', authenticate, async (req, res) => {
     try {
-        const { name, category, date } = req.body;
+        const { name, category, date, supplierId } = req.body;
 
         console.log('🛒 POST /shopping - req.user:', req.user);
 
@@ -3872,22 +3875,46 @@ app.post('/shopping', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'Name and date are required' });
         }
 
+        const finalCategory = category || 'ALTRO';
+
+        // If a supplier is provided, validate it exists and belongs to the same category
+        if (supplierId) {
+            const supRes = await queryWithRetry('SELECT category FROM suppliers WHERE id = $1', [supplierId]);
+            if (supRes.rows.length === 0) {
+                return res.status(400).json({ error: 'Supplier not found' });
+            }
+            if (supRes.rows[0].category !== finalCategory) {
+                return res.status(400).json({ error: 'Supplier does not belong to the selected category' });
+            }
+        }
+
         const creatorEmail = req.user?.email || null;
         console.log('🛒 Creator email:', creatorEmail);
 
+        const inserted = await queryWithRetry(`
+            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name, supplier_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+        `, [name, finalCategory, date, req.user?.userId || null, creatorEmail, supplierId || null]);
+
+        const newId = inserted.rows[0].id;
+
         const result = await queryWithRetry(`
-            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING
-                id,
-                name,
-                category,
-                checked,
-                TO_CHAR(date, 'YYYY-MM-DD') as date,
-                created_at as "createdAt",
-                created_by_user_id as "createdByUserId",
-                created_by_user_name as "createdByUserName"
-        `, [name, category || 'ALTRO', date, req.user?.userId || null, creatorEmail]);
+            SELECT
+                si.id,
+                si.name,
+                si.category,
+                si.checked,
+                TO_CHAR(si.date, 'YYYY-MM-DD') as date,
+                si.created_at as "createdAt",
+                si.created_by_user_id as "createdByUserId",
+                si.created_by_user_name as "createdByUserName",
+                si.supplier_id as "supplierId",
+                s.name as "supplierName"
+            FROM shopping_items si
+            LEFT JOIN suppliers s ON s.id = si.supplier_id
+            WHERE si.id = $1
+        `, [newId]);
 
         console.log('🛒 Created item:', result.rows[0]);
 
@@ -3913,7 +3940,7 @@ app.post('/shopping', authenticate, async (req, res) => {
 app.put('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, category } = req.body;
+        const { name, category, supplierId } = req.body;
 
         if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
             return res.status(400).json({ error: 'name must be a non-empty string' });
@@ -3921,29 +3948,68 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
         if (category !== undefined && !['CUCINA', 'BAR', 'ALTRO'].includes(category)) {
             return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
         }
-        if (name === undefined && category === undefined) {
-            return res.status(400).json({ error: 'At least one of name or category is required' });
+        if (name === undefined && category === undefined && supplierId === undefined) {
+            return res.status(400).json({ error: 'At least one of name, category, or supplierId is required' });
+        }
+
+        // When supplierId is provided (non-null), ensure it matches the (possibly new) category
+        if (supplierId) {
+            const supRes = await queryWithRetry('SELECT category FROM suppliers WHERE id = $1', [supplierId]);
+            if (supRes.rows.length === 0) {
+                return res.status(400).json({ error: 'Supplier not found' });
+            }
+            // Resolve effective category: incoming category, or existing one
+            let effectiveCategory = category;
+            if (!effectiveCategory) {
+                const itemRes = await queryWithRetry('SELECT category FROM shopping_items WHERE id = $1', [id]);
+                if (itemRes.rows.length === 0) {
+                    return res.status(404).json({ error: 'Item not found' });
+                }
+                effectiveCategory = itemRes.rows[0].category;
+            }
+            if (supRes.rows[0].category !== effectiveCategory) {
+                return res.status(400).json({ error: 'Supplier does not belong to the selected category' });
+            }
+        }
+
+        // Build dynamic update so we can distinguish "not provided" from "explicit null" on supplier_id
+        const sets: string[] = [];
+        const params: any[] = [];
+        let p = 1;
+        if (name !== undefined) { sets.push(`name = $${p++}`); params.push(name.trim()); }
+        if (category !== undefined) { sets.push(`category = $${p++}`); params.push(category); }
+        if (supplierId !== undefined) { sets.push(`supplier_id = $${p++}`); params.push(supplierId || null); }
+        // If category changed without an explicit supplierId, clear supplier_id (it'd otherwise be stale)
+        if (category !== undefined && supplierId === undefined) {
+            sets.push(`supplier_id = NULL`);
+        }
+        params.push(id);
+
+        const updateRes = await queryWithRetry(
+            `UPDATE shopping_items SET ${sets.join(', ')} WHERE id = $${p} RETURNING id`,
+            params
+        );
+
+        if (updateRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Item not found' });
         }
 
         const result = await queryWithRetry(`
-            UPDATE shopping_items
-            SET name = COALESCE($1, name),
-                category = COALESCE($2, category)
-            WHERE id = $3
-            RETURNING
-                id,
-                name,
-                category,
-                checked,
-                TO_CHAR(date, 'YYYY-MM-DD') as date,
-                created_at as "createdAt",
-                created_by_user_id as "createdByUserId",
-                created_by_user_name as "createdByUserName"
-        `, [name?.trim() ?? null, category ?? null, id]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Item not found' });
-        }
+            SELECT
+                si.id,
+                si.name,
+                si.category,
+                si.checked,
+                TO_CHAR(si.date, 'YYYY-MM-DD') as date,
+                si.created_at as "createdAt",
+                si.created_by_user_id as "createdByUserId",
+                si.created_by_user_name as "createdByUserName",
+                si.supplier_id as "supplierId",
+                s.name as "supplierName"
+            FROM shopping_items si
+            LEFT JOIN suppliers s ON s.id = si.supplier_id
+            WHERE si.id = $1
+        `, [id]);
 
         const updatedItem = result.rows[0];
 
@@ -3961,24 +4027,33 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await queryWithRetry(`
+        const toggleRes = await queryWithRetry(`
             UPDATE shopping_items
             SET checked = NOT checked
             WHERE id = $1
-            RETURNING
-                id,
-                name,
-                category,
-                checked,
-                TO_CHAR(date, 'YYYY-MM-DD') as date,
-                created_at as "createdAt",
-                created_by_user_id as "createdByUserId",
-                created_by_user_name as "createdByUserName"
+            RETURNING id
         `, [id]);
 
-        if (result.rows.length === 0) {
+        if (toggleRes.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
         }
+
+        const result = await queryWithRetry(`
+            SELECT
+                si.id,
+                si.name,
+                si.category,
+                si.checked,
+                TO_CHAR(si.date, 'YYYY-MM-DD') as date,
+                si.created_at as "createdAt",
+                si.created_by_user_id as "createdByUserId",
+                si.created_by_user_name as "createdByUserName",
+                si.supplier_id as "supplierId",
+                s.name as "supplierName"
+            FROM shopping_items si
+            LEFT JOIN suppliers s ON s.id = si.supplier_id
+            WHERE si.id = $1
+        `, [id]);
 
         const updatedItem = result.rows[0];
 
@@ -4028,6 +4103,129 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('shopping:deleted', { id, date: result.rows[0].date }, socketId);
+
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// SUPPLIERS (fornitori, scoped per shopping category)
+// ============================================
+const VALID_SUPPLIER_CATEGORIES = ['CUCINA', 'BAR', 'ALTRO'] as const;
+
+app.get('/suppliers', authenticate, async (_req, res) => {
+    try {
+        const result = await queryWithRetry(`
+            SELECT
+                id,
+                name,
+                category,
+                phone,
+                note,
+                created_at as "createdAt"
+            FROM suppliers
+            ORDER BY
+                CASE category
+                    WHEN 'CUCINA' THEN 1
+                    WHEN 'BAR' THEN 2
+                    WHEN 'ALTRO' THEN 3
+                END,
+                LOWER(name) ASC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/suppliers', authenticate, async (req, res) => {
+    try {
+        const { name, category, phone, note } = req.body;
+        if (!name || typeof name !== 'string' || !name.trim()) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        if (!VALID_SUPPLIER_CATEGORIES.includes(category)) {
+            return res.status(400).json({ error: 'category must be CUCINA, BAR, or ALTRO' });
+        }
+
+        const result = await queryWithRetry(`
+            INSERT INTO suppliers (name, category, phone, note)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, name, category, phone, note, created_at as "createdAt"
+        `, [name.trim(), category, phone?.trim() || null, note?.trim() || null]);
+
+        const supplier = result.rows[0];
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('supplier:created', supplier, socketId);
+
+        res.status(201).json(supplier);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Esiste già un fornitore con questo nome in questa categoria' });
+        }
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/suppliers/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, phone, note } = req.body;
+
+        if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+            return res.status(400).json({ error: 'name must be a non-empty string' });
+        }
+        if (name === undefined && phone === undefined && note === undefined) {
+            return res.status(400).json({ error: 'At least one of name, phone, or note is required' });
+        }
+
+        const sets: string[] = [];
+        const params: any[] = [];
+        let p = 1;
+        if (name !== undefined) { sets.push(`name = $${p++}`); params.push(name.trim()); }
+        if (phone !== undefined) { sets.push(`phone = $${p++}`); params.push(phone?.trim() || null); }
+        if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
+        params.push(id);
+
+        const result = await queryWithRetry(
+            `UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${p}
+             RETURNING id, name, category, phone, note, created_at as "createdAt"`,
+            params
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Supplier not found' });
+        }
+
+        const supplier = result.rows[0];
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('supplier:updated', supplier, socketId);
+
+        res.json(supplier);
+    } catch (err: any) {
+        if (err?.code === '23505') {
+            return res.status(409).json({ error: 'Esiste già un fornitore con questo nome in questa categoria' });
+        }
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/suppliers/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry('DELETE FROM suppliers WHERE id = $1 RETURNING id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Supplier not found' });
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('supplier:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {

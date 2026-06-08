@@ -1,38 +1,16 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoItem, TodoPriority, TodoCategory, UserRole, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
-import { todoApiService } from '../services/todoApiService';
-import { shoppingApiService, ShoppingItem, ShoppingCategory } from '../services/shoppingApiService';
+import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem } from '../services/apiService';
-import { printShoppingList, shareShoppingListWhatsApp } from '../utils/printShoppingList';
 import { staffApiService } from '../services/staffApiService';
-import { authApiService } from '../services/authApiService';
-import { socketClient } from '../services/socketClient';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, Users, Utensils, ChevronLeft, ChevronRight, ChevronDown, Calendar, Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Circle, ListTodo, UserCircle, UsersRound, Edit2, ShoppingCart, Coffee, ChefHat, Package, Sun, Moon, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Printer, Share2, Wheat } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
-
-const CATEGORY_LABELS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'Generale',
-  [TodoCategory.RESERVATION]: 'Prenotazione',
-  [TodoCategory.INVENTORY]: 'Inventario',
-  [TodoCategory.STAFF]: 'Staff',
-  [TodoCategory.MAINTENANCE]: 'Manutenzione',
-  [TodoCategory.EVENT]: 'Evento',
-};
-
-const CATEGORY_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-100 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400',
-  [TodoCategory.RESERVATION]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-600 dark:text-[#818cf8]',
-  [TodoCategory.INVENTORY]: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400',
-  [TodoCategory.STAFF]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400',
-  [TodoCategory.EVENT]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400',
-};
+import { useShopping } from '../contexts/ShoppingContext';
+import { useTodos } from '../contexts/TodosContext';
 
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
   [TodoCategory.GENERAL]: 'bg-slate-400',
@@ -43,45 +21,16 @@ const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
   [TodoCategory.EVENT]: 'bg-purple-500',
 };
 
+const PRIORITY_RANK: Record<TodoPriority, number> = {
+  [TodoPriority.HIGH]: 0,
+  [TodoPriority.MEDIUM]: 1,
+  [TodoPriority.LOW]: 2,
+};
+
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
   [TodoPriority.LOW]: 'text-slate-400',
   [TodoPriority.MEDIUM]: 'text-amber-500',
   [TodoPriority.HIGH]: 'text-rose-500',
-};
-
-const TEAM_LABELS: Record<UserRole, string> = {
-  [UserRole.OWNER]: 'Proprietario',
-  [UserRole.GENERAL_MANAGER]: 'General Manager',
-  [UserRole.MANAGER]: 'Manager',
-  [UserRole.WAITER]: 'Camerieri',
-  [UserRole.KITCHEN]: 'Cucina',
-};
-
-const TEAM_COLORS: Record<UserRole, string> = {
-  [UserRole.OWNER]: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300',
-  [UserRole.GENERAL_MANAGER]: 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]',
-  [UserRole.MANAGER]: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300',
-  [UserRole.WAITER]: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
-  [UserRole.KITCHEN]: 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300',
-};
-
-// Mirrors the server-side hierarchy in auth/permissions.ts: an actor can
-// only assign tasks to roles at or below their rank. Kept inline because
-// the auth/ module is server-only.
-const ROLE_RANK: Record<UserRole, number> = {
-  [UserRole.OWNER]: 4,
-  [UserRole.GENERAL_MANAGER]: 3,
-  [UserRole.MANAGER]: 2,
-  [UserRole.WAITER]: 1,
-  [UserRole.KITCHEN]: 1,
-};
-
-const canAssignToRole = (actorRole: UserRole | undefined, targetRole: UserRole): boolean => {
-  if (!actorRole) return false;
-  const actor = ROLE_RANK[actorRole];
-  const target = ROLE_RANK[targetRole];
-  if (actor === undefined || target === undefined) return false;
-  return actor >= target;
 };
 
 interface DashboardProps {
@@ -93,8 +42,8 @@ interface DashboardProps {
   onNavigateToBanquets: () => void;
   onNavigateToReservations?: () => void;
   onNavigateToInventario?: () => void;
-  autoOpenNewShoppingItem?: boolean;
-  onAutoOpenNewShoppingItemHandled?: () => void;
+  onNavigateToShoppingList?: () => void;
+  onNavigateToAttivita?: () => void;
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
   onDateChange?: (date: Date) => void;
@@ -164,9 +113,10 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
   const { user } = useAuth();
-  const todoSectionRef = useRef<HTMLDivElement>(null);
+  const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
+  const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
   const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -193,7 +143,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   };
 
   const [affluenceTab, setAffluenceTab] = useState<'ORARIO' | 'SETTIMANA'>('ORARIO');
-  const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
   useEffect(() => {
@@ -222,57 +171,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const selectedDateStr = formatLocalDate(selectedDate);
   const isToday = selectedDateStr === formatLocalDate(new Date());
 
-  // Todo State
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [todosLoading, setTodosLoading] = useState(true);
-  const [todoFilter, setTodoFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'mine'>('mine');
-  const [showTodoModal, setShowTodoModal] = useState(false);
-  const [isSavingTodo, setIsSavingTodo] = useState(false);
-  const [deleteTodoConfirm, setDeleteTodoConfirm] = useState<TodoItem | null>(null);
-  const [showMyTasksModal, setShowMyTasksModal] = useState(false);
-  const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
-  const [staffUsers, setStaffUsers] = useState<Array<{ id: number; full_name: string; role: UserRole }>>([]);
-  const [todoForm, setTodoForm] = useState({
-    title: '',
-    description: '',
-    priority: TodoPriority.MEDIUM,
-    category: TodoCategory.GENERAL,
-    dueDate: '',
-    assignedToUserId: undefined as number | undefined,
-    assignedToTeam: undefined as UserRole | undefined,
-  });
+  // Inline quick-add for shopping summary card
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
+  const [isAddingShoppingItem, setIsAddingShoppingItem] = useState(false);
+
+  // Inline quick-add for attività summary card
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [isAddingTask, setIsAddingTask] = useState(false);
+
+  // Reservation notes expand/collapse state
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<number>>(new Set());
 
   // Low-stock inventory state
   const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
   const [lowStockLoading, setLowStockLoading] = useState(true);
-
-  // Shopping List State
-  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
-  const [shoppingLoading, setShoppingLoading] = useState(true);
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemCategory, setNewItemCategory] = useState<ShoppingCategory>('CUCINA');
-  const [isAddingShoppingItem, setIsAddingShoppingItem] = useState(false);
-  const [editingShoppingId, setEditingShoppingId] = useState<string | null>(null);
-  const [editShoppingName, setEditShoppingName] = useState('');
-  const [editShoppingCategory, setEditShoppingCategory] = useState<ShoppingCategory>('CUCINA');
-  const [isSavingShoppingEdit, setIsSavingShoppingEdit] = useState(false);
-  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<number>>(new Set());
-  const [shoppingHistory, setShoppingHistory] = useState<string[]>([]);
-  const [showShoppingSuggestions, setShowShoppingSuggestions] = useState(false);
-  const shoppingInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!autoOpenNewShoppingItem) return;
-    const t = setTimeout(() => {
-      const el = shoppingInputRef.current;
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.focus();
-      }
-      onAutoOpenNewShoppingItemHandled?.();
-    }, 120);
-    return () => clearTimeout(t);
-  }, [autoOpenNewShoppingItem, onAutoOpenNewShoppingItemHandled]);
 
   // Staff Presence State
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
@@ -280,26 +193,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [staffTimeOffs, setStaffTimeOffs] = useState<StaffTimeOff[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
 
-  // Socket connection state - used to re-subscribe when socket reconnects
-  const [socketConnected, setSocketConnected] = useState(socketClient.isConnected());
-
-  // Fetch all shopping items (decoupled from selected date — they persist until deleted)
-  const fetchShopping = useCallback(async () => {
-    try {
-      setShoppingLoading(true);
-      const items = await shoppingApiService.getAllItems();
-      setShoppingItems(items);
-      // Build autocomplete history from all past items (deduplicated)
-      const names = Array.from(new Set(items.map(i => i.name)));
-      setShoppingHistory(names);
-    } catch (error) {
-      console.error('Error fetching shopping items:', error);
-    } finally {
-      setShoppingLoading(false);
-    }
-  }, []);
-
-  // Fetch low-stock items across all inventory areas
   const fetchLowStock = useCallback(async () => {
     try {
       setLowStockLoading(true);
@@ -312,7 +205,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  // Fetch staff members, shifts, and time-off for selected date
   const fetchStaff = useCallback(async (dateStr: string) => {
     try {
       setStaffLoading(true);
@@ -331,22 +223,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, []);
 
-  const addShoppingItem = async (overrideName?: string) => {
-    const name = (overrideName ?? newItemName).trim();
+  const handleAddShoppingItem = async () => {
+    const name = newItemName.trim();
     if (!name || isAddingShoppingItem) return;
     try {
       setIsAddingShoppingItem(true);
-      // Don't add to state here - let the socket event handle it
-      // This prevents duplicates on the creating device
-      await shoppingApiService.createItem({
-        name,
-        category: newItemCategory,
-        date: formatLocalDate(new Date())
-      });
+      await addShoppingItemCtx({ name, category: newItemCategory });
       setNewItemName('');
-      setShowShoppingSuggestions(false);
-      // Keep focus on input for rapid entry (Google Keep-style)
-      shoppingInputRef.current?.focus();
     } catch (error) {
       console.error('Error adding shopping item:', error);
     } finally {
@@ -354,63 +237,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   };
 
-  const toggleShoppingItem = async (id: string) => {
+  const handleAddTask = async () => {
+    const title = newTaskTitle.trim();
+    if (!title || isAddingTask) return;
     try {
-      const updated = await shoppingApiService.toggleItem(id);
-      setShoppingItems(prev => prev.map(item =>
-        item.id === id ? updated : item
-      ));
-    } catch (error) {
-      console.error('Error toggling shopping item:', error);
-    }
-  };
-
-  const deleteShoppingItem = async (id: string) => {
-    try {
-      await shoppingApiService.deleteItem(id);
-      setShoppingItems(prev => prev.filter(item => item.id !== id));
-    } catch (error) {
-      console.error('Error deleting shopping item:', error);
-    }
-  };
-
-  const startEditShoppingItem = (item: ShoppingItem) => {
-    setEditingShoppingId(item.id);
-    setEditShoppingName(item.name);
-    setEditShoppingCategory(item.category);
-  };
-
-  const cancelEditShoppingItem = () => {
-    setEditingShoppingId(null);
-    setEditShoppingName('');
-  };
-
-  const saveEditShoppingItem = async () => {
-    if (!editingShoppingId || isSavingShoppingEdit) return;
-    const trimmed = editShoppingName.trim();
-    if (!trimmed) return;
-    try {
-      setIsSavingShoppingEdit(true);
-      const updated = await shoppingApiService.updateItem(editingShoppingId, {
-        name: trimmed,
-        category: editShoppingCategory,
+      setIsAddingTask(true);
+      await addTodoCtx({
+        title,
+        priority: TodoPriority.MEDIUM,
+        category: TodoCategory.GENERAL,
+        dueDate: selectedDateStr,
       });
-      setShoppingItems(prev => prev.map(item => item.id === updated.id ? updated : item));
-      setEditingShoppingId(null);
-      setEditShoppingName('');
+      setNewTaskTitle('');
     } catch (error) {
-      console.error('Error updating shopping item:', error);
+      console.error('Error adding task:', error);
     } finally {
-      setIsSavingShoppingEdit(false);
-    }
-  };
-
-  const clearCheckedItems = async () => {
-    try {
-      await shoppingApiService.clearChecked();
-      setShoppingItems(prev => prev.filter(item => !item.checked));
-    } catch (error) {
-      console.error('Error clearing checked items:', error);
+      setIsAddingTask(false);
     }
   };
 
@@ -428,16 +270,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [shoppingItems]);
 
   const totalItems = shoppingItems.length;
-
-  // Autocomplete suggestions for shopping — show past items not already in current list
-  const shoppingSuggestions = useMemo(() => {
-    const query = newItemName.trim().toLowerCase();
-    if (!query) return [];
-    const currentNames = new Set(shoppingItems.map(i => i.name.toLowerCase()));
-    return shoppingHistory
-      .filter(name => name.toLowerCase().includes(query) && !currentNames.has(name.toLowerCase()))
-      .slice(0, 5);
-  }, [newItemName, shoppingHistory, shoppingItems]);
 
   // Staff presence calculation:
   // - Excludes staff with time-off covering the selected date
@@ -504,90 +336,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const checkedItems = shoppingItems.filter(i => i.checked).length;
 
-  // Fetch all todos (decoupled from selected date — they persist until deleted)
-  const fetchTodos = useCallback(async () => {
-    try {
-      setTodosLoading(true);
-      const fetchedTodos = await todoApiService.getTodos();
-      setTodos(fetchedTodos);
-    } catch (error) {
-      console.error('Error fetching todos:', error);
-    } finally {
-      setTodosLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTodos();
-  }, [fetchTodos]);
-
-  // Load active users for the assignment picker (managers+ have access).
-  useEffect(() => {
-    authApiService.getAssignableUsers().then(users => {
-      setStaffUsers(users);
-    }).catch(() => {
-      // Roles without assignment access (waiter/kitchen) just see an empty list.
-    });
-  }, []);
-
-  // Track socket connection state to re-subscribe when socket reconnects
-  useEffect(() => {
-    console.log('🔌 Setting up socket connection tracker...');
-    const unsubscribe = socketClient.onSocketChange((socket, connected) => {
-      console.log('🔌 Socket connection changed - id:', socket?.id, 'connected:', connected);
-      setSocketConnected(connected);
-    });
-
-    // Also check current state
-    const currentSocket = socketClient.getSocket();
-    console.log('🔌 Current socket state - id:', currentSocket?.id, 'connected:', currentSocket?.connected);
-    if (currentSocket?.connected && !socketConnected) {
-      console.log('🔌 Socket already connected, updating state');
-      setSocketConnected(true);
-    }
-
-    return unsubscribe;
-  }, []);
-
-  // Socket.IO real-time updates for todos
-  useEffect(() => {
-    const socket = socketClient.getSocket();
-    if (!socket) return;
-
-    const handleTodoCreated = (todo: TodoItem) => {
-      setTodos(prev => {
-        if (prev.some(t => t.id === todo.id)) return prev;
-        return [todo, ...prev];
-      });
-    };
-
-    const handleTodoUpdated = (todo: TodoItem) => {
-      setTodos(prev => {
-        const exists = prev.some(t => t.id === todo.id);
-        if (exists) return prev.map(t => t.id === todo.id ? todo : t);
-        return [todo, ...prev];
-      });
-    };
-
-    const handleTodoDeleted = (data: { id: string }) => {
-      setTodos(prev => prev.filter(t => t.id !== data.id));
-    };
-
-    socket.on('todo:created', handleTodoCreated);
-    socket.on('todo:updated', handleTodoUpdated);
-    socket.on('todo:deleted', handleTodoDeleted);
-
-    return () => {
-      socket.off('todo:created', handleTodoCreated);
-      socket.off('todo:updated', handleTodoUpdated);
-      socket.off('todo:deleted', handleTodoDeleted);
-    };
-  }, [socketConnected]);
-
-  useEffect(() => {
-    fetchShopping();
-  }, [fetchShopping]);
-
   useEffect(() => {
     fetchLowStock();
   }, [fetchLowStock]);
@@ -597,64 +345,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     fetchStaff(selectedDateStr);
   }, [selectedDateStr, fetchStaff]);
 
-  // Socket.IO real-time updates for shopping
-  useEffect(() => {
-    const socket = socketClient.getSocket();
-    console.log('🛒 Shopping socket setup - socket id:', socket?.id, 'connected:', socket?.connected, 'socketConnected state:', socketConnected);
-
-    if (!socket) {
-      console.log('🛒 No socket available, skipping listener setup');
-      return;
-    }
-
-    if (!socket.connected) {
-      console.log('🛒 Socket not connected, skipping listener setup');
-      return;
-    }
-
-    console.log('🛒 Setting up shopping socket listeners...');
-
-    const handleShoppingCreated = (item: ShoppingItem) => {
-      setShoppingItems(prev => {
-        if (prev.some(i => i.id === item.id)) return prev;
-        return [...prev, item];
-      });
-    };
-
-    const handleShoppingUpdated = (item: ShoppingItem) => {
-      setShoppingItems(prev => prev.map(i => i.id === item.id ? item : i));
-    };
-
-    const handleShoppingDeleted = (data: { id: string }) => {
-      setShoppingItems(prev => prev.filter(i => i.id !== data.id));
-    };
-
-    const handleShoppingCleared = () => {
-      setShoppingItems(prev => prev.filter(i => !i.checked));
-    };
-
-    socket.on('shopping:created', handleShoppingCreated);
-    socket.on('shopping:updated', handleShoppingUpdated);
-    socket.on('shopping:deleted', handleShoppingDeleted);
-    socket.on('shopping:cleared', handleShoppingCleared);
-    console.log('🛒 Shopping socket listeners registered successfully');
-
-    // Debug: Listen for any event
-    const debugHandler = (...args: any[]) => {
-      console.log('🛒 Socket received event:', args);
-    };
-    socket.onAny(debugHandler);
-
-    return () => {
-      console.log('🛒 Cleaning up shopping socket listeners');
-      socket.off('shopping:created', handleShoppingCreated);
-      socket.off('shopping:updated', handleShoppingUpdated);
-      socket.off('shopping:deleted', handleShoppingDeleted);
-      socket.off('shopping:cleared', handleShoppingCleared);
-      socket.offAny(debugHandler);
-    };
-  }, [socketConnected]);
-
   const handleGenerateReport = async () => {
     setLoading(true);
     const result = await generateRestaurantReport(reservations, tables, dishes);
@@ -662,131 +352,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     setLoading(false);
   };
 
-  const resetTodoForm = () => {
-    setTodoForm({ title: '', description: '', priority: TodoPriority.MEDIUM, category: TodoCategory.GENERAL, dueDate: '', assignedToUserId: undefined, assignedToTeam: undefined });
-    setEditingTodo(null);
-  };
-
-  const handleOpenAddTodo = () => {
-    resetTodoForm();
-    // Default to selected date for new todos
-    setTodoForm(prev => ({ ...prev, dueDate: selectedDateStr }));
-    setShowTodoModal(true);
-  };
-
-  const handleOpenEditTodo = (todo: TodoItem) => {
-    setEditingTodo(todo);
-    setTodoForm({
-      title: todo.title,
-      description: todo.description || '',
-      priority: todo.priority,
-      category: todo.category,
-      dueDate: todo.dueDate || '',
-      assignedToUserId: todo.assignedToUserId,
-      assignedToTeam: todo.assignedToTeam,
-    });
-    setShowTodoModal(true);
-  };
-
-  const handleSaveTodo = async () => {
-    if (!todoForm.title.trim() || isSavingTodo) return;
-    const assignedUser = staffUsers.find(u => u.id === todoForm.assignedToUserId);
-
-    try {
-      setIsSavingTodo(true);
-      if (editingTodo) {
-        // Update existing todo
-        const updated = await todoApiService.updateTodo(editingTodo.id, {
-          title: todoForm.title,
-          description: todoForm.description || undefined,
-          priority: todoForm.priority,
-          category: todoForm.category,
-          dueDate: todoForm.dueDate || undefined,
-          assignedToUserId: todoForm.assignedToUserId,
-          assignedToUserName: assignedUser?.full_name,
-          assignedToTeam: todoForm.assignedToTeam,
-        });
-        setTodos(todos.map(t => t.id === editingTodo.id ? updated : t));
-      } else {
-        // Create new todo
-        const todo = await todoApiService.createTodo({
-          title: todoForm.title,
-          description: todoForm.description || undefined,
-          priority: todoForm.priority,
-          category: todoForm.category,
-          dueDate: todoForm.dueDate || undefined,
-          assignedToUserId: todoForm.assignedToUserId,
-          assignedToUserName: assignedUser?.full_name,
-          assignedToTeam: todoForm.assignedToTeam,
-        });
-        setTodos([todo, ...todos]);
-      }
-
-      resetTodoForm();
-      setShowTodoModal(false);
-    } catch (error) {
-      console.error('Error saving todo:', error);
-    } finally {
-      setIsSavingTodo(false);
-    }
-  };
-
   const handleToggleTodo = async (id: string) => {
     try {
-      const updated = await todoApiService.toggleTodoComplete(id);
-      setTodos(todos.map(t => t.id === id ? updated : t));
+      await toggleTodoCtx(id);
     } catch (error) {
       console.error('Error toggling todo:', error);
     }
   };
 
-  const handleDeleteTodo = async (id: string) => {
+  const handleToggleShoppingItem = async (id: string) => {
     try {
-      await todoApiService.deleteTodo(id);
-      setTodos(todos.filter(t => t.id !== id));
+      await toggleShoppingItemCtx(id);
     } catch (error) {
-      console.error('Error deleting todo:', error);
+      console.error('Error toggling shopping item:', error);
     }
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Helper to check if task is assigned to current user
-  const isAssignedToMe = (todo: TodoItem) => {
-    // Check by ID first
-    if (todo.assignedToUserId && user?.id) {
-      if (Number(todo.assignedToUserId) === Number(user.id)) {
-        return true;
-      }
-    }
-    // Fallback: check by name if ID comparison fails
-    if (todo.assignedToUserName && user?.full_name) {
-      if (todo.assignedToUserName.toLowerCase() === user.full_name.toLowerCase()) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  const isAssignedToMyTeam = (todo: TodoItem) => {
-    return todo.assignedToTeam === user?.role;
-  };
-
-  // My assigned todos (assigned to me or my team)
-  const myTodos = todos.filter(t =>
-    !t.completed && (isAssignedToMe(t) || isAssignedToMyTeam(t))
-  );
-
-  const filteredTodos = todos.filter(todo => {
-    if (todoFilter === 'mine') return !todo.completed && (isAssignedToMe(todo) || isAssignedToMyTeam(todo));
-    if (todoFilter === 'pending') return !todo.completed;
-    if (todoFilter === 'completed') return todo.completed;
-    if (todoFilter === 'overdue') return !todo.completed && todo.dueDate && todo.dueDate < todayStr;
-    return true;
-  });
   const todaysTodos = todos.filter(t => t.dueDate === todayStr && !t.completed);
   const overdueTodos = todos.filter(t => !t.completed && t.dueDate && t.dueDate < todayStr);
   const pendingCount = todos.filter(t => !t.completed).length;
+
+  // Top urgent tasks for the summary card: overdue first (oldest due first),
+  // then today, then upcoming by due date and priority.
+  const urgentTasks = useMemo(() => {
+    const pending = todos.filter(t => !t.completed);
+    const score = (t: typeof pending[number]): number => {
+      if (t.dueDate && t.dueDate < todayStr) return 0;
+      if (t.dueDate === todayStr) return 1;
+      if (t.dueDate && t.dueDate > todayStr) return 2;
+      return 3;
+    };
+    return [...pending]
+      .sort((a, b) => {
+        const sa = score(a);
+        const sb = score(b);
+        if (sa !== sb) return sa - sb;
+        if (a.dueDate && b.dueDate && a.dueDate !== b.dueDate) {
+          return a.dueDate.localeCompare(b.dueDate);
+        }
+        return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+      })
+      .slice(0, 3);
+  }, [todos, todayStr]);
 
   // Filter reservations for selected date (exclude cancelled bookings from KPIs/occupancy)
   const selectedDayReservations = useMemo(() => {
@@ -1031,7 +640,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
               {todaysTodos.length > 0 && (
                 <button
-                  onClick={() => todoSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                  onClick={() => onNavigateToAttivita?.()}
                   className="inline-flex items-center gap-2 p-2.5 rounded-xl text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex-shrink-0 self-end"
                   aria-label={`${todaysTodos.length} attività di oggi`}
                   title="Attività di oggi"
@@ -1606,237 +1215,121 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Row 3: Attività + Spesa del giorno + Sotto Scorta */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        {/* Attività (Todo List) */}
-        <div ref={todoSectionRef} className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+        {/* Attività — compact summary */}
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
               <p className="tabular text-xs text-[var(--color-fg-muted)]">
-                {todos.filter(t => t.completed).length}/{todos.length} completate
+                {overdueTodos.length > 0 && (
+                  <span className="text-rose-600 dark:text-rose-400 font-medium">{overdueTodos.length} scadute</span>
+                )}
+                {overdueTodos.length > 0 && (todaysTodos.length > 0 || pendingCount > 0) && <span> · </span>}
+                {todaysTodos.length > 0 && <span>{todaysTodos.length} oggi</span>}
+                {overdueTodos.length === 0 && todaysTodos.length === 0 && (
+                  <span>{pendingCount} da fare</span>
+                )}
               </p>
             </div>
-            <button
-              onClick={handleOpenAddTodo}
-              className="rounded-full p-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition"
-              aria-label="Aggiungi attività"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* Filter Tabs */}
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
-            {[
-              { key: 'mine', label: 'Mie' },
-              { key: 'all', label: 'Tutte' },
-              { key: 'pending', label: 'Da fare' },
-              { key: 'completed', label: 'Fatte' },
-            ].map(({ key, label }) => (
+            {onNavigateToAttivita && (
               <button
-                key={key}
-                onClick={() => setTodoFilter(key as typeof todoFilter)}
-                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${
-                  todoFilter === key
-                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                }`}
+                onClick={onNavigateToAttivita}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
               >
-                {label}
+                Apri <ChevronRight className="h-3.5 w-3.5" />
               </button>
-            ))}
+            )}
           </div>
 
-          {/* Overdue Alert */}
           {overdueTodos.length > 0 && (
-            <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 rounded-lg">
-              <div className="flex items-center gap-2 mb-1">
+            <div className="mb-3 p-2.5 bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 rounded-lg">
+              <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
-                <p className="tabular text-sm font-medium text-rose-700 dark:text-rose-300">{overdueTodos.length} attività scadute</p>
+                <p className="text-xs text-rose-700 dark:text-rose-300 truncate">
+                  {overdueTodos.slice(0, 2).map(t => t.title).join(', ')}{overdueTodos.length > 2 ? '…' : ''}
+                </p>
               </div>
-              <p className="text-xs text-rose-600 dark:text-rose-400 pl-6">{overdueTodos.map(t => t.title).slice(0, 2).join(', ')}{overdueTodos.length > 2 ? '...' : ''}</p>
             </div>
           )}
 
-          {/* Todo List */}
-          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
-            {todosLoading ? (
-              <div className="py-8 text-center">
-                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento attività...</p>
-              </div>
-            ) : filteredTodos.length === 0 ? (
-              <div className="py-8 text-center">
-                <CheckCircle2 className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">
-                  {todoFilter === 'mine' ? 'Nessuna attività assegnata a te' : 'Nessuna attività'}
-                </p>
+          <div className="flex-1 space-y-1.5 mb-3 min-h-[120px]">
+            {urgentTasks.length === 0 ? (
+              <div className="py-6 text-center">
+                <CheckCircle2 className="h-7 w-7 text-emerald-500 mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Tutto sotto controllo</p>
               </div>
             ) : (
-              filteredTodos.map(todo => {
-                const isOverdue = todo.dueDate && todo.dueDate < todayStr && !todo.completed;
+              urgentTasks.map(todo => {
+                const isOverdue = todo.dueDate && todo.dueDate < todayStr;
                 return (
                   <div
                     key={todo.id}
-                    className={`group p-3 rounded-lg border transition-colors ${
-                      todo.completed
-                        ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
-                        : isOverdue
-                        ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30'
-                        : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                    }`}
+                    className="group flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors"
                   >
-                    {/* Row 1: Checkbox + Title + Actions */}
-                    <div className="flex items-start gap-3">
-                      <button
-                        onClick={() => handleToggleTodo(todo.id)}
-                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                          todo.completed
-                            ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
-                            : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
-                        }`}
-                      >
-                        {todo.completed && <Check className="h-2.5 w-2.5" />}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm font-medium ${todo.completed ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
-                            {todo.title}
-                          </p>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                            <button
-                              onClick={() => handleOpenEditTodo(todo)}
-                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                            >
-                              <Edit2 className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteTodoConfirm(todo)}
-                              className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Row 2: Assignee + Due date */}
-                        <div className="flex items-center gap-2 mt-1.5 text-[var(--color-fg-muted)]">
-                          {todo.assignedToUserName && (
-                            <span className="inline-flex items-center gap-1 text-xs">
-                              <UserCircle className="h-3 w-3 flex-shrink-0" />
-                              {todo.assignedToUserName}
-                            </span>
-                          )}
-                          {todo.assignedToTeam && !todo.assignedToUserId && (
-                            <span className="inline-flex items-center gap-1 text-xs">
-                              <UsersRound className="h-3 w-3 flex-shrink-0" />
-                              {TEAM_LABELS[todo.assignedToTeam]}
-                            </span>
-                          )}
-                          {todo.dueDate && (
-                            <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : ''}`}>
-                              <Clock className="h-3 w-3 flex-shrink-0" />
-                              {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Row 3: Category + Priority + Banquet badge */}
-                        <div className="flex items-center gap-2 mt-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
-                            <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]}`} />
-                            {CATEGORY_LABELS[todo.category]}
-                          </span>
-                          {todo.priority !== TodoPriority.LOW && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                              todo.priority === TodoPriority.HIGH
-                                ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-500/30'
-                                : 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/30'
-                            }`}>
-                              <Flag className="h-3 w-3" />
-                              {todo.priority === TodoPriority.HIGH ? 'Alta' : 'Media'}
-                            </span>
-                          )}
-                          {todo.banquetReminderHours != null && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-100 dark:border-orange-500/30">
-                              {todo.banquetReminderHours}h prima
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Row 4: Linked banquets */}
-                        {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
-                          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                            {todo.linkedBanquetIds.map(bid => {
-                              const banquet = banquetMenus.find(b => b.id === bid);
-                              if (!banquet) return null;
-                              return (
-                                <button
-                                  key={bid}
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); setBanquetModal(banquet); }}
-                                  className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-100 transition-colors"
-                                  title="Visualizza composizione"
-                                >
-                                  <Utensils className="h-2.5 w-2.5" />
-                                  <span className="truncate max-w-[140px]">{banquet.name}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <button
+                      onClick={() => handleToggleTodo(todo.id)}
+                      className="flex-shrink-0 w-4 h-4 rounded-full border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] transition-colors"
+                      aria-label="Completa attività"
+                    />
+                    <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]} flex-shrink-0`} />
+                    <span className="flex-1 min-w-0 text-sm text-[var(--color-fg)] truncate">{todo.title}</span>
+                    {todo.priority !== TodoPriority.LOW && (
+                      <Flag className={`h-3 w-3 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
+                    )}
+                    {todo.dueDate && (
+                      <span className={`tabular text-[11px] flex-shrink-0 ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
+                        {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                      </span>
+                    )}
                   </div>
                 );
               })
             )}
           </div>
+
+          {/* Quick-add inline */}
+          <div className="border-t border-[var(--color-line)] pt-3">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+              <input
+                type="text"
+                value={newTaskTitle}
+                onChange={e => setNewTaskTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTask(); } }}
+                placeholder="Nuova attività…"
+                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddTask}
+                disabled={!newTaskTitle.trim() || isAddingTask}
+                aria-label="Aggiungi attività"
+                className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isAddingTask ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Spesa del Giorno (Shopping List) */}
+        {/* Spesa — compact summary */}
         <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
               <p className="tabular text-xs text-[var(--color-fg-muted)]">{checkedItems}/{totalItems} completati</p>
             </div>
-            <div className="flex items-center gap-2">
-              {checkedItems > 0 && (
-                <button
-                  onClick={clearCheckedItems}
-                  className="text-xs text-[var(--color-fg-muted)] hover:text-rose-600 transition-colors"
-                >
-                  Rimuovi completati
-                </button>
-              )}
-              {totalItems > 0 && (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(cat => {
-                const items = shoppingByCategory[cat];
-                if (items.length === 0) return null;
-                return (
-                  <div key={cat} className="flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => shareShoppingListWhatsApp(items, cat, selectedDateStr)}
-                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
-                      title={`WhatsApp ${SHOPPING_CATEGORY_LABELS[cat]}`}
-                    >
-                      <Share2 className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => printShoppingList(items, cat, selectedDateStr)}
-                      className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
-                      title={`Stampa ${SHOPPING_CATEGORY_LABELS[cat]}`}
-                    >
-                      <Printer className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            {onNavigateToShoppingList && (
+              <button
+                onClick={onNavigateToShoppingList}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+              >
+                Apri <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* Pane del giorno — auto-calcolato dalle prenotazioni + banchetti del giorno */}
+          {/* Pane del giorno */}
           <div className="mb-3 flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/25 text-amber-600 dark:text-amber-300 flex-shrink-0">
               <Wheat className="h-4 w-4" />
@@ -1852,178 +1345,89 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </p>
               <p className="text-[11px] text-[var(--color-fg-muted)]">
                 {breadEstimate.coperti > 0
-                  ? `${breadEstimate.coperti} coperti previsti · 1 kg ogni 10`
+                  ? `${breadEstimate.coperti} coperti · 1 kg ogni 10`
                   : 'Si aggiorna in base alle prenotazioni del giorno'}
               </p>
             </div>
           </div>
 
-          {/* Shopping List by Category */}
-          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-3 mb-3">
-            {shoppingLoading ? (
-              <div className="py-8 text-center">
-                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
-              </div>
-            ) : totalItems === 0 ? (
-              <div className="py-8 text-center">
-                <ShoppingCart className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Nessun prodotto nella lista</p>
+          {/* Category counts */}
+          <div className="flex-1 mb-3 min-h-[120px]">
+            {totalItems === 0 ? (
+              <div className="py-6 text-center">
+                <ShoppingCart className="h-7 w-7 text-[var(--color-fg-subtle)] mx-auto mb-2" />
+                <p className="text-[var(--color-fg-subtle)] text-sm">Lista vuota</p>
               </div>
             ) : (
-              (['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(category => {
-                const items = shoppingByCategory[category];
-                if (items.length === 0) return null;
-                return (
-                  <div key={category}>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${SHOPPING_CATEGORY_COLORS[category]}`}>
-                        {SHOPPING_CATEGORY_ICONS[category]}
-                        {SHOPPING_CATEGORY_LABELS[category]}
-                        <span className="tabular opacity-70">({items.length})</span>
+              <div className="space-y-1.5">
+                {(['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(cat => {
+                  const items = shoppingByCategory[cat];
+                  if (items.length === 0) return null;
+                  const remaining = items.filter(i => !i.checked).length;
+                  return (
+                    <div key={cat} className="flex items-center gap-2 px-2 py-1.5 rounded-md">
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${SHOPPING_CATEGORY_COLORS[cat]}`}>
+                        {SHOPPING_CATEGORY_ICONS[cat]}
+                        {SHOPPING_CATEGORY_LABELS[cat]}
+                      </span>
+                      <span className="tabular text-xs text-[var(--color-fg-muted)] ml-auto">
+                        {remaining}/{items.length} da prendere
                       </span>
                     </div>
-                    <div className="space-y-0.5">
-                      {items.map(item => {
-                        const meta = `${item.createdByUserName ? item.createdByUserName.split('@')[0] : 'Anonimo'}${
-                          item.createdAt
-                            ? ` · ${new Date(item.createdAt).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })} ${new Date(item.createdAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-                            : ''
-                        }`;
-                        const isEditing = editingShoppingId === item.id;
-                        if (isEditing) {
-                          return (
-                            <div key={item.id} className="flex items-center gap-2 py-1.5 px-1">
-                              <input
-                                type="text"
-                                value={editShoppingName}
-                                onChange={(e) => setEditShoppingName(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') saveEditShoppingItem();
-                                  if (e.key === 'Escape') cancelEditShoppingItem();
-                                }}
-                                autoFocus
-                                className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-fg)]"
-                              />
-                              <select
-                                value={editShoppingCategory}
-                                onChange={(e) => setEditShoppingCategory(e.target.value as ShoppingCategory)}
-                                className="text-xs bg-[var(--color-surface)] border border-[var(--color-line-strong)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--color-fg)]"
-                              >
-                                <option value="CUCINA">Cucina</option>
-                                <option value="BAR">Bar</option>
-                                <option value="ALTRO">Altro</option>
-                              </select>
-                              <button
-                                onClick={saveEditShoppingItem}
-                                disabled={!editShoppingName.trim() || isSavingShoppingEdit}
-                                className="p-1 rounded text-emerald-600 hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
-                                title="Salva"
-                              >
-                                {isSavingShoppingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              </button>
-                              <button
-                                onClick={cancelEditShoppingItem}
-                                disabled={isSavingShoppingEdit}
-                                className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                                title="Annulla"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div key={item.id} className="group flex items-center gap-3 py-1.5 px-1 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors" title={meta}>
-                            <button
-                              onClick={() => toggleShoppingItem(item.id)}
-                              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${
-                                item.checked
-                                  ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
-                                  : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
-                              }`}
-                            >
-                              {item.checked && <Check className="h-2.5 w-2.5" />}
-                            </button>
-                            <span className={`flex-1 min-w-0 text-sm truncate ${item.checked ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
-                              {item.name}
-                            </span>
-                            <button
-                              onClick={() => startEditShoppingItem(item)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
-                              title="Modifica"
-                            >
-                              <Edit2 className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => deleteShoppingItem(item.id)}
-                              className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all flex-shrink-0"
-                              title="Elimina"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })
+                  );
+                })}
+                {/* Latest 3 items preview */}
+                <div className="pt-1 space-y-0.5">
+                  {shoppingItems
+                    .filter(i => !i.checked)
+                    .slice(-3)
+                    .reverse()
+                    .map(item => (
+                      <div key={item.id} className="group flex items-center gap-2 px-2 py-1 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors">
+                        <button
+                          onClick={() => handleToggleShoppingItem(item.id)}
+                          className="flex-shrink-0 w-3.5 h-3.5 rounded border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] transition-colors"
+                          aria-label="Completa"
+                        />
+                        <span className="flex-1 min-w-0 text-sm text-[var(--color-fg)] truncate">{item.name}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Add Item — Google Keep style: input at bottom with autocomplete */}
-          <div className="relative border-t border-[var(--color-line)] pt-3">
+          {/* Quick-add inline */}
+          <div className="border-t border-[var(--color-line)] pt-3">
             <div className="flex items-center gap-2">
               <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
               <input
-                ref={shoppingInputRef}
                 type="text"
                 value={newItemName}
-                onChange={(e) => { setNewItemName(e.target.value); setShowShoppingSuggestions(true); }}
-                onFocus={() => setShowShoppingSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowShoppingSuggestions(false), 150)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); addShoppingItem(); }
-                }}
-                placeholder="Aggiungi prodotto..."
+                onChange={e => setNewItemName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShoppingItem(); } }}
+                placeholder="Aggiungi prodotto…"
                 className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
               />
-              <div className="relative flex-shrink-0">
-                <select
-                  value={newItemCategory}
-                  onChange={(e) => setNewItemCategory(e.target.value as ShoppingCategory)}
-                  className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full pl-3 pr-7 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] appearance-none cursor-pointer"
-                >
-                  <option value="CUCINA">Cucina</option>
-                  <option value="BAR">Bar</option>
-                  <option value="ALTRO">Altro</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--color-fg-muted)]" />
-              </div>
-              {isAddingShoppingItem && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-subtle)] flex-shrink-0" />}
+              <select
+                value={newItemCategory}
+                onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
+                className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-2 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] flex-shrink-0"
+              >
+                <option value="CUCINA">Cucina</option>
+                <option value="BAR">Bar</option>
+                <option value="ALTRO">Altro</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleAddShoppingItem}
+                disabled={!newItemName.trim() || isAddingShoppingItem}
+                aria-label="Aggiungi prodotto"
+                className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isAddingShoppingItem ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </button>
             </div>
-
-            {/* Autocomplete dropdown */}
-            {showShoppingSuggestions && shoppingSuggestions.length > 0 && (
-              <div className="absolute left-0 right-0 bottom-full mb-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-sm)] overflow-hidden z-10">
-                {shoppingSuggestions.map(name => (
-                  <button
-                    key={name}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setShowShoppingSuggestions(false);
-                      addShoppingItem(name);
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-2"
-                  >
-                    <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                    {name}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
@@ -2207,172 +1611,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         )}
       </div>
 
-      {/* My Tasks Modal */}
-      {showMyTasksModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => setShowMyTasksModal(false)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <div className="flex items-center gap-3">
-                <UserCircle className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                <div>
-                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Le Mie Attività</h3>
-                  <p className="tabular text-xs text-[var(--color-fg-muted)]">{myTodos.length} {myTodos.length === 1 ? 'attività' : 'attività'} da completare</p>
-                </div>
-              </div>
-              <button onClick={() => setShowMyTasksModal(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {myTodos.length === 0 ? (
-                <div className="py-12 text-center">
-                  <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
-                  <p className="text-[var(--color-fg)] font-medium">Tutto fatto!</p>
-                  <p className="text-[var(--color-fg-subtle)] text-sm">Non hai attività assegnate</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {myTodos.map(todo => {
-                    const isOverdue = todo.dueDate && todo.dueDate < todayStr;
-                    return (
-                      <div key={todo.id} className={`p-3 rounded-md border ${isOverdue ? 'border-rose-100 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15' : 'border-[var(--color-line)] bg-[var(--color-surface)]'} transition-colors`}>
-                        <div className="flex items-start gap-3">
-                          <button
-                            onClick={() => handleToggleTodo(todo.id)}
-                            className="mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] flex items-center justify-center transition-colors"
-                          >
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="font-medium text-sm text-[var(--color-fg)]">{todo.title}</p>
-                              <Flag className={`h-4 w-4 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
-                            </div>
-                            {todo.description && (
-                              <p className="text-sm text-[var(--color-fg-muted)] mt-1">{todo.description}</p>
-                            )}
-                            <div className="flex items-center gap-2 mt-2 flex-wrap">
-                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[todo.category]}`}>
-                                {CATEGORY_LABELS[todo.category]}
-                              </span>
-                              {isAssignedToMe(todo) && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-500/30">
-                                  <UserCircle className="h-3 w-3" /> Personale
-                                </span>
-                              )}
-                              {isAssignedToMyTeam(todo) && !isAssignedToMe(todo) && (
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${TEAM_COLORS[todo.assignedToTeam!]}`}>
-                                  <UsersRound className="h-3 w-3" /> {TEAM_LABELS[todo.assignedToTeam!]}
-                                </span>
-                              )}
-                              {todo.dueDate && (
-                                <span className={`tabular text-[11px] flex items-center gap-1 ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-[var(--color-fg-muted)]'}`}>
-                                  <Clock className="h-3 w-3" />
-                                  {isOverdue ? 'Scaduto: ' : ''}
-                                  {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-              <button
-                onClick={() => setShowMyTasksModal(false)}
-                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
-              >
-                Chiudi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add/Edit Todo Modal */}
-      {showTodoModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={() => { setShowTodoModal(false); resetTodoForm(); }}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)] flex-shrink-0">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{editingTodo ? 'Modifica Attività' : 'Nuova Attività'}</h3>
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="p-4 space-y-4 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Titolo</label>
-                <input type="text" value={todoForm.title} onChange={e => setTodoForm({ ...todoForm, title: e.target.value })} placeholder="Es: Chiamare fornitore vini" className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" autoFocus />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Descrizione (opzionale)</label>
-                <textarea value={todoForm.description} onChange={e => setTodoForm({ ...todoForm, description: e.target.value })} placeholder="Aggiungi dettagli..." className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20 resize-none" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Priorità</label>
-                  <select value={todoForm.priority} onChange={e => setTodoForm({ ...todoForm, priority: e.target.value as TodoPriority })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
-                    <option value={TodoPriority.LOW}>Bassa</option>
-                    <option value={TodoPriority.MEDIUM}>Media</option>
-                    <option value={TodoPriority.HIGH}>Alta</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Categoria</label>
-                  <select value={todoForm.category} onChange={e => setTodoForm({ ...todoForm, category: e.target.value as TodoCategory })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]">
-                    {Object.entries(CATEGORY_LABELS).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Scadenza (opzionale)</label>
-                <input type="date" value={todoForm.dueDate} onChange={e => setTodoForm({ ...todoForm, dueDate: e.target.value })} className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a persona</label>
-                  <select
-                    value={todoForm.assignedToUserId || ''}
-                    onChange={e => setTodoForm({ ...todoForm, assignedToUserId: e.target.value ? Number(e.target.value) : undefined, assignedToTeam: undefined })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    <option value="">Nessuno</option>
-                    {staffUsers.map(u => (
-                      <option key={u.id} value={u.id}>{u.full_name} ({TEAM_LABELS[u.role]})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a team</label>
-                  <select
-                    value={todoForm.assignedToTeam || ''}
-                    onChange={e => setTodoForm({ ...todoForm, assignedToTeam: e.target.value ? e.target.value as UserRole : undefined, assignedToUserId: undefined })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    <option value="">Nessun team</option>
-                    {(Object.entries(TEAM_LABELS) as [UserRole, string][])
-                      .filter(([key]) => canAssignToRole(user?.role, key))
-                      .map(([key, label]) => (
-                        <option key={key} value={key}>{label}</option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end flex-shrink-0">
-              <button onClick={() => { setShowTodoModal(false); resetTodoForm(); }} className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={handleSaveTodo} disabled={!todoForm.title.trim() || isSavingTodo} className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
-                {isSavingTodo && <Loader2 className="h-4 w-4 animate-spin" />}
-                {editingTodo ? 'Salva' : 'Aggiungi'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Today's Tasks Summary — moved to top of page */}
-
       {/* AI Report Section */}
       {report && (
         <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
@@ -2384,26 +1622,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         </div>
-      )}
-
-      <ConfirmDeleteModal
-        isOpen={!!deleteTodoConfirm}
-        title="Elimina Attività"
-        message="Stai per eliminare l'attività:"
-        itemName={deleteTodoConfirm?.title}
-        onCancel={() => setDeleteTodoConfirm(null)}
-        onConfirm={() => {
-          if (deleteTodoConfirm) handleDeleteTodo(deleteTodoConfirm.id);
-          setDeleteTodoConfirm(null);
-        }}
-      />
-
-      {banquetModal && (
-        <BanquetCompositionModal
-          banquet={banquetModal}
-          dishes={dishes}
-          onClose={() => setBanquetModal(null)}
-        />
       )}
     </div>
   );
