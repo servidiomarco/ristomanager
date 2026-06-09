@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -13,6 +13,7 @@ import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
 import { ShoppingListPage } from './components/ShoppingListPage';
+import { HaccpPage } from './components/HaccpPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
@@ -921,6 +922,15 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.HACCP) && (
+            <SidebarItem
+              icon={<ShieldCheck size={20} />}
+              label="HACCP"
+              active={view === ViewState.HACCP}
+              onClick={() => { setSidebarCollapsed(false); setView(ViewState.HACCP); }}
+              collapsed={sidebarCollapsed}
+            />
+          )}
 
           {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers()) && !sidebarCollapsed && (
             <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
@@ -1412,6 +1422,10 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.HACCP && (
+          <HaccpPage />
+        )}
+
         {view === ViewState.ATTIVITA && (
           <AttivitaPage
             banquetMenus={banquetMenus}
@@ -1458,6 +1472,7 @@ const App: React.FC = () => {
                       [ViewState.CLIENTI]: 'Clienti',
                       [ViewState.INVENTARIO]: 'Inventario',
                       [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
+                      [ViewState.HACCP]: 'HACCP',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
@@ -1626,11 +1641,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS)) && (
+            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS) || canAccessView(ViewState.HACCP)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS}
+                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS || view === ViewState.HACCP}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1729,6 +1744,16 @@ const App: React.FC = () => {
                   >
                     <ShoppingCart className="h-5 w-5 text-[var(--color-fg-muted)]" />
                     <span className="text-sm font-medium text-[var(--color-fg)]">Lista della Spesa</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canAccessView(ViewState.HACCP) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.HACCP); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.HACCP ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <ShieldCheck className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">HACCP</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}

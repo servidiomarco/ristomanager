@@ -1173,6 +1173,106 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ON CONFLICT (key) DO NOTHING;
         `);
 
+        // ============================================
+        // HACCP (controlli giornalieri)
+        // ============================================
+        // 5 tables mirror the operator's existing paper sheets:
+        //   1) temperature readings per appliance, daily
+        //   2) oil status per fryer, daily
+        //   3) cleaning checks per risk point, daily
+        //   4) goods receipt entries (ad-hoc, multiple per day)
+        //   5) blast-chilling production logs (ad-hoc, multiple per day)
+        //
+        // Tables 1–3 have UNIQUE(date, label) so the daily form upserts in place;
+        // tables 4–5 grow row-by-row as the operator records deliveries/batches.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS haccp_temperature_readings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                date DATE NOT NULL,
+                location VARCHAR(100) NOT NULL,
+                temperature NUMERIC(5,1) NOT NULL,
+                target_max NUMERIC(5,1),
+                note TEXT,
+                recorded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                recorded_by_user_name VARCHAR(255),
+                recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, location)
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_haccp_temp_date ON haccp_temperature_readings(date);
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS haccp_oil_checks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                date DATE NOT NULL,
+                fryer_label VARCHAR(100) NOT NULL,
+                action VARCHAR(20) NOT NULL CHECK (action IN ('SOSTITUITO','FILTRATO','UTILIZZABILE')),
+                note TEXT,
+                recorded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                recorded_by_user_name VARCHAR(255),
+                recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, fryer_label)
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_haccp_oil_date ON haccp_oil_checks(date);
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS haccp_cleaning_checks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                date DATE NOT NULL,
+                point VARCHAR(100) NOT NULL,
+                done BOOLEAN NOT NULL DEFAULT false,
+                note TEXT,
+                recorded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                recorded_by_user_name VARCHAR(255),
+                recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, point)
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_haccp_cleaning_date ON haccp_cleaning_checks(date);
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS haccp_goods_receipts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                date DATE NOT NULL,
+                product VARCHAR(255) NOT NULL,
+                lot_number VARCHAR(100),
+                temperature NUMERIC(5,1),
+                accepted BOOLEAN NOT NULL DEFAULT true,
+                note TEXT,
+                recorded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                recorded_by_user_name VARCHAR(255),
+                recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_haccp_receipt_date ON haccp_goods_receipts(date);
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS haccp_production_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                date DATE NOT NULL,
+                product VARCHAR(255) NOT NULL,
+                blast_temp_range VARCHAR(20),
+                blast_duration VARCHAR(20),
+                internal_lot VARCHAR(100),
+                note TEXT,
+                recorded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                recorded_by_user_name VARCHAR(255),
+                recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_haccp_production_date ON haccp_production_logs(date);
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {
