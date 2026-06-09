@@ -15,6 +15,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.RESERVATIONS]: 'reservations:view',
   [ViewState.ATTIVITA]: 'dashboard:view',
   [ViewState.LISTA_DELLA_SPESA]: 'dashboard:view',
+  [ViewState.HACCP]: 'dashboard:view',
   [ViewState.STAFF]: 'staff:view',
   [ViewState.CLIENTI]: 'customers:view',
   [ViewState.INVENTARIO]: 'inventory:view',

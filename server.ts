@@ -5449,6 +5449,452 @@ app.delete('/closures/:id', authenticate, requirePermission('settings:full'), as
 });
 
 // ============================================
+// HACCP (controlli giornalieri)
+// ============================================
+// 5 resources mirror the operator's paper sheets. For per-day-per-label
+// resources (temperatures / oil / cleaning) POST upserts on the unique
+// (date, label) key so the daily form can fire-and-forget. For ad-hoc
+// resources (receipts / production) POST creates new rows each time.
+
+const HACCP_OIL_ACTIONS = ['SOSTITUITO', 'FILTRATO', 'UTILIZZABILE'] as const;
+type HaccpOilAction = (typeof HACCP_OIL_ACTIONS)[number];
+
+const isValidDate = (s: unknown): s is string =>
+    typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+const parseNumericOrNull = (v: unknown): number | null => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+    return isFinite(n) ? n : null;
+};
+
+// ---- TEMPERATURE READINGS ---------------------------------------------------
+app.get('/haccp/temperatures', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        const result = await queryWithRetry(`
+            SELECT id,
+                   TO_CHAR(date, 'YYYY-MM-DD') as date,
+                   location,
+                   temperature::float8 as temperature,
+                   target_max::float8 as "targetMax",
+                   note,
+                   recorded_by_user_id as "recordedByUserId",
+                   recorded_by_user_name as "recordedByUserName",
+                   recorded_at as "recordedAt"
+            FROM haccp_temperature_readings
+            WHERE date = $1
+            ORDER BY location ASC
+        `, [date]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Upsert by (date, location). The daily form posts the same row repeatedly as
+// the operator types; ON CONFLICT keeps the row in place.
+app.post('/haccp/temperatures', authenticate, async (req, res) => {
+    try {
+        const { date, location, temperature, targetMax, note } = req.body;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        if (!location || typeof location !== 'string' || !location.trim()) {
+            return res.status(400).json({ error: 'location is required' });
+        }
+        const temp = parseNumericOrNull(temperature);
+        if (temp === null) return res.status(400).json({ error: 'temperature is required' });
+        const target = parseNumericOrNull(targetMax);
+        const recorderName = req.user?.email || null;
+        const result = await queryWithRetry(`
+            INSERT INTO haccp_temperature_readings
+                (date, location, temperature, target_max, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (date, location) DO UPDATE SET
+                temperature = EXCLUDED.temperature,
+                target_max = EXCLUDED.target_max,
+                note = EXCLUDED.note,
+                recorded_by_user_id = EXCLUDED.recorded_by_user_id,
+                recorded_by_user_name = EXCLUDED.recorded_by_user_name,
+                recorded_at = CURRENT_TIMESTAMP
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      location,
+                      temperature::float8 as temperature,
+                      target_max::float8 as "targetMax",
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/haccp/temperatures/:id', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry('DELETE FROM haccp_temperature_readings WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ---- OIL CHECKS -------------------------------------------------------------
+app.get('/haccp/oil', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        const result = await queryWithRetry(`
+            SELECT id,
+                   TO_CHAR(date, 'YYYY-MM-DD') as date,
+                   fryer_label as "fryerLabel",
+                   action,
+                   note,
+                   recorded_by_user_id as "recordedByUserId",
+                   recorded_by_user_name as "recordedByUserName",
+                   recorded_at as "recordedAt"
+            FROM haccp_oil_checks
+            WHERE date = $1
+            ORDER BY fryer_label ASC
+        `, [date]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/haccp/oil', authenticate, async (req, res) => {
+    try {
+        const { date, fryerLabel, action, note } = req.body;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        if (!fryerLabel || typeof fryerLabel !== 'string' || !fryerLabel.trim()) {
+            return res.status(400).json({ error: 'fryerLabel is required' });
+        }
+        if (!HACCP_OIL_ACTIONS.includes(action as HaccpOilAction)) {
+            return res.status(400).json({ error: `action must be one of ${HACCP_OIL_ACTIONS.join(', ')}` });
+        }
+        const recorderName = req.user?.email || null;
+        const result = await queryWithRetry(`
+            INSERT INTO haccp_oil_checks
+                (date, fryer_label, action, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (date, fryer_label) DO UPDATE SET
+                action = EXCLUDED.action,
+                note = EXCLUDED.note,
+                recorded_by_user_id = EXCLUDED.recorded_by_user_id,
+                recorded_by_user_name = EXCLUDED.recorded_by_user_name,
+                recorded_at = CURRENT_TIMESTAMP
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      fryer_label as "fryerLabel",
+                      action,
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, [date, fryerLabel.trim(), action, note?.trim() || null, req.user?.userId || null, recorderName]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/haccp/oil/:id', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry('DELETE FROM haccp_oil_checks WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ---- CLEANING CHECKS --------------------------------------------------------
+app.get('/haccp/cleaning', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        const result = await queryWithRetry(`
+            SELECT id,
+                   TO_CHAR(date, 'YYYY-MM-DD') as date,
+                   point,
+                   done,
+                   note,
+                   recorded_by_user_id as "recordedByUserId",
+                   recorded_by_user_name as "recordedByUserName",
+                   recorded_at as "recordedAt"
+            FROM haccp_cleaning_checks
+            WHERE date = $1
+            ORDER BY point ASC
+        `, [date]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/haccp/cleaning', authenticate, async (req, res) => {
+    try {
+        const { date, point, done, note } = req.body;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        if (!point || typeof point !== 'string' || !point.trim()) {
+            return res.status(400).json({ error: 'point is required' });
+        }
+        const recorderName = req.user?.email || null;
+        const result = await queryWithRetry(`
+            INSERT INTO haccp_cleaning_checks
+                (date, point, done, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (date, point) DO UPDATE SET
+                done = EXCLUDED.done,
+                note = EXCLUDED.note,
+                recorded_by_user_id = EXCLUDED.recorded_by_user_id,
+                recorded_by_user_name = EXCLUDED.recorded_by_user_name,
+                recorded_at = CURRENT_TIMESTAMP
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      point,
+                      done,
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, [date, point.trim(), !!done, note?.trim() || null, req.user?.userId || null, recorderName]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/haccp/cleaning/:id', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry('DELETE FROM haccp_cleaning_checks WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ---- GOODS RECEIPTS ---------------------------------------------------------
+app.get('/haccp/receipts', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        const result = await queryWithRetry(`
+            SELECT id,
+                   TO_CHAR(date, 'YYYY-MM-DD') as date,
+                   product,
+                   lot_number as "lotNumber",
+                   temperature::float8 as temperature,
+                   accepted,
+                   note,
+                   recorded_by_user_id as "recordedByUserId",
+                   recorded_by_user_name as "recordedByUserName",
+                   recorded_at as "recordedAt"
+            FROM haccp_goods_receipts
+            WHERE date = $1
+            ORDER BY recorded_at ASC
+        `, [date]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/haccp/receipts', authenticate, async (req, res) => {
+    try {
+        const { date, product, lotNumber, temperature, accepted, note } = req.body;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        if (!product || typeof product !== 'string' || !product.trim()) {
+            return res.status(400).json({ error: 'product is required' });
+        }
+        const temp = parseNumericOrNull(temperature);
+        const recorderName = req.user?.email || null;
+        const result = await queryWithRetry(`
+            INSERT INTO haccp_goods_receipts
+                (date, product, lot_number, temperature, accepted, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      product,
+                      lot_number as "lotNumber",
+                      temperature::float8 as temperature,
+                      accepted,
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, [date, product.trim(), lotNumber?.trim() || null, temp, accepted !== false, note?.trim() || null, req.user?.userId || null, recorderName]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/haccp/receipts/:id', authenticate, async (req, res) => {
+    try {
+        const { product, lotNumber, temperature, accepted, note } = req.body;
+        const sets: string[] = [];
+        const params: any[] = [];
+        let p = 1;
+        if (product !== undefined) { sets.push(`product = $${p++}`); params.push(String(product).trim()); }
+        if (lotNumber !== undefined) { sets.push(`lot_number = $${p++}`); params.push(lotNumber?.trim() || null); }
+        if (temperature !== undefined) { sets.push(`temperature = $${p++}`); params.push(parseNumericOrNull(temperature)); }
+        if (accepted !== undefined) { sets.push(`accepted = $${p++}`); params.push(accepted !== false); }
+        if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
+        if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+        params.push(req.params.id);
+        const result = await queryWithRetry(`
+            UPDATE haccp_goods_receipts SET ${sets.join(', ')} WHERE id = $${p}
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      product,
+                      lot_number as "lotNumber",
+                      temperature::float8 as temperature,
+                      accepted,
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, params);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/haccp/receipts/:id', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry('DELETE FROM haccp_goods_receipts WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ---- PRODUCTION LOGS --------------------------------------------------------
+app.get('/haccp/production', authenticate, async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        const result = await queryWithRetry(`
+            SELECT id,
+                   TO_CHAR(date, 'YYYY-MM-DD') as date,
+                   product,
+                   blast_temp_range as "blastTempRange",
+                   blast_duration as "blastDuration",
+                   internal_lot as "internalLot",
+                   note,
+                   recorded_by_user_id as "recordedByUserId",
+                   recorded_by_user_name as "recordedByUserName",
+                   recorded_at as "recordedAt"
+            FROM haccp_production_logs
+            WHERE date = $1
+            ORDER BY recorded_at ASC
+        `, [date]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/haccp/production', authenticate, async (req, res) => {
+    try {
+        const { date, product, blastTempRange, blastDuration, internalLot, note } = req.body;
+        if (!isValidDate(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+        if (!product || typeof product !== 'string' || !product.trim()) {
+            return res.status(400).json({ error: 'product is required' });
+        }
+        const recorderName = req.user?.email || null;
+        const result = await queryWithRetry(`
+            INSERT INTO haccp_production_logs
+                (date, product, blast_temp_range, blast_duration, internal_lot, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      product,
+                      blast_temp_range as "blastTempRange",
+                      blast_duration as "blastDuration",
+                      internal_lot as "internalLot",
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, [date, product.trim(), blastTempRange?.trim() || null, blastDuration?.trim() || null, internalLot?.trim() || null, note?.trim() || null, req.user?.userId || null, recorderName]);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/haccp/production/:id', authenticate, async (req, res) => {
+    try {
+        const { product, blastTempRange, blastDuration, internalLot, note } = req.body;
+        const sets: string[] = [];
+        const params: any[] = [];
+        let p = 1;
+        if (product !== undefined) { sets.push(`product = $${p++}`); params.push(String(product).trim()); }
+        if (blastTempRange !== undefined) { sets.push(`blast_temp_range = $${p++}`); params.push(blastTempRange?.trim() || null); }
+        if (blastDuration !== undefined) { sets.push(`blast_duration = $${p++}`); params.push(blastDuration?.trim() || null); }
+        if (internalLot !== undefined) { sets.push(`internal_lot = $${p++}`); params.push(internalLot?.trim() || null); }
+        if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
+        if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+        params.push(req.params.id);
+        const result = await queryWithRetry(`
+            UPDATE haccp_production_logs SET ${sets.join(', ')} WHERE id = $${p}
+            RETURNING id,
+                      TO_CHAR(date, 'YYYY-MM-DD') as date,
+                      product,
+                      blast_temp_range as "blastTempRange",
+                      blast_duration as "blastDuration",
+                      internal_lot as "internalLot",
+                      note,
+                      recorded_by_user_id as "recordedByUserId",
+                      recorded_by_user_name as "recordedByUserName",
+                      recorded_at as "recordedAt"
+        `, params);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/haccp/production/:id', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry('DELETE FROM haccp_production_logs WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // FEATURE FLAGS (app_settings)
 // ============================================
 // Boolean toggles managed from the Settings page. Used to pause the public
