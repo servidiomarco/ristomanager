@@ -683,7 +683,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                       : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                   }`}
                 >
-                  {tab === 'TODO' ? `Da fare (${totalCount - checkedCount})` : `Fatte (${checkedCount})`}
+                  {tab === 'TODO' ? `Da acquistare (${totalCount - checkedCount})` : `Acquistati (${checkedCount})`}
                 </button>
               ))}
             </div>
