@@ -405,7 +405,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
       {/* Split 25/75 */}
       <div className="flex-1 flex min-h-0">
         {/* LEFT 25% — search + list */}
-        <div className="w-1/4 min-w-[280px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-1)]">
+        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-1)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-muted)]" />
