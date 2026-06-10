@@ -1115,6 +1115,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
+        // Reception (iPad host view) — granted to all front-of-house roles.
+        const receptionPermissions = [
+            ['OWNER', 'reception:view'],
+            ['GENERAL_MANAGER', 'reception:view'],
+            ['MANAGER', 'reception:view'],
+            ['WAITER', 'reception:view'],
+        ];
+        for (const [role, permission] of receptionPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
         // ============================================
         // PUSH SUBSCRIPTIONS TABLE (Web Push)
         // ============================================
