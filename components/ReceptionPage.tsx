@@ -5,6 +5,8 @@ import {
   Room,
   ArrivalStatus,
   ReservationStatus,
+  ReservationSource,
+  PaymentStatus,
   TableStatus,
   Shift
 } from '../types';
@@ -21,9 +23,11 @@ import {
   ChevronLeft,
   RefreshCw,
   AlertTriangle,
-  Star
+  Star,
+  Zap,
+  X as XIcon
 } from 'lucide-react';
-import { getReservations, getTables, getRooms, updateReservation } from '../services/apiService';
+import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 
 // Local-date helper (avoid UTC drift)
@@ -80,6 +84,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showWalkIn, setShowWalkIn] = useState(false);
   const [, setTick] = useState(0);
 
   // Re-render every 60s so the time-band grouping (Adesso / Prossima ora / …) stays accurate.
@@ -203,6 +208,40 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     if (!selectedReservation) return;
     await patchReservation(selectedReservation.id, { table_id: tableId });
     setShowTablePicker(false);
+  };
+
+  // Walk-in: create a brand-new reservation for "right now", already marked
+  // as arrived. After the booking is on file we jump straight into the table
+  // picker so the host can seat the guests in one motion.
+  const handleCreateWalkIn = async (input: { name: string; guests: number; phone: string; notes: string }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const reservationTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      const shift = now.getHours() < 16 ? Shift.LUNCH : Shift.DINNER;
+      const created = await createReservation({
+        customer_name: input.name.trim(),
+        reservation_time: reservationTime,
+        shift,
+        guests: input.guests,
+        phone: input.phone.trim() || undefined,
+        notes: input.notes.trim() || undefined,
+        payment_status: PaymentStatus.PENDING,
+        arrival_status: ArrivalStatus.ARRIVED,
+        reservation_status: ReservationStatus.CONFIRMED,
+        source: ReservationSource.MANUAL,
+      } as Omit<Reservation, 'id'>);
+      setReservations(prev => [...prev, created]);
+      setSelectedReservationId(created.id);
+      setShowWalkIn(false);
+      setShowTablePicker(true);
+    } catch (err) {
+      setError((err as Error)?.message || 'Errore creazione walk-in');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleMarkArrived = async () => {
@@ -339,6 +378,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
           </div>
         </div>
         <button
+          onClick={() => setShowWalkIn(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm shadow-sm"
+          title="Cliente senza prenotazione"
+        >
+          <Zap className="h-4 w-4" />
+          Walk-in
+        </button>
+        <button
           onClick={loadAll}
           className="p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
           aria-label="Aggiorna"
@@ -435,6 +482,134 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
               onFreeTable={handleFreeTable}
             />
           )}
+        </div>
+      </div>
+
+      {showWalkIn && (
+        <WalkInModal
+          busy={busy}
+          onCancel={() => setShowWalkIn(false)}
+          onSubmit={handleCreateWalkIn}
+        />
+      )}
+    </div>
+  );
+};
+
+interface WalkInModalProps {
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (input: { name: string; guests: number; phone: string; notes: string }) => void;
+}
+
+const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) => {
+  const [name, setName] = useState('');
+  const [guests, setGuests] = useState(2);
+  const [phone, setPhone] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const canSubmit = name.trim().length > 0 && guests > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-[var(--color-surface-1)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-line)]">
+          <div className="flex items-center gap-2">
+            <Zap className="h-5 w-5 text-amber-500" />
+            <h3 className="text-lg font-semibold text-[var(--color-fg)]">Walk-in</h3>
+          </div>
+          <button
+            onClick={onCancel}
+            className="p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
+            aria-label="Chiudi"
+          >
+            <XIcon className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-[var(--color-fg-muted)]">
+            Crea una prenotazione "adesso" già marcata come arrivata. Subito dopo potrai assegnare il tavolo.
+          </p>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+              Nome cliente <span className="text-rose-500">*</span>
+            </label>
+            <input
+              autoFocus
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Es. Mario Rossi"
+              className="w-full px-3 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+                Coperti <span className="text-rose-500">*</span>
+              </label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setGuests(g => Math.max(1, g - 1))}
+                  className="w-11 h-11 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-xl font-semibold hover:bg-[var(--color-surface-3)]"
+                  aria-label="Meno"
+                >−</button>
+                <div className="flex-1 text-center text-2xl font-bold text-[var(--color-fg)] tabular-nums">{guests}</div>
+                <button
+                  type="button"
+                  onClick={() => setGuests(g => g + 1)}
+                  className="w-11 h-11 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-xl font-semibold hover:bg-[var(--color-surface-3)]"
+                  aria-label="Più"
+                >+</button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+                Telefono
+              </label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="Opzionale"
+                className="w-full h-11 px-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+              Note
+            </label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Allergie, preferenze, …"
+              rows={2}
+              className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={() => onSubmit({ name, guests, phone, notes })}
+            disabled={busy || !canSubmit}
+            className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Crea e assegna tavolo
+          </button>
         </div>
       </div>
     </div>
