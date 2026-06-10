@@ -1182,6 +1182,95 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
     }
 });
 
+// Atomic table swap: two reservations exchange their table assignments in a
+// single transaction. The host picks the second reservation from the
+// assign-table picker by tapping an occupied tile. Doing it in one TX avoids
+// the intermediate state where both bookings briefly point at the same table
+// (which the application-level conflict check would reject).
+app.post('/reservations/:id/swap-table', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const aId = Number(req.params.id);
+        const bId = Number(req.body?.other_id);
+        if (!Number.isFinite(aId) || !Number.isFinite(bId) || aId === bId) {
+            return res.status(400).json({ error: 'Identificativi prenotazione non validi' });
+        }
+
+        await client.query('BEGIN');
+
+        const rows = await client.query(
+            `SELECT id, table_id, customer_name FROM reservations WHERE id = ANY($1::int[]) FOR UPDATE`,
+            [[aId, bId]]
+        );
+        if (rows.rows.length !== 2) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Prenotazione non trovata' });
+        }
+        const a = rows.rows.find((r: any) => r.id === aId);
+        const b = rows.rows.find((r: any) => r.id === bId);
+        if (!a?.table_id || !b?.table_id) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Entrambe le prenotazioni devono avere un tavolo assegnato per essere scambiate' });
+        }
+
+        await client.query(
+            `UPDATE reservations
+                SET table_id = CASE id WHEN $1 THEN $4::int WHEN $2 THEN $3::int END
+              WHERE id IN ($1, $2)`,
+            [aId, bId, a.table_id, b.table_id]
+        );
+
+        const enriched = await client.query(
+            `SELECT r.*, u.full_name AS created_by_user_name,
+                    c.is_vip AS customer_is_vip,
+                    c.preferred_table_id AS customer_preferred_table_id,
+                    pt.name AS customer_preferred_table_name,
+                    c.dietary_notes AS customer_dietary_notes,
+                    c.preferences_notes AS customer_preferences_notes
+               FROM reservations r
+               LEFT JOIN users u ON r.created_by_user_id = u.id
+               LEFT JOIN customers c
+                      ON r.phone IS NOT NULL
+                     AND c.phone IS NOT NULL
+                     AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+               LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+              WHERE r.id = ANY($1::int[])`,
+            [[aId, bId]]
+        );
+
+        await client.query('COMMIT');
+
+        const updatedA = enriched.rows.find((r: any) => r.id === aId);
+        const updatedB = enriched.rows.find((r: any) => r.id === bId);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.RESERVATION,
+                aId,
+                a.customer_name,
+                { swapped_with: bId, new_table_id: updatedA?.table_id }
+            );
+        }
+
+        if (socketService) {
+            socketService.broadcastReservationUpdated(updatedA);
+            socketService.broadcastReservationUpdated(updatedB);
+        }
+
+        res.json({ a: updatedA, b: updatedB });
+    } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        console.error('POST /reservations/:id/swap-table error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
 // Send WhatsApp confirmation for reservation
 app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
