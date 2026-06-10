@@ -7,7 +7,7 @@ import {
   ReservationStatus,
   ReservationSource,
   PaymentStatus,
-  TableStatus,
+  TableShape,
   Shift
 } from '../types';
 import {
@@ -29,7 +29,7 @@ import {
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
-import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { TableGlyph, getGlyphDimensions } from './TableGlyph';
 
 // Local-date helper (avoid UTC drift)
 const formatLocalDate = (d: Date): string => {
@@ -56,17 +56,6 @@ const formatHHMM = (iso: string): string => {
 const formatPhone = (phone?: string): string => {
   if (!phone) return '';
   return phone.replace(/^\+39/, '').trim();
-};
-
-const tableStatusForGlyph = (
-  res: Reservation | undefined,
-  table: Table
-): TableDisplayStatus => {
-  if (!res) return 'libera';
-  const arr = res.arrival_status || ArrivalStatus.WAITING;
-  if (arr === ArrivalStatus.ARRIVED) return 'arrivato';
-  if (res.reservation_status === ReservationStatus.NO_SHOW) return 'noshow';
-  return 'attesa';
 };
 
 interface ReceptionPageProps {
@@ -907,130 +896,206 @@ const TablePicker: React.FC<TablePickerProps> = ({
   const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
   const roomTables = activeRoom ? tables.filter(t => t.room_id === activeRoom.id) : [];
 
-  // Fit the full room into the available viewport — scale on the tighter axis
-  // so nothing ever scrolls. Allow upscaling past 1× on small rooms.
-  const PAD = 32;
-  const scale = activeRoom && activeRoom.width > 0 && activeRoom.height > 0
+  // Compute the true bounding box from the placed tables (room.width/height
+  // is a stored ceiling but tables can be positioned right at the edge, which
+  // is why earlier versions clipped tables 34 & 36 on the Veranda).
+  const PAD = 48;
+  const extent = useMemo(() => {
+    let maxR = activeRoom?.width || 0;
+    let maxB = activeRoom?.height || 0;
+    for (const t of roomTables) {
+      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
+      maxR = Math.max(maxR, t.x + w);
+      maxB = Math.max(maxB, t.y + h);
+    }
+    return { width: maxR + PAD, height: maxB + PAD };
+  }, [activeRoom, roomTables]);
+
+  const scale = extent.width > 0 && extent.height > 0
     ? Math.min(
-        (containerSize.width - PAD * 2) / activeRoom.width,
-        (containerSize.height - PAD * 2) / activeRoom.height
+        (containerSize.width - PAD * 2) / extent.width,
+        (containerSize.height - PAD * 2) / extent.height,
+        1.6 // allow modest upscaling so a sparse room still fills the canvas
       )
     : 1;
 
+  // Bucket each table for the picker so the host can scan the room in two
+  // glances: which ones fit, which ones are out, which one is the current.
+  type TableState = 'ideal' | 'big' | 'tooSmall' | 'occupied' | 'current';
+  const bucketize = (t: Table): TableState => {
+    if (reservation.table_id === t.id) return 'current';
+    if (occupiedTableIds.has(t.id)) return 'occupied';
+    const cap = t.max_seats ?? t.seats;
+    if (cap < reservation.guests) return 'tooSmall';
+    if (t.seats > reservation.guests + 2) return 'big';
+    return 'ideal';
+  };
+
+  const counts = useMemo(() => {
+    const c = { ideal: 0, big: 0, tooSmall: 0, occupied: 0 };
+    for (const t of roomTables) {
+      const s = bucketize(t);
+      if (s === 'current') continue;
+      if (s === 'ideal') c.ideal++;
+      else if (s === 'big') c.big++;
+      else if (s === 'tooSmall') c.tooSmall++;
+      else if (s === 'occupied') c.occupied++;
+    }
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomTables, occupiedTableIds, reservation.table_id, reservation.guests]);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
-      <div className="flex-shrink-0 px-6 py-4 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
-        <div className="min-w-0">
+      {/* Header — compact, party-size hint sits where the host's eye lands. */}
+      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
+        <div className="min-w-0 flex items-baseline gap-3 flex-wrap">
           <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
-            Assegna tavolo a
+            Tavolo per
           </div>
-          <div className="text-2xl font-bold text-[var(--color-fg)] truncate">
-            {reservation.customer_name || 'Senza nome'} · {reservation.guests} coperti
+          <div className="text-xl font-bold text-[var(--color-fg)] truncate">
+            {reservation.customer_name || 'Senza nome'}
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-sm font-semibold text-[var(--color-fg)]">
+            <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+            {reservation.guests} coperti
           </div>
         </div>
         <button
           onClick={onCancel}
           disabled={busy}
-          className="px-5 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] font-medium inline-flex items-center gap-2"
+          aria-label="Chiudi"
+          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] inline-flex items-center justify-center"
         >
           <XIcon className="h-5 w-5" />
-          Chiudi
         </button>
       </div>
 
-      {visibleRooms.length > 1 && (
-        <div className="flex-shrink-0 px-6 pt-3 flex gap-2 overflow-x-auto">
-          {visibleRooms.map(room => (
-            <button
-              key={room.id}
-              onClick={() => setActiveRoomId(room.id)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap border ${
-                room.id === activeRoom?.id
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-              }`}
-            >
-              {room.name}
-            </button>
-          ))}
+      {/* Room tabs + scan summary on the same row to save vertical space. */}
+      <div className="flex-shrink-0 px-6 py-3 flex items-center justify-between gap-4 border-b border-[var(--color-line)] flex-wrap">
+        {visibleRooms.length > 1 ? (
+          <div className="flex gap-1.5 overflow-x-auto">
+            {visibleRooms.map(room => (
+              <button
+                key={room.id}
+                onClick={() => setActiveRoomId(room.id)}
+                className={`px-4 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
+                  room.id === activeRoom?.id
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-transparent'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                {room.name}
+              </button>
+            ))}
+          </div>
+        ) : <div />}
+        <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+          <LegendDot tone="emerald" label={`${counts.ideal} adatti`} />
+          <LegendDot tone="slate" label={`${counts.big} grandi`} />
+          <LegendDot tone="rose" label={`${counts.occupied} occupati`} />
         </div>
-      )}
-
-      <div className="flex-shrink-0 px-6 pt-3">
-        <Legend />
       </div>
 
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden px-6 pb-6 flex items-center justify-center">
+      {/* Canvas. Floor-dot background so the room reads as space, not a card. */}
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 overflow-hidden flex items-center justify-center"
+        style={{
+          backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
+          backgroundSize: '18px 18px',
+        }}
+      >
         {activeRoom && (
           <div
-            className="relative rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-line)]"
+            className="relative"
             style={{
-              width: activeRoom.width * scale,
-              height: activeRoom.height * scale
+              width: extent.width * scale,
+              height: extent.height * scale,
             }}
           >
-              {roomTables.map(t => {
-                const occupied = occupiedTableIds.has(t.id);
-                const tooSmall = (t.max_seats ?? t.seats) < reservation.guests;
-                const isCurrent = reservation.table_id === t.id;
-                const dim = getGlyphDimensions(t.shape, t.seats);
-                const glyphW = dim.width * scale;
-                const glyphH = dim.height * scale;
+            {roomTables.map(t => {
+              const state = bucketize(t);
+              const disabled = state === 'occupied' || state === 'tooSmall';
+              const dim = getGlyphDimensions(t.shape, t.seats);
+              const glyphW = dim.width * scale;
+              const glyphH = dim.height * scale;
 
-                let badgeBg = 'bg-emerald-500/15 ring-emerald-500/40';
-                let chairColor: string | undefined = '#10b981'; // emerald-500
-                let disabled = false;
-                let cornerNote: string | null = null;
+              // Match the natural glyph radius so the halo follows the table
+              // shape (circle ≈ pill; rectangle ≈ rounded square).
+              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
 
-                if (isCurrent) {
-                  badgeBg = 'bg-indigo-500/20 ring-indigo-500/50';
-                  chairColor = '#6366f1';
-                  cornerNote = 'Attuale';
-                } else if (occupied) {
-                  badgeBg = 'bg-rose-500/15 ring-rose-500/40';
-                  chairColor = '#f43f5e';
-                  disabled = true;
-                  cornerNote = 'Occupato';
-                } else if (tooSmall) {
-                  badgeBg = 'bg-slate-500/10 ring-slate-400/40';
-                  chairColor = '#94a3b8';
-                  cornerNote = `${t.seats} posti`;
-                }
+              // Decoration per state. The glyph itself stays in 'libera' so the
+              // room reads as a coherent floor plan — colour is conveyed by the
+              // halo + opacity, not by recolouring the chairs.
+              let haloClass = '';
+              let glyphOpacity = 'opacity-100';
+              let grayscale = '';
+              let badge: { text: string; tone: 'emerald' | 'slate' | 'rose' | 'indigo' } | null = null;
 
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => !disabled && onSelect(t.id)}
-                    disabled={busy || disabled}
-                    className={`absolute rounded-2xl ring-2 ring-inset transition-all ${badgeBg} ${
-                      disabled ? 'cursor-not-allowed opacity-60' : 'hover:scale-105 hover:z-10 cursor-pointer'
-                    }`}
-                    style={{
-                      left: t.x * scale,
-                      top: t.y * scale,
-                      width: glyphW,
-                      height: glyphH
-                    }}
-                    title={`${t.name} · ${t.seats} posti`}
+              if (state === 'current') {
+                haloClass = 'ring-2 ring-indigo-500 shadow-[0_0_0_4px_rgba(99,102,241,0.18)]';
+                badge = { text: 'Attuale', tone: 'indigo' };
+              } else if (state === 'occupied') {
+                haloClass = 'ring-1 ring-rose-300';
+                glyphOpacity = 'opacity-50';
+                badge = { text: 'Occupato', tone: 'rose' };
+              } else if (state === 'tooSmall') {
+                haloClass = '';
+                glyphOpacity = 'opacity-40';
+                grayscale = 'grayscale';
+                badge = { text: `${t.seats} posti`, tone: 'slate' };
+              } else if (state === 'ideal') {
+                haloClass = 'ring-2 ring-emerald-400/70 hover:ring-emerald-500 hover:shadow-[0_8px_24px_-8px_rgba(16,185,129,0.45)]';
+              } else if (state === 'big') {
+                haloClass = 'ring-1 ring-slate-300 hover:ring-slate-400';
+              }
+
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => !disabled && onSelect(t.id)}
+                  disabled={busy || disabled}
+                  className={`absolute transition-all duration-150 ${
+                    disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
+                  }`}
+                  style={{
+                    left: t.x * scale,
+                    top: t.y * scale,
+                    width: glyphW,
+                    height: glyphH,
+                  }}
+                  title={`${t.name} · ${t.seats} posti${t.max_seats && t.max_seats !== t.seats ? ` (max ${t.max_seats})` : ''}`}
+                >
+                  <div
+                    className={`relative ${haloClass} ${glyphOpacity} ${grayscale}`}
+                    style={{ width: glyphW, height: glyphH, borderRadius: haloRadius }}
                   >
-                    <div style={{ width: glyphW, height: glyphH }} className="flex items-center justify-center">
+                    <div className="absolute inset-0 flex items-center justify-center">
                       <TableGlyph
                         name={t.name}
                         seats={t.seats}
                         shape={t.shape}
                         status="libera"
                         fit
-                        chairColor={chairColor}
                       />
                     </div>
-                    {cornerNote && (
-                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap">
-                        {cornerNote}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+                  </div>
+                  {badge && (
+                    <span
+                      className={`absolute left-1/2 -translate-x-1/2 -bottom-3 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shadow-sm border ${
+                        badge.tone === 'rose'    ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:border-rose-500/40'
+                      : badge.tone === 'slate'   ? 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30'
+                      : badge.tone === 'indigo'  ? 'bg-indigo-600 text-white border-indigo-600'
+                                                 : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}
+                    >
+                      {badge.text}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1038,21 +1103,17 @@ const TablePicker: React.FC<TablePickerProps> = ({
   );
 };
 
-const Legend: React.FC = () => (
-  <div className="flex items-center gap-4 mb-4 text-xs text-[var(--color-fg-muted)] flex-wrap">
-    <span className="inline-flex items-center gap-1.5">
-      <span className="w-3 h-3 rounded-full bg-emerald-500/40 ring-2 ring-emerald-500/60" /> Libero
+const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose'; label: string }> = ({ tone, label }) => {
+  const dot =
+    tone === 'emerald' ? 'bg-emerald-500'
+    : tone === 'rose'  ? 'bg-rose-400'
+                       : 'bg-slate-300';
+  return (
+    <span className="inline-flex items-center gap-1.5 tabular-nums">
+      <span className={`w-2 h-2 rounded-full ${dot}`} />
+      {label}
     </span>
-    <span className="inline-flex items-center gap-1.5">
-      <span className="w-3 h-3 rounded-full bg-rose-500/40 ring-2 ring-rose-500/60" /> Occupato
-    </span>
-    <span className="inline-flex items-center gap-1.5">
-      <span className="w-3 h-3 rounded-full bg-slate-400/40 ring-2 ring-slate-400/60" /> Troppo piccolo
-    </span>
-    <span className="inline-flex items-center gap-1.5">
-      <span className="w-3 h-3 rounded-full bg-indigo-500/40 ring-2 ring-indigo-500/60" /> Attuale
-    </span>
-  </div>
-);
+  );
+};
 
 export default ReceptionPage;
