@@ -1451,7 +1451,10 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.RECEPTION && (
-          <ReceptionPage />
+          <ReceptionPage
+            globalDate={globalDate}
+            globalShiftFilter={globalShiftFilter}
+          />
         )}
 
         {view === ViewState.ATTIVITA && (

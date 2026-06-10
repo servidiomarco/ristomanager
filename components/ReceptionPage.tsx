@@ -16,6 +16,7 @@ import {
   Clock,
   Phone,
   MapPin,
+  MapPinOff,
   CheckCircle2,
   XCircle,
   Armchair,
@@ -25,16 +26,13 @@ import {
   AlertTriangle,
   Star,
   Zap,
-  Sun,
-  Moon,
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 
 // Local-date helper (avoid UTC drift)
-const todayStr = (): string => {
-  const d = new Date();
+const formatLocalDate = (d: Date): string => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -72,10 +70,12 @@ const tableStatusForGlyph = (
 };
 
 interface ReceptionPageProps {
+  globalDate: Date;
+  globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
   onBack?: () => void;
 }
 
-const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
+const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, onBack }) => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -87,9 +87,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showWalkIn, setShowWalkIn] = useState(false);
-  const [shiftFilter, setShiftFilter] = useState<Shift>(
-    new Date().getHours() < 16 ? Shift.LUNCH : Shift.DINNER
-  );
   const [, setTick] = useState(0);
 
   // Re-render every 60s so the time-band grouping (Adesso / Prossima ora / …) stays accurate.
@@ -118,17 +115,16 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Today's bookings for the active shift (excluding cancelled), sorted by time.
-  // The shift toggle drives this so lunch and dinner stay visually separated —
-  // showing both at once was the host's #1 complaint.
+  // Bookings for the date+shift chosen in the global top-bar control.
+  // 'ALL' shows both shifts; any other value filters to that shift.
   const todayReservations = useMemo(() => {
-    const today = todayStr();
+    const dateStr = formatLocalDate(globalDate);
     return reservations
-      .filter(r => r.reservation_time?.startsWith(today))
+      .filter(r => r.reservation_time?.startsWith(dateStr))
       .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
-      .filter(r => r.shift === shiftFilter)
+      .filter(r => globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-  }, [reservations, shiftFilter]);
+  }, [reservations, globalDate, globalShiftFilter]);
 
   // Apply text search + status filter
   const filtered = useMemo(() => {
@@ -280,6 +276,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     await patchReservation(selectedReservation.id, { arrival_status: ArrivalStatus.DEPARTED });
   };
 
+  // Detach the table from the reservation without touching arrival status —
+  // the booking stays in the list, just without a seat. The PUT handler
+  // coerces `table_id` to NULL via `(table_id ?? null)`.
+  const handleRemoveTable = async () => {
+    if (!selectedReservation) return;
+    await patchReservation(selectedReservation.id, { table_id: undefined });
+  };
+
   // Render a reservation card in the left list
   const renderCard = (r: Reservation) => {
     const isSelected = r.id === selectedReservationId;
@@ -358,7 +362,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-surface-1)]">
+    <div className="h-full flex flex-col bg-[var(--color-surface)]">
       {/* Top header bar (stays on top, sits above the split) */}
       <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)] px-4 py-3 flex items-center gap-3">
         {onBack && (
@@ -419,27 +423,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
       {/* Split 40/60 */}
       <div className="flex-1 flex min-h-0">
         {/* LEFT 40% — search + list */}
-        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-1)]">
+        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
-            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)]">
-              {([
-                [Shift.LUNCH, 'Pranzo', <Sun key="s" className="h-4 w-4" />],
-                [Shift.DINNER, 'Cena', <Moon key="m" className="h-4 w-4" />]
-              ] as const).map(([key, label, icon]) => (
-                <button
-                  key={key}
-                  onClick={() => setShiftFilter(key)}
-                  className={`inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-                    shiftFilter === key
-                      ? 'bg-[var(--color-surface-1)] text-[var(--color-fg)] shadow-sm'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  {icon}
-                  {label}
-                </button>
-              ))}
-            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-muted)]" />
               <input
@@ -487,28 +472,17 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* RIGHT 75% — detail + table picker */}
-        <div className="flex-1 flex flex-col bg-[var(--color-surface-1)] min-w-0">
+        {/* RIGHT 60% — detail */}
+        <div className="flex-1 flex flex-col bg-[var(--color-surface)] min-w-0">
           {!selectedReservation ? (
             <EmptyState count={filtered.length} />
-          ) : showTablePicker ? (
-            <TablePicker
-              reservation={selectedReservation}
-              tables={tables}
-              rooms={rooms}
-              activeRoomId={activeRoomId}
-              setActiveRoomId={setActiveRoomId}
-              occupiedTableIds={occupiedTableIds}
-              onCancel={() => setShowTablePicker(false)}
-              onSelect={handleAssignTable}
-              busy={busy}
-            />
           ) : (
             <DetailPanel
               reservation={selectedReservation}
               table={selectedTable}
               busy={busy}
               onAssignTable={() => setShowTablePicker(true)}
+              onRemoveTable={handleRemoveTable}
               onMarkArrived={handleMarkArrived}
               onMarkWaiting={handleMarkWaiting}
               onMarkNoShow={handleMarkNoShow}
@@ -517,6 +491,22 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
           )}
         </div>
       </div>
+
+      {/* Full-screen table picker so every table in a room is visible without
+          horizontal scroll — the spatial map needs the whole viewport. */}
+      {showTablePicker && selectedReservation && (
+        <TablePicker
+          reservation={selectedReservation}
+          tables={tables}
+          rooms={rooms}
+          activeRoomId={activeRoomId}
+          setActiveRoomId={setActiveRoomId}
+          occupiedTableIds={occupiedTableIds}
+          onCancel={() => setShowTablePicker(false)}
+          onSelect={handleAssignTable}
+          busy={busy}
+        />
+      )}
 
       {showWalkIn && (
         <WalkInModal
@@ -545,7 +535,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-[var(--color-surface-1)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-line)]">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-amber-500" />
@@ -632,7 +622,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
           <button
             onClick={onCancel}
             disabled={busy}
-            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           >
             Annulla
           </button>
@@ -670,6 +660,7 @@ interface DetailPanelProps {
   table: Table | null;
   busy: boolean;
   onAssignTable: () => void;
+  onRemoveTable: () => void;
   onMarkArrived: () => void;
   onMarkWaiting: () => void;
   onMarkNoShow: () => void;
@@ -681,6 +672,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   table,
   busy,
   onAssignTable,
+  onRemoveTable,
   onMarkArrived,
   onMarkWaiting,
   onMarkNoShow,
@@ -774,6 +766,15 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             icon={<MapPin className="h-6 w-6" />}
             label={table ? 'Cambia tavolo' : 'Assegna tavolo'}
           />
+          {table && (
+            <ActionButton
+              disabled={busy}
+              onClick={onRemoveTable}
+              icon={<MapPinOff className="h-6 w-6" />}
+              label="Rimuovi tavolo"
+              variant="neutral"
+            />
+          )}
           {arr === ArrivalStatus.ARRIVED ? (
             <ActionButton
               disabled={busy}
@@ -889,12 +890,14 @@ const TablePicker: React.FC<TablePickerProps> = ({
   busy
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(800);
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(entries => {
-      for (const e of entries) setContainerWidth(e.contentRect.width);
+      for (const e of entries) {
+        setContainerSize({ width: e.contentRect.width, height: e.contentRect.height });
+      }
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
@@ -904,15 +907,19 @@ const TablePicker: React.FC<TablePickerProps> = ({
   const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
   const roomTables = activeRoom ? tables.filter(t => t.room_id === activeRoom.id) : [];
 
-  // Compute scale to fit room width into container (leave 40px padding)
-  const targetWidth = containerWidth - 80;
-  const scale = activeRoom && activeRoom.width > 0
-    ? Math.min(1, targetWidth / activeRoom.width)
+  // Fit the full room into the available viewport — scale on the tighter axis
+  // so nothing ever scrolls. Allow upscaling past 1× on small rooms.
+  const PAD = 32;
+  const scale = activeRoom && activeRoom.width > 0 && activeRoom.height > 0
+    ? Math.min(
+        (containerSize.width - PAD * 2) / activeRoom.width,
+        (containerSize.height - PAD * 2) / activeRoom.height
+      )
     : 1;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 px-8 py-5 border-b border-[var(--color-line)] flex items-center justify-between gap-4">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
+      <div className="flex-shrink-0 px-6 py-4 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
             Assegna tavolo a
@@ -924,14 +931,15 @@ const TablePicker: React.FC<TablePickerProps> = ({
         <button
           onClick={onCancel}
           disabled={busy}
-          className="px-5 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] font-medium"
+          className="px-5 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] font-medium inline-flex items-center gap-2"
         >
-          Annulla
+          <XIcon className="h-5 w-5" />
+          Chiudi
         </button>
       </div>
 
       {visibleRooms.length > 1 && (
-        <div className="flex-shrink-0 px-8 pt-4 flex gap-2 overflow-x-auto">
+        <div className="flex-shrink-0 px-6 pt-3 flex gap-2 overflow-x-auto">
           {visibleRooms.map(room => (
             <button
               key={room.id}
@@ -948,17 +956,19 @@ const TablePicker: React.FC<TablePickerProps> = ({
         </div>
       )}
 
-      <div className="flex-1 overflow-auto px-8 py-6">
+      <div className="flex-shrink-0 px-6 pt-3">
         <Legend />
-        <div ref={containerRef} className="w-full">
-          {activeRoom && (
-            <div
-              className="relative rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-line)] mx-auto"
-              style={{
-                width: activeRoom.width * scale,
-                height: activeRoom.height * scale
-              }}
-            >
+      </div>
+
+      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden px-6 pb-6 flex items-center justify-center">
+        {activeRoom && (
+          <div
+            className="relative rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-line)]"
+            style={{
+              width: activeRoom.width * scale,
+              height: activeRoom.height * scale
+            }}
+          >
               {roomTables.map(t => {
                 const occupied = occupiedTableIds.has(t.id);
                 const tooSmall = (t.max_seats ?? t.seats) < reservation.guests;
@@ -1014,16 +1024,15 @@ const TablePicker: React.FC<TablePickerProps> = ({
                       />
                     </div>
                     {cornerNote && (
-                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-[var(--color-surface-1)] border border-[var(--color-line)] text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap">
+                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap">
                         {cornerNote}
                       </span>
                     )}
                   </button>
                 );
               })}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
