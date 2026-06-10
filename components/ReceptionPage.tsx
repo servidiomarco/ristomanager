@@ -26,6 +26,8 @@ import {
   AlertTriangle,
   Star,
   Zap,
+  List,
+  LayoutGrid,
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
@@ -76,6 +78,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showWalkIn, setShowWalkIn] = useState(false);
+  // Right-pane mode toggle. Lista = reservation detail (default).
+  // Mappa = live room map, host taps a table to jump to its booking.
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [, setTick] = useState(0);
 
   // Re-render every 60s so the time-band grouping (Adesso / Prossima ora / …) stays accurate.
@@ -182,6 +187,26 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     }
     return set;
   }, [todayReservations, selectedReservationId]);
+
+  // Map view: tableId → its current reservation (if any). Prefers the next
+  // upcoming reservation for the table — ARRIVED beats WAITING beats DEPARTED.
+  const reservationByTableId = useMemo(() => {
+    const m = new Map<number, Reservation>();
+    const priority = (r: Reservation) => {
+      if (r.arrival_status === ArrivalStatus.ARRIVED) return 3;
+      if (r.reservation_status === ReservationStatus.NO_SHOW) return 1;
+      if (r.arrival_status === ArrivalStatus.DEPARTED) return 0;
+      return 2; // WAITING
+    };
+    for (const r of todayReservations) {
+      if (!r.table_id) continue;
+      const existing = m.get(r.table_id);
+      if (!existing || priority(r) > priority(existing)) {
+        m.set(r.table_id, r);
+      }
+    }
+    return m;
+  }, [todayReservations]);
 
   // The PUT /reservations/:id endpoint is a *full* replace — it destructures
   // the body into fixed columns, so a partial body would null out NOT NULL
@@ -414,6 +439,28 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         {/* LEFT 40% — search + list */}
         <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
+            {/* Lista / Mappa toggle — controls the right pane so the host can
+                check the floor at any time without leaving the list view. */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)]">
+              {([
+                ['list', 'Lista', <List key="l" className="h-4 w-4" />],
+                ['map', 'Mappa', <LayoutGrid key="m" className="h-4 w-4" />]
+              ] as const).map(([key, label, icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  className={`inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                    viewMode === key
+                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
+                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                  }`}
+                  aria-pressed={viewMode === key}
+                >
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-muted)]" />
               <input
@@ -494,6 +541,23 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           onCancel={() => setShowTablePicker(false)}
           onSelect={handleAssignTable}
           busy={busy}
+        />
+      )}
+
+      {/* Mappa mode opens the same full-viewport canvas as the assign-table
+          picker, but coloured by today's reservation state instead of fit. */}
+      {viewMode === 'map' && (
+        <RoomMap
+          tables={tables}
+          rooms={rooms}
+          reservationByTableId={reservationByTableId}
+          activeRoomId={activeRoomId}
+          setActiveRoomId={setActiveRoomId}
+          onClose={() => setViewMode('list')}
+          onPickReservation={(id) => {
+            setSelectedReservationId(id);
+            setViewMode('list');
+          }}
         />
       )}
 
@@ -1103,16 +1167,230 @@ const TablePicker: React.FC<TablePickerProps> = ({
   );
 };
 
-const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose'; label: string }> = ({ tone, label }) => {
+const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo'; label: string }> = ({ tone, label }) => {
   const dot =
     tone === 'emerald' ? 'bg-emerald-500'
     : tone === 'rose'  ? 'bg-rose-400'
+    : tone === 'indigo' ? 'bg-indigo-500'
                        : 'bg-slate-300';
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
       <span className={`w-2 h-2 rounded-full ${dot}`} />
       {label}
     </span>
+  );
+};
+
+interface RoomMapProps {
+  tables: Table[];
+  rooms: Room[];
+  reservationByTableId: Map<number, Reservation>;
+  activeRoomId: number | null;
+  setActiveRoomId: (id: number) => void;
+  onClose: () => void;
+  onPickReservation: (id: number) => void;
+}
+
+// Full-viewport live room map — shares the visual shell with the assign-table
+// picker, but each table is colour-coded by today's reservation state instead
+// of fit. Tapping a booked table jumps to that reservation in the list and
+// closes the map; tapping a free table is a no-op.
+const RoomMap: React.FC<RoomMapProps> = ({
+  tables,
+  rooms,
+  reservationByTableId,
+  activeRoomId,
+  setActiveRoomId,
+  onClose,
+  onPickReservation,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ width: 600, height: 600 });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        setContainerSize({ width: e.contentRect.width, height: e.contentRect.height });
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const visibleRooms = rooms.filter(r => !r.is_closed);
+  const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
+  const roomTables = activeRoom ? tables.filter(t => t.room_id === activeRoom.id) : [];
+
+  const PAD = 40;
+  const extent = useMemo(() => {
+    let maxR = activeRoom?.width || 0;
+    let maxB = activeRoom?.height || 0;
+    for (const t of roomTables) {
+      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
+      maxR = Math.max(maxR, t.x + w);
+      maxB = Math.max(maxB, t.y + h);
+    }
+    return { width: maxR + PAD, height: maxB + PAD };
+  }, [activeRoom, roomTables]);
+
+  const scale = extent.width > 0 && extent.height > 0
+    ? Math.min(
+        (containerSize.width - PAD * 2) / extent.width,
+        (containerSize.height - PAD * 2) / extent.height,
+        1.6
+      )
+    : 1;
+
+  // Stats for the active room — gives the host a one-glance read on capacity.
+  const stats = useMemo(() => {
+    let arrived = 0, waiting = 0, free = 0;
+    for (const t of roomTables) {
+      const r = reservationByTableId.get(t.id);
+      if (!r) { free++; continue; }
+      if (r.arrival_status === ArrivalStatus.ARRIVED) arrived++;
+      else if (r.reservation_status !== ReservationStatus.NO_SHOW) waiting++;
+    }
+    return { arrived, waiting, free };
+  }, [roomTables, reservationByTableId]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
+      {/* Header — mirrors the TablePicker shell so the two views feel paired. */}
+      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
+        <div className="min-w-0 flex items-baseline gap-3 flex-wrap">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
+            Stato sala
+          </div>
+          <div className="text-xl font-bold text-[var(--color-fg)] truncate">
+            {activeRoom?.name || 'Sala'}
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Chiudi"
+          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] inline-flex items-center justify-center"
+        >
+          <XIcon className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Room tabs + stats on a single header row */}
+      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 flex-wrap">
+        {visibleRooms.length > 1 ? (
+          <div className="flex gap-1.5 overflow-x-auto">
+            {visibleRooms.map(room => (
+              <button
+                key={room.id}
+                onClick={() => setActiveRoomId(room.id)}
+                className={`px-4 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
+                  room.id === activeRoom?.id
+                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-transparent'
+                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                {room.name}
+              </button>
+            ))}
+          </div>
+        ) : <div />}
+        <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+          <LegendDot tone="emerald" label={`${stats.arrived} arrivati`} />
+          <LegendDot tone="indigo" label={`${stats.waiting} in attesa`} />
+          <LegendDot tone="slate" label={`${stats.free} liberi`} />
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 overflow-hidden flex items-center justify-center"
+        style={{
+          backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
+          backgroundSize: '18px 18px',
+        }}
+      >
+        {activeRoom && (
+          <div
+            className="relative"
+            style={{
+              width: extent.width * scale,
+              height: extent.height * scale,
+            }}
+          >
+            {roomTables.map(t => {
+              const res = reservationByTableId.get(t.id);
+              const dim = getGlyphDimensions(t.shape, t.seats);
+              const glyphW = dim.width * scale;
+              const glyphH = dim.height * scale;
+              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
+
+              // Pick the glyph status from the actual reservation state so
+              // the room reads the same as the floor plan view.
+              let status: 'libera' | 'attesa' | 'arrivato' | 'noshow' = 'libera';
+              let haloClass = '';
+              let caption: string | null = null;
+
+              if (res) {
+                if (res.arrival_status === ArrivalStatus.ARRIVED) {
+                  status = 'arrivato';
+                  haloClass = 'ring-2 ring-emerald-400/70';
+                  caption = `${res.customer_name?.split(' ')[0] || 'Ospite'} · ${res.guests}p`;
+                } else if (res.reservation_status === ReservationStatus.NO_SHOW) {
+                  status = 'noshow';
+                  haloClass = 'ring-2 ring-rose-400/70';
+                  caption = 'No-show';
+                } else {
+                  status = 'attesa';
+                  haloClass = 'ring-2 ring-indigo-400/70';
+                  caption = `${formatHHMM(res.reservation_time)} · ${res.customer_name?.split(' ')[0] || 'Ospite'}`;
+                }
+              }
+
+              const disabled = !res;
+
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => res && onPickReservation(res.id)}
+                  disabled={disabled}
+                  className={`absolute transition-all duration-150 ${
+                    disabled ? 'cursor-default' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
+                  }`}
+                  style={{
+                    left: t.x * scale,
+                    top: t.y * scale,
+                    width: glyphW,
+                    height: glyphH,
+                  }}
+                  title={res ? `${t.name} · ${res.customer_name}` : `${t.name} · libero`}
+                >
+                  <div
+                    className={`relative ${haloClass}`}
+                    style={{ width: glyphW, height: glyphH, borderRadius: haloRadius }}
+                  >
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <TableGlyph
+                        name={t.name}
+                        seats={t.seats}
+                        shape={t.shape}
+                        status={status}
+                        party={res ? res.guests : undefined}
+                        fit
+                      />
+                    </div>
+                  </div>
+                  {caption && (
+                    <span className="absolute left-1/2 -translate-x-1/2 -bottom-3 px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap shadow-sm border bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] tabular-nums">
+                      {caption}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
