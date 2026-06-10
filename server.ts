@@ -5895,6 +5895,260 @@ app.delete('/haccp/production/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
+// VOICE CALLS (ElevenLabs conversations)
+// ============================================
+// Browse the voice_calls table populated by the post-call webhook, plus a
+// manual sync that pulls recent conversations from the ElevenLabs API for
+// rows the webhook missed (timeouts, redeploys). Audio is streamed through
+// the server so the ElevenLabs API key never reaches the browser.
+
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+const ELEVENLABS_AGENT_ID = process.env.ELEVENLABS_AGENT_ID || '';
+const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io/v1';
+
+const VOICE_CALLS_ROLES: UserRole[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER];
+
+const voiceCallsAuthorize = authorize(...VOICE_CALLS_ROLES);
+
+// List with optional filters. Default newest-first, capped to 200 rows.
+app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const { from, to, q, linked } = req.query as Record<string, string | undefined>;
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
+        const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+
+        const where: string[] = [];
+        const params: any[] = [];
+
+        if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+            params.push(from);
+            where.push(`vc.created_at >= $${params.length}::date`);
+        }
+        if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+            params.push(to);
+            where.push(`vc.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+        }
+        if (q && q.trim()) {
+            params.push(`%${q.trim()}%`);
+            const idx = params.length;
+            where.push(`(vc.phone ILIKE $${idx} OR vc.summary ILIKE $${idx} OR vc.transcript ILIKE $${idx})`);
+        }
+        if (linked === 'true') where.push('vc.reservation_id IS NOT NULL');
+        else if (linked === 'false') where.push('vc.reservation_id IS NULL');
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+        params.push(limit);
+        params.push(offset);
+        const result = await queryWithRetry(
+            `SELECT vc.id,
+                    vc.conversation_id,
+                    vc.phone,
+                    vc.duration_seconds,
+                    vc.summary,
+                    vc.reservation_id,
+                    vc.created_at,
+                    r.customer_name AS reservation_customer_name,
+                    r.reservation_time AS reservation_time,
+                    r.guests AS reservation_guests,
+                    r.reservation_status AS reservation_status
+             FROM voice_calls vc
+             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             ${whereSql}
+             ORDER BY vc.created_at DESC
+             LIMIT $${params.length - 1} OFFSET $${params.length}`,
+            params
+        );
+
+        const countResult = await queryWithRetry(
+            `SELECT COUNT(*)::int AS total FROM voice_calls vc ${whereSql}`,
+            params.slice(0, params.length - 2)
+        );
+
+        res.json({
+            items: result.rows,
+            total: countResult.rows[0]?.total ?? 0,
+            limit,
+            offset,
+        });
+    } catch (err) {
+        console.error('GET /voice-calls error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Detail with full transcript.
+app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const result = await queryWithRetry(
+            `SELECT vc.id,
+                    vc.conversation_id,
+                    vc.phone,
+                    vc.duration_seconds,
+                    vc.transcript,
+                    vc.summary,
+                    vc.reservation_id,
+                    vc.created_at,
+                    r.customer_name AS reservation_customer_name,
+                    r.reservation_time AS reservation_time,
+                    r.guests AS reservation_guests,
+                    r.reservation_status AS reservation_status
+             FROM voice_calls vc
+             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             WHERE vc.id = $1`,
+            [id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('GET /voice-calls/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Stream the call recording from ElevenLabs. The browser hits this endpoint
+// so the API key stays on the server. Audio is gated by the same RBAC as the
+// transcript so a leaked URL can't be hot-linked from outside the app.
+app.get('/voice-calls/:id/audio', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        if (!ELEVENLABS_API_KEY) {
+            return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
+        }
+
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const row = await queryWithRetry(
+            'SELECT conversation_id FROM voice_calls WHERE id = $1',
+            [id]
+        );
+        if (row.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        const conversationId = row.rows[0].conversation_id;
+
+        const upstream = await fetch(
+            `${ELEVENLABS_API_BASE}/convai/conversations/${encodeURIComponent(conversationId)}/audio`,
+            { headers: { 'xi-api-key': ELEVENLABS_API_KEY } }
+        );
+
+        if (!upstream.ok || !upstream.body) {
+            const text = await upstream.text().catch(() => '');
+            console.warn('[ElevenLabs] audio fetch failed', upstream.status, text.slice(0, 200));
+            return res.status(upstream.status === 404 ? 404 : 502).json({
+                error: upstream.status === 404 ? 'Audio not available' : 'Upstream audio fetch failed',
+            });
+        }
+
+        const contentType = upstream.headers.get('content-type') || 'audio/mpeg';
+        res.setHeader('Content-Type', contentType);
+        const contentLength = upstream.headers.get('content-length');
+        if (contentLength) res.setHeader('Content-Length', contentLength);
+        res.setHeader('Cache-Control', 'private, max-age=300');
+
+        const { Readable } = await import('stream');
+        Readable.fromWeb(upstream.body as any).pipe(res);
+    } catch (err) {
+        console.error('GET /voice-calls/:id/audio error:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Manual sync: pulls the agent's recent conversations from ElevenLabs and
+// upserts any conversation_id we're missing (post-call webhook timeouts /
+// redeploys lose calls otherwise). For each new conversation we fetch the
+// detail to get transcript + summary + phone + duration; existing rows are
+// left untouched so manual edits aren't clobbered.
+app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, res) => {
+    try {
+        if (!ELEVENLABS_API_KEY) return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
+        if (!ELEVENLABS_AGENT_ID) return res.status(503).json({ error: 'ELEVENLABS_AGENT_ID not configured' });
+
+        const listUrl = `${ELEVENLABS_API_BASE}/convai/conversations?agent_id=${encodeURIComponent(ELEVENLABS_AGENT_ID)}&page_size=30`;
+        const listRes = await fetch(listUrl, { headers: { 'xi-api-key': ELEVENLABS_API_KEY } });
+        if (!listRes.ok) {
+            const text = await listRes.text().catch(() => '');
+            console.warn('[ElevenLabs] sync list failed', listRes.status, text.slice(0, 200));
+            return res.status(502).json({ error: 'Upstream list failed' });
+        }
+        const listJson = await listRes.json() as any;
+        const conversations: any[] = Array.isArray(listJson?.conversations) ? listJson.conversations : [];
+
+        const existing = await queryWithRetry(
+            `SELECT conversation_id FROM voice_calls WHERE conversation_id = ANY($1::text[])`,
+            [conversations.map(c => c.conversation_id).filter(Boolean)]
+        );
+        const existingSet = new Set<string>(existing.rows.map(r => r.conversation_id));
+
+        let imported = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        for (const conv of conversations) {
+            const conversationId: string | undefined = conv.conversation_id;
+            if (!conversationId) { failed++; continue; }
+            if (existingSet.has(conversationId)) { skipped++; continue; }
+
+            try {
+                const detailRes = await fetch(
+                    `${ELEVENLABS_API_BASE}/convai/conversations/${encodeURIComponent(conversationId)}`,
+                    { headers: { 'xi-api-key': ELEVENLABS_API_KEY } }
+                );
+                if (!detailRes.ok) { failed++; continue; }
+                const detail = await detailRes.json() as any;
+
+                const rawTranscript = detail?.transcript;
+                let transcript: string | undefined;
+                if (Array.isArray(rawTranscript)) {
+                    transcript = rawTranscript
+                        .map((t: any) => {
+                            const who = t.role || t.speaker || 'unknown';
+                            const text = t.message ?? t.text ?? t.content ?? '';
+                            return `${who}: ${text}`;
+                        })
+                        .join('\n');
+                } else if (typeof rawTranscript === 'string') {
+                    transcript = rawTranscript;
+                }
+
+                const summary: string | undefined =
+                    (typeof detail?.analysis?.transcript_summary === 'string' ? detail.analysis.transcript_summary : undefined) ??
+                    (typeof detail?.summary === 'string' ? detail.summary : undefined);
+
+                const duration = Number(
+                    detail?.metadata?.call_duration_secs ??
+                    detail?.metadata?.call_duration_seconds ??
+                    detail?.call_duration_secs
+                );
+
+                const phoneRaw: string | undefined =
+                    detail?.metadata?.phone_call?.external_number ||
+                    detail?.metadata?.phone_number ||
+                    detail?.metadata?.phone;
+
+                await recordVoiceCall({
+                    conversation_id: conversationId,
+                    phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
+                    duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
+                    transcript,
+                    summary,
+                });
+                imported++;
+            } catch (err) {
+                console.warn('[ElevenLabs] sync detail failed for', conversationId, err);
+                failed++;
+            }
+        }
+
+        res.json({ imported, skipped, failed, total_fetched: conversations.length });
+    } catch (err) {
+        console.error('POST /voice-calls/sync error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // FEATURE FLAGS (app_settings)
 // ============================================
 // Boolean toggles managed from the Settings page. Used to pause the public

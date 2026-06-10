@@ -26,7 +26,8 @@ export type Permission =
   | 'customers:view'
   | 'customers:full'
   | 'inventory:view'
-  | 'inventory:full';
+  | 'inventory:full'
+  | 'voice_calls:view';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -55,7 +56,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:view',
     'customers:full',
     'inventory:view',
-    'inventory:full'
+    'inventory:full',
+    'voice_calls:view'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -77,7 +79,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:view',
     'customers:full',
     'inventory:view',
-    'inventory:full'
+    'inventory:full',
+    'voice_calls:view'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -96,7 +99,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:view',
     'customers:full',
     'inventory:view',
-    'inventory:full'
+    'inventory:full',
+    'voice_calls:view'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -124,6 +128,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.ATTIVITA]: ['dashboard:view'],
   [ViewState.LISTA_DELLA_SPESA]: ['dashboard:view'],
   [ViewState.HACCP]: ['dashboard:view'],
+  [ViewState.CONVERSAZIONI]: ['voice_calls:view'],
   [ViewState.STAFF]: ['staff:view'],
   [ViewState.CLIENTI]: ['customers:view'],
   [ViewState.INVENTARIO]: ['inventory:view'],

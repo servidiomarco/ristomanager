@@ -1102,6 +1102,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
+        // Voice calls (ElevenLabs conversations) — read access for management roles.
+        const voiceCallsPermissions = [
+            ['OWNER', 'voice_calls:view'],
+            ['GENERAL_MANAGER', 'voice_calls:view'],
+            ['MANAGER', 'voice_calls:view'],
+        ];
+        for (const [role, permission] of voiceCallsPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
         // ============================================
         // PUSH SUBSCRIPTIONS TABLE (Web Push)
         // ============================================
