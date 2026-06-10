@@ -25,6 +25,8 @@ import {
   AlertTriangle,
   Star,
   Zap,
+  Sun,
+  Moon,
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
@@ -85,6 +87,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showWalkIn, setShowWalkIn] = useState(false);
+  const [shiftFilter, setShiftFilter] = useState<Shift>(
+    new Date().getHours() < 16 ? Shift.LUNCH : Shift.DINNER
+  );
   const [, setTick] = useState(0);
 
   // Re-render every 60s so the time-band grouping (Adesso / Prossima ora / …) stays accurate.
@@ -113,14 +118,17 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Today's bookings (excluding cancelled), sorted by time
+  // Today's bookings for the active shift (excluding cancelled), sorted by time.
+  // The shift toggle drives this so lunch and dinner stay visually separated —
+  // showing both at once was the host's #1 complaint.
   const todayReservations = useMemo(() => {
     const today = todayStr();
     return reservations
       .filter(r => r.reservation_time?.startsWith(today))
       .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
+      .filter(r => r.shift === shiftFilter)
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-  }, [reservations]);
+  }, [reservations, shiftFilter]);
 
   // Apply text search + status filter
   const filtered = useMemo(() => {
@@ -190,12 +198,18 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     return set;
   }, [todayReservations, selectedReservationId]);
 
-  // Update a reservation, then patch local state in place (avoid full refetch flicker)
+  // The PUT /reservations/:id endpoint is a *full* replace — it destructures
+  // the body into fixed columns, so a partial body would null out NOT NULL
+  // columns (customer_name) and trip a 500. We always merge the patch onto
+  // the current row before sending.
   const patchReservation = async (id: number, patch: Partial<Reservation>) => {
     setBusy(true);
     setError(null);
     try {
-      const updated = await updateReservation(id, patch);
+      const current = reservations.find(r => r.id === id);
+      if (!current) throw new Error('Prenotazione non trovata');
+      const body = { ...current, ...patch };
+      const updated = await updateReservation(id, body);
       setReservations(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
     } catch (err) {
       setError((err as Error)?.message || 'Errore aggiornamento');
@@ -402,11 +416,30 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
         </div>
       )}
 
-      {/* Split 25/75 */}
+      {/* Split 40/60 */}
       <div className="flex-1 flex min-h-0">
-        {/* LEFT 25% — search + list */}
+        {/* LEFT 40% — search + list */}
         <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-1)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)]">
+              {([
+                [Shift.LUNCH, 'Pranzo', <Sun key="s" className="h-4 w-4" />],
+                [Shift.DINNER, 'Cena', <Moon key="m" className="h-4 w-4" />]
+              ] as const).map(([key, label, icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setShiftFilter(key)}
+                  className={`inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                    shiftFilter === key
+                      ? 'bg-[var(--color-surface-1)] text-[var(--color-fg)] shadow-sm'
+                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                  }`}
+                >
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-muted)]" />
               <input
