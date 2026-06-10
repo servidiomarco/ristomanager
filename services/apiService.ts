@@ -113,6 +113,20 @@ export const deleteReservation = async (id: number): Promise<void> => {
   }, false);
 };
 
+export const swapReservationTables = async (
+  aId: number,
+  bId: number,
+): Promise<{ a: Reservation; b: Reservation }> => {
+  return apiRequest<{ a: Reservation; b: Reservation }>(
+    `${API_URL}/reservations/${aId}/swap-table`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ other_id: bId }),
+    },
+  );
+};
+
 export const getTables = async (): Promise<Table[]> => {
   return apiRequest<Table[]>(`${API_URL}/tables`, {
     headers: getHeaders(false)

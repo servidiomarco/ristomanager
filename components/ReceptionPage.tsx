@@ -30,7 +30,7 @@ import {
   LayoutGrid,
   X as XIcon
 } from 'lucide-react';
-import { getReservations, getTables, getRooms, updateReservation, createReservation } from '../services/apiService';
+import { getReservations, getTables, getRooms, updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { TableGlyph, getGlyphDimensions } from './TableGlyph';
 
 // Local-date helper (avoid UTC drift)
@@ -232,6 +232,27 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     if (!selectedReservation) return;
     await patchReservation(selectedReservation.id, { table_id: tableId });
     setShowTablePicker(false);
+  };
+
+  // Swap the selected reservation's table with another reservation's. One
+  // round-trip, server-side TX — see POST /reservations/:id/swap-table.
+  const handleSwapTable = async (otherReservationId: number) => {
+    if (!selectedReservation) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { a, b } = await swapReservationTables(selectedReservation.id, otherReservationId);
+      setReservations(prev => prev.map(r => {
+        if (r.id === a.id) return { ...r, ...a };
+        if (r.id === b.id) return { ...r, ...b };
+        return r;
+      }));
+      setShowTablePicker(false);
+    } catch (err) {
+      setError((err as Error)?.message || 'Errore scambio tavoli');
+    } finally {
+      setBusy(false);
+    }
   };
 
   // Walk-in: create a brand-new reservation for "right now", already marked
@@ -538,8 +559,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           activeRoomId={activeRoomId}
           setActiveRoomId={setActiveRoomId}
           occupiedTableIds={occupiedTableIds}
+          reservationByTableId={reservationByTableId}
           onCancel={() => setShowTablePicker(false)}
           onSelect={handleAssignTable}
+          onSwap={handleSwapTable}
           busy={busy}
         />
       )}
@@ -926,8 +949,10 @@ interface TablePickerProps {
   activeRoomId: number | null;
   setActiveRoomId: (id: number) => void;
   occupiedTableIds: Set<number>;
+  reservationByTableId: Map<number, Reservation>;
   onCancel: () => void;
   onSelect: (tableId: number) => void;
+  onSwap: (otherReservationId: number) => void;
   busy: boolean;
 }
 
@@ -938,10 +963,15 @@ const TablePicker: React.FC<TablePickerProps> = ({
   activeRoomId,
   setActiveRoomId,
   occupiedTableIds,
+  reservationByTableId,
   onCancel,
   onSelect,
+  onSwap,
   busy
 }) => {
+  // Tapping an occupied tile arms a swap confirmation — the host pairs the
+  // current reservation with the booking sitting at that tile.
+  const [swapCandidate, setSwapCandidate] = useState<Reservation | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
@@ -1058,6 +1088,9 @@ const TablePicker: React.FC<TablePickerProps> = ({
           <LegendDot tone="emerald" label={`${counts.ideal} adatti`} />
           <LegendDot tone="slate" label={`${counts.big} grandi`} />
           <LegendDot tone="rose" label={`${counts.occupied} occupati`} />
+          {reservation.table_id && (
+            <LegendDot tone="amber" label="tocca occupato → scambia" />
+          )}
         </div>
       </div>
 
@@ -1080,7 +1113,12 @@ const TablePicker: React.FC<TablePickerProps> = ({
           >
             {roomTables.map(t => {
               const state = bucketize(t);
-              const disabled = state === 'occupied' || state === 'tooSmall';
+              // Swap is offered only when *we* already have a table to give away.
+              // Without it the swap would be a one-way reassignment, which the
+              // server (correctly) refuses.
+              const occupantRes = state === 'occupied' ? reservationByTableId.get(t.id) : null;
+              const swappable = state === 'occupied' && !!reservation.table_id && !!occupantRes;
+              const disabled = state === 'tooSmall' || (state === 'occupied' && !swappable);
               const dim = getGlyphDimensions(t.shape, t.seats);
               const glyphW = dim.width * scale;
               const glyphH = dim.height * scale;
@@ -1095,15 +1133,21 @@ const TablePicker: React.FC<TablePickerProps> = ({
               let haloClass = '';
               let glyphOpacity = 'opacity-100';
               let grayscale = '';
-              let badge: { text: string; tone: 'emerald' | 'slate' | 'rose' | 'indigo' } | null = null;
+              let badge: { text: string; tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber' } | null = null;
 
               if (state === 'current') {
                 haloClass = 'ring-2 ring-indigo-500 shadow-[0_0_0_4px_rgba(99,102,241,0.18)]';
                 badge = { text: 'Attuale', tone: 'indigo' };
               } else if (state === 'occupied') {
-                haloClass = 'ring-1 ring-rose-300';
-                glyphOpacity = 'opacity-50';
-                badge = { text: 'Occupato', tone: 'rose' };
+                if (swappable) {
+                  haloClass = 'ring-2 ring-amber-400/70 hover:ring-amber-500 hover:shadow-[0_8px_24px_-8px_rgba(245,158,11,0.45)]';
+                  glyphOpacity = 'opacity-80';
+                  badge = { text: 'Scambia', tone: 'amber' };
+                } else {
+                  haloClass = 'ring-1 ring-rose-300';
+                  glyphOpacity = 'opacity-50';
+                  badge = { text: 'Occupato', tone: 'rose' };
+                }
               } else if (state === 'tooSmall') {
                 haloClass = '';
                 glyphOpacity = 'opacity-40';
@@ -1115,10 +1159,19 @@ const TablePicker: React.FC<TablePickerProps> = ({
                 haloClass = 'ring-1 ring-slate-300 hover:ring-slate-400';
               }
 
+              const handleClick = () => {
+                if (disabled) return;
+                if (swappable && occupantRes) {
+                  setSwapCandidate(occupantRes);
+                } else {
+                  onSelect(t.id);
+                }
+              };
+
               return (
                 <button
                   key={t.id}
-                  onClick={() => !disabled && onSelect(t.id)}
+                  onClick={handleClick}
                   disabled={busy || disabled}
                   className={`absolute transition-all duration-150 ${
                     disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
@@ -1151,6 +1204,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
                         badge.tone === 'rose'    ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:border-rose-500/40'
                       : badge.tone === 'slate'   ? 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30'
                       : badge.tone === 'indigo'  ? 'bg-indigo-600 text-white border-indigo-600'
+                      : badge.tone === 'amber'   ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/40'
                                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       }`}
                     >
@@ -1163,15 +1217,105 @@ const TablePicker: React.FC<TablePickerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Swap confirmation — sits over the picker so the host can verify the
+          two parties before committing the atomic exchange. */}
+      {swapCandidate && (
+        <SwapConfirmDialog
+          source={reservation}
+          target={swapCandidate}
+          tables={tables}
+          busy={busy}
+          onCancel={() => setSwapCandidate(null)}
+          onConfirm={() => {
+            const otherId = swapCandidate.id;
+            setSwapCandidate(null);
+            onSwap(otherId);
+          }}
+        />
+      )}
     </div>
   );
 };
 
-const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo'; label: string }> = ({ tone, label }) => {
+interface SwapConfirmDialogProps {
+  source: Reservation;
+  target: Reservation;
+  tables: Table[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
+  source, target, tables, busy, onCancel, onConfirm,
+}) => {
+  const tableName = (id?: number | null) =>
+    tables.find(t => t.id === id)?.name ?? '—';
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-[var(--color-line)]">
+        <div className="p-5 border-b border-[var(--color-line)]">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold mb-1">
+            Conferma scambio tavoli
+          </div>
+          <div className="text-lg font-bold text-[var(--color-fg)]">
+            Inverti i due tavoli?
+          </div>
+        </div>
+        <div className="p-5 space-y-3">
+          <SwapRow
+            name={source.customer_name || 'Senza nome'}
+            from={tableName(source.table_id)}
+            to={tableName(target.table_id)}
+          />
+          <SwapRow
+            name={target.customer_name || 'Senza nome'}
+            from={tableName(target.table_id)}
+            to={tableName(source.table_id)}
+          />
+        </div>
+        <div className="p-4 bg-[var(--color-surface-2)] flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-4 h-10 rounded-xl border border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] font-medium disabled:opacity-50"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-4 h-10 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Inverti tavoli
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SwapRow: React.FC<{ name: string; from: string; to: string }> = ({ name, from, to }) => (
+  <div className="flex items-center gap-2 text-sm">
+    <div className="flex-1 min-w-0 truncate font-medium text-[var(--color-fg)]">{name}</div>
+    <span className="px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-xs font-semibold tabular-nums">
+      {from}
+    </span>
+    <span className="text-[var(--color-fg-muted)]">→</span>
+    <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold tabular-nums dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/40">
+      {to}
+    </span>
+  </div>
+);
+
+const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber'; label: string }> = ({ tone, label }) => {
   const dot =
     tone === 'emerald' ? 'bg-emerald-500'
     : tone === 'rose'  ? 'bg-rose-400'
     : tone === 'indigo' ? 'bg-indigo-500'
+    : tone === 'amber' ? 'bg-amber-400'
                        : 'bg-slate-300';
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
