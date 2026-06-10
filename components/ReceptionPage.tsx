@@ -508,21 +508,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
         </div>
 
-        {/* RIGHT 60% — detail in Lista mode, room map in Mappa mode */}
+        {/* RIGHT 60% — detail */}
         <div className="flex-1 flex flex-col bg-[var(--color-surface)] min-w-0">
-          {viewMode === 'map' ? (
-            <RoomMap
-              tables={tables}
-              rooms={rooms}
-              reservationByTableId={reservationByTableId}
-              activeRoomId={activeRoomId}
-              setActiveRoomId={setActiveRoomId}
-              onPickReservation={(id) => {
-                setSelectedReservationId(id);
-                setViewMode('list');
-              }}
-            />
-          ) : !selectedReservation ? (
+          {!selectedReservation ? (
             <EmptyState count={filtered.length} />
           ) : (
             <DetailPanel
@@ -553,6 +541,23 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           onCancel={() => setShowTablePicker(false)}
           onSelect={handleAssignTable}
           busy={busy}
+        />
+      )}
+
+      {/* Mappa mode opens the same full-viewport canvas as the assign-table
+          picker, but coloured by today's reservation state instead of fit. */}
+      {viewMode === 'map' && (
+        <RoomMap
+          tables={tables}
+          rooms={rooms}
+          reservationByTableId={reservationByTableId}
+          activeRoomId={activeRoomId}
+          setActiveRoomId={setActiveRoomId}
+          onClose={() => setViewMode('list')}
+          onPickReservation={(id) => {
+            setSelectedReservationId(id);
+            setViewMode('list');
+          }}
         />
       )}
 
@@ -1182,19 +1187,21 @@ interface RoomMapProps {
   reservationByTableId: Map<number, Reservation>;
   activeRoomId: number | null;
   setActiveRoomId: (id: number) => void;
+  onClose: () => void;
   onPickReservation: (id: number) => void;
 }
 
-// Live room map for the right pane in 'map' mode. Same spatial layout the
-// host uses in the assign-table picker, but each table is colour-coded by its
-// current reservation status today. Tapping a booked table jumps to the list
-// detail; tapping a free table is a no-op (nothing to act on).
+// Full-viewport live room map — shares the visual shell with the assign-table
+// picker, but each table is colour-coded by today's reservation state instead
+// of fit. Tapping a booked table jumps to that reservation in the list and
+// closes the map; tapping a free table is a no-op.
 const RoomMap: React.FC<RoomMapProps> = ({
   tables,
   rooms,
   reservationByTableId,
   activeRoomId,
   setActiveRoomId,
+  onClose,
   onPickReservation,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1248,16 +1255,35 @@ const RoomMap: React.FC<RoomMapProps> = ({
   }, [roomTables, reservationByTableId]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
+      {/* Header — mirrors the TablePicker shell so the two views feel paired. */}
+      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
+        <div className="min-w-0 flex items-baseline gap-3 flex-wrap">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
+            Stato sala
+          </div>
+          <div className="text-xl font-bold text-[var(--color-fg)] truncate">
+            {activeRoom?.name || 'Sala'}
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Chiudi"
+          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] inline-flex items-center justify-center"
+        >
+          <XIcon className="h-5 w-5" />
+        </button>
+      </div>
+
       {/* Room tabs + stats on a single header row */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 flex-wrap">
         {visibleRooms.length > 1 ? (
           <div className="flex gap-1.5 overflow-x-auto">
             {visibleRooms.map(room => (
               <button
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
-                className={`px-3 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
+                className={`px-4 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
                   room.id === activeRoom?.id
                     ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-transparent'
                     : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
