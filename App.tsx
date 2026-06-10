@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -15,6 +15,7 @@ import { Inventory } from './components/Inventory';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
+import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
@@ -887,6 +888,15 @@ const App: React.FC = () => {
               collapsed={sidebarCollapsed}
             />
           )}
+          {canAccessView(ViewState.RECEPTION) && (
+            <SidebarItem
+              icon={<ConciergeBell size={20} />}
+              label="Reception"
+              active={view === ViewState.RECEPTION}
+              onClick={() => { setSidebarCollapsed(true); setView(ViewState.RECEPTION); }}
+              collapsed={sidebarCollapsed}
+            />
+          )}
           {canAccessView(ViewState.FLOOR_PLAN) && (
             <SidebarItem
               icon={<Grid size={20} />}
@@ -1440,6 +1450,10 @@ const App: React.FC = () => {
           <ConversazioniPage />
         )}
 
+        {view === ViewState.RECEPTION && (
+          <ReceptionPage />
+        )}
+
         {view === ViewState.ATTIVITA && (
           <AttivitaPage
             banquetMenus={banquetMenus}
@@ -1480,6 +1494,7 @@ const App: React.FC = () => {
                     const labels: Record<ViewState, string> = {
                       [ViewState.DASHBOARD]: 'Dashboard',
                       [ViewState.RESERVATIONS]: 'Prenotazioni',
+                      [ViewState.RECEPTION]: 'Reception',
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.STAFF]: 'Personale',
@@ -1656,11 +1671,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS) || canAccessView(ViewState.HACCP) || canAccessView(ViewState.CONVERSAZIONI)) && (
+            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS) || canAccessView(ViewState.HACCP) || canAccessView(ViewState.CONVERSAZIONI) || canAccessView(ViewState.RECEPTION)) && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS || view === ViewState.HACCP || view === ViewState.CONVERSAZIONI}
+                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS || view === ViewState.HACCP || view === ViewState.CONVERSAZIONI || view === ViewState.RECEPTION}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1739,6 +1754,16 @@ const App: React.FC = () => {
                   >
                     <Grid className="h-5 w-5 text-[var(--color-fg-muted)]" />
                     <span className="text-sm font-medium text-[var(--color-fg)]">Sala</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                  </button>
+                )}
+                {canAccessView(ViewState.RECEPTION) && (
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setView(ViewState.RECEPTION); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.RECEPTION ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                  >
+                    <ConciergeBell className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">Reception</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
                 )}

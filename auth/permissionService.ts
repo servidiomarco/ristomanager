@@ -10,6 +10,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Sale e Tavoli', permissions: ['floorplan:view', 'floorplan:update_status', 'floorplan:full'] },
   { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full', 'banquet:view_price'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
+  { feature: 'Reception', permissions: ['reception:view'] },
   { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
   { feature: 'Clienti', permissions: ['customers:view', 'customers:full'] },
   { feature: 'Inventario', permissions: ['inventory:view', 'inventory:full'] },
