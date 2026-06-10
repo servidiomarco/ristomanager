@@ -16,6 +16,7 @@ import {
   Clock,
   Phone,
   MapPin,
+  MapPinOff,
   CheckCircle2,
   XCircle,
   Armchair,
@@ -280,6 +281,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
     await patchReservation(selectedReservation.id, { arrival_status: ArrivalStatus.DEPARTED });
   };
 
+  // Detach the table from the reservation without touching arrival status —
+  // the booking stays in the list, just without a seat. The PUT handler
+  // coerces `table_id` to NULL via `(table_id ?? null)`.
+  const handleRemoveTable = async () => {
+    if (!selectedReservation) return;
+    await patchReservation(selectedReservation.id, { table_id: undefined });
+  };
+
   // Render a reservation card in the left list
   const renderCard = (r: Reservation) => {
     const isSelected = r.id === selectedReservationId;
@@ -358,7 +367,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-surface-1)]">
+    <div className="h-full flex flex-col bg-[var(--color-surface)]">
       {/* Top header bar (stays on top, sits above the split) */}
       <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)] px-4 py-3 flex items-center gap-3">
         {onBack && (
@@ -419,7 +428,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
       {/* Split 40/60 */}
       <div className="flex-1 flex min-h-0">
         {/* LEFT 40% — search + list */}
-        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface-1)]">
+        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
             <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)]">
               {([
@@ -431,7 +440,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
                   onClick={() => setShiftFilter(key)}
                   className={`inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
                     shiftFilter === key
-                      ? 'bg-[var(--color-surface-1)] text-[var(--color-fg)] shadow-sm'
+                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
                       : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
                   }`}
                 >
@@ -488,7 +497,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
         </div>
 
         {/* RIGHT 75% — detail + table picker */}
-        <div className="flex-1 flex flex-col bg-[var(--color-surface-1)] min-w-0">
+        <div className="flex-1 flex flex-col bg-[var(--color-surface)] min-w-0">
           {!selectedReservation ? (
             <EmptyState count={filtered.length} />
           ) : showTablePicker ? (
@@ -509,6 +518,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ onBack }) => {
               table={selectedTable}
               busy={busy}
               onAssignTable={() => setShowTablePicker(true)}
+              onRemoveTable={handleRemoveTable}
               onMarkArrived={handleMarkArrived}
               onMarkWaiting={handleMarkWaiting}
               onMarkNoShow={handleMarkNoShow}
@@ -545,7 +555,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-[var(--color-surface-1)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-line)]">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-amber-500" />
@@ -632,7 +642,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
           <button
             onClick={onCancel}
             disabled={busy}
-            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           >
             Annulla
           </button>
@@ -670,6 +680,7 @@ interface DetailPanelProps {
   table: Table | null;
   busy: boolean;
   onAssignTable: () => void;
+  onRemoveTable: () => void;
   onMarkArrived: () => void;
   onMarkWaiting: () => void;
   onMarkNoShow: () => void;
@@ -681,6 +692,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   table,
   busy,
   onAssignTable,
+  onRemoveTable,
   onMarkArrived,
   onMarkWaiting,
   onMarkNoShow,
@@ -774,6 +786,15 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             icon={<MapPin className="h-6 w-6" />}
             label={table ? 'Cambia tavolo' : 'Assegna tavolo'}
           />
+          {table && (
+            <ActionButton
+              disabled={busy}
+              onClick={onRemoveTable}
+              icon={<MapPinOff className="h-6 w-6" />}
+              label="Rimuovi tavolo"
+              variant="neutral"
+            />
+          )}
           {arr === ArrivalStatus.ARRIVED ? (
             <ActionButton
               disabled={busy}
@@ -1014,7 +1035,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
                       />
                     </div>
                     {cornerNote && (
-                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-[var(--color-surface-1)] border border-[var(--color-line)] text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap">
+                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[10px] font-semibold text-[var(--color-fg)] whitespace-nowrap">
                         {cornerNote}
                       </span>
                     )}
