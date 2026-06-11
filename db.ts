@@ -453,7 +453,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -481,7 +481,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id SERIAL PRIMARY KEY,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN')),
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
                 permission VARCHAR(100) NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(role, permission)
@@ -583,11 +583,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
         console.log('Staff permissions migration completed');
 
-        // Add GENERAL_MANAGER role to existing databases (CHECK constraint migration)
+        // Role CHECK constraint migration. Each new role we add (GENERAL_MANAGER,
+        // RECEPTION, …) needs to be in the allow-list on *both* users and
+        // role_permissions, otherwise INSERTs trip the constraint.
         await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
         await client.query(`ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check`);
-        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
 
         // Seed GENERAL_MANAGER default permissions if missing
         const generalManagerPermissions = [
@@ -631,6 +633,30 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
         console.log('banquet:manage_payments migration completed');
+
+        // Seed RECEPTION default permissions. Reception staff handle the door:
+        // they need full reservation control, the floor plan (read-only +
+        // status flip for seating/freeing), the customer rubrica, and voice
+        // call logs. They explicitly do NOT get menu, inventory, staff,
+        // reports or users access.
+        const receptionRoleSeedPermissions = [
+            ['RECEPTION', 'dashboard:view'],
+            ['RECEPTION', 'floorplan:view'],
+            ['RECEPTION', 'floorplan:update_status'],
+            ['RECEPTION', 'reservations:view'],
+            ['RECEPTION', 'reservations:full'],
+            ['RECEPTION', 'customers:view'],
+            ['RECEPTION', 'customers:full'],
+            ['RECEPTION', 'reception:view'],
+            ['RECEPTION', 'voice_calls:view'],
+        ];
+        for (const [role, permission] of receptionRoleSeedPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+        console.log('RECEPTION role permissions migration completed');
 
         // ============================================
         // BANQUET PAYMENTS TABLE

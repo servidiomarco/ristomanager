@@ -801,6 +801,7 @@ const App: React.FC = () => {
       [UserRole.OWNER]: 'Proprietario',
       [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
+      [UserRole.RECEPTION]: 'Reception',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'
     };

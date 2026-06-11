@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, AlertTriangle } from 'lucide-react';
+import { X, Plus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, AlertTriangle, Headset } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -152,6 +152,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
         return <Shield className="h-4 w-4" />;
       case UserRole.MANAGER:
         return <UserIcon className="h-4 w-4" />;
+      case UserRole.RECEPTION:
+        return <Headset className="h-4 w-4" />;
       case UserRole.WAITER:
         return <Utensils className="h-4 w-4" />;
       case UserRole.KITCHEN:
@@ -164,6 +166,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       [UserRole.OWNER]: 'Proprietario',
       [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
+      [UserRole.RECEPTION]: 'Reception',
       [UserRole.WAITER]: 'Cameriere',
       [UserRole.KITCHEN]: 'Cucina'
     };
@@ -178,6 +181,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
         return 'bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-[#4f46e5]/15 dark:text-[#a5b4fc] dark:border-[#4f46e5]/30';
       case UserRole.MANAGER:
         return 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
+      case UserRole.RECEPTION:
+        return 'bg-cyan-50 text-cyan-700 border border-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-300 dark:border-cyan-500/30';
       case UserRole.WAITER:
         return 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
       case UserRole.KITCHEN:
@@ -267,6 +272,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                       <option value={UserRole.OWNER}>Proprietario</option>
                       <option value={UserRole.GENERAL_MANAGER}>General Manager</option>
                       <option value={UserRole.MANAGER}>Manager</option>
+                      <option value={UserRole.RECEPTION}>Reception</option>
                       <option value={UserRole.WAITER}>Cameriere</option>
                       <option value={UserRole.KITCHEN}>Cucina</option>
                     </select>

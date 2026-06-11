@@ -106,6 +106,17 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'voice_calls:view',
     'reception:view'
   ],
+  [UserRole.RECEPTION]: [
+    'dashboard:view',
+    'floorplan:view',
+    'floorplan:update_status',
+    'reservations:view',
+    'reservations:full',
+    'customers:view',
+    'customers:full',
+    'reception:view',
+    'voice_calls:view'
+  ],
   [UserRole.WAITER]: [
     'dashboard:view',
     'floorplan:view',
@@ -209,6 +220,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   [UserRole.OWNER]: 4,
   [UserRole.GENERAL_MANAGER]: 3,
   [UserRole.MANAGER]: 2,
+  [UserRole.RECEPTION]: 1,
   [UserRole.WAITER]: 1,
   [UserRole.KITCHEN]: 1,
 };

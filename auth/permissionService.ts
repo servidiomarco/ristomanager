@@ -84,6 +84,7 @@ export class RolePermissionService {
       OWNER: [],
       GENERAL_MANAGER: [],
       MANAGER: [],
+      RECEPTION: [],
       WAITER: [],
       KITCHEN: []
     };
