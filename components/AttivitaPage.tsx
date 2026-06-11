@@ -38,6 +38,7 @@ const TEAM_LABELS: Record<UserRole, string> = {
   [UserRole.OWNER]: 'Proprietario',
   [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
+  [UserRole.RECEPTION]: 'Reception',
   [UserRole.WAITER]: 'Camerieri',
   [UserRole.KITCHEN]: 'Cucina',
 };
@@ -47,6 +48,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   [UserRole.OWNER]: 4,
   [UserRole.GENERAL_MANAGER]: 3,
   [UserRole.MANAGER]: 2,
+  [UserRole.RECEPTION]: 1,
   [UserRole.WAITER]: 1,
   [UserRole.KITCHEN]: 1,
 };
