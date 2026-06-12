@@ -64,9 +64,12 @@ interface ReceptionPageProps {
   globalDate: Date;
   globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
   onBack?: () => void;
+  /** When true, open the walk-in modal (e.g. triggered from the global "+" create menu). */
+  autoOpenWalkIn?: boolean;
+  onAutoOpenWalkInHandled?: () => void;
 }
 
-const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, onBack }) => {
+const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, onBack, autoOpenWalkIn, onAutoOpenWalkInHandled }) => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -78,6 +81,13 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showWalkIn, setShowWalkIn] = useState(false);
+  // Open the walk-in modal when triggered from the global "+" create menu, then clear the flag.
+  useEffect(() => {
+    if (autoOpenWalkIn) {
+      setShowWalkIn(true);
+      onAutoOpenWalkInHandled?.();
+    }
+  }, [autoOpenWalkIn]);
   // Right-pane mode toggle. Lista = reservation detail (default).
   // Mappa = live room map, host taps a table to jump to its booking.
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
@@ -610,11 +620,17 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
   const canSubmit = name.trim().length > 0 && guests > 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4"
+      onClick={() => { if (!busy) onCancel(); }}
+    >
+      <div
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-line)]">
           <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-amber-500" />
+            <Zap className="h-5 w-5 text-[var(--color-fg)]" />
             <h3 className="text-lg font-semibold text-[var(--color-fg)]">Walk-in</h3>
           </div>
           <button
@@ -632,7 +648,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
           </p>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+            <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
               Nome cliente <span className="text-rose-500">*</span>
             </label>
             <input
@@ -641,13 +657,13 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Es. Mario Rossi"
-              className="w-full px-3 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              className="w-full px-3 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+              <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
                 Coperti <span className="text-rose-500">*</span>
               </label>
               <div className="flex items-center gap-1.5">
@@ -667,7 +683,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
               </div>
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+              <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
                 Telefono
               </label>
               <input
@@ -675,13 +691,13 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="Opzionale"
-                className="w-full h-11 px-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                className="w-full h-11 px-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">
+            <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
               Note
             </label>
             <textarea
@@ -689,7 +705,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
               onChange={e => setNotes(e.target.value)}
               placeholder="Allergie, preferenze, …"
               rows={2}
-              className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
+              className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 resize-none"
             />
           </div>
         </div>
@@ -698,14 +714,14 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
           <button
             onClick={onCancel}
             disabled={busy}
-            className="px-5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+            className="px-4 py-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
           >
             Annulla
           </button>
           <button
             onClick={() => onSubmit({ name, guests, phone, notes })}
             disabled={busy || !canSubmit}
-            className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Crea e assegna tavolo
           </button>

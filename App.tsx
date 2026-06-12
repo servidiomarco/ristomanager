@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -55,6 +55,61 @@ import {
   deleteTableMerge,
 } from './services/apiService';
 
+// ---------------------------------------------------------------------------
+// Navigation taxonomy — single source of truth for the desktop sidebar AND the
+// mobile "Altro" sheet. Both surfaces map over NAV_ITEMS; only their filters and
+// presentation differ. Item labels, icons and routes must not be edited here
+// without an intentional change — this drives every nav surface.
+// ---------------------------------------------------------------------------
+type NavGroupId = 'servizio' | 'operazioni' | 'gestione' | 'sistema';
+
+// Eyebrow headings, in render order. Proper case by design — never all caps.
+const NAV_GROUPS: { id: NavGroupId; label: string }[] = [
+  { id: 'servizio', label: 'Servizio' },
+  { id: 'operazioni', label: 'Operazioni' },
+  { id: 'gestione', label: 'Gestione' },
+  { id: 'sistema', label: 'Sistema' },
+];
+
+type NavItem = {
+  kind: 'link' | 'theme';
+  label: string;
+  Icon: React.ComponentType<{ size?: number; className?: string }>;
+  group: NavGroupId | null;        // null = ungrouped, pinned to the top (Dashboard)
+  isTab: boolean;                  // true = already in the mobile bottom tab bar → hidden from "Altro"
+  view?: ViewState;                // present for 'link' items
+  requiresUserManagement?: boolean;// gate via canManageUsers() instead of canAccessView()
+  sidebarCollapse?: boolean;       // desktop side effect on select: true→collapse, false→expand, undefined→leave as-is
+  menuInitialTab?: 'DISHES' | 'BANQUETS';
+};
+
+const NAV_ITEMS: NavItem[] = [
+  // Ungrouped (top)
+  { kind: 'link', label: 'Dashboard', Icon: LayoutDashboard, group: null, isTab: true, view: ViewState.DASHBOARD, sidebarCollapse: false },
+
+  // Servizio
+  { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
+  { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
+  { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
+  { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: true, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
+  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+
+  // Operazioni
+  { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
+  { kind: 'link', label: 'Inventario', Icon: Boxes, group: 'operazioni', isTab: false, view: ViewState.INVENTARIO },
+  { kind: 'link', label: 'Lista della Spesa', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
+  { kind: 'link', label: 'HACCP', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
+
+  // Gestione
+  { kind: 'link', label: 'Clienti', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Personale', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
+  { kind: 'link', label: 'Utenti', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
+
+  // Sistema
+  { kind: 'link', label: 'Impostazioni', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
+  { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
+];
+
 const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
@@ -73,7 +128,23 @@ const App: React.FC = () => {
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
   const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
   const [autoOpenNewShoppingItem, setAutoOpenNewShoppingItem] = useState(false);
+  const [autoOpenWalkIn, setAutoOpenWalkIn] = useState(false);
+  const [autoOpenNewAttivita, setAutoOpenNewAttivita] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const createMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close the global create menu on outside click (pointer down outside the +/panel)
+  useEffect(() => {
+    if (!showCreateMenu) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (createMenuRef.current && !createMenuRef.current.contains(e.target as Node)) {
+        setShowCreateMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [showCreateMenu]);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
 
@@ -808,6 +879,51 @@ const App: React.FC = () => {
     return roleNames[role] || role;
   };
 
+  // Capability gate for a nav item — drives which items show across every surface
+  // so all permission tiers stay consistent. The theme toggle is always available.
+  const canSeeNavItem = (item: NavItem): boolean => {
+    if (item.kind === 'theme') return true;
+    if (item.requiresUserManagement) return canManageUsers();
+    return item.view !== undefined && canAccessView(item.view);
+  };
+
+  // Desktop sidebar: select a link, applying its incidental sidebar side effects.
+  const selectNavItem = (item: NavItem) => {
+    if (item.view === undefined) return;
+    if (item.sidebarCollapse === true) setSidebarCollapsed(true);
+    else if (item.sidebarCollapse === false) setSidebarCollapsed(false);
+    if (item.menuInitialTab) setMenuInitialTab(item.menuInitialTab);
+    setView(item.view);
+  };
+
+  // Items surfaced in the mobile "Altro" sheet (every visible non-tab link).
+  // Drives the bottom-tab "Altro" button's visibility and active state.
+  const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
+
+  // Global "+" create menu — identical on every page (not contextual to the view).
+  // Each item reuses an existing create flow; items the user can't create are hidden.
+  // Two clusters (service actions, then records) rendered with an unlabeled divider.
+  // Closing the menu, then running the action, keeps the panel from lingering over the modal.
+  const runCreateAction = (run: () => void) => { setShowCreateMenu(false); run(); };
+  const createMenuClusters: { label: string; Icon: React.ComponentType<{ size?: number; className?: string }>; show: boolean; run: () => void }[][] = [
+    [
+      { label: 'Prenotazione', Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
+      { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
+      { label: 'Banchetto', Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); setAutoOpenNewBanquet(true); } },
+      { label: 'Piatto', Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); setAutoOpenNewDish(true); } },
+      { label: 'Attività', Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
+    ],
+    [
+      { label: 'Cliente', Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
+      { label: 'Dipendente', Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
+      { label: 'Utente', Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
+      { label: 'Prodotto', Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
+    ],
+  ];
+  const visibleCreateClusters = createMenuClusters
+    .map(cluster => cluster.filter(item => item.show))
+    .filter(cluster => cluster.length > 0);
+
   return (
     <div className="flex h-screen bg-[var(--color-surface-2)] font-sans text-[var(--color-fg)]">
       {/* Skip link for keyboard users */}
@@ -866,183 +982,78 @@ const App: React.FC = () => {
         )}
 
         <nav className={`flex-1 py-5 space-y-0.5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
-          {!sidebarCollapsed && (
-            <div className="px-3 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
-              Operatività
-            </div>
-          )}
-          {canAccessView(ViewState.DASHBOARD) && (
+          {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
-              icon={<LayoutDashboard size={20} />}
-              label="Dashboard"
-              active={view === ViewState.DASHBOARD}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.DASHBOARD); }}
+              key={item.label}
+              icon={<item.Icon size={20} />}
+              label={item.label}
+              active={item.view !== undefined && view === item.view}
+              onClick={() => selectNavItem(item)}
               collapsed={sidebarCollapsed}
             />
-          )}
-          {canAccessView(ViewState.RESERVATIONS) && (
-            <SidebarItem
-              icon={<Calendar size={20} />}
-              label="Prenotazioni"
-              active={view === ViewState.RESERVATIONS}
-              onClick={() => { setSidebarCollapsed(true); setView(ViewState.RESERVATIONS); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.RECEPTION) && (
-            <SidebarItem
-              icon={<ConciergeBell size={20} />}
-              label="Reception"
-              active={view === ViewState.RECEPTION}
-              onClick={() => { setSidebarCollapsed(true); setView(ViewState.RECEPTION); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.FLOOR_PLAN) && (
-            <SidebarItem
-              icon={<Grid size={20} />}
-              label="Sale & Tavoli"
-              active={view === ViewState.FLOOR_PLAN}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.FLOOR_PLAN); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.MENU) && (
-            <SidebarItem
-              icon={<UtensilsCrossed size={20} />}
-              label="Menu & Banchetti"
-              active={view === ViewState.MENU}
-              onClick={() => { setSidebarCollapsed(false); setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.ATTIVITA) && (
-            <SidebarItem
-              icon={<ListChecks size={20} />}
-              label="Attività"
-              active={view === ViewState.ATTIVITA}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.ATTIVITA); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.LISTA_DELLA_SPESA) && (
-            <SidebarItem
-              icon={<ShoppingCart size={20} />}
-              label="Lista della Spesa"
-              active={view === ViewState.LISTA_DELLA_SPESA}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.LISTA_DELLA_SPESA); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.HACCP) && (
-            <SidebarItem
-              icon={<ShieldCheck size={20} />}
-              label="HACCP"
-              active={view === ViewState.HACCP}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.HACCP); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.CONVERSAZIONI) && (
-            <SidebarItem
-              icon={<Phone size={20} />}
-              label="Conversazioni"
-              active={view === ViewState.CONVERSAZIONI}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.CONVERSAZIONI); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-
-          {(canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers()) && !sidebarCollapsed && (
-            <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
-              Gestione
-            </div>
-          )}
-          {canAccessView(ViewState.STAFF) && (
-            <SidebarItem
-              icon={<UsersRound size={20} />}
-              label="Personale"
-              active={view === ViewState.STAFF}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.STAFF); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.CLIENTI) && (
-            <SidebarItem
-              icon={<BookUser size={20} />}
-              label="Clienti"
-              active={view === ViewState.CLIENTI}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.CLIENTI); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canAccessView(ViewState.INVENTARIO) && (
-            <SidebarItem
-              icon={<Boxes size={20} />}
-              label="Inventario"
-              active={view === ViewState.INVENTARIO}
-              onClick={() => setView(ViewState.INVENTARIO)}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {canManageUsers() && (
-            <SidebarItem
-              icon={<Users size={20} />}
-              label="Utenti"
-              active={view === ViewState.USERS}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.USERS); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-
-          {canAccessView(ViewState.SETTINGS) && !sidebarCollapsed && (
-            <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
-              Sistema
-            </div>
-          )}
-          {canAccessView(ViewState.SETTINGS) && (
-            <SidebarItem
-              icon={<Settings size={20} />}
-              label="Impostazioni"
-              active={view === ViewState.SETTINGS}
-              onClick={() => { setSidebarCollapsed(false); setView(ViewState.SETTINGS); }}
-              collapsed={sidebarCollapsed}
-            />
-          )}
-          {sidebarCollapsed ? (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
-              aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-              className="group w-full flex items-center justify-center px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors"
-            >
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-              aria-pressed={theme === 'dark'}
-              className="group w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors text-sm"
-            >
-              <span className="flex items-center gap-3">
-                <span className="text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]">
-                  {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-                </span>
-                <span className="font-medium">Modalità scura</span>
-              </span>
-              <span
-                aria-hidden
-                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-sidebar-fg-strong)]' : 'bg-[var(--color-sidebar-line)]'}`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-sidebar-bg)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
-                />
-              </span>
-            </button>
-          )}
+          ))}
+          {NAV_GROUPS.map(group => {
+            const items = NAV_ITEMS.filter(item => item.group === group.id && canSeeNavItem(item));
+            if (items.length === 0) return null;
+            return (
+              <React.Fragment key={group.id}>
+                {!sidebarCollapsed && (
+                  <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+                    {group.label}
+                  </div>
+                )}
+                {items.map(item => (
+                  item.kind === 'theme' ? (
+                    sidebarCollapsed ? (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={toggleTheme}
+                        title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+                        aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
+                        className="group w-full flex items-center justify-center px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors"
+                      >
+                        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                      </button>
+                    ) : (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={toggleTheme}
+                        aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
+                        aria-pressed={theme === 'dark'}
+                        className="group w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors text-sm"
+                      >
+                        <span className="flex items-center gap-3">
+                          <span className="text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]">
+                            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                          </span>
+                          <span className="font-medium">{item.label}</span>
+                        </span>
+                        <span
+                          aria-hidden
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-sidebar-fg-strong)]' : 'bg-[var(--color-sidebar-line)]'}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-sidebar-bg)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
+                          />
+                        </span>
+                      </button>
+                    )
+                  ) : (
+                    <SidebarItem
+                      key={item.label}
+                      icon={<item.Icon size={20} />}
+                      label={item.label}
+                      active={item.view !== undefined && view === item.view}
+                      onClick={() => selectNavItem(item)}
+                      collapsed={sidebarCollapsed}
+                    />
+                  )
+                ))}
+              </React.Fragment>
+            );
+          })}
         </nav>
 
         <div className={`p-3 space-y-1 ${sidebarCollapsed ? 'px-2' : ''}`}>
@@ -1139,78 +1150,47 @@ const App: React.FC = () => {
            </div>
 
            <div className="ml-auto flex items-center gap-2">
-              {/* Nuova prenotazione — primary CTA */}
-              {hasPermission('reservations:full') && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewReservation(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-transparent bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-4 h-9 text-sm font-medium hover:opacity-90 transition-opacity shadow-[var(--shadow-sm)]"
-                >
-                  <Plus className="h-4 w-4" />
-                  Nuova prenotazione
-                </button>
-              )}
+              {/* Global "+" create menu — replaces the old Nuova prenotazione + per-view secondary CTAs.
+                  Identical on every page; desktop/tablet only (mobile uses the bottom "+" sheet). */}
+              {visibleCreateClusters.length > 0 && (
+                <div className="relative hidden md:block" ref={createMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCreateMenu(v => !v); setShowNotifications(false); }}
+                    aria-haspopup="menu"
+                    aria-expanded={showCreateMenu}
+                    aria-label="Crea nuovo"
+                    className="inline-flex items-center justify-center h-11 w-11 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition-all shadow-[var(--shadow-sm)]"
+                  >
+                    <Plus className="h-5 w-5 transition-transform duration-200" style={{ transform: showCreateMenu ? 'rotate(45deg)' : 'none' }} />
+                  </button>
 
-              {/* Secondary CTAs — context-aware per view */}
-              {view === ViewState.MENU && hasPermission('menu:full') && activeMenuTab === 'BANQUETS' && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewBanquet(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Nuovo Banchetto
-                </button>
-              )}
-              {view === ViewState.MENU && hasPermission('menu:full') && activeMenuTab === 'DISHES' && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewDish(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Nuovo Piatto
-                </button>
-              )}
-              {view === ViewState.CLIENTI && hasPermission('customers:full') && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewCustomer(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Nuovo cliente
-                </button>
-              )}
-              {view === ViewState.STAFF && hasPermission('staff:full') && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewStaff(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Aggiungi Dipendente
-                </button>
-              )}
-              {view === ViewState.USERS && canManageUsers() && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewUser(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Aggiungi Utente
-                </button>
-              )}
-              {view === ViewState.INVENTARIO && hasPermission('inventory:full') && (
-                <button
-                  type="button"
-                  onClick={() => setAutoOpenNewProduct(true)}
-                  className="hidden md:inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] px-4 h-9 text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Aggiungi Prodotto
-                </button>
+                  {showCreateMenu && (
+                    <div
+                      role="menu"
+                      aria-label="Crea nuovo"
+                      className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--color-line)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] z-30 animate-in fade-in slide-in-from-top-2"
+                    >
+                      {visibleCreateClusters.map((cluster, ci) => (
+                        <React.Fragment key={ci}>
+                          {ci > 0 && <div className="my-1.5 border-t border-[var(--color-line)]" />}
+                          {cluster.map(item => (
+                            <button
+                              key={item.label}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => runCreateAction(item.run)}
+                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors text-left"
+                            >
+                              <item.Icon className="h-[18px] w-[18px] text-[var(--color-fg-muted)]" />
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Connection state — full pill on md+, status dot only on mobile */}
@@ -1455,6 +1435,8 @@ const App: React.FC = () => {
           <ReceptionPage
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
+            autoOpenWalkIn={autoOpenWalkIn}
+            onAutoOpenWalkInHandled={() => setAutoOpenWalkIn(false)}
           />
         )}
 
@@ -1462,6 +1444,8 @@ const App: React.FC = () => {
           <AttivitaPage
             banquetMenus={banquetMenus}
             dishes={dishes}
+            autoOpenNew={autoOpenNewAttivita}
+            onAutoOpenNewHandled={() => setAutoOpenNewAttivita(false)}
           />
         )}
 
@@ -1675,11 +1659,11 @@ const App: React.FC = () => {
                 onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
               />
             )}
-            {(canAccessView(ViewState.FLOOR_PLAN) || canAccessView(ViewState.STAFF) || canAccessView(ViewState.CLIENTI) || canAccessView(ViewState.INVENTARIO) || canManageUsers() || canAccessView(ViewState.SETTINGS) || canAccessView(ViewState.HACCP) || canAccessView(ViewState.CONVERSAZIONI) || canAccessView(ViewState.RECEPTION)) && (
+            {altroNavItems.length > 0 && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
                 label="Altro"
-                active={showMoreMenu || view === ViewState.FLOOR_PLAN || view === ViewState.STAFF || view === ViewState.CLIENTI || view === ViewState.INVENTARIO || view === ViewState.USERS || view === ViewState.SETTINGS || view === ViewState.HACCP || view === ViewState.CONVERSAZIONI || view === ViewState.RECEPTION}
+                active={showMoreMenu || altroNavItems.some(item => view === item.view)}
                 onClick={() => setShowMoreMenu(true)}
               />
             )}
@@ -1751,116 +1735,41 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="px-2 pb-2">
-                {canAccessView(ViewState.FLOOR_PLAN) && (
+                {NAV_GROUPS.filter(group => group.id !== 'sistema').map(group => {
+                  const items = NAV_ITEMS.filter(item => item.group === group.id && !item.isTab && item.kind === 'link' && canSeeNavItem(item));
+                  if (items.length === 0) return null;
+                  return (
+                    <React.Fragment key={group.id}>
+                      <div className="px-3 pt-3 pb-1 text-[11px] tracking-[0.04em] font-semibold text-[var(--color-fg-subtle)]">
+                        {group.label}
+                      </div>
+                      {items.map(item => (
+                        <button
+                          key={item.label}
+                          onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
+                          className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                        >
+                          <item.Icon className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                          <span className="text-sm font-medium text-[var(--color-fg)]">{item.label}</span>
+                          <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                        </button>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+              <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
+                {NAV_ITEMS.filter(item => item.group === 'sistema' && item.kind === 'link' && canSeeNavItem(item)).map(item => (
                   <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.FLOOR_PLAN); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.FLOOR_PLAN ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                    key={item.label}
+                    onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
                   >
-                    <Grid className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Sala</span>
+                    <item.Icon className="h-5 w-5 text-[var(--color-fg-muted)]" />
+                    <span className="text-sm font-medium text-[var(--color-fg)]">{item.label}</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
                   </button>
-                )}
-                {canAccessView(ViewState.RECEPTION) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.RECEPTION); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.RECEPTION ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <ConciergeBell className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Reception</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.ATTIVITA) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.ATTIVITA); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.ATTIVITA ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <ListChecks className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Attività</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.LISTA_DELLA_SPESA) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.LISTA_DELLA_SPESA); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.LISTA_DELLA_SPESA ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <ShoppingCart className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Lista della Spesa</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.HACCP) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.HACCP); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.HACCP ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <ShieldCheck className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">HACCP</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.CONVERSAZIONI) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.CONVERSAZIONI); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.CONVERSAZIONI ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <Phone className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Conversazioni</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.STAFF) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.STAFF); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.STAFF ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <UsersRound className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Personale</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.CLIENTI) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.CLIENTI); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.CLIENTI ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <BookUser className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Clienti</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.INVENTARIO) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.INVENTARIO); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.INVENTARIO ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <Boxes className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Inventario</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canManageUsers() && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.USERS); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.USERS ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <Users className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Utenti</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
-                {canAccessView(ViewState.SETTINGS) && (
-                  <button
-                    onClick={() => { setShowMoreMenu(false); setView(ViewState.SETTINGS); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${view === ViewState.SETTINGS ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
-                  >
-                    <Settings className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">Impostazioni</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-                )}
+                ))}
                 <button
                   type="button"
                   onClick={toggleTheme}
@@ -1878,8 +1787,6 @@ const App: React.FC = () => {
                     />
                   </span>
                 </button>
-              </div>
-              <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
                 <button
                   onClick={() => { setShowMoreMenu(false); logout(); }}
                   className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 transition-colors"

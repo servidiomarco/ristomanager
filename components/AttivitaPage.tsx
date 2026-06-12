@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useTodos } from '../contexts/TodosContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -14,6 +14,9 @@ import {
 interface AttivitaPageProps {
   banquetMenus: BanquetMenu[];
   dishes: Dish[];
+  /** When true, open the new-activity modal (e.g. triggered from the global "+" create menu). */
+  autoOpenNew?: boolean;
+  onAutoOpenNewHandled?: () => void;
 }
 
 const CATEGORY_LABELS: Record<TodoCategory, string> = {
@@ -97,7 +100,7 @@ const emptyForm: TodoForm = {
   assignedToTeam: undefined,
 };
 
-export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes }) => {
+export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes, autoOpenNew, onAutoOpenNewHandled }) => {
   const { user } = useAuth();
   const { todos, loading, assignableUsers, addTodo, updateTodo, toggleTodo, deleteTodo } = useTodos();
 
@@ -191,6 +194,13 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
     setForm(prev => ({ ...prev, dueDate: todayStr }));
     setShowModal(true);
   };
+  // Open the new-activity modal when triggered from the global "+" create menu, then clear the flag.
+  useEffect(() => {
+    if (autoOpenNew) {
+      openAdd();
+      onAutoOpenNewHandled?.();
+    }
+  }, [autoOpenNew]);
   const openEdit = (t: TodoItem) => {
     setEditingTodo(t);
     setForm({
