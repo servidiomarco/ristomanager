@@ -136,6 +136,87 @@ const getMinutesLate = (reservationTime: string): number => {
   return Math.floor((now.getTime() - resDate.getTime()) / 60000);
 };
 
+// Local-date helpers for the preflight check below — `new Date(isoString)`
+// drifts under UTC, which would flag a 09:30 booking as "tomorrow" for the
+// wrong timezone. We parse the local components by hand instead.
+const parseLocalDate = (iso: string): Date | null => {
+  const m = iso.match(/(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  return new Date(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(mi || 0));
+};
+
+const startOfDay = (d: Date): Date => {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+};
+
+type PreflightWarning =
+  | { kind: 'futureDate'; isoDate: string; weekday: string; date: string; time: string; daysAhead: number }
+  | { kind: 'sameDayDuplicate'; match: Reservation }
+  | { kind: 'nearDuplicate'; match: Reservation; dayDiff: number };
+
+// Looks for previously-booked entries that share the phone (or the name, when
+// no phone is given) on the same day or within ±2 days. Also flags future
+// dates so the host confirms when they're booking ahead. Skips CANCELLED
+// rows — those should not block a new booking.
+const computePreflightWarnings = (
+  payload: Pick<Reservation, 'customer_name' | 'phone' | 'reservation_time'>,
+  reservations: Reservation[],
+): PreflightWarning[] => {
+  const warnings: PreflightWarning[] = [];
+  if (!payload.reservation_time) return warnings;
+
+  const target = parseLocalDate(payload.reservation_time);
+  if (!target) return warnings;
+  const targetDay = startOfDay(target);
+  const today = startOfDay(new Date());
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysAhead = Math.round((targetDay.getTime() - today.getTime()) / msPerDay);
+
+  if (daysAhead >= 1) {
+    warnings.push({
+      kind: 'futureDate',
+      isoDate: payload.reservation_time,
+      weekday: target.toLocaleDateString('it-IT', { weekday: 'long' }),
+      date: target.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' }),
+      time: target.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+      daysAhead,
+    });
+  }
+
+  const phoneDigits = (payload.phone || '').replace(/\D/g, '');
+  const formName = (payload.customer_name || '').trim().toLowerCase();
+  const seen = new Set<number>();
+
+  for (const r of reservations) {
+    if (!r.id || seen.has(r.id)) continue;
+    if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+
+    const rPhoneDigits = (r.phone || '').replace(/\D/g, '');
+    const rName = (r.customer_name || '').trim().toLowerCase();
+
+    const phoneMatch = phoneDigits.length >= 6 && rPhoneDigits === phoneDigits;
+    const nameMatch = !phoneMatch && !!formName && rName === formName;
+    if (!phoneMatch && !nameMatch) continue;
+
+    const rDay = parseLocalDate(r.reservation_time);
+    if (!rDay) continue;
+    const diff = Math.abs(Math.round((startOfDay(rDay).getTime() - targetDay.getTime()) / msPerDay));
+    if (diff > 2) continue;
+
+    seen.add(r.id);
+    if (diff === 0) {
+      warnings.push({ kind: 'sameDayDuplicate', match: r });
+    } else {
+      warnings.push({ kind: 'nearDuplicate', match: r, dayDiff: diff });
+    }
+  }
+
+  return warnings;
+};
+
 interface ReservationListProps {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
@@ -308,6 +389,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingReservation, setIsSavingReservation] = useState(false);
+  // Preflight modal: future-date confirmation + duplicate-booking warnings.
+  // Holds the warnings list and the already-prepared payload, so a confirm
+  // tap just calls onAddReservation without re-running validation.
+  const [preflightModal, setPreflightModal] = useState<{
+    warnings: PreflightWarning[];
+    payload: Omit<Reservation, 'id'>;
+  } | null>(null);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
@@ -1438,6 +1526,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
+  // Performs the actual save and closes the form. Shared between the direct
+  // submit path (no warnings) and the preflight confirm button.
+  const performSave = async (dataToSave: Omit<Reservation, 'id'> | Reservation) => {
+      try {
+          setIsSavingReservation(true);
+          if (isEditing) {
+              await onUpdateReservation(dataToSave as Reservation);
+          } else {
+              await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+              clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+          }
+
+          setDraftBanner(null);
+          setIsFormOpen(false);
+          setPreflightModal(null);
+      } finally {
+          setIsSavingReservation(false);
+      }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
@@ -1458,20 +1566,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           notes: combinedNotes || undefined
       };
 
-      try {
-          setIsSavingReservation(true);
-          if (isEditing) {
-              await onUpdateReservation(dataToSave as Reservation);
-          } else {
-              await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
-              clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+      // Skip preflight checks when editing — duplicates/future dates only matter
+      // for new bookings. The edit path can hit the same date deliberately.
+      if (!isEditing) {
+          const warnings = computePreflightWarnings(
+              {
+                  customer_name: dataToSave.customer_name || '',
+                  phone: dataToSave.phone,
+                  reservation_time: dataToSave.reservation_time || '',
+              },
+              reservations,
+          );
+          if (warnings.length > 0) {
+              setPreflightModal({ warnings, payload: dataToSave as Omit<Reservation, 'id'> });
+              return;
           }
-
-          setDraftBanner(null);
-          setIsFormOpen(false);
-      } finally {
-          setIsSavingReservation(false);
       }
+
+      await performSave(dataToSave as Omit<Reservation, 'id'>);
   };
 
   const getStatusColor = (status: PaymentStatus) => {
@@ -3997,6 +4109,124 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           await handleUnhideAllTables();
         }}
       />
+
+      {/* Preflight modal: future-date confirmation + duplicate-booking warning */}
+      {preflightModal && (() => {
+        const futureWarning = preflightModal.warnings.find(w => w.kind === 'futureDate') as Extract<PreflightWarning, { kind: 'futureDate' }> | undefined;
+        const sameDayMatches = preflightModal.warnings.filter(w => w.kind === 'sameDayDuplicate') as Extract<PreflightWarning, { kind: 'sameDayDuplicate' }>[];
+        const nearMatches = preflightModal.warnings.filter(w => w.kind === 'nearDuplicate') as Extract<PreflightWarning, { kind: 'nearDuplicate' }>[];
+        const hasDuplicate = sameDayMatches.length + nearMatches.length > 0;
+
+        const formatMatchLine = (r: Reservation): string => {
+          const dt = parseLocalDate(r.reservation_time);
+          if (!dt) return r.reservation_time;
+          const datePart = dt.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
+          const timePart = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+          return `${datePart} · ${timePart} · ${r.guests || '?'} ospiti`;
+        };
+
+        return (
+          <div
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4"
+            onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
+          >
+            <div
+              className="bg-[var(--color-surface)] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden">
+                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              </div>
+              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+                <div className="flex items-start gap-3 min-w-0">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300 flex-shrink-0">
+                    <AlertTriangle className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
+                      {hasDuplicate ? 'Verifica prenotazione' : 'Conferma prenotazione'}
+                    </h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                      {toTitleCase(preflightModal.payload.customer_name || '')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
+                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                {futureWarning && (
+                  <div className="rounded-xl border border-blue-200/70 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-500/10 p-4">
+                    <p className="text-xs uppercase tracking-wide font-semibold text-blue-700 dark:text-blue-300">
+                      Prenotazione futura
+                      {futureWarning.daysAhead === 1 ? ' · domani' : ` · tra ${futureWarning.daysAhead} giorni`}
+                    </p>
+                    <p className="mt-2 text-[20px] font-semibold text-[var(--color-fg)] capitalize leading-tight">
+                      {futureWarning.weekday} {futureWarning.date}
+                    </p>
+                    <p className="mt-1 text-[28px] font-bold text-[var(--color-fg)] tabular-nums">
+                      {futureWarning.time}
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--color-fg-muted)]">
+                      Conferma che la data e l'ora siano corrette.
+                    </p>
+                  </div>
+                )}
+
+                {hasDuplicate && (
+                  <div className="rounded-xl border border-amber-200/70 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 p-4">
+                    <p className="text-xs uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-300">
+                      Possibile duplicato
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--color-fg)]">
+                      Una prenotazione simile esiste già per <strong>{toTitleCase(preflightModal.payload.customer_name || '')}</strong>:
+                    </p>
+                    <ul className="mt-2 space-y-1.5">
+                      {sameDayMatches.map(w => (
+                        <li key={`s-${w.match.id}`} className="text-sm text-[var(--color-fg)] flex items-center gap-2">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-600" />
+                          <span>Stesso giorno · {formatMatchLine(w.match)}</span>
+                        </li>
+                      ))}
+                      {nearMatches.map(w => (
+                        <li key={`n-${w.match.id}`} className="text-sm text-[var(--color-fg)] flex items-center gap-2">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                          <span>{w.dayDiff === 1 ? 'A 1 giorno' : `A ${w.dayDiff} giorni`} · {formatMatchLine(w.match)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+                <button
+                  type="button"
+                  onClick={() => setPreflightModal(null)}
+                  disabled={isSavingReservation}
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => { await performSave(preflightModal.payload); }}
+                  disabled={isSavingReservation}
+                  className="px-4 py-2 rounded-full text-sm font-medium bg-[var(--color-fg)] text-[var(--color-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Conferma e salva
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <PrintReservationsModal
         isOpen={isPrintModalOpen}
