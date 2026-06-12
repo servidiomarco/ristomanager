@@ -806,7 +806,10 @@ const App: React.FC = () => {
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>) => {
     try {
       const returnedRes = await createReservation(newRes);
-      // Don't add to state here - socket event will handle it to avoid duplicates
+      // Optimistically include the new row so checks that scan `reservations`
+      // (e.g. the duplicate preflight) see it immediately instead of waiting
+      // for the socket round-trip. The socket handler dedupes by id.
+      setReservations(prev => prev.some(r => r.id === returnedRes.id) ? prev : [...prev, returnedRes]);
       setNotifications(prev => [{
         id: Math.random().toString(),
         title: 'Nuova Prenotazione',
