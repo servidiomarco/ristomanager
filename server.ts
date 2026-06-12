@@ -847,6 +847,9 @@ app.get('/reservations', authenticate, async (req, res) => {
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
         // the booking card to render VIP/preferred-table chips without an extra
         // round-trip per row.
+        // LATERAL + LIMIT 1 so a rubrica with duplicate phones doesn't multiply
+        // the same reservation into N rows. Tie-break: VIP first, then anyone
+        // with a preferred_table, then oldest id.
         const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
@@ -856,10 +859,15 @@ app.get('/reservations', authenticate, async (req, res) => {
                    c.preferences_notes AS customer_preferences_notes
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
-            LEFT JOIN customers c
-                   ON r.phone IS NOT NULL
-                  AND c.phone IS NOT NULL
-                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN LATERAL (
+                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                WHERE r.phone IS NOT NULL
+                  AND cc.phone IS NOT NULL
+                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id
             ORDER BY r.reservation_time DESC
         `);
@@ -936,10 +944,15 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                    c.preferences_notes AS customer_preferences_notes
             FROM ins
             LEFT JOIN users u ON ins.created_by_user_id = u.id
-            LEFT JOIN customers c
-                   ON ins.phone IS NOT NULL
-                  AND c.phone IS NOT NULL
-                  AND regexp_replace(ins.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN LATERAL (
+                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                WHERE ins.phone IS NOT NULL
+                  AND cc.phone IS NOT NULL
+                  AND regexp_replace(ins.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
             [
                 customer_name,
@@ -1061,10 +1074,15 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                    c.preferences_notes AS customer_preferences_notes
             FROM upd
             LEFT JOIN users u ON upd.created_by_user_id = u.id
-            LEFT JOIN customers c
-                   ON upd.phone IS NOT NULL
-                  AND c.phone IS NOT NULL
-                  AND regexp_replace(upd.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+            LEFT JOIN LATERAL (
+                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                WHERE upd.phone IS NOT NULL
+                  AND cc.phone IS NOT NULL
+                  AND regexp_replace(upd.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
             [
                 customer_name,
@@ -1234,10 +1252,15 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                     c.preferences_notes AS customer_preferences_notes
                FROM reservations r
                LEFT JOIN users u ON r.created_by_user_id = u.id
-               LEFT JOIN customers c
-                      ON r.phone IS NOT NULL
-                     AND c.phone IS NOT NULL
-                     AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(c.phone, '\\D', '', 'g')
+               LEFT JOIN LATERAL (
+                   SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                   FROM customers cc
+                   WHERE r.phone IS NOT NULL
+                     AND cc.phone IS NOT NULL
+                     AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                   ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+                   LIMIT 1
+               ) c ON true
                LEFT JOIN tables pt ON pt.id = c.preferred_table_id
               WHERE r.id = ANY($1::int[])`,
             [[aId, bId]]
@@ -2494,6 +2517,30 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             ? Number(preferred_table_id)
             : null;
         const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
+
+        // Reject if another customer already owns this phone (digits-only match).
+        // Without this, the UPDATE would silently create a duplicate that
+        // breaks the reservation→customer JOIN (multiplies rows in the list).
+        const trimmedPhone = String(phone).trim();
+        const phoneDigits = trimmedPhone.replace(/\D/g, '');
+        if (phoneDigits) {
+            const conflict = await queryWithRetry(
+                `SELECT id, name FROM customers
+                 WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+                   AND id <> $2
+                 LIMIT 1`,
+                [phoneDigits, id]
+            );
+            if (conflict.rows.length > 0) {
+                const other = conflict.rows[0];
+                return res.status(409).json({
+                    error: `Questo numero è già associato a "${other.name}" in rubrica.`,
+                    existing_customer_id: other.id,
+                    existing_customer_name: other.name,
+                });
+            }
+        }
+
         const result = await queryWithRetry(
             `UPDATE customers SET
                 name = $1,
