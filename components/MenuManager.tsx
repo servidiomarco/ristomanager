@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat } from 'lucide-react';
+import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -12,6 +12,7 @@ import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -179,6 +180,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Banquet form validation errors
   const [banquetFormErrors, setBanquetFormErrors] = useState<string[]>([]);
   const [isSavingBanquet, setIsSavingBanquet] = useState(false);
+  // Surfaced when reopening the new-banquet modal and a saved draft exists.
+  const [banquetDraftBanner, setBanquetDraftBanner] = useState<{ savedAt: number } | null>(null);
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
@@ -354,12 +357,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           await onUpdateBanquetMenu(editingBanquetId, payload);
         } else {
           await onAddBanquetMenu(payload as BanquetMenu);
+          clearDraft(DRAFT_KEYS.BANQUET_NEW);
         }
 
         setIsBanquetFormOpen(false);
         setIsEditingBanquet(false);
         setEditingBanquetId(null);
         setSelectedBanquetCustomer(null);
+        setBanquetDraftBanner(null);
         setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [], discount_type: null, discount_value: null });
       } catch (err: any) {
         const msg = err?.message || 'Errore durante il salvataggio';
@@ -422,12 +427,58 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       table_ids: []
     });
     setIsBanquetFormOpen(true);
+
+    const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
+    setBanquetDraftBanner(existing ? { savedAt: existing.savedAt } : null);
   };
 
   const closeBanquetForm = () => {
     setIsBanquetFormOpen(false);
     setBanquetFormErrors([]);
+    setBanquetDraftBanner(null);
   };
+
+  const handleRestoreBanquetDraft = () => {
+    const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
+    if (!existing) {
+      setBanquetDraftBanner(null);
+      return;
+    }
+    setNewBanquet(existing.data);
+    setBanquetDraftBanner(null);
+  };
+
+  const handleDiscardBanquetDraft = () => {
+    clearDraft(DRAFT_KEYS.BANQUET_NEW);
+    setBanquetDraftBanner(null);
+  };
+
+  // Persist a draft of the new-banquet form (debounced). Only while creating
+  // (not editing) and only once the user has typed something meaningful. The
+  // customer is recovered from the saved customer_id via the existing lookup
+  // effect, so we only store newBanquet.
+  useEffect(() => {
+    if (!isBanquetFormOpen || isEditingBanquet) return;
+
+    const hasContent =
+      (newBanquet.name && newBanquet.name.trim() !== '') ||
+      (newBanquet.event_date && newBanquet.event_date.trim() !== '') ||
+      (newBanquet.description && newBanquet.description.trim() !== '') ||
+      (newBanquet.notes_courses && newBanquet.notes_courses.trim() !== '') ||
+      (newBanquet.notes_service && newBanquet.notes_service.trim() !== '') ||
+      (newBanquet.notes_mise_en_place && newBanquet.notes_mise_en_place.trim() !== '') ||
+      (newBanquet.guests != null && newBanquet.guests !== ('' as any)) ||
+      (newBanquet.price_per_person != null && Number(newBanquet.price_per_person) > 0) ||
+      newBanquet.customer_id != null ||
+      (Array.isArray(newBanquet.courses) && newBanquet.courses.some(c => (c.dish_ids || []).length > 0)) ||
+      (Array.isArray(newBanquet.table_ids) && newBanquet.table_ids.length > 0);
+    if (!hasContent) return;
+
+    const timer = setTimeout(() => {
+      saveDraft(DRAFT_KEYS.BANQUET_NEW, newBanquet);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [isBanquetFormOpen, isEditingBanquet, newBanquet]);
 
   const banquetFieldHasError = (field: string) => banquetFormErrors.includes(field);
 
@@ -1147,14 +1198,41 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeBanquetForm(); }}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-5xl overflow-hidden flex flex-col h-full" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-0 sm:p-4">
+          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-5xl overflow-hidden flex flex-col h-full">
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h3>
               <button onClick={closeBanquetForm} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {!isEditingBanquet && banquetDraftBanner && (
+              <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl flex items-start gap-3">
+                <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Bozza non salvata trovata</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                    Salvata {new Date(banquetDraftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleRestoreBanquetDraft}
+                    className="px-3 py-1.5 bg-amber-600 text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-amber-700"
+                  >
+                    Riprendi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardBanquetDraft}
+                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100 dark:bg-[var(--color-surface-3)] dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-[var(--color-surface-hover)]"
+                  >
+                    Scarta
+                  </button>
+                </div>
+              </div>
+            )}
             <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 sm:px-8 py-6 space-y-8">
 
               {/* SECTION: Cliente */}

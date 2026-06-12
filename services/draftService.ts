@@ -72,4 +72,5 @@ export const clearDraft = (formKey: string): void => {
 // Form keys used across the app (centralized to avoid typos)
 export const DRAFT_KEYS = {
   RESERVATION_NEW: 'reservation_new',
+  BANQUET_NEW: 'banquet_new',
 } as const;
