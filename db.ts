@@ -926,6 +926,44 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);`);
 
+        // Enforce phone uniqueness on the digits-only form so "+39 333 1234567"
+        // and "3331234567" can't both exist. Two customers sharing a phone
+        // multiplies rows in the reservation→customer JOIN (and the rubrica
+        // VIP/preferred-table flags become non-deterministic).
+        //
+        // Cleanup before the index is created — otherwise it errors out on
+        // existing duplicates. Tie-break: keep the lowest id, blank the phone
+        // on the rest so they survive (with a marker note) instead of being
+        // silently lost. Idempotent: a re-run finds no duplicates to fix.
+        await client.query(`
+            WITH ranked AS (
+                SELECT id,
+                       regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS digits,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')
+                           ORDER BY id ASC
+                       ) AS rn
+                FROM customers
+                WHERE phone IS NOT NULL
+                  AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> ''
+            )
+            UPDATE customers c
+            SET phone = NULL,
+                notes = COALESCE(c.notes, '') ||
+                        CASE WHEN COALESCE(c.notes, '') = '' THEN '' ELSE E'\\n' END ||
+                        '[telefono rimosso automaticamente: duplicato di un altro contatto]',
+                updated_at = CURRENT_TIMESTAMP
+            FROM ranked r
+            WHERE c.id = r.id
+              AND r.rn > 1;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_digits_unique
+            ON customers ((regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')))
+            WHERE phone IS NOT NULL
+              AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> '';
+        `);
+
         // Track whether a customer was created by the backfill so we can prune
         // legacy auto-imported entries that don't meet the current rules
         // (phone or email required) without touching customers added manually.
