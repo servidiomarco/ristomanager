@@ -911,6 +911,9 @@ const App: React.FC = () => {
       { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
       { label: 'Banchetto', Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); setAutoOpenNewBanquet(true); } },
       { label: 'Piatto', Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); setAutoOpenNewDish(true); } },
+    ],
+    [
+      { label: 'Spesa', Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
       { label: 'Attività', Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
     ],
     [
