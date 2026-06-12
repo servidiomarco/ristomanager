@@ -372,6 +372,11 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (create) failed:', err?.message || err));
         }
 
+        // Auto-save the caller into the rubrica. Voice bookings are the most
+        // common way a brand-new customer first appears in our system, so the
+        // upsert here is what keeps the rubrica in sync with reality.
+        await upsertCustomerFromReservation(customerName, phoneRaw, null, null);
+
         // Activity log: no authenticated user, attribute to the voice agent.
         LogService.logActivity(
             null,
@@ -5238,6 +5243,9 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
             socketService.broadcastReservationCreated(newReservation);
         }
 
+        // Auto-save WhatsApp contact to the rubrica.
+        await upsertCustomerFromReservation(name, phoneNumber, null, null);
+
         console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}. Waiting for manual confirmation.`);
 
     } catch (error) {
@@ -6527,6 +6535,10 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, phoneE164]
         );
         const created = result.rows[0];
+
+        // Auto-save the booker into the rubrica so the contact appears even if
+        // staff never edit this booking from the internal app.
+        await upsertCustomerFromReservation(customer_name, phoneE164, null, null);
 
         // Notify staff dashboards in real time.
         if (socketService) {
