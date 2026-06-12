@@ -1717,16 +1717,19 @@ const App: React.FC = () => {
               className="absolute inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)]"
               onClick={() => setShowMoreMenu(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 bg-[var(--color-surface)] rounded-t-2xl border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)] animate-in slide-in-from-bottom duration-200">
-              <div className="flex justify-center pt-2.5 pb-1">
-                <div className="w-10 h-1 rounded-full bg-[var(--color-line-strong)]" />
+            <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--color-surface)] rounded-t-2xl border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)] animate-in slide-in-from-bottom duration-200">
+              <div className="flex-shrink-0 bg-[var(--color-surface)] rounded-t-2xl">
+                <div className="flex justify-center pt-2.5 pb-1">
+                  <div className="w-10 h-1 rounded-full bg-[var(--color-line-strong)]" />
+                </div>
+                <div className="px-4 pb-2 pt-1 flex items-center justify-between">
+                  <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Altro</h3>
+                  <button onClick={() => setShowMoreMenu(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <div className="px-4 pb-2 pt-1 flex items-center justify-between">
-                <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Altro</h3>
-                <button onClick={() => setShowMoreMenu(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
               {/* User identity card */}
               <div className="mx-4 mb-2 px-3 py-3 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)] flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] flex items-center justify-center text-[12px] font-medium shrink-0">
@@ -1797,6 +1800,7 @@ const App: React.FC = () => {
                   <LogOut className="h-5 w-5" />
                   <span className="text-sm font-medium">Esci</span>
                 </button>
+              </div>
               </div>
             </div>
           </div>
