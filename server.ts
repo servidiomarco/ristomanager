@@ -1230,6 +1230,21 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             ).catch(err => console.error('Push (cancellation) failed:', err));
         }
 
+        // Auto-send the WhatsApp confirmation on PENDING → CONFIRMED. WhatsApp
+        // bookings land as PENDING; flipping them to CONFIRMED in the UI is the
+        // signal that the table is reserved and the guest can be told. Fire and
+        // forget — never fail the route.
+        if (
+            previousStatus === 'PENDING' &&
+            reservation_status === 'CONFIRMED' &&
+            updatedReservation?.phone
+        ) {
+            sendWhatsAppText(
+                updatedReservation.phone,
+                buildConfirmationMessage(updatedReservation.customer_name, updatedReservation.reservation_time)
+            ).catch(err => console.error('WhatsApp auto-confirmation failed:', err));
+        }
+
         res.json(updatedReservation);
     } catch (err: any) {
         console.error('PUT /reservations/:id error:', err);
@@ -1392,21 +1407,9 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             return res.status(400).json({ error: 'No phone number for this reservation' });
         }
 
-        // Format date and time in Italian format
-        const reservationDate = new Date(reservation.reservation_time);
-        const day = String(reservationDate.getDate()).padStart(2, '0');
-        const month = String(reservationDate.getMonth() + 1).padStart(2, '0');
-        const year = reservationDate.getFullYear();
-        const hours = String(reservationDate.getHours()).padStart(2, '0');
-        const minutes = String(reservationDate.getMinutes()).padStart(2, '0');
-
-        const formattedDate = `${day}/${month}/${year}`;
-        const formattedTime = `${hours}:${minutes}`;
-
-        // Send WhatsApp confirmation
         await sendWhatsAppText(
             reservation.phone,
-            `La prenotazione per ${formattedDate} ${formattedTime} e' confermata. A presto!`
+            buildConfirmationMessage(reservation.customer_name, reservation.reservation_time)
         );
 
         console.log(`[WhatsApp] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
@@ -5341,9 +5344,11 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         // Determine shift based on time
         const shift = determineShift(time);
 
-        // Create reservation in database
+        // Create reservation in database. WhatsApp bookings land as PENDING ("Da
+        // confermare") — staff reviews them in the list and the confirmation
+        // message is fired automatically when they flip the status to CONFIRMED.
         const result = await queryWithRetry(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
             [
                 name,
                 `${date}T${time}`,
@@ -5351,7 +5356,8 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
                 guests,
                 phoneNumber,
                 PaymentStatus.PENDING,
-                'WAITING'
+                'WAITING',
+                'PENDING'
             ]
         );
 
@@ -5407,6 +5413,21 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
     }
 
     return null;
+}
+
+// Build the WhatsApp confirmation message. Personalized with the guest's first
+// name (so "Marco Rossi" → "Ciao Marco"). Shared by the manual /confirm-whatsapp
+// endpoint and by the auto-fire on PENDING→CONFIRMED in PUT /reservations/:id.
+function buildConfirmationMessage(customerName: string | null | undefined, reservationTime: string | Date): string {
+    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    const hours = String(dt.getHours()).padStart(2, '0');
+    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const firstName = (customerName ?? '').trim().split(/\s+/)[0] ?? '';
+    const greeting = firstName ? `Ciao ${firstName}, la tua` : 'La';
+    return `${greeting} prenotazione per ${day}/${month}/${year} alle ${hours}:${minutes} e' confermata. A presto!`;
 }
 
 // Normalize date to YYYY-MM-DD format
