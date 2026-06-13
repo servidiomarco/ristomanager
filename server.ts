@@ -157,6 +157,78 @@ app.post('/webhook/vonage-status', (req, res) => {
 });
 
 // ============================================
+// WHATSAPP WEBHOOK ENDPOINTS (Twilio)
+// ============================================
+// Twilio posts application/x-www-form-urlencoded, which the global json()
+// parser doesn't touch. Mounting urlencoded only on these routes keeps the
+// rest of the API json-only.
+const twilioUrlEncoded = express.urlencoded({ extended: false });
+
+// Twilio signs every request: HMAC-SHA1 with the auth token, message =
+// public_url + sorted(key+value) concatenation, base64-encoded. We need
+// trust-proxy=1 (already set) so req.protocol/host reflect the URL Twilio
+// configured, not the loopback Railway sees internally.
+function validateTwilioSignature(req: express.Request): boolean {
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!authToken) return false;
+    const signature = req.header('X-Twilio-Signature');
+    if (!signature) return false;
+    try {
+        const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+        const params = (req.body || {}) as Record<string, string>;
+        const sortedKeys = Object.keys(params).sort();
+        const data = sortedKeys.reduce((acc, key) => acc + key + (params[key] ?? ''), url);
+        const expected = crypto.createHmac('sha1', authToken).update(data).digest('base64');
+        const a = Buffer.from(signature);
+        const b = Buffer.from(expected);
+        if (a.length !== b.length) return false;
+        return crypto.timingSafeEqual(a, b);
+    } catch (err) {
+        console.error('[Twilio] Signature validation failed:', err);
+        return false;
+    }
+}
+
+// Twilio WhatsApp inbound messages webhook
+app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
+    if (!validateTwilioSignature(req)) {
+        console.warn('[Twilio] Inbound: invalid signature, rejecting');
+        return res.status(403).send();
+    }
+    console.log('[Twilio] Incoming message:', req.body);
+    // Acknowledge with empty TwiML so Twilio doesn't auto-reply on our behalf.
+    res.set('Content-Type', 'text/xml').status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+    try {
+        const from = String(req.body?.From || '').replace(/^whatsapp:/, '');
+        const body = String(req.body?.Body || '').trim();
+        const numMedia = Number(req.body?.NumMedia || 0);
+        if (numMedia > 0) {
+            console.log('[Twilio] Inbound has media attachments — processing text only');
+        }
+        if (from && body) {
+            await processWhatsAppBooking(from, body);
+        } else {
+            console.log('[Twilio] Inbound: missing From or empty Body, ignoring');
+        }
+    } catch (error) {
+        console.error('[Twilio] Error processing inbound:', error);
+    }
+});
+
+// Twilio WhatsApp status callbacks (sent/delivered/read/failed)
+app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => {
+    if (!validateTwilioSignature(req)) {
+        console.warn('[Twilio] Status: invalid signature, rejecting');
+        return res.status(403).send();
+    }
+    const { MessageSid, MessageStatus, To, ErrorCode, ErrorMessage } = req.body || {};
+    const errSuffix = ErrorCode ? ` errCode=${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}` : '';
+    console.log(`[Twilio] Status: ${MessageSid} → ${MessageStatus} (to ${To})${errSuffix}`);
+    res.status(200).send();
+});
+
+// ============================================
 // ELEVENLABS VOICE-AGENT WEBHOOKS
 // ============================================
 // Tools the Restaurant Host agent can call mid-conversation. Each request
@@ -730,7 +802,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 ? `, tavolo ${row.table_name}${row.room_name ? ` (${row.room_name})` : ''}`
                 : '';
             const message = `Ciao ${row.customer_name.split(' ')[0]}, la tua prenotazione per ${row.guests} ${persone} è registrata per il ${day}/${month}/${year} alle ${hours}:${minutes}${tableSuffix}. A presto!`;
-            sendVonageWhatsApp(row.phone, message).catch(err =>
+            sendWhatsAppText(row.phone, message).catch(err =>
                 console.warn('[ElevenLabs] post-call WhatsApp send failed:', err?.message || err)
             );
         }
@@ -1332,7 +1404,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
         const formattedTime = `${hours}:${minutes}`;
 
         // Send WhatsApp confirmation
-        await sendVonageWhatsApp(
+        await sendWhatsAppText(
             reservation.phone,
             `La prenotazione per ${formattedDate} ${formattedTime} e' confermata. A presto!`
         );
@@ -5230,7 +5302,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     const bookingData = parseBookingMessage(messageText);
 
     if (!bookingData) {
-        await sendVonageWhatsApp(phoneNumber,
+        await sendWhatsAppText(phoneNumber,
             "❌ Non ho capito il messaggio. Per favore usa questo formato:\n\n" +
             "DATA ORA OSPITI NOME\n\n" +
             "Esempio: 15/12 20:00 4 Marco Rossi"
@@ -5246,7 +5318,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     if (!bookingData.name) missingFields.push("nome");
 
     if (missingFields.length > 0) {
-        await sendVonageWhatsApp(phoneNumber,
+        await sendWhatsAppText(phoneNumber,
             `⚠️ Mancano alcune informazioni: ${missingFields.join(", ")}\n\n` +
             "Per favore invia: DATA ORA OSPITI NOME\n\n" +
             "Esempio: 15/12 20:00 4 Marco Rossi"
@@ -5262,7 +5334,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         const guests = bookingData.guests!;
 
         // Send immediate acknowledgment
-        await sendVonageWhatsApp(phoneNumber,
+        await sendWhatsAppText(phoneNumber,
             "Grazie per la richiesta di prenotazione, a breve ricevera la conferma della disponibilita del tavolo per la data e ora richiesta."
         );
 
@@ -5297,7 +5369,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
 
     } catch (error) {
         console.error('[WhatsApp] Error creating reservation:', error);
-        await sendVonageWhatsApp(phoneNumber,
+        await sendWhatsAppText(phoneNumber,
             "❌ Si è verificato un errore durante la creazione della prenotazione.\n\n" +
             "Per favore riprova o contattaci telefonicamente."
         );
@@ -5399,6 +5471,65 @@ async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
         console.error('[Vonage] ❌ Error sending message:', error);
         throw error;
     }
+}
+
+// Twilio WhatsApp — sandbox during testing, business number after porting.
+// Recipients must "join <code>" via WhatsApp once before they can receive
+// messages from the sandbox sender.
+function isTwilioWhatsAppConfigured(): boolean {
+    return !!(process.env.TWILIO_ACCOUNT_SID
+        && process.env.TWILIO_AUTH_TOKEN
+        && process.env.TWILIO_WHATSAPP_FROM);
+}
+
+async function sendTwilioWhatsApp(to: string, text: string): Promise<void> {
+    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+    const FROM = process.env.TWILIO_WHATSAPP_FROM;
+
+    if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
+        console.error('[Twilio] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_WHATSAPP_FROM');
+        throw new Error('Twilio not configured');
+    }
+
+    // Twilio expects "whatsapp:+E164" on both ends. Tolerate either form on
+    // input — strip non-digits, re-add "whatsapp:+".
+    const formattedTo = `whatsapp:+${String(to).replace(/\D/g, '')}`;
+    const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
+
+    console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}`);
+
+    const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
+    const body = new URLSearchParams({
+        From: formattedFrom,
+        To: formattedTo,
+        Body: text,
+    });
+
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+    });
+
+    const result = await response.json().catch(() => ({} as any)) as { sid?: string };
+    if (!response.ok) {
+        console.error('[Twilio] ❌ Error sending message:', result);
+        throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
+    }
+    console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
+}
+
+// Plain-text WhatsApp dispatcher. Prefers Twilio when configured, falls back
+// to Vonage. Meta is template-only (separate path) so it isn't in this chain.
+async function sendWhatsAppText(to: string, text: string): Promise<void> {
+    if (isTwilioWhatsAppConfigured()) {
+        return sendTwilioWhatsApp(to, text);
+    }
+    return sendVonageWhatsApp(to, text);
 }
 
 // Meta WhatsApp Business Cloud API — uses approved templates, so customers
@@ -6624,10 +6755,10 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 ],
             }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
         } else {
-            sendVonageWhatsApp(
+            sendWhatsAppText(
                 phoneE164,
                 `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`
-            ).catch(err => console.error('[public-booking] Vonage WhatsApp ack failed:', err));
+            ).catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
         }
 
         res.status(201).json({ ok: true, id: created.id });
@@ -6641,9 +6772,10 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
-// WhatsApp diagnostic — sends a real message via the active provider (Meta if
-// configured, otherwise Vonage sandbox) and returns the raw response so we can
-// see exactly what's happening. Owner-only.
+// WhatsApp diagnostic — sends a real message via the active provider and
+// returns the raw response so we can see exactly what's happening.
+// "auto" prefers Twilio → Meta → Vonage (same priority as the dispatcher).
+// Owner-only.
 app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'), async (req, res) => {
     const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
     const text = typeof req.body?.text === 'string' && req.body.text.trim()
@@ -6653,7 +6785,49 @@ app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'
 
     if (!to) return res.status(400).json({ error: 'missing_to', message: 'Body must include "to"' });
 
-    const useMeta = provider === 'meta' || (provider === 'auto' && isMetaWhatsAppConfigured());
+    const useTwilio = provider === 'twilio' || (provider === 'auto' && isTwilioWhatsAppConfigured());
+    const useMeta = !useTwilio && (provider === 'meta' || (provider === 'auto' && isMetaWhatsAppConfigured()));
+
+    if (useTwilio) {
+        const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+        const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+        const FROM = process.env.TWILIO_WHATSAPP_FROM;
+
+        if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
+            return res.status(500).json({
+                error: 'missing_twilio_config',
+                present: {
+                    TWILIO_ACCOUNT_SID: !!ACCOUNT_SID,
+                    TWILIO_AUTH_TOKEN: !!AUTH_TOKEN,
+                    TWILIO_WHATSAPP_FROM: !!FROM,
+                },
+            });
+        }
+
+        const formattedTo = `whatsapp:+${String(to).replace(/\D/g, '')}`;
+        const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
+        const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
+        const body = new URLSearchParams({ From: formattedFrom, To: formattedTo, Body: text });
+
+        try {
+            const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+                method: 'POST',
+                headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+            });
+            const rawBody = await response.text();
+            let parsedBody: any;
+            try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
+            return res.json({
+                ok: response.ok,
+                provider: 'twilio',
+                request: { from: formattedFrom, to: formattedTo, text, accountSid: ACCOUNT_SID },
+                twilio: { status: response.status, body: parsedBody },
+            });
+        } catch (err: any) {
+            return res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
+        }
+    }
 
     if (useMeta) {
         const ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
