@@ -5304,8 +5304,17 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     // Parse the message
     const bookingData = parseBookingMessage(messageText);
 
+    // Fire-and-forget WhatsApp replies. The booking itself must never be lost
+    // because Twilio/Vonage rate-limited us or the network blipped — we save
+    // first and reply on a best-effort basis.
+    const replyAsync = (text: string) => {
+        sendWhatsAppText(phoneNumber, text).catch(err =>
+            console.error('[WhatsApp] reply send failed:', err)
+        );
+    };
+
     if (!bookingData) {
-        await sendWhatsAppText(phoneNumber,
+        replyAsync(
             "❌ Non ho capito il messaggio. Per favore usa questo formato:\n\n" +
             "DATA ORA OSPITI NOME\n\n" +
             "Esempio: 15/12 20:00 4 Marco Rossi"
@@ -5321,7 +5330,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     if (!bookingData.name) missingFields.push("nome");
 
     if (missingFields.length > 0) {
-        await sendWhatsAppText(phoneNumber,
+        replyAsync(
             `⚠️ Mancano alcune informazioni: ${missingFields.join(", ")}\n\n` +
             "Per favore invia: DATA ORA OSPITI NOME\n\n" +
             "Esempio: 15/12 20:00 4 Marco Rossi"
@@ -5335,11 +5344,6 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         const time = bookingData.time!;
         const name = bookingData.name!;
         const guests = bookingData.guests!;
-
-        // Send immediate acknowledgment
-        await sendWhatsAppText(phoneNumber,
-            "Grazie per la richiesta di prenotazione, a breve ricevera la conferma della disponibilita del tavolo per la data e ora richiesta."
-        );
 
         // Determine shift based on time
         const shift = determineShift(time);
@@ -5373,9 +5377,15 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
 
         console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}. Waiting for manual confirmation.`);
 
+        // Ack the guest only after the booking is safely saved. Fire-and-forget
+        // so a Twilio rate-limit or transient error can't roll back the work.
+        replyAsync(
+            "Grazie per la richiesta di prenotazione, a breve ricevera la conferma della disponibilita del tavolo per la data e ora richiesta."
+        );
+
     } catch (error) {
         console.error('[WhatsApp] Error creating reservation:', error);
-        await sendWhatsAppText(phoneNumber,
+        replyAsync(
             "❌ Si è verificato un errore durante la creazione della prenotazione.\n\n" +
             "Per favore riprova o contattaci telefonicamente."
         );
