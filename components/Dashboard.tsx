@@ -272,25 +272,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const totalItems = shoppingItems.length;
 
   // Staff presence calculation:
-  // - Excludes staff with time-off covering the selected date
-  // - FISSO staff are implicitly present on both shifts during their hire period
-  //   unless it's their weekly rest day
-  // - Explicit shift rows (with present=false) override the implicit rule
+  // - Explicit shift rows (with present=false) override everything else
+  // - Time-off can be full-day (shift=null) or scoped to a single shift; a
+  //   lunch-only Riposo must NOT remove the person from the dinner shift
+  // - FISSO/STAGIONALE staff are implicitly present on both shifts during their
+  //   hire period unless it's their weekly rest day
   const staffPresence = useMemo(() => {
     const dayOfWeek = new Date(`${selectedDateStr}T00:00:00`).getDay();
-    const onTimeOff = new Set(
-      staffTimeOffs
-        .filter(t => toDateOnly(t.startDate) <= selectedDateStr && toDateOnly(t.endDate) >= selectedDateStr)
-        .map(t => t.staffId)
+    const dayTimeOffs = staffTimeOffs.filter(
+      t => toDateOnly(t.startDate) <= selectedDateStr && toDateOnly(t.endDate) >= selectedDateStr
     );
 
-    const isPresent = (staff: StaffMember, shift: Shift): boolean => {
-      if (onTimeOff.has(staff.id)) return false;
+    // A time-off entry blocks a shift only when it's full-day (shift null/undefined)
+    // or explicitly scoped to that same shift.
+    const isOffForShift = (staffId: string, shift: Shift): boolean =>
+      dayTimeOffs.some(t => t.staffId === staffId && (t.shift == null || t.shift === shift));
 
+    const isPresent = (staff: StaffMember, shift: Shift): boolean => {
       const explicitShift = staffShifts.find(s =>
         s.staffId === staff.id && s.shift === shift && toDateOnly(s.date) === selectedDateStr
       );
       if (explicitShift) return explicitShift.present !== false;
+
+      if (isOffForShift(staff.id, shift)) return false;
 
       if (staff.staffType !== StaffType.FISSO && staff.staffType !== StaffType.STAGIONALE) return false;
       if (staff.weeklyRestDay != null && staff.weeklyRestDay === dayOfWeek) return false;
