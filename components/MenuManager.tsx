@@ -972,6 +972,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               ) : (
                                 <span>{menu.dish_ids.length} piatti</span>
                               )}
+                              {menu.guests != null && Number(menu.guests) > 0 && (
+                                <span> · {Number(menu.guests)} coperti</span>
+                              )}
                               {canViewBanquetPrice && menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
                                 <span> · Acconto €{Number(menu.deposit_amount).toFixed(2)}</span>
                               )}
