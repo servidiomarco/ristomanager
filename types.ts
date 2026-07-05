@@ -164,6 +164,13 @@ export interface Reservation {
   shift: Shift;
   guests: number;
   children?: number;
+  /**
+   * How long the party is expected to keep the table, in minutes. Drives the
+   * time-window overlap check that enables double-seating on the same table
+   * (e.g. an early sitting followed by a later one). NULL/undefined = fall
+   * back to the shift default (90 lunch / 120 dinner).
+   */
+  duration_minutes?: number;
   table_id?: number;
   notes?: string;
   email?: string;

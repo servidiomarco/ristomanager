@@ -836,22 +836,51 @@ interface TableConflict {
     source_name: string;
 }
 
+// Shift-default duration used when a reservation has no explicit
+// duration_minutes. Kept in sync with defaultDurationForShift() on the client.
+const SHIFT_DEFAULT_DURATION_SQL = `CASE WHEN r.shift = 'LUNCH' THEN 90 ELSE 120 END`;
+
 async function findTableConflicts(
     eventDate: string,
     shift: string | null | undefined,
     tableIds: number[],
-    options?: { excludeBanquetId?: number; excludeReservationId?: number }
+    options?: {
+        excludeBanquetId?: number;
+        excludeReservationId?: number;
+        /**
+         * When set, reservation-vs-reservation conflicts are decided by
+         * time-window overlap ([start, start+duration)) instead of the
+         * shift-wide equality check. Enables double-seating on the same
+         * table when the earlier party leaves before the later one arrives.
+         * When left undefined (e.g. a banquet requester), we fall back to
+         * shift-wide matching so the caller still blocks any overlap.
+         */
+        reservationStart?: string;
+        reservationDurationMin?: number;
+    }
 ): Promise<TableConflict[]> {
     if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
 
     const conflicts: TableConflict[] = [];
 
-    const resParams: any[] = [tableIds, eventDate, shift];
+    const useWindow = options?.reservationStart != null && options?.reservationDurationMin != null;
+    const resParams: any[] = [tableIds, eventDate];
     let resWhere = `r.table_id = ANY($1::int[])
                     AND DATE(r.reservation_time) = $2::date
-                    AND r.shift = $3
                     AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
                     AND COALESCE(r.reservation_status, 'CONFIRMED') <> 'CANCELLED'`;
+    if (useWindow) {
+        // Overlap: r.start < new.end AND r.end > new.start
+        resParams.push(options!.reservationStart);
+        const startIdx = resParams.length;
+        resParams.push(options!.reservationDurationMin);
+        const durIdx = resParams.length;
+        resWhere += ` AND r.reservation_time < ($${startIdx}::timestamptz + ($${durIdx} || ' minutes')::interval)
+                      AND (r.reservation_time + (COALESCE(r.duration_minutes, ${SHIFT_DEFAULT_DURATION_SQL}) || ' minutes')::interval) > $${startIdx}::timestamptz`;
+    } else {
+        resParams.push(shift);
+        resWhere += ` AND r.shift = $${resParams.length}`;
+    }
     if (options?.excludeReservationId) {
         resParams.push(options.excludeReservationId);
         resWhere += ` AND r.id <> $${resParams.length}`;
@@ -952,8 +981,12 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        // Explicit table hold; NULL means "use shift default" on lookups.
+        const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
+        const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
+        const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
 
         // If the client didn't pick a table but the caller is a known rubrica
         // entry with a preferred_table_id, try to honor that preference. The
@@ -980,7 +1013,10 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                     const fitsGuests = !guests || !capacity || Number(guests) <= capacity;
                     if (fitsGuests && !(await isTableInClosedRoom(row.preferred_table_id))) {
                         const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-                        const conflicts = await findTableConflicts(eventDate, shift, [Number(row.preferred_table_id)]);
+                        const conflicts = await findTableConflicts(eventDate, shift, [Number(row.preferred_table_id)], {
+                            reservationStart: reservation_time,
+                            reservationDurationMin: effectiveDurationForCheck,
+                        });
                         if (conflicts.length === 0) {
                             effectiveTableId = Number(row.preferred_table_id);
                         }
@@ -994,7 +1030,10 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         if (effectiveTableId != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [effectiveTableId]);
+            const conflicts = await findTableConflicts(eventDate, shift, [effectiveTableId], {
+                reservationStart: reservation_time,
+                reservationDurationMin: effectiveDurationForCheck,
+            });
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -1004,8 +1043,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, created_by_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -1039,6 +1078,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
                 reservation_status ?? 'CONFIRMED',
+                durationValue,
                 req.user?.userId ?? null,
             ]
         );
@@ -1108,8 +1148,11 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
+        const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
+        const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
@@ -1118,7 +1161,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const effectiveTableId = isCancelling ? null : (table_id ?? null);
         if (!isCancelling && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], { excludeReservationId: Number(id) });
+            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], {
+                excludeReservationId: Number(id),
+                reservationStart: reservation_time,
+                reservationDurationMin: effectiveDurationForCheck,
+            });
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -1131,11 +1178,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
-                SELECT reservation_status AS prev_status FROM reservations WHERE id = $13
+                SELECT reservation_status AS prev_status FROM reservations WHERE id = $14
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12
-                WHERE id = $13
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13
+                WHERE id = $14
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status,
@@ -1169,6 +1216,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 payment_status ?? 'PENDING',
                 arrival_status ?? 'WAITING',
                 reservation_status ?? 'CONFIRMED',
+                durationValue,
                 id,
             ]
         );

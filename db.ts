@@ -361,6 +361,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Children sub-count of `guests`. Server enforces 0 <= children <= guests.
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS children INTEGER NOT NULL DEFAULT 0;`);
 
+        // Expected table hold time, in minutes, used to check overlap with other
+        // reservations on the same table (double-seating support). NULL means
+        // "use shift default" — the app resolves it (90 lunch / 120 dinner).
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;`);
+
         // Original booking timestamp. Added without a default so existing rows
         // stay NULL until backfilled below — that way the migration uses real
         // CREATE log times instead of stamping every row with the migration time.

@@ -152,6 +152,35 @@ const startOfDay = (d: Date): Date => {
   return out;
 };
 
+// Default expected table-hold time in minutes when a reservation has no
+// explicit `duration_minutes`. Kept in sync with the SQL fallback in
+// server.ts (SHIFT_DEFAULT_DURATION_SQL).
+const defaultDurationForShift = (shift: Shift | undefined | null): number =>
+  shift === Shift.LUNCH ? 90 : 120;
+
+const resolveDurationMinutes = (r: Pick<Reservation, 'duration_minutes' | 'shift'>): number => {
+  const raw = r.duration_minutes;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  return defaultDurationForShift(r.shift);
+};
+
+// [start, start+duration) time-window overlap. Two windows overlap iff
+// aStart < bEnd AND bStart < aEnd. Wall-clock ISO strings only (via
+// parseLocalDate — avoids UTC drift).
+const reservationsOverlap = (
+  aStart: string,
+  aDurationMin: number,
+  bStart: string,
+  bDurationMin: number,
+): boolean => {
+  const aStartDate = parseLocalDate(aStart);
+  const bStartDate = parseLocalDate(bStart);
+  if (!aStartDate || !bStartDate) return false;
+  const aEnd = aStartDate.getTime() + aDurationMin * 60_000;
+  const bEnd = bStartDate.getTime() + bDurationMin * 60_000;
+  return aStartDate.getTime() < bEnd && bStartDate.getTime() < aEnd;
+};
+
 type PreflightWarning =
   | { kind: 'futureDate'; isoDate: string; weekday: string; date: string; time: string; daysAhead: number }
   | { kind: 'sameDayDuplicate'; match: Reservation }
@@ -580,6 +609,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       children: 0,
       reservation_time: `${new Date().toISOString().split('T')[0]}T20:00`,
       shift: Shift.DINNER,
+      duration_minutes: defaultDurationForShift(Shift.DINNER),
       payment_status: PaymentStatus.PENDING,
       table_id: undefined,
       enable_reminder: true,
@@ -1292,7 +1322,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         enable_reminder: walkIn ? false : true,
         reminder_sent: false,
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
-        notes: ''
+        notes: '',
+        duration_minutes: defaultDurationForShift(newShift),
       });
       setSelectedAllergens([]);
       setSelectedQuickNotes([]);
@@ -1397,14 +1428,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return null;
   };
 
+  // Double-seating aware: a table is "occupied" for the currently-edited
+  // reservation only if some other booking's [start, start+duration) window
+  // overlaps ours. Banquets still lock the whole shift (they have no
+  // duration column).
   const isTableOccupied = (table_id: number, checkDate: string, checkShift: Shift) => {
-    const occupiedByReservation = reservations.some(r =>
-        r.table_id === table_id &&
-        r.reservation_time.split('T')[0] === checkDate &&
-        r.shift === checkShift &&
-        r.id !== formData.id &&
-        r.arrival_status !== ArrivalStatus.DEPARTED
-    );
+    const myStart = formData.reservation_time;
+    const myShift = formData.shift || checkShift;
+    const myDuration = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: myShift });
+    const occupiedByReservation = myStart ? reservations.some(r => {
+      if (r.table_id !== table_id) return false;
+      if (r.id === formData.id) return false;
+      if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
+      if (r.reservation_status === ReservationStatus.CANCELLED) return false;
+      if (r.reservation_time.split('T')[0] !== checkDate) return false;
+      return reservationsOverlap(myStart, myDuration, r.reservation_time, resolveDurationMinutes(r));
+    }) : false;
     if (occupiedByReservation) return true;
     return !!getBanquetForTable(table_id, checkDate, checkShift);
   };
@@ -1444,13 +1483,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const getOccupierForTableInForm = (table_id: number): { kind: 'reservation'; data: Reservation } | { kind: 'banquet'; data: BanquetMenu } | null => {
       if (!formData.reservation_time || !formData.shift) return null;
       const date = formData.reservation_time.split('T')[0];
+      const myDuration = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
       const res = reservations.find(r =>
           r.table_id === table_id &&
           r.reservation_time.split('T')[0] === date &&
-          r.shift === formData.shift &&
           r.id !== formData.id &&
           r.arrival_status !== ArrivalStatus.DEPARTED &&
-          r.reservation_status !== ReservationStatus.CANCELLED
+          r.reservation_status !== ReservationStatus.CANCELLED &&
+          reservationsOverlap(formData.reservation_time!, myDuration, r.reservation_time, resolveDurationMinutes(r))
       );
       if (res) return { kind: 'reservation', data: res };
       const banquet = getBanquetForTable(table_id, date, formData.shift);
@@ -3291,7 +3331,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={() => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`});
+                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`, duration_minutes: defaultDurationForShift(Shift.LUNCH)});
                                             }}
                                             className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
                                         >
@@ -3301,7 +3341,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={() => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`});
+                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`, duration_minutes: defaultDurationForShift(Shift.DINNER)});
                                             }}
                                             className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
                                         >
@@ -3355,6 +3395,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             )}
                                         </select>
                                     </div>
+                                </div>
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)]">Durata (min)</label>
+                                        {(() => {
+                                            const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
+                                            const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
+                                            if (!start) return null;
+                                            const end = new Date(start.getTime() + dur * 60_000);
+                                            const hh = String(end.getHours()).padStart(2, '0');
+                                            const mm = String(end.getMinutes()).padStart(2, '0');
+                                            return (
+                                                <span className="text-[10px] text-[var(--color-fg-muted)] tabular-nums">
+                                                    Tavolo libero alle <span className="font-semibold text-[var(--color-fg)]">{hh}:{mm}</span>
+                                                </span>
+                                            );
+                                        })()}
+                                    </div>
+                                    <select
+                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
+                                        value={formData.duration_minutes ?? defaultDurationForShift(formData.shift)}
+                                        onChange={e => setFormData({ ...formData, duration_minutes: Number(e.target.value) })}
+                                    >
+                                        {[45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 210, 240].map(min => {
+                                            const label = min < 60
+                                                ? `${min} min`
+                                                : min % 60 === 0
+                                                    ? `${min / 60}h`
+                                                    : `${Math.floor(min / 60)}h ${min % 60}`;
+                                            return <option key={min} value={min}>{label}</option>;
+                                        })}
+                                    </select>
                                 </div>
                                 {slotArrivalStats && (
                                     <div>
