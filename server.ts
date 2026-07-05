@@ -6587,6 +6587,72 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 });
 
 // ============================================
+// RESERVATION NOTE PRESETS (quick-notes chips)
+// ============================================
+// GET is authenticated but not permission-gated — every operator that can
+// see the reservation modal needs to render the chip list. PUT is admin-only
+// (settings:full) and replaces the full list in one shot so we don't have to
+// track per-item CRUD/ordering.
+app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT id, label FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+        );
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+    } catch (err) {
+        console.error('Error fetching reservation note presets:', err);
+        res.status(500).json({ error: 'Failed to fetch reservation note presets' });
+    }
+});
+
+app.put('/settings/reservation-notes', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const rawLabels = Array.isArray(body.labels) ? body.labels : null;
+    if (!rawLabels) {
+        return res.status(400).json({ error: 'invalid_body', message: 'labels must be an array of strings' });
+    }
+    const cleaned: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of rawLabels) {
+        if (typeof raw !== 'string') continue;
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        if (trimmed.length > 80) {
+            return res.status(400).json({ error: 'label_too_long', message: `Nota "${trimmed.slice(0, 20)}…" supera 80 caratteri` });
+        }
+        const dedupKey = trimmed.toLowerCase();
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
+        cleaned.push(trimmed);
+    }
+    if (cleaned.length > 30) {
+        return res.status(400).json({ error: 'too_many_labels', message: 'Massimo 30 note.' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM reservation_note_presets');
+        for (let i = 0; i < cleaned.length; i++) {
+            await client.query(
+                `INSERT INTO reservation_note_presets (label, sort_order) VALUES ($1, $2)`,
+                [cleaned[i], (i + 1) * 10]
+            );
+        }
+        await client.query('COMMIT');
+        const result = await queryWithRetry(
+            `SELECT id, label FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+        );
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error updating reservation note presets:', err);
+        res.status(500).json({ error: 'Failed to update reservation note presets' });
+    } finally {
+        client.release();
+    }
+});
+
+// ============================================
 // PUBLIC BOOKING (Google Business link)
 // ============================================
 // Unauthenticated endpoints powering the /prenota mobile page. Two safeguards

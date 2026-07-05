@@ -1270,6 +1270,34 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // RESERVATION NOTE PRESETS
+        // ============================================
+        // Configurable quick-notes list shown as chips in the reservation
+        // modal. Free-form label + explicit sort_order (small integer) so the
+        // operator can drag/reorder in Impostazioni. First-run seed matches the
+        // previous hardcoded set so nothing changes for existing installs.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reservation_note_presets (
+                id         SERIAL PRIMARY KEY,
+                label      VARCHAR(80) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        const existingPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_note_presets;`);
+        if (existingPresetCount.rows[0]?.n === 0) {
+            await client.query(`
+                INSERT INTO reservation_note_presets (label, sort_order) VALUES
+                    ('Seggiolone',       10),
+                    ('Cane',             20),
+                    ('Compleanno',       30),
+                    ('Anniversario',     40),
+                    ('Tavolo tranquillo',50),
+                    ('Vista',            60);
+            `);
+        }
+
+        // ============================================
         // HACCP (controlli giornalieri)
         // ============================================
         // 5 tables mirror the operator's existing paper sheets:

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Star } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers } from '../services/apiService';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
@@ -427,6 +427,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   } | null>(null);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
+  // Fetched from /settings/reservation-notes on mount so admins can edit the
+  // chip list from Impostazioni. Starts empty and gets replaced by the API
+  // payload; the UI renders no chips until fetch resolves.
+  const [quickNotes, setQuickNotes] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
@@ -451,6 +455,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [cardMenuOpenId]);
+
+  // Load configurable quick-notes chips (editable from Impostazioni →
+  // Opzioni prenotazioni). One-shot fetch on mount; failure keeps the list
+  // empty rather than falling back to hardcoded defaults, since the backend
+  // seeds the default set on first migration.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getReservationNotePresets();
+        if (!cancelled) setQuickNotes(rows.map(r => r.label));
+      } catch {
+        // Silent: an empty chip list is a clear "not configured yet" signal.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Split-view state
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
@@ -511,6 +532,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Map-view: assign a free table to an unassigned reservation
   const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
+  // When a table has multiple non-cancelled reservations (double-seating),
+  // clicking the table opens this chooser instead of jumping straight into
+  // one specific reservation's edit view.
+  const [tableChooserModal, setTableChooserModal] = useState<{ table: Table; reservations: Reservation[] } | null>(null);
   // Map-view: list of reservations without an assigned table for the selected date+shift
   const [showUnassignedModal, setShowUnassignedModal] = useState(false);
 
@@ -898,6 +923,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     [tables, tableMerges]
   );
 
+  // For each reservation that shares its table with at least one other booking
+  // in the same date+shift, compute its 1-based turno position and the total
+  // number of turns. Cancelled bookings are ignored (they never happened);
+  // DEPARTED ones stay in the count so the operator still sees who came first.
+  const turnoIndexById = useMemo((): Map<number, { position: number; total: number }> => {
+    const map = new Map<number, { position: number; total: number }>();
+    const groups = new Map<string, Reservation[]>();
+    for (const r of reservations) {
+      if (r.table_id == null) continue;
+      if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      const date = r.reservation_time.split('T')[0];
+      const key = `${r.table_id}|${date}|${r.shift}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(r); else groups.set(key, [r]);
+    }
+    for (const arr of groups.values()) {
+      if (arr.length < 2) continue;
+      arr.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+      arr.forEach((r, i) => map.set(r.id, { position: i + 1, total: arr.length }));
+    }
+    return map;
+  }, [reservations]);
+
   // Filter Logic for Main List
   const activeFilterCount =
     (filterRoomId !== 'ALL' ? 1 : 0) +
@@ -1250,7 +1298,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setSelectedAllergens(existingAllergens);
 
       // Extract quick notes
-      const existingQuickNotes = QUICK_NOTES.filter(note =>
+      const existingQuickNotes = quickNotes.filter(note =>
         res.notes?.toLowerCase().includes(note.toLowerCase())
       );
       setSelectedQuickNotes(existingQuickNotes);
@@ -1295,7 +1343,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setDeleteConfirmModal({show: false, reservationId: null, customerName: ''});
   }
 
-  const QUICK_NOTES = ['Seggiolone', 'Cane', 'Compleanno', 'Anniversario', 'Tavolo tranquillo', 'Vista'];
 
   const handleOpenNew = (opts: { walkIn?: boolean } = {}) => {
       const walkIn = !!opts.walkIn;
@@ -1457,6 +1504,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           r.reservation_status !== ReservationStatus.CANCELLED
       );
   }
+
+  // All non-cancelled, non-departed reservations for a table in the current
+  // date+shift, sorted by time. Used by the Map view to render the multi-turno
+  // badge and open the chooser when the operator clicks a shared table.
+  const getReservationsForTable = (table_id: number): Reservation[] => {
+      const dateOnly = selectedDate.split('T')[0];
+      return reservations
+          .filter(r =>
+              r.table_id === table_id &&
+              r.reservation_time.split('T')[0] === dateOnly &&
+              (selectedShift === 'ALL' || r.shift === selectedShift) &&
+              r.arrival_status !== ArrivalStatus.DEPARTED &&
+              r.reservation_status !== ReservationStatus.CANCELLED
+          )
+          .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+  };
 
   // Returns either a reservation OR a banquet that occupies this table for the
   // currently selected date+shift in the map view. Used by Map view to render
@@ -1720,6 +1783,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const occupier = getOccupierForTable(table.id);
       const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
       const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
+      const allReservations = getReservationsForTable(table.id);
+      const hasMultipleReservations = allReservations.length > 1;
       const isOccupied = !!occupier;
       const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
       const isHidden = hiddenTableIds.has(table.id);
@@ -1758,20 +1823,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const isMapHovered = hoveredMapTableId === table.id;
 
       const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
-      const hoverPillName = reservation
-          ? toTitleCase(reservation.customer_name)
-          : banquet
-              ? banquet.name
-              : null;
-      const showHoverPill = isMapHovered && !!hoverPillName && !isHighlighted && !isHoverMatch;
+      // With double-seating the pill lists each customer on its own line so
+      // the operator sees all turni at a glance, not just the first booking.
+      const hoverPillNames = hasMultipleReservations
+          ? allReservations.map(r => toTitleCase(r.customer_name))
+          : reservation
+              ? [toTitleCase(reservation.customer_name)]
+              : banquet
+                  ? [banquet.name]
+                  : [];
+      const showHoverPill = isMapHovered && hoverPillNames.length > 0 && !isHighlighted && !isHoverMatch;
 
       const tooltipText = isHidden
           ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
-          : reservation
-              ? `Occupato da: ${toTitleCase(reservation.customer_name)} · ${reservation.guests}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''} coperti${reservationTime ? ` · ${reservationTime}` : ''}`
-              : banquet
-                  ? `Banchetto: ${banquet.name}`
-                  : 'Libero — clicca per assegnare una prenotazione';
+          : hasMultipleReservations
+              ? `Doppio turno · ${allReservations.map(r => {
+                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                    return `${toTitleCase(r.customer_name)}${t ? ` (${t})` : ''}`;
+                }).join(' · ')}`
+              : reservation
+                  ? `Occupato da: ${toTitleCase(reservation.customer_name)} · ${reservation.guests}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''} coperti${reservationTime ? ` · ${reservationTime}` : ''}`
+                  : banquet
+                      ? `Banchetto: ${banquet.name}`
+                      : 'Libero — clicca per assegnare una prenotazione';
 
       const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
 
@@ -1798,7 +1872,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     e.preventDefault();
                     return;
                 }
-                if (reservation) {
+                if (hasMultipleReservations) {
+                    setTableChooserModal({ table, reservations: allReservations });
+                } else if (reservation) {
                     handleEditClick(reservation);
                 } else if (banquet) {
                     // Banquet-occupied tables are not assignable from this view.
@@ -1827,6 +1903,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <EyeOff size={8} />
                 </div>
             )}
+            {hasMultipleReservations && (
+                <div
+                    className="absolute bg-indigo-600 text-[#ffffff] text-[13px] font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-[#ffffff] pointer-events-none tabular"
+                    style={{ top: -10, right: -10 }}
+                    aria-label={`${allReservations.length} prenotazioni sullo stesso tavolo`}
+                >
+                    ×{allReservations.length}
+                </div>
+            )}
             {/* Capacity chip (seat + N) under the table. Always shown — the
                 floor plan is now a status canvas, so details live in the
                 tooltip / detail drawer rather than overlaying the glyph. */}
@@ -1837,14 +1922,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Armchair size={22} style={{ color: 'var(--tg-covers)' }} className="flex-shrink-0" />
                 <span style={{ color: 'var(--tg-covers)' }}>{table.seats}</span>
             </div>
+            {hasMultipleReservations && (
+                <div
+                    className="absolute left-1/2 -translate-x-1/2 pointer-events-none flex flex-col items-center gap-1"
+                    style={{ top: captionTopPx + 30 }}
+                >
+                    {allReservations.map((r, i) => {
+                        const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                        return (
+                            <span
+                                key={r.id}
+                                className="text-[14px] font-semibold leading-tight px-2.5 py-1 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-800 dark:bg-indigo-500/20 dark:border-indigo-500/40 dark:text-indigo-200 whitespace-nowrap shadow-sm"
+                            >
+                                <span className="opacity-70 tabular mr-1">{i + 1}°</span>
+                                {toTitleCase(r.customer_name).split(' ')[0]}
+                                {t && <span className="opacity-70 ml-1.5 tabular">{t}</span>}
+                            </span>
+                        );
+                    })}
+                </div>
+            )}
             {showHoverPill && (() => {
                 // Counter-scale so the pill stays at a constant screen size
                 // even when the canvas is zoomed out (dense rooms like Veranda
                 // render at scale ~0.4, which made the pill unreadable).
                 const invScale = Math.min(2.2, Math.max(1, 1 / Math.max(0.0001, mapScale)));
+                const isMulti = hoverPillNames.length > 1;
                 return (
                     <div
-                        className="absolute left-1/2 px-2 py-0.5 rounded-full border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--shadow-md)]"
+                        className={`absolute left-1/2 ${isMulti ? 'px-2 py-1 rounded-lg' : 'px-2 py-0.5 rounded-full'} border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--shadow-md)]`}
                         style={{
                             top: -8,
                             background: accentVar || 'var(--color-surface)',
@@ -1854,7 +1960,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             transformOrigin: 'bottom center',
                         }}
                     >
-                        {hoverPillName}
+                        {isMulti ? (
+                            <div className="flex flex-col items-center leading-tight gap-0.5">
+                                {allReservations.map((r, i) => {
+                                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                                    return (
+                                        <span key={r.id} className="text-[11px]">
+                                            <span className="opacity-70 tabular mr-1">{i + 1}°</span>
+                                            {toTitleCase(r.customer_name)}
+                                            {t && <span className="opacity-70 ml-1 tabular">· {t}</span>}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            hoverPillNames[0]
+                        )}
                     </div>
                 );
             })()}
@@ -1941,6 +2062,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <span className="text-xs text-[var(--color-fg)] tabular">
               {formatTime(res.reservation_time)}
             </span>
+            {(() => {
+              const turno = turnoIndexById.get(res.id);
+              if (!turno) return null;
+              return (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0"
+                  title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
+                >
+                  {turno.position}° turno
+                </span>
+              );
+            })()}
             <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
               <Info className="h-5 w-5" />
             </button>
@@ -2104,6 +2237,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
                 )}
                 {toTitleCase(res.customer_name)}
+                {(() => {
+                  const turno = turnoIndexById.get(res.id);
+                  if (!turno) return null;
+                  return (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-semibold uppercase tracking-wide"
+                      title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
+                    >
+                      {turno.position}° turno
+                    </span>
+                  );
+                })()}
               </h3>
               <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
@@ -3740,7 +3885,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="p-3 pt-0 space-y-4 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
                                             {/* Quick Notes */}
                                             <div className="grid grid-cols-2 gap-2 pt-3">
-                                                {QUICK_NOTES.map(note => {
+                                                {quickNotes.map(note => {
                                                     const isSelected = selectedQuickNotes.includes(note);
                                                     return (
                                                         <button
@@ -4520,6 +4665,93 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     Chiudi
                   </button>
                 </div>
+              </div>
+            </div>
+          );
+      })()}
+
+      {/* Reservation chooser: click on a shared table (double-seating). */}
+      {tableChooserModal && (() => {
+          const { table, reservations: rows } = tableChooserModal;
+          const dateOnly = selectedDate.split('T')[0];
+          const dateLabel = new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
+          return (
+            <div
+                className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4"
+                onClick={() => setTableChooserModal(null)}
+            >
+              <div
+                  className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
+                  onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                  <div className="min-w-0">
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
+                      Tavolo {table.name} · {rows.length} turni
+                    </h3>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                      {dateLabel} — scegli quale prenotazione aprire
+                    </p>
+                  </div>
+                  <button
+                      onClick={() => setTableChooserModal(null)}
+                      className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <ul className="flex-1 overflow-y-auto divide-y divide-[var(--color-line)]">
+                  {rows.map((r, i) => {
+                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                    const duration = resolveDurationMinutes(r);
+                    const start = parseLocalDate(r.reservation_time);
+                    const endLabel = start ? (() => {
+                      const e = new Date(start.getTime() + duration * 60_000);
+                      return `${String(e.getHours()).padStart(2, '0')}:${String(e.getMinutes()).padStart(2, '0')}`;
+                    })() : '';
+                    return (
+                      <li key={r.id}>
+                        <button
+                            onClick={() => {
+                              setTableChooserModal(null);
+                              handleEditClick(r);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3"
+                        >
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 text-xs font-bold flex-shrink-0">
+                            {i + 1}°
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              {r.customer_is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />}
+                              <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                              <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {t}{endLabel ? ` → ${endLabel}` : ''}</span>
+                              <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {canEdit && (
+                  <div className="p-3 border-t border-[var(--color-line)]">
+                    <button
+                        onClick={() => {
+                          setTableChooserModal(null);
+                          setAssignTableModal(table);
+                        }}
+                        className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                    >
+                      Aggiungi un altro turno
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );

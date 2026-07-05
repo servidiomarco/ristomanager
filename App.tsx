@@ -20,6 +20,7 @@ import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
+import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { useSocket } from './hooks/useSocket';
@@ -1536,6 +1537,14 @@ const App: React.FC = () => {
               <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Canali di prenotazione</h3>
               <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
                 <FeatureTogglesManager showToast={addToast} />
+              </div>
+            </div>
+
+            {/* Opzioni prenotazioni — customizable quick-notes list surfaced as chips in the reservation modal */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Opzioni prenotazioni</h3>
+              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                <ReservationNotesManager showToast={addToast} />
               </div>
             </div>
 
