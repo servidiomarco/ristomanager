@@ -593,6 +593,7 @@ export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promis
 export interface ReservationNotePreset {
   id: number;
   label: string;
+  icon?: string | null;
 }
 
 export const getReservationNotePresets = async (): Promise<ReservationNotePreset[]> => {
@@ -601,10 +602,12 @@ export const getReservationNotePresets = async (): Promise<ReservationNotePreset
   });
 };
 
-export const updateReservationNotePresets = async (labels: string[]): Promise<ReservationNotePreset[]> => {
+export const updateReservationNotePresets = async (
+  items: Array<{ label: string; icon?: string | null }>,
+): Promise<ReservationNotePreset[]> => {
   return apiRequest<ReservationNotePreset[]>(`${API_URL}/settings/reservation-notes`, {
     method: 'PUT',
     headers: getHeaders(),
-    body: JSON.stringify({ labels }),
+    body: JSON.stringify({ items }),
   });
 };

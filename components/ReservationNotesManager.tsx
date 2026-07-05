@@ -1,17 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Loader2, Save, GripVertical, StickyNote } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, GripVertical, StickyNote, Smile, X } from 'lucide-react';
 import {
     getReservationNotePresets,
     updateReservationNotePresets,
     ReservationNotePreset,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import {
+    RESERVATION_NOTE_ICONS,
+    RESERVATION_NOTE_ICON_KEYS,
+    RESERVATION_NOTE_ICON_LABELS,
+    getReservationNoteIcon,
+} from './reservationNoteIcons';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
-type Draft = { key: string; label: string; existingId?: number };
+type Draft = { key: string; label: string; icon: string | null; existingId?: number };
 
 const MAX_LABELS = 30;
 const MAX_LABEL_LENGTH = 80;
@@ -24,10 +30,12 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
     const canEdit = hasPermission('settings:full');
 
     const [drafts, setDrafts] = useState<Draft[]>([]);
-    const [initial, setInitial] = useState<string[]>([]);
+    const [initial, setInitial] = useState<Draft[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [newLabel, setNewLabel] = useState('');
+    const [newIcon, setNewIcon] = useState<string | null>(null);
+    const [iconPickerFor, setIconPickerFor] = useState<string | 'new' | null>(null);
     const dragIndexRef = useRef<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
@@ -37,8 +45,9 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
             try {
                 const data = await getReservationNotePresets();
                 if (cancelled) return;
-                setDrafts(data.map(d => ({ key: makeKey(), label: d.label, existingId: d.id })));
-                setInitial(data.map(d => d.label));
+                const rows = data.map(d => ({ key: makeKey(), label: d.label, icon: d.icon || null, existingId: d.id }));
+                setDrafts(rows);
+                setInitial(rows.map(r => ({ ...r, key: r.key })));
             } catch (err: any) {
                 if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle note', 'error');
             } finally {
@@ -48,9 +57,14 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
         return () => { cancelled = true; };
     }, [showToast]);
 
-    const currentLabels = drafts.map(d => d.label.trim()).filter(Boolean);
-    const isDirty = currentLabels.length !== initial.length
-        || currentLabels.some((l, i) => l !== initial[i]);
+    const isDirty = (() => {
+        if (drafts.length !== initial.length) return true;
+        for (let i = 0; i < drafts.length; i++) {
+            if (drafts[i].label.trim() !== initial[i].label.trim()) return true;
+            if ((drafts[i].icon || null) !== (initial[i].icon || null)) return true;
+        }
+        return false;
+    })();
 
     const addLabel = () => {
         const trimmed = newLabel.trim();
@@ -68,16 +82,21 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
             showToast('Nota già presente', 'error');
             return;
         }
-        setDrafts(prev => [...prev, { key: makeKey(), label: trimmed }]);
+        setDrafts(prev => [...prev, { key: makeKey(), label: trimmed, icon: newIcon }]);
         setNewLabel('');
+        setNewIcon(null);
     };
 
     const removeAt = (idx: number) => {
         setDrafts(prev => prev.filter((_, i) => i !== idx));
     };
 
-    const updateAt = (idx: number, value: string) => {
+    const updateLabelAt = (idx: number, value: string) => {
         setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, label: value } : d));
+    };
+
+    const updateIconAt = (idx: number, icon: string | null) => {
+        setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, icon } : d));
     };
 
     const handleDragStart = (idx: number) => {
@@ -113,16 +132,85 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
         if (!canEdit || saving) return;
         setSaving(true);
         try {
-            const labels = drafts.map(d => d.label.trim()).filter(Boolean);
-            const updated = await updateReservationNotePresets(labels);
-            setDrafts(updated.map(d => ({ key: makeKey(), label: d.label, existingId: d.id })));
-            setInitial(updated.map(d => d.label));
+            const items = drafts
+                .map(d => ({ label: d.label.trim(), icon: d.icon || null }))
+                .filter(d => d.label.length > 0);
+            const updated = await updateReservationNotePresets(items);
+            const rows = updated.map(d => ({ key: makeKey(), label: d.label, icon: d.icon || null, existingId: d.id }));
+            setDrafts(rows);
+            setInitial(rows.map(r => ({ ...r, key: r.key })));
             showToast('Note aggiornate', 'success');
         } catch (err: any) {
             showToast(err?.message || 'Errore aggiornamento note', 'error');
         } finally {
             setSaving(false);
         }
+    };
+
+    const renderIconButton = (
+        currentIcon: string | null,
+        pickerKey: string,
+        onPick: (icon: string | null) => void,
+        disabled: boolean,
+    ) => {
+        const Icon = getReservationNoteIcon(currentIcon);
+        const isOpen = iconPickerFor === pickerKey;
+        return (
+            <div className="relative flex-shrink-0">
+                <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setIconPickerFor(isOpen ? null : pickerKey)}
+                    className={`w-9 h-9 rounded-md border flex items-center justify-center transition-colors ${
+                        currentIcon
+                            ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40'
+                            : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={currentIcon ? RESERVATION_NOTE_ICON_LABELS[currentIcon] || currentIcon : 'Scegli icona'}
+                    aria-label="Scegli icona"
+                >
+                    {Icon ? <Icon className="w-4 h-4" /> : <Smile className="w-4 h-4" />}
+                </button>
+                {isOpen && (
+                    <>
+                        <div className="fixed inset-0 z-[70]" onClick={() => setIconPickerFor(null)} />
+                        <div className="absolute right-0 top-full mt-1 z-[71] w-64 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-overlay)] p-2">
+                            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-[var(--color-line)]">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">Icona</span>
+                                <button
+                                    type="button"
+                                    onClick={() => { onPick(null); setIconPickerFor(null); }}
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-500 hover:text-rose-600"
+                                >
+                                    <X className="w-3 h-3" /> Nessuna
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-6 gap-1 max-h-56 overflow-y-auto">
+                                {RESERVATION_NOTE_ICON_KEYS.map(key => {
+                                    const Ic = RESERVATION_NOTE_ICONS[key];
+                                    const selected = currentIcon === key;
+                                    return (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            onClick={() => { onPick(key); setIconPickerFor(null); }}
+                                            className={`w-9 h-9 rounded-md flex items-center justify-center transition-colors ${
+                                                selected
+                                                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200'
+                                                    : 'text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                            }`}
+                                            title={RESERVATION_NOTE_ICON_LABELS[key] || key}
+                                        >
+                                            <Ic className="w-4 h-4" />
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        );
     };
 
     if (loading) {
@@ -142,7 +230,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                 <div className="min-w-0 flex-1">
                     <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Note rapide prenotazione</h4>
                     <p className="text-[13px] text-[var(--color-fg-muted)]">
-                        Chip suggeriti nel modal di prenotazione (es. Seggiolone, Compleanno). Trascina per riordinare.
+                        Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare.
                     </p>
                 </div>
             </div>
@@ -164,12 +252,13 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                             }`}
                         >
                             <GripVertical className={`w-4 h-4 flex-shrink-0 ${canEdit ? 'text-[var(--color-fg-muted)] cursor-grab active:cursor-grabbing' : 'text-[var(--color-fg-subtle)]'}`} />
+                            {renderIconButton(d.icon, d.key, (icon) => updateIconAt(i, icon), !canEdit)}
                             <input
                                 type="text"
                                 value={d.label}
                                 disabled={!canEdit}
                                 maxLength={MAX_LABEL_LENGTH}
-                                onChange={(e) => updateAt(i, e.target.value)}
+                                onChange={(e) => updateLabelAt(i, e.target.value)}
                                 className="flex-1 bg-transparent text-[14px] text-[var(--color-fg)] focus:outline-none disabled:opacity-70"
                             />
                             {canEdit && (
@@ -190,6 +279,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
 
             {canEdit && (
                 <div className="flex items-center gap-2">
+                    {renderIconButton(newIcon, 'new', setNewIcon, false)}
                     <input
                         type="text"
                         value={newLabel}

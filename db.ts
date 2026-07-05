@@ -1284,16 +1284,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // Optional lucide icon key; NULL means "no icon" and the chip renders
+        // as a plain text pill. Client keeps a whitelist so unknown values
+        // gracefully fall back to no icon.
+        await client.query(`ALTER TABLE reservation_note_presets ADD COLUMN IF NOT EXISTS icon VARCHAR(40);`);
         const existingPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_note_presets;`);
         if (existingPresetCount.rows[0]?.n === 0) {
             await client.query(`
-                INSERT INTO reservation_note_presets (label, sort_order) VALUES
-                    ('Seggiolone',       10),
-                    ('Cane',             20),
-                    ('Compleanno',       30),
-                    ('Anniversario',     40),
-                    ('Tavolo tranquillo',50),
-                    ('Vista',            60);
+                INSERT INTO reservation_note_presets (label, sort_order, icon) VALUES
+                    ('Seggiolone',       10, 'baby'),
+                    ('Cane',             20, 'dog'),
+                    ('Compleanno',       30, 'cake'),
+                    ('Anniversario',     40, 'heart'),
+                    ('Tavolo tranquillo',50, 'volume-x'),
+                    ('Vista',            60, 'mountain');
             `);
         }
 

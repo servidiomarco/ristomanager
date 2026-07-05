@@ -6596,9 +6596,9 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
     try {
         const result = await queryWithRetry(
-            `SELECT id, label FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT id, label, icon FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
         );
-        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label, icon: r.icon || null })));
     } catch (err) {
         console.error('Error fetching reservation note presets:', err);
         res.status(500).json({ error: 'Failed to fetch reservation note presets' });
@@ -6607,15 +6607,22 @@ app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
 
 app.put('/settings/reservation-notes', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
-    const rawLabels = Array.isArray(body.labels) ? body.labels : null;
-    if (!rawLabels) {
-        return res.status(400).json({ error: 'invalid_body', message: 'labels must be an array of strings' });
+    // Accept either the legacy shape { labels: string[] } or the richer
+    // { items: { label, icon? }[] }. The legacy branch keeps older clients
+    // working while frontends roll out the icon picker.
+    const rawItems: Array<{ label: any; icon?: any }> | null = Array.isArray(body.items)
+        ? body.items
+        : Array.isArray(body.labels)
+            ? body.labels.map((l: any) => ({ label: l }))
+            : null;
+    if (!rawItems) {
+        return res.status(400).json({ error: 'invalid_body', message: 'items or labels required' });
     }
-    const cleaned: string[] = [];
+    const cleaned: Array<{ label: string; icon: string | null }> = [];
     const seen = new Set<string>();
-    for (const raw of rawLabels) {
-        if (typeof raw !== 'string') continue;
-        const trimmed = raw.trim();
+    for (const raw of rawItems) {
+        if (!raw || typeof raw.label !== 'string') continue;
+        const trimmed = raw.label.trim();
         if (!trimmed) continue;
         if (trimmed.length > 80) {
             return res.status(400).json({ error: 'label_too_long', message: `Nota "${trimmed.slice(0, 20)}…" supera 80 caratteri` });
@@ -6623,7 +6630,17 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
         const dedupKey = trimmed.toLowerCase();
         if (seen.has(dedupKey)) continue;
         seen.add(dedupKey);
-        cleaned.push(trimmed);
+        // Icon is free-form (validated on the client against the whitelist);
+        // we just clamp length and reject non-strings.
+        let icon: string | null = null;
+        if (typeof raw.icon === 'string' && raw.icon.trim()) {
+            const t = raw.icon.trim();
+            if (t.length > 40) {
+                return res.status(400).json({ error: 'icon_too_long', message: 'Icona non valida' });
+            }
+            icon = t;
+        }
+        cleaned.push({ label: trimmed, icon });
     }
     if (cleaned.length > 30) {
         return res.status(400).json({ error: 'too_many_labels', message: 'Massimo 30 note.' });
@@ -6634,15 +6651,15 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
         await client.query('DELETE FROM reservation_note_presets');
         for (let i = 0; i < cleaned.length; i++) {
             await client.query(
-                `INSERT INTO reservation_note_presets (label, sort_order) VALUES ($1, $2)`,
-                [cleaned[i], (i + 1) * 10]
+                `INSERT INTO reservation_note_presets (label, sort_order, icon) VALUES ($1, $2, $3)`,
+                [cleaned[i].label, (i + 1) * 10, cleaned[i].icon]
             );
         }
         await client.query('COMMIT');
         const result = await queryWithRetry(
-            `SELECT id, label FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT id, label, icon FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
         );
-        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label, icon: r.icon || null })));
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         console.error('Error updating reservation note presets:', err);

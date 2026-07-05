@@ -4,6 +4,7 @@ import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Roo
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Star } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
+import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
@@ -428,9 +429,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   // Fetched from /settings/reservation-notes on mount so admins can edit the
-  // chip list from Impostazioni. Starts empty and gets replaced by the API
-  // payload; the UI renders no chips until fetch resolves.
-  const [quickNotes, setQuickNotes] = useState<string[]>([]);
+  // chip list from Impostazioni. Each preset carries an optional lucide icon
+  // key that we render both as a chip and next to the customer's name in the
+  // reservation card. Starts empty and gets replaced by the API payload.
+  const [quickNotes, setQuickNotes] = useState<Array<{ label: string; icon: string | null }>>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
@@ -465,7 +467,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     (async () => {
       try {
         const rows = await getReservationNotePresets();
-        if (!cancelled) setQuickNotes(rows.map(r => r.label));
+        if (!cancelled) setQuickNotes(rows.map(r => ({ label: r.label, icon: r.icon || null })));
       } catch {
         // Silent: an empty chip list is a clear "not configured yet" signal.
       }
@@ -1298,9 +1300,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setSelectedAllergens(existingAllergens);
 
       // Extract quick notes
-      const existingQuickNotes = quickNotes.filter(note =>
-        res.notes?.toLowerCase().includes(note.toLowerCase())
-      );
+      const existingQuickNotes = quickNotes
+        .filter(n => res.notes?.toLowerCase().includes(n.label.toLowerCase()))
+        .map(n => n.label);
       setSelectedQuickNotes(existingQuickNotes);
 
       // Clean notes: remove allergens and quick notes parts to avoid duplication
@@ -2037,6 +2039,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
     const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
     const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    // Preset notes whose label appears in res.notes AND that carry an icon.
+    // We render each as a small pill in tier 3 so operators can spot common
+    // requests (seggiolone, cane, compleanno, ...) at a glance.
+    const matchedNoteIcons = res.notes
+      ? quickNotes
+          .filter(n => n.icon && res.notes!.toLowerCase().includes(n.label.toLowerCase()))
+          .map(n => ({ label: n.label, Icon: getReservationNoteIcon(n.icon) }))
+          .filter(m => !!m.Icon)
+      : [];
     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
     const isFlashing = newReservationFlashId === res.id;
     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
@@ -2103,6 +2114,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Tier 3 — attributes: channel · dietary · preferred · note · payment · menu */}
           <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
             {renderChannelIcon(res)}
+            {matchedNoteIcons.map(m => {
+              const Icon = m.Icon!;
+              return (
+                <span
+                  key={m.label}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 flex-shrink-0"
+                  title={m.label}
+                  aria-label={m.label}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+              );
+            })}
             {allergenText && (
               <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
                 <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
@@ -2220,6 +2244,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
     const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
     const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    const matchedNoteIcons = res.notes
+      ? quickNotes
+          .filter(n => n.icon && res.notes!.toLowerCase().includes(n.label.toLowerCase()))
+          .map(n => ({ label: n.label, Icon: getReservationNoteIcon(n.icon) }))
+          .filter(m => !!m.Icon)
+      : [];
 
     return (
       <div className="bg-[var(--color-surface)] border-t border-[var(--color-line)] shadow-[0_-4px_12px_rgba(0,0,0,0.08)] rounded-t-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
@@ -2289,6 +2319,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Armchair className="h-2.5 w-2.5" /> Preferito non disponibile
               </span>
             )}
+            {matchedNoteIcons.map(m => {
+              const Icon = m.Icon!;
+              return (
+                <span
+                  key={m.label}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-medium"
+                >
+                  <Icon className="h-2.5 w-2.5" /> {m.label}
+                </span>
+              );
+            })}
           </div>
 
           {/* Contact info */}
@@ -3886,16 +3927,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             {/* Quick Notes */}
                                             <div className="grid grid-cols-2 gap-2 pt-3">
                                                 {quickNotes.map(note => {
-                                                    const isSelected = selectedQuickNotes.includes(note);
+                                                    const isSelected = selectedQuickNotes.includes(note.label);
+                                                    const NoteIcon = getReservationNoteIcon(note.icon);
                                                     return (
                                                         <button
-                                                            key={note}
+                                                            key={note.label}
                                                             type="button"
                                                             onClick={() => {
                                                                 setSelectedQuickNotes(prev =>
                                                                     isSelected
-                                                                        ? prev.filter(n => n !== note)
-                                                                        : [...prev, note]
+                                                                        ? prev.filter(n => n !== note.label)
+                                                                        : [...prev, note.label]
                                                                 );
                                                             }}
                                                             className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
@@ -3909,7 +3951,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             }`}>
                                                                 {isSelected && <Check className="text-[var(--color-fg-on-brand)] w-2.5 h-2.5" />}
                                                             </div>
-                                                            <span className="text-sm font-medium truncate">{note}</span>
+                                                            {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
+                                                            <span className="text-sm font-medium truncate">{note.label}</span>
                                                         </button>
                                                     );
                                                 })}
