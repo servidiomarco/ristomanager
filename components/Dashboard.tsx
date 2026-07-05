@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, COMMON_ALLERGENS } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
-import { getLowStockInventory, LowStockItem } from '../services/apiService';
+import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -192,6 +192,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const [staffShifts, setStaffShifts] = useState<StaffShift[]>([]);
   const [staffTimeOffs, setStaffTimeOffs] = useState<StaffTimeOff[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
+
+  // Configurable allergen list (managed in Impostazioni → Opzioni
+  // prenotazioni). Used to detect which words in a reservation's notes count
+  // as intolerances for the "Intolleranze del giorno" widget. One-shot fetch;
+  // empty on failure so the widget just shows no allergens rather than
+  // pretending everything is an allergen.
+  const [allergenPresets, setAllergenPresets] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getReservationAllergenPresets();
+        if (!cancelled) setAllergenPresets(rows.map(r => r.label));
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const fetchLowStock = useCallback(async () => {
     try {
@@ -486,12 +504,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const table = r.table_id ? tables.find(t => t.id === r.table_id) : undefined;
         const room = table ? rooms.find(rm => rm.id === table.room_id) : undefined;
         const noteLower = (r.notes || '').toLowerCase();
-        const allergens = COMMON_ALLERGENS.filter(a => noteLower.includes(a.toLowerCase()));
+        const allergens = allergenPresets.filter(a => noteLower.includes(a.toLowerCase()));
         return { reservation: r, table, room, allergens };
       });
     items.sort((a, b) => a.reservation.reservation_time.localeCompare(b.reservation.reservation_time));
     return items;
-  }, [selectedDayReservations, tables, rooms, globalShiftFilter]);
+  }, [selectedDayReservations, tables, rooms, globalShiftFilter, allergenPresets]);
 
   // Time slot and room affluence data
   const timeSlotAffluence = useMemo(() => {

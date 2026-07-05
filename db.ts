@@ -1302,6 +1302,42 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
 
         // ============================================
+        // RESERVATION ALLERGEN PRESETS
+        // ============================================
+        // Configurable intolleranze chips shown in the reservation modal.
+        // Same shape as note presets but no icon — allergens render as a
+        // uniform amber pill on the card, so per-item icons would add no
+        // signal. Seed matches the previous hardcoded COMMON_ALLERGENS list.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reservation_allergen_presets (
+                id         SERIAL PRIMARY KEY,
+                label      VARCHAR(80) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        const existingAllergenPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_allergen_presets;`);
+        if (existingAllergenPresetCount.rows[0]?.n === 0) {
+            await client.query(`
+                INSERT INTO reservation_allergen_presets (label, sort_order) VALUES
+                    ('Glutine',          10),
+                    ('Crostacei',        20),
+                    ('Uova',             30),
+                    ('Pesce',            40),
+                    ('Arachidi',         50),
+                    ('Soia',             60),
+                    ('Latte',            70),
+                    ('Frutta a guscio',  80),
+                    ('Sedano',           90),
+                    ('Senape',          100),
+                    ('Sesamo',          110),
+                    ('Solfiti',         120),
+                    ('Lupini',          130),
+                    ('Molluschi',       140);
+            `);
+        }
+
+        // ============================================
         // HACCP (controlli giornalieri)
         // ============================================
         // 5 tables mirror the operator's existing paper sheets:

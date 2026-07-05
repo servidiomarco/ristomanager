@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, COMMON_ALLERGENS, Customer } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Star } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets } from '../services/apiService';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -433,6 +433,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // key that we render both as a chip and next to the customer's name in the
   // reservation card. Starts empty and gets replaced by the API payload.
   const [quickNotes, setQuickNotes] = useState<Array<{ label: string; icon: string | null }>>([]);
+  // Fetched from /settings/reservation-allergens on mount, same rationale as
+  // quickNotes: admins edit the list in Impostazioni → Opzioni prenotazioni.
+  const [allergenPresets, setAllergenPresets] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
@@ -470,6 +473,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         if (!cancelled) setQuickNotes(rows.map(r => ({ label: r.label, icon: r.icon || null })));
       } catch {
         // Silent: an empty chip list is a clear "not configured yet" signal.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getReservationAllergenPresets();
+        if (!cancelled) setAllergenPresets(rows.map(r => r.label));
+      } catch {
+        // Silent — same fallback story as quickNotes.
       }
     })();
     return () => { cancelled = true; };
@@ -1294,7 +1310,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setFormData(formattedReservation);
 
       // Extract allergens from notes
-      const existingAllergens = COMMON_ALLERGENS.filter(allergen =>
+      const existingAllergens = allergenPresets.filter(allergen =>
         res.notes?.toLowerCase().includes(allergen.toLowerCase())
       );
       setSelectedAllergens(existingAllergens);
@@ -3851,7 +3867,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     {showAllergensSection && (
                                         <div className="p-3 pt-0 space-y-3 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
                                             <div className="grid grid-cols-2 gap-2 pt-3">
-                                                {COMMON_ALLERGENS.slice(0, 8).map(allergen => {
+                                                {allergenPresets.map(allergen => {
                                                     const isSelected = selectedAllergens.includes(allergen);
                                                     return (
                                                         <button

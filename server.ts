@@ -6605,6 +6605,70 @@ app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
     }
 });
 
+// Same pattern as reservation-notes but without an icon column. Kept as two
+// separate endpoints (rather than a generic /settings/presets/:kind) so the
+// permission surface and payload shape stay explicit — allergens have their
+// own semantics (uniform amber pill on the card) and shouldn't accidentally
+// grow icon support just because the notes endpoint does.
+app.get('/settings/reservation-allergens', authenticate, async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT id, label FROM reservation_allergen_presets ORDER BY sort_order ASC, id ASC`
+        );
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+    } catch (err) {
+        console.error('Error fetching reservation allergen presets:', err);
+        res.status(500).json({ error: 'Failed to fetch reservation allergen presets' });
+    }
+});
+
+app.put('/settings/reservation-allergens', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const rawLabels = Array.isArray(body.labels) ? body.labels : null;
+    if (!rawLabels) {
+        return res.status(400).json({ error: 'invalid_body', message: 'labels must be an array of strings' });
+    }
+    const cleaned: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of rawLabels) {
+        if (typeof raw !== 'string') continue;
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        if (trimmed.length > 80) {
+            return res.status(400).json({ error: 'label_too_long', message: `Intolleranza "${trimmed.slice(0, 20)}…" supera 80 caratteri` });
+        }
+        const dedupKey = trimmed.toLowerCase();
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
+        cleaned.push(trimmed);
+    }
+    if (cleaned.length > 30) {
+        return res.status(400).json({ error: 'too_many_labels', message: 'Massimo 30 intolleranze.' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM reservation_allergen_presets');
+        for (let i = 0; i < cleaned.length; i++) {
+            await client.query(
+                `INSERT INTO reservation_allergen_presets (label, sort_order) VALUES ($1, $2)`,
+                [cleaned[i], (i + 1) * 10]
+            );
+        }
+        await client.query('COMMIT');
+        const result = await queryWithRetry(
+            `SELECT id, label FROM reservation_allergen_presets ORDER BY sort_order ASC, id ASC`
+        );
+        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error updating reservation allergen presets:', err);
+        res.status(500).json({ error: 'Failed to update reservation allergen presets' });
+    } finally {
+        client.release();
+    }
+});
+
 app.put('/settings/reservation-notes', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
     // Accept either the legacy shape { labels: string[] } or the richer

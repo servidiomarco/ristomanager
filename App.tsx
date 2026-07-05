@@ -21,6 +21,7 @@ import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
+import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { useSocket } from './hooks/useSocket';
@@ -1540,11 +1541,14 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Opzioni prenotazioni — customizable quick-notes list surfaced as chips in the reservation modal */}
+            {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}
             <div className="mb-8">
               <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Opzioni prenotazioni</h3>
-              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 space-y-6">
                 <ReservationNotesManager showToast={addToast} />
+                <div className="border-t border-[var(--color-line)] pt-6">
+                  <ReservationAllergensManager showToast={addToast} />
+                </div>
               </div>
             </div>
 

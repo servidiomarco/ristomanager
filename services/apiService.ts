@@ -611,3 +611,24 @@ export const updateReservationNotePresets = async (
     body: JSON.stringify({ items }),
   });
 };
+
+export interface ReservationAllergenPreset {
+  id: number;
+  label: string;
+}
+
+export const getReservationAllergenPresets = async (): Promise<ReservationAllergenPreset[]> => {
+  return apiRequest<ReservationAllergenPreset[]>(`${API_URL}/settings/reservation-allergens`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateReservationAllergenPresets = async (
+  labels: string[],
+): Promise<ReservationAllergenPreset[]> => {
+  return apiRequest<ReservationAllergenPreset[]>(`${API_URL}/settings/reservation-allergens`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ labels }),
+  });
+};
