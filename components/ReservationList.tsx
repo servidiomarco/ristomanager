@@ -696,6 +696,44 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     ? formData.shift
     : (selectedShift !== 'ALL' ? selectedShift : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER));
 
+  // Arrival heat-map for the reservation form's date+shift. One entry per
+  // 30-min slot, summing covers across rooms; excludes the reservation being
+  // edited plus no-shows/cancelled so the host sees expected arrivals only.
+  // Thresholds scale with total dining-room seats so the coloring adapts to
+  // restaurants of different sizes; fall back to fixed numbers if tables
+  // haven't loaded yet.
+  const slotArrivalStats = useMemo(() => {
+    if (!formData.reservation_time || !formData.shift) return null;
+    const date = formData.reservation_time.split('T')[0];
+    const slots = formData.shift === Shift.LUNCH
+      ? ['13:00', '13:30', '14:00']
+      : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
+    const totals = new Map<string, number>(slots.map(s => [s, 0]));
+    for (const r of reservations) {
+      if (r.id === (formData as Reservation).id) continue;
+      if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      if (r.reservation_status === ReservationStatus.NO_SHOW) continue;
+      if (r.shift !== formData.shift) continue;
+      if (!r.reservation_time?.startsWith(date)) continue;
+      const hhmm = r.reservation_time.split('T')[1]?.substring(0, 5);
+      if (hhmm && totals.has(hhmm)) {
+        totals.set(hhmm, (totals.get(hhmm) || 0) + ((r.guests || 0) + (r.children || 0)));
+      }
+    }
+    const totalSeats = tables.reduce((sum, t) => sum + (t.seats || 0), 0);
+    const lowMax = totalSeats > 0 ? Math.max(4, Math.round(totalSeats * 0.15)) : 6;
+    const highMin = totalSeats > 0 ? Math.max(lowMax + 1, Math.round(totalSeats * 0.30)) : 15;
+    return slots.map(time => {
+      const guests = totals.get(time) || 0;
+      let level: 'empty' | 'low' | 'medium' | 'high';
+      if (guests === 0) level = 'empty';
+      else if (guests <= lowMax) level = 'low';
+      else if (guests < highMin) level = 'medium';
+      else level = 'high';
+      return { time, guests, level };
+    });
+  }, [reservations, tables, formData.reservation_time, formData.shift, (formData as Reservation).id]);
+
   // Refresh merges from the server. Used after local merge/split actions so
   // the originating client updates immediately even when the socket is offline.
   const refreshMerges = async (date: string, shift: Shift) => {
@@ -3318,6 +3356,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </select>
                                     </div>
                                 </div>
+                                {slotArrivalStats && (
+                                    <div>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <label className="block text-xs font-medium text-[var(--color-fg-muted)]">Affluenza arrivi</label>
+                                            <div className="hidden sm:flex items-center gap-2 text-[10px] text-[var(--color-fg-muted)]">
+                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400" /> scarsa</span>
+                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400" /> media</span>
+                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-500" /> alta</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            {slotArrivalStats.map(s => {
+                                                const bg = s.level === 'high' ? 'bg-rose-500'
+                                                    : s.level === 'medium' ? 'bg-amber-400'
+                                                    : s.level === 'low' ? 'bg-emerald-400'
+                                                    : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)]';
+                                                const isSelected = formData.reservation_time?.split('T')[1]?.substring(0, 5) === s.time;
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        key={s.time}
+                                                        onClick={() => {
+                                                            const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                            setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
+                                                        }}
+                                                        className={`flex-1 min-w-0 flex flex-col items-center rounded transition-opacity ${isSelected ? 'ring-2 ring-[var(--color-fg)] ring-offset-1 ring-offset-[var(--color-surface)]' : 'opacity-80 hover:opacity-100'}`}
+                                                        title={`${s.time} — ${s.guests} coperti`}
+                                                    >
+                                                        <div className={`w-full h-3 rounded-sm ${bg}`} />
+                                                        <div className="text-[9px] mt-0.5 text-[var(--color-fg-muted)] tabular-nums leading-tight">{s.time}</div>
+                                                        <div className="text-[10px] font-semibold text-[var(--color-fg)] tabular-nums leading-tight">{s.guests}</div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Customer Name with Voice Input */}
