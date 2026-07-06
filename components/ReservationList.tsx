@@ -184,6 +184,7 @@ const reservationsOverlap = (
 
 type PreflightWarning =
   | { kind: 'futureDate'; isoDate: string; weekday: string; date: string; time: string; daysAhead: number }
+  | { kind: 'pastTime'; isoDate: string; date: string; time: string; minutesAgo: number }
   | { kind: 'sameDayDuplicate'; match: Reservation }
   | { kind: 'nearDuplicate'; match: Reservation; dayDiff: number };
 
@@ -200,8 +201,9 @@ const computePreflightWarnings = (
 
   const target = parseLocalDate(payload.reservation_time);
   if (!target) return warnings;
+  const now = new Date();
   const targetDay = startOfDay(target);
-  const today = startOfDay(new Date());
+  const today = startOfDay(now);
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysAhead = Math.round((targetDay.getTime() - today.getTime()) / msPerDay);
 
@@ -213,6 +215,17 @@ const computePreflightWarnings = (
       date: target.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' }),
       time: target.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
       daysAhead,
+    });
+  } else if (daysAhead === 0 && target.getTime() < now.getTime()) {
+    // Same-day booking whose time has already passed — e.g. it's 20:00 and the
+    // host is entering a 13:00 slot for today. Almost always a mistake (wrong
+    // day, or lunch when they meant dinner), so surface a confirmation.
+    warnings.push({
+      kind: 'pastTime',
+      isoDate: payload.reservation_time,
+      date: target.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long' }),
+      time: target.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+      minutesAgo: Math.round((now.getTime() - target.getTime()) / 60000),
     });
   }
 
@@ -4464,6 +4477,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {/* Preflight modal: future-date confirmation + duplicate-booking warning */}
       {preflightModal && (() => {
         const futureWarning = preflightModal.warnings.find(w => w.kind === 'futureDate') as Extract<PreflightWarning, { kind: 'futureDate' }> | undefined;
+        const pastWarning = preflightModal.warnings.find(w => w.kind === 'pastTime') as Extract<PreflightWarning, { kind: 'pastTime' }> | undefined;
         const sameDayMatches = preflightModal.warnings.filter(w => w.kind === 'sameDayDuplicate') as Extract<PreflightWarning, { kind: 'sameDayDuplicate' }>[];
         const nearMatches = preflightModal.warnings.filter(w => w.kind === 'nearDuplicate') as Extract<PreflightWarning, { kind: 'nearDuplicate' }>[];
         const hasDuplicate = sameDayMatches.length + nearMatches.length > 0;
@@ -4525,6 +4539,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </p>
                     <p className="mt-2 text-sm text-[var(--color-fg-muted)]">
                       Conferma che la data e l'ora siano corrette.
+                    </p>
+                  </div>
+                )}
+
+                {pastWarning && (
+                  <div className="rounded-xl border border-rose-200/70 dark:border-rose-500/30 bg-rose-50/70 dark:bg-rose-500/10 p-4">
+                    <p className="text-xs uppercase tracking-wide font-semibold text-rose-700 dark:text-rose-300">
+                      Orario già passato
+                      {pastWarning.minutesAgo >= 60
+                        ? ` · ${Math.floor(pastWarning.minutesAgo / 60)}h fa`
+                        : ` · ${pastWarning.minutesAgo} min fa`}
+                    </p>
+                    <p className="mt-2 text-[20px] font-semibold text-[var(--color-fg)] capitalize leading-tight">
+                      {pastWarning.date}
+                    </p>
+                    <p className="mt-1 text-[28px] font-bold text-[var(--color-fg)] tabular-nums">
+                      {pastWarning.time}
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--color-fg-muted)]">
+                      Questo orario di oggi è già trascorso. Verifica di non aver sbagliato giorno o turno (es. pranzo invece di cena).
                     </p>
                   </div>
                 )}
