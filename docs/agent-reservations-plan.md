@@ -81,6 +81,43 @@ endpoint URL + secret).
   ElevenLabs (vedi sezione "Setup SIP trunk Vonage → ElevenLabs")
 - **Post-call webhook**: enabled, punta a `/webhook/elevenlabs/post-call`
 
+### Regole prenotazione (da incollare nel system prompt ElevenLabs)
+
+Testo canonico. Aggiornare qui *e* sulla dashboard ElevenLabs quando cambiano
+gli orari o le eccezioni stagionali — la dashboard è la sorgente in produzione,
+questo doc è il riferimento locale per non perdere il testo.
+
+```
+REGOLE PRENOTAZIONE
+
+1) Orario massimo di prenotazione
+   - Default: 22:30 (l'ultima ora prenotabile è le 22:30).
+   - Eccezioni con orario esteso a 23:00:
+       • tutti i giorni del mese di Agosto
+       • Venerdì, Sabato e Domenica del mese di Luglio
+   - Se il cliente chiede un orario oltre il limite del giorno,
+     rispondi cortesemente indicando l'ultimo orario disponibile e
+     proponilo come alternativa. Non chiamare create_reservation con
+     orari oltre il limite.
+
+2) Richieste particolari (es. torte / dolci portati da casa)
+   - Non forniamo un servizio di pasticceria interna.
+   - Il cliente può portare la torta da fuori, purché fornita di
+     scontrino della pasticceria (obbligatorio).
+   - Formula suggerita: "Mi dispiace, non offriamo il servizio di
+     pasticceria, ma potete tranquillamente portare la torta da fuori:
+     l'unica cosa che vi chiediamo è di portare anche lo scontrino
+     della pasticceria."
+
+3) Menu
+   - Il menu è alla carta ed è visibile sulla nostra pagina Instagram.
+   - Eccezione: il 15 Agosto il menu è fisso (comunicare al cliente
+     che quel giorno non è alla carta).
+   - Se il cliente chiede il menu, indirizzalo alla pagina Instagram
+     del ristorante; se prenota per il 15 Agosto, anticipa che quel
+     giorno il menu è fisso.
+```
+
 ## Sicurezza webhook
 
 ElevenLabs firma il body con HMAC-SHA256 (header `ElevenLabs-Signature`, formato
