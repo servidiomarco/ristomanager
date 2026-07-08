@@ -68,6 +68,23 @@ const ITALIAN_MONTHS_LOOKUP: Record<string, number> = {
     dicembre: 12, dic: 12,
 };
 
+// weekday index matches Date#getUTCDay(): 0=Sunday, 6=Saturday.
+const ITALIAN_WEEKDAY_LOOKUP: Record<string, number> = {
+    domenica: 0,
+    lunedi: 1, 'lunedì': 1,
+    martedi: 2, 'martedì': 2,
+    mercoledi: 3, 'mercoledì': 3,
+    giovedi: 4, 'giovedì': 4,
+    venerdi: 5, 'venerdì': 5,
+    sabato: 6,
+};
+
+const ITALIAN_WEEKDAY_NAMES = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
+const ITALIAN_MONTH_NAMES = [
+    'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+    'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
+];
+
 function toIsoDate(y: number, mo: number, d: number): string | null {
     if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
@@ -75,6 +92,39 @@ function toIsoDate(y: number, mo: number, d: number): string | null {
     const probe = new Date(Date.UTC(y, mo - 1, d));
     if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null;
     return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// Today in Europe/Rome (server may run in UTC on Railway). Returned as a
+// UTC-anchored Date at 00:00Z so arithmetic on it stays trivial.
+function getRomeTodayUtc(): Date {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Rome',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find(p => p.type === 'year')!.value;
+    const m = parts.find(p => p.type === 'month')!.value;
+    const d = parts.find(p => p.type === 'day')!.value;
+    return new Date(`${y}-${m}-${d}T00:00:00Z`);
+}
+
+function utcDateToIso(d: Date): string {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Italian day-name + day-of-month readback, e.g. "venerdì 10 luglio".
+ * The agent reads this string verbatim so we never rely on the LLM to
+ * compute the weekday from a date — that's the class of error where it
+ * confidently says "venerdì 11 luglio" when Friday is actually the 10th.
+ */
+export function formatItalianDateReadback(iso: string): string {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return iso;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    const date = new Date(Date.UTC(y, mo - 1, d));
+    const weekday = ITALIAN_WEEKDAY_NAMES[date.getUTCDay()];
+    const month = ITALIAN_MONTH_NAMES[mo - 1];
+    return `${weekday} ${d} ${month}`;
 }
 
 export function parseFlexibleDate(input: unknown): string | null {
@@ -105,6 +155,43 @@ export function parseFlexibleDate(input: unknown): string | null {
         const month = ITALIAN_MONTHS_LOOKUP[m[2]];
         const year = m[3] ? +m[3] : new Date().getFullYear();
         return toIsoDate(year, month, day);
+    }
+
+    // Relative Italian phrases: "oggi" / "stasera" / "domani" / "dopodomani" /
+    // "venerdì" / "venerdì prossimo" / "sabato che viene".
+    // The agent is instructed to pass these verbatim instead of doing the
+    // date math itself — LLMs are unreliable at weekday↔date arithmetic.
+    const lower = s.toLowerCase();
+    const today = getRomeTodayUtc();
+
+    if (/\bdopodomani\b/.test(lower)) {
+        const d = new Date(today);
+        d.setUTCDate(d.getUTCDate() + 2);
+        return utcDateToIso(d);
+    }
+    if (/\bdomani\b/.test(lower)) {
+        const d = new Date(today);
+        d.setUTCDate(d.getUTCDate() + 1);
+        return utcDateToIso(d);
+    }
+    if (/\b(oggi|stasera|stanotte|questa\s+sera|questa\s+notte)\b/.test(lower)) {
+        return utcDateToIso(today);
+    }
+
+    // Bare weekday, optionally with "prossimo" / "che viene" to force the
+    // *following* week when today matches the requested weekday.
+    for (const word of Object.keys(ITALIAN_WEEKDAY_LOOKUP)) {
+        const wRe = new RegExp(`\\b${word}\\b`);
+        if (wRe.test(lower)) {
+            const target = ITALIAN_WEEKDAY_LOOKUP[word];
+            const forceNext = /\bprossim[oa]\b|\bche\s+viene\b/.test(lower);
+            const currentDow = today.getUTCDay();
+            let diff = (target - currentDow + 7) % 7;
+            if (diff === 0 && forceNext) diff = 7;
+            const d = new Date(today);
+            d.setUTCDate(d.getUTCDate() + diff);
+            return utcDateToIso(d);
+        }
     }
 
     return null;

@@ -32,6 +32,7 @@ import {
     normalizeItalianPhone,
     parseFlexibleDate,
     parseFlexibleTime,
+    formatItalianDateReadback,
 } from './services/elevenlabsService.js';
 import { toTitleCase } from './utils/text.js';
 import {
@@ -299,19 +300,37 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
         : undefined;
 
+    // NOTE: user-actionable validation errors (bad date/time/shift/guests) are
+    // returned as HTTP 200 with `available:false` and a human-readable
+    // `message`. ElevenLabs does not surface HTTP 4xx response bodies to the
+    // LLM as tool output, so returning 400 makes the agent fall back to a
+    // generic "errore tecnico" reply instead of reading the message back to
+    // the customer. Only true server errors stay as 5xx.
     const normalizedDate = parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn('[ElevenLabs] check-availability rejected: unparseable date', { received: p.date });
-        return res.status(400).json({
+        return res.json({
+            available: false,
+            free_tables_count: 0,
             error: 'invalid_date',
             message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
         });
     }
     if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
-        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+        return res.json({
+            available: false,
+            free_tables_count: 0,
+            error: 'invalid_shift',
+            message: 'Il turno non è valido. Può indicare se si tratta di pranzo o cena?'
+        });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
-        return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
+        return res.json({
+            available: false,
+            free_tables_count: 0,
+            error: 'invalid_guests',
+            message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
+        });
     }
 
     try {
@@ -322,7 +341,10 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
             location_preference: locationPreference,
         });
         console.log('[ElevenLabs] check-availability', { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
-        res.json(result);
+        // date_readback is the Italian "venerdì 10 luglio" string the agent
+        // MUST use verbatim when confirming the date to the caller — LLMs
+        // routinely mismatch weekday and day-of-month otherwise.
+        res.json({ ...result, date_readback: formatItalianDateReadback(normalizedDate) });
     } catch (err) {
         console.error('[ElevenLabs] check-availability error', err);
         res.status(500).json({
@@ -371,16 +393,28 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
         : undefined;
 
+    // See note in check-availability: user-actionable validation errors are
+    // returned as HTTP 200 with `success:false` so ElevenLabs surfaces the
+    // Italian `message` to the LLM (it drops 4xx bodies).
     if (!customerName) {
-        return res.status(400).json({ error: 'invalid_customer_name', message: 'customer_name is required' });
+        return res.json({
+            success: false,
+            error: 'invalid_customer_name',
+            message: 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?'
+        });
     }
     if (!phoneRaw) {
-        return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
+        return res.json({
+            success: false,
+            error: 'invalid_phone',
+            message: 'Non ho un numero di telefono per la prenotazione. Può dettarmelo?'
+        });
     }
     const normalizedDate = parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn('[ElevenLabs] create-reservation rejected: unparseable date', { received: p.date });
-        return res.status(400).json({
+        return res.json({
+            success: false,
             error: 'invalid_date',
             message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
         });
@@ -388,13 +422,18 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     const normalizedTime = parseFlexibleTime(p.time);
     if (!normalizedTime) {
         console.warn('[ElevenLabs] create-reservation rejected: unparseable time', { received: p.time });
-        return res.status(400).json({
+        return res.json({
+            success: false,
             error: 'invalid_time',
             message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
         });
     }
     if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
-        return res.status(400).json({ error: 'invalid_shift', message: 'shift must be LUNCH or DINNER' });
+        return res.json({
+            success: false,
+            error: 'invalid_shift',
+            message: 'Il turno non è valido. Può indicare se si tratta di pranzo o cena?'
+        });
     }
     // Constrain the booking time to the restaurant's slot grid so voice
     // bookings round-trip through the manual edit form without falling back
@@ -411,10 +450,19 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         const message = validSlots.length === 0
             ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
             : `Per ${shiftLabel} possiamo prenotare solo alle ${formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
-        return res.status(400).json({ error: 'invalid_slot', message });
+        return res.json({
+            success: false,
+            error: 'invalid_slot',
+            available_slots: validSlots,
+            message,
+        });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
-        return res.status(400).json({ error: 'invalid_guests', message: 'guests must be an integer 1-50' });
+        return res.json({
+            success: false,
+            error: 'invalid_guests',
+            message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
+        });
     }
     const childrenNum = Number(childrenRaw);
     const children = Number.isFinite(childrenNum) && childrenNum > 0
@@ -520,6 +568,9 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             reservation_id: created.id,
             requires_review: created.requires_review,
             confirmation_phrase: confirmationPhrase,
+            // date_readback is the Italian "venerdì 10 luglio" string the
+            // agent MUST use verbatim to name the day in its final readback.
+            date_readback: formatItalianDateReadback(normalizedDate),
             table_id: created.table_id,
             table_name: created.table_name,
             room_name: created.room_name,
@@ -555,13 +606,21 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
     const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
         ? 'customer'
         : callerIdRaw ? 'caller_id' : 'none';
+    // See note in check-availability: user-actionable validation errors are
+    // returned as HTTP 200 with `success:false` so ElevenLabs surfaces the
+    // Italian `message` to the LLM (it drops 4xx bodies).
     if (!phoneRaw) {
-        return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
+        return res.json({
+            success: false,
+            error: 'invalid_phone',
+            message: 'Non ho un numero di telefono a cui associare la prenotazione. Può dettarmelo?'
+        });
     }
     const normalizedDate = parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn('[ElevenLabs] cancel-reservation rejected: unparseable date', { received: p.date });
-        return res.status(400).json({
+        return res.json({
+            success: false,
             error: 'invalid_date',
             message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
         });
@@ -573,7 +632,8 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         const t = parseFlexibleTime(p.time);
         if (!t) {
             console.warn('[ElevenLabs] cancel-reservation rejected: unparseable time', { received: p.time });
-            return res.status(400).json({
+            return res.json({
+                success: false,
                 error: 'invalid_time',
                 message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
             });
