@@ -116,7 +116,55 @@ REGOLE PRENOTAZIONE
    - Se il cliente chiede il menu, indirizzalo alla pagina Instagram
      del ristorante; se prenota per il 15 Agosto, anticipa che quel
      giorno il menu è fisso.
+
+4) Prenotazioni con poco preavviso
+   - Se check_availability restituisce disponibilità, la prenotazione
+     è consentita anche in giornata o a poche ore di distanza (entro
+     l'orario limite del punto 1).
+   - Non scoraggiare il cliente con frasi tipo "è troppo tardi" o
+     "serve più preavviso": se il tool conferma la disponibilità,
+     procedi con la normale conferma e chiama create_reservation.
+   - Se check_availability restituisce indisponibile, proponi gli
+     orari alternativi in suggested_times[].
+
+5) Numero di telefono (auto-capture da caller ID)
+   - NON chiedere il numero al cliente all'inizio: usa la system
+     variable {{system__caller_id}}, che contiene il numero da cui
+     sta chiamando (letto dal SIP From: header).
+   - Ripeti il numero al cliente per conferma prima di chiamare
+     create_reservation. Leggilo in italiano cifra per cifra, es:
+     "Confermo il numero: tre-tre-cinque, uno-due-tre, quattro-cinque-
+     sei-sette. È corretto?"
+   - Se il cliente conferma → passa {{system__caller_id}} come `phone`
+     alla tool call.
+   - Se il cliente dice che è sbagliato o chiede di essere richiamato
+     su un altro numero → chiedi il numero corretto, ripetilo per
+     conferma cifra per cifra, e passa quel numero come `phone`.
+   - Se {{system__caller_id}} è vuoto (chiamante anonimo/CLIR):
+     "Non riesco a vedere il suo numero, me lo può dettare?"
+     Poi conferma con readback come sopra.
+   - Includi sempre anche `caller_id: {{system__caller_id}}` come
+     parametro separato: il backend lo usa come fallback se `phone`
+     è vuoto (belt-and-suspenders — vedi note server-side sotto).
 ```
+
+### Note server-side (auto-capture telefono)
+
+Gli endpoint `/webhook/elevenlabs/create-reservation` e
+`/webhook/elevenlabs/cancel-reservation` accettano due parametri
+telefono:
+
+- `phone`: quello che il cliente ha dettato o confermato a voce.
+  Ha la precedenza.
+- `caller_id`: il numero letto dal SIP header dell'inbound call.
+  Usato come fallback quando `phone` è vuoto.
+
+La sorgente effettivamente usata è loggata come `phone_source`
+(`customer` | `caller_id` | `none`) per facilitare il debug quando
+un booking arriva senza numero. La normalizzazione E.164
+(`normalizeItalianPhone`) resta invariata: prepende `+39` alle
+numerazioni nazionali senza prefisso e gestisce le varianti `00`,
+`39…`, `+…`.
 
 ## Sicurezza webhook
 
