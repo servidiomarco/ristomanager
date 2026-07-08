@@ -351,7 +351,17 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
 
     const customerName = String(p.customer_name ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim();
+    // Phone: prefer `phone` (what the customer dictates or confirms), fall back
+    // to `caller_id` (auto-captured from the SIP From: header by ElevenLabs).
+    // The agent's system prompt pre-fills phone with {{system__caller_id}} and
+    // reads it back for confirmation; if the customer corrects it, `phone`
+    // wins. This branch is the safety net for when the agent forgets to
+    // interpolate the variable or the caller ID is empty/anonymous.
+    const callerIdRaw = String(p.caller_id ?? '').trim();
+    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
+    const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
+        ? 'customer'
+        : callerIdRaw ? 'caller_id' : 'none';
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
     const childrenRaw = p.children;
@@ -420,7 +430,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             customer_name: customerName, raw_date: p.date, raw_time: p.time,
             normalized_date: normalizedDate, normalized_time: normalizedTime,
             shift: rawShift, guests, children, conversation_id: conversationId,
-            location_preference: locationPreference,
+            location_preference: locationPreference, phone_source: phoneSource,
         });
         const created = await createVoiceReservation({
             customer_name: customerName,
@@ -539,7 +549,12 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         : req.body || {};
     const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
 
-    const phoneRaw = String(p.phone ?? '').trim();
+    // Same phone/caller_id fallback as create-reservation.
+    const callerIdRaw = String(p.caller_id ?? '').trim();
+    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
+    const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
+        ? 'customer'
+        : callerIdRaw ? 'caller_id' : 'none';
     if (!phoneRaw) {
         return res.status(400).json({ error: 'invalid_phone', message: 'phone is required' });
     }
@@ -568,7 +583,8 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
 
     try {
         console.log('[ElevenLabs] cancel-reservation start', {
-            phone_raw: phoneRaw, normalized_date: normalizedDate,
+            phone_raw: phoneRaw, phone_source: phoneSource,
+            normalized_date: normalizedDate,
             normalized_time: normalizedTime, conversation_id: conversationId,
         });
         const outcome = await cancelVoiceReservation({
