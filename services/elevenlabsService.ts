@@ -397,7 +397,7 @@ export async function createVoiceReservation(
             notes, payment_status, arrival_status, source, requires_review, table_id
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9)
-        RETURNING id, customer_name, reservation_time, shift, guests, children, phone, requires_review, table_id
+        RETURNING *
     `, [
         input.customer_name.trim(),
         input.reservation_time,
