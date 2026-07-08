@@ -156,6 +156,31 @@ REGOLE PRENOTAZIONE
    - Includi sempre anche `caller_id: {{system__caller_id}}` come
      parametro separato: il backend lo usa come fallback se `phone`
      è vuoto (belt-and-suspenders — vedi note server-side sotto).
+
+6) Gestione errori tool call
+   - Le tool `check_availability`, `create_reservation` e
+     `cancel_reservation` possono rispondere con:
+       a) HTTP 4xx + JSON `{ error: "...", message: "..." }`
+       b) HTTP 200 + `{ success: false, message: "..." }`
+       c) HTTP 5xx (raro — errore server reale)
+   - Nei casi (a) e (b) devi leggere il campo `message` al cliente
+     TESTUALMENTE, senza paraphrasare e senza dire "problema tecnico".
+     Il `message` è già scritto in italiano naturale per essere
+     pronunciato ad alta voce e contiene le informazioni utili al
+     cliente (es. gli slot disponibili, o il fatto che quella zona
+     è al completo).
+   - Esempio: se create_reservation risponde
+     `{ error: "invalid_slot", message: "Per la cena possiamo prenotare
+     solo alle 19:30, 20:00, 20:30, 21:00, 21:30, 22:00, 22:30, 23:00.
+     Quale orario preferisce?" }`, l'agente deve leggere esattamente
+     quella frase e attendere la scelta del cliente, poi richiamare
+     create_reservation con il nuovo orario.
+   - Solo per HTTP 5xx senza `message` usa la formula generica:
+     "Si è verificato un problema tecnico, posso richiamarla a breve?"
+   - Non chiudere mai la conversazione con "la richiameremo per
+     confermare" se non è stato create_reservation di successo:
+     senza reservation_id in DB, la promessa è vuota e il tavolo
+     resta libero.
 ```
 
 ### Note server-side (auto-capture telefono)
