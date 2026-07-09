@@ -480,6 +480,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
         `);
 
+        // Outbound-confirmation tracking (SMS/WhatsApp booking ack). Populated
+        // when we hand off to Twilio; updated by the Twilio StatusCallback.
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_status VARCHAR(20);`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_channel VARCHAR(20);`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_sent_at TIMESTAMPTZ;`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_delivered_at TIMESTAMPTZ;`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_provider_sid VARCHAR(64);`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS confirmation_error TEXT;`);
+        // Index for the status-callback lookup (find reservation by Twilio SID).
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_reservations_confirmation_sid ON reservations (confirmation_provider_sid);`);
+
         // ============================================
         // ROLE PERMISSIONS TABLE
         // ============================================

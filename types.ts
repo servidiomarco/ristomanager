@@ -193,7 +193,15 @@ export interface Reservation {
   customer_preferred_table_name?: string | null;
   customer_dietary_notes?: string | null;
   customer_preferences_notes?: string | null;
+  confirmation_status?: ConfirmationStatus | null;
+  confirmation_channel?: ConfirmationChannel | null;
+  confirmation_sent_at?: string | null;
+  confirmation_delivered_at?: string | null;
+  confirmation_error?: string | null;
 }
+
+export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'undelivered';
+export type ConfirmationChannel = 'sms' | 'whatsapp';
 
 export interface Notification {
   id: string;

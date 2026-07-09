@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Star } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -116,6 +116,58 @@ const formatTime = (isoString: string): string => {
     return `${match[1]}:${match[2]}`;
   }
   return '';
+};
+
+// Human-readable "dd/mm alle HH:MM" for a Twilio callback timestamp (may be
+// null/invalid on legacy rows). Returns '—' when unparseable.
+const formatConfirmationTs = (iso: string | null | undefined): string => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })} alle ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
+// Tier 3 attribute: delivery status of the outbound booking-confirmation
+// message (SMS or WhatsApp). Twilio's StatusCallback drives the state; we
+// mirror it here as a small icon:
+//   - queued / sent  → Send (grey)   tooltip: "Inviato il ..."
+//   - delivered      → CheckCheck (green) tooltip: "Consegnato il ..."
+//   - failed / undelivered → AlertOctagon (red) tooltip: "Consegna fallita"
+// Renders nothing when we never sent a confirmation for this reservation.
+const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
+  const status = res.confirmation_status;
+  if (!status) return null;
+  const channelLabel = res.confirmation_channel === 'sms' ? 'SMS' : 'WhatsApp';
+  const base = 'inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0';
+
+  if (status === 'delivered') {
+    const ts = formatConfirmationTs(res.confirmation_delivered_at);
+    const title = `${channelLabel} consegnato il ${ts}`;
+    return (
+      <span className={`${base} bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400`} title={title} aria-label={title}>
+        <CheckCheck className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+
+  if (status === 'failed' || status === 'undelivered') {
+    const err = res.confirmation_error ? ` — ${res.confirmation_error}` : '';
+    const title = `${channelLabel}: consegna fallita${err}`;
+    return (
+      <span className={`${base} bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400`} title={title} aria-label={title}>
+        <AlertOctagon className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+
+  // queued / sent (or any unknown intermediate state)
+  const ts = formatConfirmationTs(res.confirmation_sent_at);
+  const title = `${channelLabel} inviato il ${ts} — in attesa di consegna`;
+  return (
+    <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title={title} aria-label={title}>
+      <Send className="h-3.5 w-3.5" />
+    </span>
+  );
 };
 
 // Tooltip label for the booking timestamp icon. Falls back gracefully when
@@ -1115,7 +1167,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     return [
       { key: 'pending', label: 'Da confermare', color: 'bg-amber-500', dotClass: 'bg-amber-500', items: pending },
-      { key: 'waiting', label: 'In attesa', color: 'bg-[#4D5A87]', dotClass: 'bg-[#4D5A87]', items: waiting },
+      { key: 'waiting', label: 'Confermata', color: 'bg-[#4D5A87]', dotClass: 'bg-[#4D5A87]', items: waiting },
       { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
       { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
@@ -1207,7 +1259,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
     pending:   { label: 'Da confermare', dotClass: 'bg-amber-500', chipClass: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-amber-500/25' },
-    waiting:   { label: 'In attesa', dotClass: 'bg-[#4D5A87]', chipClass: 'bg-[#EDEFF7] text-[#4D5A87] border-[#DCE0EE] hover:bg-[#E3E7F3] dark:bg-[#4D5A87]/25 dark:text-[#B9C2E0] dark:border-[#4D5A87]/40 dark:hover:bg-[#4D5A87]/35' },
+    waiting:   { label: 'Confermata', dotClass: 'bg-[#4D5A87]', chipClass: 'bg-[#EDEFF7] text-[#4D5A87] border-[#DCE0EE] hover:bg-[#E3E7F3] dark:bg-[#4D5A87]/25 dark:text-[#B9C2E0] dark:border-[#4D5A87]/40 dark:hover:bg-[#4D5A87]/35' },
     arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
     freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
     noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
@@ -2140,9 +2192,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </p>
           </div>
 
-          {/* Tier 3 — attributes: channel · dietary · preferred · note · payment · menu */}
+          {/* Tier 3 — attributes: channel · confirmation · dietary · preferred · note · payment · menu */}
           <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
             {renderChannelIcon(res)}
+            {renderConfirmationIcon(res)}
             {matchedNoteIcons.map(m => {
               const Icon = m.Icon!;
               return (
@@ -3178,9 +3231,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       </p>
                                     </div>
 
-                                    {/* Tier 3 — attributes: channel · dietary · preferred · note · payment · menu (bottom-aligned with table chip) */}
+                                    {/* Tier 3 — attributes: channel · confirmation · dietary · preferred · note · payment · menu (bottom-aligned with table chip) */}
                                     <div className="flex items-center flex-wrap gap-1.5 mt-auto pt-2">
                                       {renderChannelIcon(res)}
+                                      {renderConfirmationIcon(res)}
                                       {allergenText && (
                                         <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
                                           <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
