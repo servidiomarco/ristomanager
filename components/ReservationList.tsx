@@ -4181,7 +4181,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             other.merged_with && other.merged_with.length > 0 &&
                                             other.merged_with.map(id => Number(id)).includes(Number(t.id))
                                         ))
-                                        .filter(t => !hiddenTableIds.has(t.id));
+                                        .filter(t => !hiddenTableIds.has(t.id))
+                                        // Show tables in natural ascending order by name (e.g. 0, 1, 2,
+                                        // 3, 3 Bis, 4, 10, 11, 20…) instead of raw DB/insertion order,
+                                        // which can be scattered for rooms like "Fuori".
+                                        .sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
 
                                     // Partition the room's tables: banquet tables collapse into one
                                     // grouped container per event; the rest render as selectable cards.
