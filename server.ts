@@ -878,8 +878,8 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 ? `, tavolo ${row.table_name}${row.room_name ? ` (${row.room_name})` : ''}`
                 : '';
             const message = `Ciao ${row.customer_name.split(' ')[0]}, la tua prenotazione per ${row.guests} ${persone} è registrata per il ${day}/${month}/${year} alle ${hours}:${minutes}${tableSuffix}. A presto!`;
-            sendWhatsAppText(row.phone, message).catch(err =>
-                console.warn('[ElevenLabs] post-call WhatsApp send failed:', err?.message || err)
+            sendBookingConfirmation(row.phone, message).catch(err =>
+                console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
         }
     } catch (err: any) {
@@ -1354,19 +1354,21 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             ).catch(err => console.error('Push (cancellation) failed:', err));
         }
 
-        // Auto-send the WhatsApp confirmation on PENDING → CONFIRMED. WhatsApp
-        // bookings land as PENDING; flipping them to CONFIRMED in the UI is the
-        // signal that the table is reserved and the guest can be told. Fire and
-        // forget — never fail the route.
+        // Auto-send the customer confirmation on PENDING → CONFIRMED. Public/
+        // WhatsApp bookings land as PENDING; flipping them to CONFIRMED in the
+        // UI is the signal that the table is reserved and the guest can be
+        // told. Channel is SMS while Meta verification is pending, WhatsApp
+        // after (see sendBookingConfirmation). Fire and forget — never fail
+        // the route.
         if (
             previousStatus === 'PENDING' &&
             reservation_status === 'CONFIRMED' &&
             updatedReservation?.phone
         ) {
-            sendWhatsAppText(
+            sendBookingConfirmation(
                 updatedReservation.phone,
                 buildConfirmationMessage(updatedReservation.customer_name, updatedReservation.reservation_time)
-            ).catch(err => console.error('WhatsApp auto-confirmation failed:', err));
+            ).catch(err => console.error('Auto-confirmation send failed:', err));
         }
 
         res.json(updatedReservation);
@@ -1510,7 +1512,10 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
     }
 });
 
-// Send WhatsApp confirmation for reservation
+// Send a booking confirmation to the customer. Legacy URL keeps "whatsapp" in
+// the path so the frontend keeps working; the channel is decided at runtime
+// by sendBookingConfirmation (SMS while Meta verification is pending,
+// WhatsApp after).
 app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
@@ -1531,16 +1536,17 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             return res.status(400).json({ error: 'No phone number for this reservation' });
         }
 
-        await sendWhatsAppText(
+        await sendBookingConfirmation(
             reservation.phone,
             buildConfirmationMessage(reservation.customer_name, reservation.reservation_time)
         );
 
-        console.log(`[WhatsApp] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
+        const channel = isTwilioSmsConfigured() ? 'SMS' : 'WhatsApp';
+        console.log(`[${channel}] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
 
-        res.json({ success: true, message: 'Confirmation sent via WhatsApp' });
+        res.json({ success: true, message: `Confirmation sent via ${channel}`, channel });
     } catch (err) {
-        console.error('Error sending WhatsApp confirmation:', err);
+        console.error('Error sending confirmation:', err);
         res.status(500).json({ error: 'Failed to send confirmation' });
     }
 });
@@ -5687,6 +5693,79 @@ async function sendWhatsAppText(to: string, text: string): Promise<void> {
     return sendVonageWhatsApp(to, text);
 }
 
+// Twilio SMS — temporary stand-in for booking confirmations while Meta
+// WhatsApp Business verification is pending. Same Messages API as
+// sendTwilioWhatsApp, but Twilio bills as SMS. Sender resolves in this order:
+//   1) TWILIO_MESSAGING_SERVICE_SID (required when using an alphanumeric
+//      sender like "V Frantoio", since alpha senders live inside a service)
+//   2) TWILIO_SMS_FROM as literal alphanumeric sender ID (contains letters)
+//   3) TWILIO_SMS_FROM as E.164 phone number
+function isTwilioSmsConfigured(): boolean {
+    return !!(process.env.TWILIO_ACCOUNT_SID
+        && process.env.TWILIO_AUTH_TOKEN
+        && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
+}
+
+async function sendTwilioSms(to: string, text: string): Promise<void> {
+    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+    const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
+    const FROM = process.env.TWILIO_SMS_FROM;
+
+    if (!ACCOUNT_SID || !AUTH_TOKEN || (!MESSAGING_SERVICE_SID && !FROM)) {
+        console.error('[Twilio SMS] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or a sender (TWILIO_MESSAGING_SERVICE_SID / TWILIO_SMS_FROM)');
+        throw new Error('Twilio SMS not configured');
+    }
+
+    const formattedTo = `+${String(to).replace(/\D/g, '')}`;
+    const body = new URLSearchParams({ To: formattedTo, Body: text });
+
+    let senderDescription: string;
+    if (MESSAGING_SERVICE_SID) {
+        body.set('MessagingServiceSid', MESSAGING_SERVICE_SID);
+        senderDescription = `service ${MESSAGING_SERVICE_SID}`;
+    } else {
+        const isAlphanumeric = /[A-Za-z]/.test(FROM!);
+        const formattedFrom = isAlphanumeric
+            ? FROM!
+            : (FROM!.startsWith('+') ? FROM! : `+${FROM!.replace(/\D/g, '')}`);
+        body.set('From', formattedFrom);
+        senderDescription = `from ${formattedFrom}`;
+    }
+
+    console.log(`[Twilio SMS] Sending message to ${formattedTo} ${senderDescription}`);
+
+    const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
+
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+    });
+
+    const result = await response.json().catch(() => ({} as any)) as { sid?: string };
+    if (!response.ok) {
+        console.error('[Twilio SMS] ❌ Error sending message:', result);
+        throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
+    }
+    console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
+}
+
+// Booking-confirmation dispatcher. When a Twilio SMS sender is configured
+// (either TWILIO_MESSAGING_SERVICE_SID or TWILIO_SMS_FROM) the confirmation
+// goes out as SMS (used while Meta WhatsApp verification is pending). As soon
+// as SMS is unconfigured the existing WhatsApp chain kicks back in — no code
+// change needed to switch back.
+async function sendBookingConfirmation(to: string, text: string): Promise<void> {
+    if (isTwilioSmsConfigured()) {
+        return sendTwilioSms(to, text);
+    }
+    return sendWhatsAppText(to, text);
+}
+
 // Meta WhatsApp Business Cloud API — uses approved templates, so customers
 // don't need to opt-in like in the Vonage sandbox. Active when the three
 // META_WHATSAPP_* env vars are set; otherwise we fall back to Vonage.
@@ -7035,13 +7114,19 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             }
         ).catch(err => console.error('Push (public booking) failed:', err));
 
-        // Fire-and-forget WhatsApp acknowledgement to the customer. The booking
-        // is PENDING — staff still need to confirm — so wording reflects that.
+        // Fire-and-forget acknowledgement to the customer. The booking is
+        // PENDING — staff still need to confirm — so wording reflects that.
+        // Channel priority: Twilio SMS (while Meta verification is pending) →
+        // Meta WhatsApp template → generic WhatsApp text fallback.
         const [yyyy, mm, dd] = date.split('-');
         const dateLabel = `${dd}/${mm}/${yyyy}`;
         const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
+        const freeText = `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
-        if (isMetaWhatsAppConfigured()) {
+        if (isTwilioSmsConfigured()) {
+            sendTwilioSms(phoneE164, freeText)
+                .catch(err => console.error('[public-booking] SMS ack failed:', err));
+        } else if (isMetaWhatsAppConfigured()) {
             const templateName = process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
             const templateLang = process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
             sendMetaWhatsAppTemplate(phoneE164, {
@@ -7057,10 +7142,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 ],
             }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
         } else {
-            sendWhatsAppText(
-                phoneE164,
-                `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`
-            ).catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
+            sendWhatsAppText(phoneE164, freeText)
+                .catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
         }
 
         res.status(201).json({ ok: true, id: created.id });
