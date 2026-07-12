@@ -906,7 +906,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         );
         const row = linked.rows[0];
         if (row && row.phone) {
-            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests);
+            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
             sendBookingConfirmation(row.phone, message, row.id).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -1395,12 +1395,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             reservation_status === 'CONFIRMED' &&
             updatedReservation?.phone
         ) {
+            const roomName = await resolveReservationRoomName(updatedReservation);
             sendBookingConfirmation(
                 updatedReservation.phone,
                 buildConfirmationMessage(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    roomName
                 ),
                 updatedReservation.id
             ).catch(err => console.error('Auto-confirmation send failed:', err));
@@ -1577,7 +1579,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
 
         // Get reservation details
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone FROM reservations WHERE id = $1',
+            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1',
             [id]
         );
 
@@ -1591,12 +1593,14 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             return res.status(400).json({ error: 'No phone number for this reservation' });
         }
 
+        const roomName = await resolveReservationRoomName(reservation);
         await sendBookingConfirmation(
             reservation.phone,
             buildConfirmationMessage(
                 reservation.customer_name,
                 reservation.reservation_time,
-                reservation.guests
+                reservation.guests,
+                roomName
             ),
             reservation.id
         );
@@ -5615,14 +5619,16 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
     return null;
 }
 
-// Build the booking-confirmation message. Includes full name, date, time and
-// party size — the four data points the guest needs to verify the booking.
-// Shared by the manual /confirm-whatsapp endpoint, the auto-fire on
-// PENDING→CONFIRMED in PUT /reservations/:id, and the voice-agent post-call.
+// Build the booking-confirmation message. Includes full name, date, time,
+// party size and (when known) the room — the data points the guest needs to
+// verify the booking. Shared by the manual /confirm-whatsapp endpoint, the
+// auto-fire on PENDING→CONFIRMED in PUT /reservations/:id, and the
+// voice-agent post-call.
 function buildConfirmationMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    roomName?: string | null
 ): string {
     const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
     const day = String(dt.getDate()).padStart(2, '0');
@@ -5634,7 +5640,32 @@ function buildConfirmationMessage(
     const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
-    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes} e' confermata. A presto!`;
+    const room = (roomName ?? '').trim();
+    const roomPart = room ? ` in ${room}` : '';
+    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}${roomPart} e' confermata. A presto!`;
+}
+
+// Resolve the room name for a reservation, preferring the actually assigned
+// room (via table_id JOIN) and falling back to the customer's requested room
+// stored in notes as "Sala richiesta: <name>." by POST /public/reservations.
+// Returns null when no room information is available.
+async function resolveReservationRoomName(reservation: { table_id?: number | null; notes?: string | null }): Promise<string | null> {
+    if (reservation.table_id) {
+        try {
+            const r = await queryWithRetry(
+                `SELECT rm.name FROM tables t JOIN rooms rm ON rm.id = t.room_id WHERE t.id = $1`,
+                [reservation.table_id]
+            );
+            const name = r.rows[0]?.name;
+            if (typeof name === 'string' && name.trim()) return name.trim();
+        } catch (err) {
+            console.warn('[resolveReservationRoomName] JOIN lookup failed:', err);
+        }
+    }
+    const notes = String(reservation.notes ?? '');
+    const match = notes.match(/Sala richiesta:\s*([^.]+?)\./i);
+    if (match) return match[1].trim();
+    return null;
 }
 
 // Build the decline message sent when staff couldn't accept a booking request.
