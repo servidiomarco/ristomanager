@@ -28,6 +28,7 @@ import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
+import { voiceCallsApiService } from './services/voiceCallsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
@@ -149,6 +150,35 @@ const App: React.FC = () => {
   }, [showCreateMenu]);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
+
+  // Count of voice calls in the last 7 days without a linked reservation —
+  // drives the follow-up badge on the Conversazioni sidebar icon.
+  const [voiceCallsPendingCount, setVoiceCallsPendingCount] = useState(0);
+  const canSeeVoiceCalls = canAccessView(ViewState.CONVERSAZIONI);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeVoiceCalls) return;
+    let cancelled = false;
+    const refresh = () => {
+      voiceCallsApiService.pendingCount()
+        .then(({ count }) => { if (!cancelled) setVoiceCallsPendingCount(count); })
+        .catch(() => { /* silent — badge just stays at previous value */ });
+    };
+    refresh();
+    // Refresh when the app regains focus (e.g., staff comes back after a call)
+    // and every time the user navigates to the Conversazioni page (see effect below).
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, [isAuthenticated, canSeeVoiceCalls]);
+  // Re-fetch when leaving the Conversazioni page so the badge reflects any
+  // reservations linked from calls the user just handled.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeVoiceCalls) return;
+    if (view === ViewState.CONVERSAZIONI) return;
+    voiceCallsApiService.pendingCount()
+      .then(({ count }) => setVoiceCallsPendingCount(count))
+      .catch(() => {});
+  }, [view, isAuthenticated, canSeeVoiceCalls]);
 
   // Global date/shift state — drives the header control group on desktop
   const [globalDate, setGlobalDate] = useState<Date>(new Date());
@@ -1056,6 +1086,7 @@ const App: React.FC = () => {
                       active={item.view !== undefined && view === item.view}
                       onClick={() => selectNavItem(item)}
                       collapsed={sidebarCollapsed}
+                      badge={item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount : undefined}
                     />
                   )
                 ))}
@@ -1765,7 +1796,9 @@ const App: React.FC = () => {
                       <div className="px-3 pt-3 pb-1 text-[11px] tracking-[0.04em] font-semibold text-[var(--color-fg-subtle)]">
                         {group.label}
                       </div>
-                      {items.map(item => (
+                      {items.map(item => {
+                        const badge = item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount : 0;
+                        return (
                         <button
                           key={item.label}
                           onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
@@ -1773,9 +1806,15 @@ const App: React.FC = () => {
                         >
                           <item.Icon className="h-5 w-5 text-[var(--color-fg-muted)]" />
                           <span className="text-sm font-medium text-[var(--color-fg)]">{item.label}</span>
-                          <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                          {badge > 0 && (
+                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                              {badge > 99 ? '99+' : badge}
+                            </span>
+                          )}
+                          <ChevronRight className={`${badge > 0 ? '' : 'ml-auto'} h-4 w-4 text-[var(--color-fg-subtle)]`} />
                         </button>
-                      ))}
+                        );
+                      })}
                     </React.Fragment>
                   );
                 })}
@@ -1909,7 +1948,7 @@ const App: React.FC = () => {
 };
 
 // Helper Component for Sidebar (dark navy)
-const SidebarItem = ({ icon, label, active, onClick, collapsed = false }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed?: boolean }) => (
+const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, collapsed?: boolean, badge?: number }) => (
   <button
     onClick={onClick}
     title={collapsed ? label : undefined}
@@ -1920,10 +1959,24 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false }: { icon
         : 'text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)]'
     }`}
   >
-    <span className={active ? 'text-[var(--color-sidebar-active-fg)]' : 'text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]'}>
+    <span className={`relative ${active ? 'text-[var(--color-sidebar-active-fg)]' : 'text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]'}`}>
       {icon}
+      {collapsed && badge != null && badge > 0 && (
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-semibold leading-none ring-2 ring-[var(--color-sidebar-bg)]">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </span>
-    {!collapsed && <span className="font-medium text-[13px] tracking-tight">{label}</span>}
+    {!collapsed && (
+      <>
+        <span className="font-medium text-[13px] tracking-tight">{label}</span>
+        {badge != null && badge > 0 && (
+          <span className="ml-auto min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-semibold leading-none">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </>
+    )}
   </button>
 );
 

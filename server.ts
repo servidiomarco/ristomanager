@@ -6693,6 +6693,25 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
     }
 });
 
+// Count of calls that need a follow-up: no reservation was created and the
+// call is recent enough to still be actionable (last 7 days). Surfaces as a
+// badge on the sidebar phone icon. Must be declared before `/voice-calls/:id`
+// so Express doesn't route "pending-count" into the :id handler.
+app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT COUNT(*)::int AS count
+             FROM voice_calls
+             WHERE reservation_id IS NULL
+               AND created_at >= NOW() - INTERVAL '7 days'`
+        );
+        res.json({ count: result.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /voice-calls/pending-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Detail with full transcript.
 app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {

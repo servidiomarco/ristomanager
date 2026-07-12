@@ -456,6 +456,11 @@ const ConversazioniPage: React.FC = () => {
                           {resBadge.label}
                         </span>
                       )}
+                      {item.reservation_id == null && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
+                          Da ricontattare
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] shrink-0">
                       <span className="inline-flex items-center gap-1 tabular">

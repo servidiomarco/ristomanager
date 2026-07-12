@@ -129,6 +129,12 @@ class VoiceCallsApiService {
       headers: getHeaders(),
     });
   }
+
+  async pendingCount(): Promise<{ count: number }> {
+    return apiRequest<{ count: number }>(`${API_URL}/voice-calls/pending-count`, {
+      headers: getHeaders(),
+    });
+  }
 }
 
 export const voiceCallsApiService = new VoiceCallsApiService();
