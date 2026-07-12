@@ -5650,7 +5650,7 @@ function buildDeclineMessage(
     const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
-    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci per verificare un'altra data/orario. Grazie e a presto!`;
+    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
 // Normalize date to YYYY-MM-DD format

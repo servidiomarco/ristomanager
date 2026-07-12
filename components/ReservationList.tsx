@@ -2290,36 +2290,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
         {/* Actions band: status (left) · edit + delete (right) */}
         {canEdit && (
-          <div className="flex items-center gap-2.5 px-3 pt-1.5 pb-2">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-3 pt-1.5 pb-2">
             {(() => {
               const state = getReservationState(res);
               const meta = RESERVATION_STATE_META[state];
               return (
                 <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                  className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                  className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${meta.chipClass}`}
                   title="Cambia stato">
                   {meta.label}
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </button>
               );
             })()}
-            {(res.reservation_status === ReservationStatus.PENDING) && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
-                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-                title="Conferma prenotazione">
-                <Check className="h-3.5 w-3.5" /> Conferma
-              </button>
-            )}
-            {(res.reservation_status === ReservationStatus.PENDING) && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); setDeclineReservation(res); }}
-                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors"
-                title="Non confermare la prenotazione">
-                <X className="h-3.5 w-3.5" /> Non confermata
-              </button>
-            )}
             {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
                 <MapPin className="h-3.5 w-3.5" /> Tavolo
               </button>
             )}
@@ -3323,36 +3309,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                 {/* Actions band: status (left) · edit + delete (right) */}
                                 {canEdit && (
-                                  <div className="flex items-center gap-2.5 mt-3 pt-3 border-t border-[var(--color-line)]">
+                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3 pt-3 border-t border-[var(--color-line)]">
                                     {(() => {
                                       const state = getReservationState(res);
                                       const meta = RESERVATION_STATE_META[state];
                                       return (
                                         <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                                          className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
+                                          className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${meta.chipClass}`}
                                           title="Cambia stato">
                                           {meta.label}
                                           <ChevronDown className="h-3 w-3 opacity-60" />
                                         </button>
                                       );
                                     })()}
-                                    {(res.reservation_status === ReservationStatus.PENDING) && (
-                                      <button onClick={(e) => { e.stopPropagation(); handleSetReservationState(res, 'waiting'); }}
-                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-                                        title="Conferma prenotazione">
-                                        <Check className="h-3.5 w-3.5" /> Conferma
-                                      </button>
-                                    )}
-                                    {(res.reservation_status === ReservationStatus.PENDING) && (
-                                      <button onClick={(e) => { e.stopPropagation(); setDeclineReservation(res); }}
-                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors"
-                                        title="Non confermare la prenotazione">
-                                        <X className="h-3.5 w-3.5" /> Non confermata
-                                      </button>
-                                    )}
                                     {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
                                         <MapPin className="h-3.5 w-3.5" /> Tavolo
                                       </button>
                                     )}
@@ -4715,7 +4687,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {stateChangeReservation && (() => {
         const res = stateChangeReservation;
         const current = getReservationState(res);
-        const options: ReservationStateKey[] = ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled', 'declined'];
+        const isPending = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.PENDING;
+        // For PENDING web bookings the only sensible actions are Conferma / Non confermata.
+        const options: ReservationStateKey[] = isPending
+          ? ['waiting', 'declined']
+          : ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled', 'declined'];
+        const title = isPending ? 'Rispondi al cliente' : 'Cambia stato';
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
@@ -4725,7 +4702,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
               <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Cambia stato</h3>
+                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{title}</h3>
                     <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
                       {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
                     </p>
@@ -4744,7 +4721,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       key={opt}
                       type="button"
                       onClick={() => {
-                        if (!isCurrent) handleSetReservationState(res, opt);
+                        if (isCurrent) {
+                          setStateChangeReservation(null);
+                          return;
+                        }
+                        // 'declined' always routes through the SMS-warning confirmation modal.
+                        if (opt === 'declined') {
+                          setStateChangeReservation(null);
+                          setDeclineReservation(res);
+                          return;
+                        }
+                        handleSetReservationState(res, opt);
                         setStateChangeReservation(null);
                       }}
                       className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
