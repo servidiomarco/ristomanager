@@ -39,6 +39,7 @@ export interface VoiceCallsListParams {
 
 export interface VoiceCallsSyncResult {
   imported: number;
+  backfilled: number;
   skipped: number;
   failed: number;
   total_fetched: number;

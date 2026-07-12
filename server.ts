@@ -866,8 +866,19 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         (typeof body.summary === 'string' ? body.summary : undefined);
 
     const duration = Number(data.duration_seconds ?? body.duration_seconds ?? data.metadata?.call_duration_seconds);
+    // For SIP calls the number lives at metadata.phone_call.external_number;
+    // the other keys are legacy/dashboard-set fallbacks.
     const phoneRaw: string | undefined =
-        data.metadata?.phone || body.metadata?.phone || data.phone || body.phone || data.caller_id || body.caller_id;
+        data.metadata?.phone_call?.external_number ||
+        body.metadata?.phone_call?.external_number ||
+        data.metadata?.phone_number ||
+        body.metadata?.phone_number ||
+        data.metadata?.phone ||
+        body.metadata?.phone ||
+        data.phone ||
+        body.phone ||
+        data.caller_id ||
+        body.caller_id;
 
     // Acknowledge fast — ElevenLabs retries on timeout. Side-effects below are fire-and-forget.
     res.status(200).json({ ok: true });
@@ -6765,19 +6776,21 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
         const conversations: any[] = Array.isArray(listJson?.conversations) ? listJson.conversations : [];
 
         const existing = await queryWithRetry(
-            `SELECT conversation_id FROM voice_calls WHERE conversation_id = ANY($1::text[])`,
+            `SELECT conversation_id, phone FROM voice_calls WHERE conversation_id = ANY($1::text[])`,
             [conversations.map(c => c.conversation_id).filter(Boolean)]
         );
-        const existingSet = new Set<string>(existing.rows.map(r => r.conversation_id));
+        const savedWithPhone = new Set<string>(existing.rows.filter(r => r.phone).map(r => r.conversation_id));
+        const savedWithoutPhone = new Set<string>(existing.rows.filter(r => !r.phone).map(r => r.conversation_id));
 
         let imported = 0;
+        let backfilled = 0;
         let skipped = 0;
         let failed = 0;
 
         for (const conv of conversations) {
             const conversationId: string | undefined = conv.conversation_id;
             if (!conversationId) { failed++; continue; }
-            if (existingSet.has(conversationId)) { skipped++; continue; }
+            if (savedWithPhone.has(conversationId)) { skipped++; continue; }
 
             try {
                 const detailRes = await fetch(
@@ -6816,21 +6829,33 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
                     detail?.metadata?.phone_number ||
                     detail?.metadata?.phone;
 
-                await recordVoiceCall({
-                    conversation_id: conversationId,
-                    phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
-                    duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
-                    transcript,
-                    summary,
-                });
-                imported++;
+                if (savedWithoutPhone.has(conversationId)) {
+                    // Backfill only the phone — leave transcript/summary/duration
+                    // untouched to preserve any staff edits or fields already set
+                    // by the post-call webhook.
+                    if (!phoneRaw) { skipped++; continue; }
+                    await recordVoiceCall({
+                        conversation_id: conversationId,
+                        phone: normalizeItalianPhone(phoneRaw),
+                    });
+                    backfilled++;
+                } else {
+                    await recordVoiceCall({
+                        conversation_id: conversationId,
+                        phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
+                        duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
+                        transcript,
+                        summary,
+                    });
+                    imported++;
+                }
             } catch (err) {
                 console.warn('[ElevenLabs] sync detail failed for', conversationId, err);
                 failed++;
             }
         }
 
-        res.json({ imported, skipped, failed, total_fetched: conversations.length });
+        res.json({ imported, backfilled, skipped, failed, total_fetched: conversations.length });
     } catch (err) {
         console.error('POST /voice-calls/sync error:', err);
         res.status(500).json({ error: 'Internal server error' });

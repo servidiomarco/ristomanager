@@ -307,7 +307,7 @@ const ConversazioniPage: React.FC = () => {
     setSyncMessage(null);
     try {
       const result = await voiceCallsApiService.sync();
-      setSyncMessage(`Importate ${result.imported} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`);
+      setSyncMessage(`Importate ${result.imported} · numeri recuperati ${result.backfilled} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`);
       await fetchItems();
     } catch (err) {
       setSyncMessage(`Errore: ${(err as Error).message}`);
