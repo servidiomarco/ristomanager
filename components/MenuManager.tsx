@@ -574,6 +574,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (r.shift !== shift) continue;
       if ((r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.DEPARTED) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      if (r.reservation_status === ReservationStatus.DECLINED) continue;
       const resDate = (r.reservation_time || '').slice(0, 10);
       if (resDate !== date) continue;
       if (!map.has(r.table_id)) {

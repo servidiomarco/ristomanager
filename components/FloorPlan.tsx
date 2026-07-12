@@ -494,6 +494,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           if (currentActiveShift && r.shift !== currentActiveShift) return false;
           if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
           if (r.reservation_status === ReservationStatus.CANCELLED) return false;
+          if (r.reservation_status === ReservationStatus.DECLINED) return false;
 
           const [h, m] = r.reservation_time.split('T')[1].substring(0, 5).split(':').map(Number);
           const resTimeValue = h * 60 + m;

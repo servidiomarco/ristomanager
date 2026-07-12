@@ -424,7 +424,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     return Array.isArray(reservations)
       ? reservations.filter(r =>
           r.reservation_time.startsWith(selectedDateStr) &&
-          r.reservation_status !== ReservationStatus.CANCELLED
+          r.reservation_status !== ReservationStatus.CANCELLED &&
+          r.reservation_status !== ReservationStatus.DECLINED
         )
       : [];
   }, [reservations, selectedDateStr]);

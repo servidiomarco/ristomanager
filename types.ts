@@ -153,6 +153,7 @@ export enum ReservationSource {
 export enum ReservationStatus {
   PENDING = 'PENDING',      // Booking request awaiting staff approval (public form)
   CONFIRMED = 'CONFIRMED',  // Booking is on
+  DECLINED = 'DECLINED',    // Staff couldn't accept the request (no availability) — customer notified via SMS
   NO_SHOW = 'NO_SHOW',      // Customer did not show up
   CANCELLED = 'CANCELLED'   // Cancelled by customer (e.g. via voice agent)
 }

@@ -125,7 +125,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     const dateStr = formatLocalDate(globalDate);
     return reservations
       .filter(r => r.reservation_time?.startsWith(dateStr))
-      .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
+      .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
       .filter(r => globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
   }, [reservations, globalDate, globalShiftFilter]);

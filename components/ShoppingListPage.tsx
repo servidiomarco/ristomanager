@@ -210,7 +210,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     const reservationGuests = (reservations || [])
       .filter(r =>
         r.reservation_time.startsWith(todayStr) &&
-        r.reservation_status !== ReservationStatus.CANCELLED,
+        r.reservation_status !== ReservationStatus.CANCELLED &&
+        r.reservation_status !== ReservationStatus.DECLINED,
       )
       .reduce((acc, r) => acc + (r.guests || 0), 0);
     const banquetGuests = (banquetMenus || [])

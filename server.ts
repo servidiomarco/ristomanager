@@ -968,7 +968,7 @@ async function findTableConflicts(
     let resWhere = `r.table_id = ANY($1::int[])
                     AND DATE(r.reservation_time) = $2::date
                     AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
-                    AND COALESCE(r.reservation_status, 'CONFIRMED') <> 'CANCELLED'`;
+                    AND COALESCE(r.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`;
     if (useWindow) {
         // Overlap: r.start < new.end AND r.end > new.start
         resParams.push(options!.reservationStart);
@@ -1256,10 +1256,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (await isTableInClosedRoom(table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
-        const isCancelling = reservation_status === 'CANCELLED';
-        // Cancelling frees the assigned table immediately so it can be reused.
-        const effectiveTableId = isCancelling ? null : (table_id ?? null);
-        if (!isCancelling && table_id != null && reservation_time && shift) {
+        // Both CANCELLED and DECLINED free the assigned table so it can be
+        // reused, and skip the conflict check (the row is no longer live).
+        const releasesTable = reservation_status === 'CANCELLED' || reservation_status === 'DECLINED';
+        const effectiveTableId = releasesTable ? null : (table_id ?? null);
+        if (!releasesTable && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
             const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], {
                 excludeReservationId: Number(id),
@@ -1398,6 +1399,26 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ),
                 updatedReservation.id
             ).catch(err => console.error('Auto-confirmation send failed:', err));
+        }
+
+        // Auto-send the decline notice on any → DECLINED. The guest is told the
+        // request could not be accepted and invited to call for an alternative
+        // date/time. Same dispatcher as the confirmation path (SMS while Meta
+        // WhatsApp is pending). Fire and forget.
+        if (
+            previousStatus !== 'DECLINED' &&
+            reservation_status === 'DECLINED' &&
+            updatedReservation?.phone
+        ) {
+            sendBookingConfirmation(
+                updatedReservation.phone,
+                buildDeclineMessage(
+                    updatedReservation.customer_name,
+                    updatedReservation.reservation_time,
+                    updatedReservation.guests
+                ),
+                updatedReservation.id
+            ).catch(err => console.error('Auto-decline send failed:', err));
         }
 
         res.json(updatedReservation);
@@ -2413,7 +2434,7 @@ async function runDailyBreadReminder(): Promise<void> {
             COALESCE((
                 SELECT SUM(guests) FROM reservations
                 WHERE DATE(reservation_time) = $1
-                  AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
+                  AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
             ), 0)
             + COALESCE((
                 SELECT SUM(guests) FROM banquet_menus
@@ -5611,6 +5632,27 @@ function buildConfirmationMessage(
     return `${greeting} prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes} e' confermata. A presto!`;
 }
 
+// Build the decline message sent when staff couldn't accept a booking request.
+// Same four data points as the confirmation so the guest knows exactly which
+// request was declined. Fired by the auto-send on → DECLINED in PUT /reservations/:id.
+function buildDeclineMessage(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): string {
+    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    const hours = String(dt.getHours()).padStart(2, '0');
+    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const fullName = (customerName ?? '').trim();
+    const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
+    const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci per verificare un'altra data/orario. Grazie e a presto!`;
+}
+
 // Normalize date to YYYY-MM-DD format
 function normalizeDate(dateStr: string): string {
     const parts = dateStr.split('/');
@@ -7073,7 +7115,7 @@ app.get('/public/rooms', async (req, res) => {
                          WHERE res.table_id = t.id
                            AND DATE(res.reservation_time) = $2
                            AND res.shift = $3
-                           AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+                           AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
                      )
                )
              ORDER BY r.name ASC`,

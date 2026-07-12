@@ -288,6 +288,7 @@ const computePreflightWarnings = (
   for (const r of reservations) {
     if (!r.id || seen.has(r.id)) continue;
     if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+    if (r.reservation_status === ReservationStatus.DECLINED) continue;
 
     const rPhoneDigits = (r.phone || '').replace(/\D/g, '');
     const rName = (r.customer_name || '').trim().toLowerCase();
@@ -850,6 +851,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     for (const r of reservations) {
       if (r.id === (formData as Reservation).id) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      if (r.reservation_status === ReservationStatus.DECLINED) continue;
       if (r.reservation_status === ReservationStatus.NO_SHOW) continue;
       if (r.shift !== formData.shift) continue;
       if (!r.reservation_time?.startsWith(date)) continue;
@@ -1016,6 +1018,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     for (const r of reservations) {
       if (r.table_id == null) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      if (r.reservation_status === ReservationStatus.DECLINED) continue;
       const date = r.reservation_time.split('T')[0];
       const key = `${r.table_id}|${date}|${r.shift}`;
       const arr = groups.get(key);
@@ -1105,7 +1108,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         pending.push(r);
         continue;
       }
-      if (resStatus === ReservationStatus.CANCELLED) {
+      if (resStatus === ReservationStatus.CANCELLED || resStatus === ReservationStatus.DECLINED) {
         cancelled.push(r);
         continue;
       }
@@ -1244,11 +1247,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  type ReservationStateKey = 'pending' | 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled';
+  type ReservationStateKey = 'pending' | 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled' | 'declined';
 
   const getReservationState = (res: Reservation): ReservationStateKey => {
     const rs = res.reservation_status || ReservationStatus.CONFIRMED;
     if (rs === ReservationStatus.PENDING) return 'pending';
+    if (rs === ReservationStatus.DECLINED) return 'declined';
     if (rs === ReservationStatus.CANCELLED) return 'cancelled';
     if (rs === ReservationStatus.NO_SHOW) return 'noshow';
     const a = res.arrival_status || ArrivalStatus.WAITING;
@@ -1264,9 +1268,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
     noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
     cancelled: { label: 'Annullata',dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
+    declined:  { label: 'Non confermata', dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
   };
 
   const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
+  const [declineReservation, setDeclineReservation] = useState<Reservation | null>(null);
 
   const handleSetReservationState = (res: Reservation, state: ReservationStateKey) => {
     const update: Partial<Reservation> = {};
@@ -1294,6 +1300,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       case 'cancelled':
         update.arrival_status = ArrivalStatus.WAITING;
         update.reservation_status = ReservationStatus.CANCELLED;
+        update.table_id = undefined;
+        break;
+      case 'declined':
+        update.arrival_status = ArrivalStatus.WAITING;
+        update.reservation_status = ReservationStatus.DECLINED;
         update.table_id = undefined;
         break;
     }
@@ -1571,6 +1582,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (r.id === formData.id) return false;
       if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
       if (r.reservation_status === ReservationStatus.CANCELLED) return false;
+      if (r.reservation_status === ReservationStatus.DECLINED) return false;
       if (r.reservation_time.split('T')[0] !== checkDate) return false;
       return reservationsOverlap(myStart, myDuration, r.reservation_time, resolveDurationMinutes(r));
     }) : false;
@@ -1584,7 +1596,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
           (selectedShift === 'ALL' || r.shift === selectedShift) &&
           r.arrival_status !== ArrivalStatus.DEPARTED &&
-          r.reservation_status !== ReservationStatus.CANCELLED
+          r.reservation_status !== ReservationStatus.CANCELLED &&
+          r.reservation_status !== ReservationStatus.DECLINED
       );
   }
 
@@ -1599,7 +1612,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               r.reservation_time.split('T')[0] === dateOnly &&
               (selectedShift === 'ALL' || r.shift === selectedShift) &&
               r.arrival_status !== ArrivalStatus.DEPARTED &&
-              r.reservation_status !== ReservationStatus.CANCELLED
+              r.reservation_status !== ReservationStatus.CANCELLED &&
+              r.reservation_status !== ReservationStatus.DECLINED
           )
           .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
   };
@@ -1636,6 +1650,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           r.id !== formData.id &&
           r.arrival_status !== ArrivalStatus.DEPARTED &&
           r.reservation_status !== ReservationStatus.CANCELLED &&
+          r.reservation_status !== ReservationStatus.DECLINED &&
           reservationsOverlap(formData.reservation_time!, myDuration, r.reservation_time, resolveDurationMinutes(r))
       );
       if (res) return { kind: 'reservation', data: res };
@@ -2295,6 +2310,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Check className="h-3.5 w-3.5" /> Conferma
               </button>
             )}
+            {(res.reservation_status === ReservationStatus.PENDING) && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); setDeclineReservation(res); }}
+                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors"
+                title="Non confermare la prenotazione">
+                <X className="h-3.5 w-3.5" /> Non confermata
+              </button>
+            )}
             {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                 className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
@@ -2696,7 +2718,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     });
     const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
     const reservationCountForDayShift = reservationsForDayShift.length;
-    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED).length;
+    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED).length;
 
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
@@ -3319,6 +3341,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
                                         title="Conferma prenotazione">
                                         <Check className="h-3.5 w-3.5" /> Conferma
+                                      </button>
+                                    )}
+                                    {(res.reservation_status === ReservationStatus.PENDING) && (
+                                      <button onClick={(e) => { e.stopPropagation(); setDeclineReservation(res); }}
+                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors"
+                                        title="Non confermare la prenotazione">
+                                        <X className="h-3.5 w-3.5" /> Non confermata
                                       </button>
                                     )}
                                     {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
@@ -4686,7 +4715,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {stateChangeReservation && (() => {
         const res = stateChangeReservation;
         const current = getReservationState(res);
-        const options: ReservationStateKey[] = ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled'];
+        const options: ReservationStateKey[] = ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled', 'declined'];
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
@@ -4738,6 +4767,47 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         );
       })()}
 
+      {/* Decline confirmation modal: warns the operator that an SMS will be sent */}
+      {declineReservation && (() => {
+        const res = declineReservation;
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeclineReservation(null)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-center pt-3 pb-1 sm:hidden">
+                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              </div>
+              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+                <div className="min-w-0">
+                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Non confermare</h3>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                    {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
+                  </p>
+                </div>
+                <button onClick={() => setDeclineReservation(null)}
+                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-[var(--color-fg)]">
+                  Verrà inviato un SMS al cliente per informarlo che non è stato possibile confermare la prenotazione. Procedere?
+                </p>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => setDeclineReservation(null)}
+                    className="px-3 h-9 rounded-lg text-sm font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                    Annulla
+                  </button>
+                  <button type="button" onClick={() => { handleSetReservationState(res, 'declined'); setDeclineReservation(null); }}
+                    className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors">
+                    <X className="h-4 w-4" /> Non confermare
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Unassigned-reservations modal: opened from the map header badge */}
       {showUnassignedModal && (() => {
           const dateOnly = selectedDate.split('T')[0];
@@ -4748,7 +4818,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .filter(r => r.reservation_time.split('T')[0] === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
-            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
+            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           return (
@@ -4919,7 +4989,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .filter(r => r.reservation_time.split('T')[0] === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
-            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED)
+            .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           const assign = (r: Reservation) => {
