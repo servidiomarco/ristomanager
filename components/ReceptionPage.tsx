@@ -174,17 +174,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     noTable: todayReservations.filter(r => !r.table_id).length
   }), [todayReservations]);
 
-  // Second-turn queue: confirmed bookings for today+shift with no table yet,
-  // ordered FIFO by booking time. The host assigns manually when a table frees
-  // up (via the existing DetailPanel → TablePicker flow).
-  const waitlistFIFO = useMemo(() => {
-    return todayReservations
-      .filter(r => !r.table_id)
-      .filter(r => r.arrival_status !== ArrivalStatus.DEPARTED)
-      .filter(r => r.reservation_status === ReservationStatus.CONFIRMED)
-      .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
-  }, [todayReservations]);
-
   const selectedReservation = useMemo(
     () => reservations.find(r => r.id === selectedReservationId) || null,
     [reservations, selectedReservationId]
@@ -405,43 +394,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     );
   };
 
-  // Compact card for the FIFO waitlist strip. Shows queue position, arrival
-  // time and party — clicking selects the reservation so the DetailPanel's
-  // "Assegna tavolo" button (which opens TablePicker) can be used to seat it.
-  const renderWaitlistCard = (r: Reservation, position: number) => {
-    const isSelected = r.id === selectedReservationId;
-    return (
-      <button
-        key={r.id}
-        onClick={() => setSelectedReservationId(r.id)}
-        className={`w-full text-left rounded-xl border p-2.5 transition-colors flex items-center gap-2.5 ${
-          isSelected
-            ? 'bg-indigo-50 border-indigo-300 dark:bg-indigo-500/15 dark:border-indigo-500/50'
-            : 'bg-[var(--color-surface)] border-amber-200 dark:border-amber-500/30 hover:bg-amber-100/60 dark:hover:bg-amber-500/15'
-        }`}
-      >
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center tabular-nums">
-          {position}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-[var(--color-fg)] tabular-nums">
-              {formatHHMM(r.reservation_time)}
-            </span>
-            {r.customer_is_vip && <Star className="h-3 w-3 text-amber-500 fill-amber-500 flex-shrink-0" />}
-            <span className="text-sm text-[var(--color-fg)] truncate">
-              {r.customer_name || 'Senza nome'}
-            </span>
-          </div>
-          <div className="text-xs text-[var(--color-fg-muted)] flex items-center gap-1">
-            <Users className="h-3 w-3" />
-            {r.guests}{r.children ? `+${r.children}` : ''} coperti
-          </div>
-        </div>
-      </button>
-    );
-  };
-
   const renderGroup = (title: string, items: Reservation[]) => {
     if (items.length === 0) return null;
     return (
@@ -573,19 +525,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 pt-3 pb-4">
-            {waitlistFIFO.length > 0 && (
-              <div className="mb-4 p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <MapPinOff className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200">
-                    In attesa tavolo · {waitlistFIFO.length}
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  {waitlistFIFO.map((r, idx) => renderWaitlistCard(r, idx + 1))}
-                </div>
-              </div>
-            )}
             {filtered.length === 0 ? (
               <div className="text-center text-sm text-[var(--color-fg-muted)] py-10">
                 Nessuna prenotazione corrisponde ai filtri.
