@@ -3829,7 +3829,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div className="relative">
                                         <input
                                             type="tel"
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            className={`w-full rounded-md border border-[var(--color-line)] py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors ${formData.phone ? 'pl-3 pr-10' : 'px-3'}`}
                                             value={formData.phone || ''}
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
@@ -3841,6 +3841,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             placeholder="+39 333..."
                                             autoComplete="off"
                                         />
+                                        {formData.phone && (
+                                            <a
+                                                href={`tel:${formData.phone.replace(/[^\d+]/g, '')}`}
+                                                onMouseDown={e => e.preventDefault()}
+                                                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-7 w-7 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                                                aria-label="Chiama"
+                                                title="Chiama"
+                                            >
+                                                <Phone className="h-3.5 w-3.5" />
+                                            </a>
+                                        )}
                                         {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
                                             <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
                                                 {customerSuggestions.map(c => (
