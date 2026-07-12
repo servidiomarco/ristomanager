@@ -123,11 +123,18 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose }) => {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-[var(--color-line)] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Phone className="h-4 w-4 text-[var(--color-fg-muted)]" />
-            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">
-              {detail ? formatPhone(detail.phone) : 'Conversazione'}
-            </h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <h2 className="text-[15px] font-semibold text-[var(--color-fg)] truncate">
+                {detail ? (detail.customer_name || formatPhone(detail.phone)) : 'Conversazione'}
+              </h2>
+              {detail?.customer_name && detail.phone && (
+                <span className="text-[12px] text-[var(--color-fg-muted)] tabular truncate">
+                  {detail.phone}
+                </span>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -434,9 +441,16 @@ const ConversazioniPage: React.FC = () => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
-                      <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
-                        {formatPhone(item.phone)}
-                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
+                          {item.customer_name || formatPhone(item.phone)}
+                        </span>
+                        {item.customer_name && item.phone && (
+                          <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
+                            {item.phone}
+                          </span>
+                        )}
+                      </div>
                       {resBadge && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
                           {resBadge.label}

@@ -6640,6 +6640,10 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
 
         params.push(limit);
         params.push(offset);
+        // Match customers on the last 10 digits of the phone. `customers.phone`
+        // is stored in mixed formats (E.164, national, bare digits) so we can't
+        // rely on equality — right(10) covers Italian mobile/landline reliably.
+        // LATERAL + LIMIT 1 avoids row explosion if two rows share a number.
         const result = await queryWithRetry(
             `SELECT vc.id,
                     vc.conversation_id,
@@ -6651,9 +6655,21 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
-                    r.reservation_status AS reservation_status
+                    r.reservation_status AS reservation_status,
+                    cust.customer_id,
+                    cust.customer_name
              FROM voice_calls vc
              LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN LATERAL (
+                 SELECT c.id AS customer_id, c.name AS customer_name
+                 FROM customers c
+                 WHERE vc.phone IS NOT NULL
+                   AND c.phone IS NOT NULL
+                   AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
+                   AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
+                     = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
+                 LIMIT 1
+             ) cust ON true
              ${whereSql}
              ORDER BY vc.created_at DESC
              LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -6695,9 +6711,21 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
-                    r.reservation_status AS reservation_status
+                    r.reservation_status AS reservation_status,
+                    cust.customer_id,
+                    cust.customer_name
              FROM voice_calls vc
              LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN LATERAL (
+                 SELECT c.id AS customer_id, c.name AS customer_name
+                 FROM customers c
+                 WHERE vc.phone IS NOT NULL
+                   AND c.phone IS NOT NULL
+                   AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
+                   AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
+                     = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
+                 LIMIT 1
+             ) cust ON true
              WHERE vc.id = $1`,
             [id]
         );

@@ -15,6 +15,8 @@ export interface VoiceCallSummary {
   reservation_time: string | null;
   reservation_guests: number | null;
   reservation_status: string | null;
+  customer_id: number | null;
+  customer_name: string | null;
 }
 
 export interface VoiceCallDetail extends VoiceCallSummary {
