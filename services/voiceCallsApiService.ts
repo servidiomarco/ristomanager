@@ -159,6 +159,19 @@ class VoiceCallsApiService {
       body: JSON.stringify(patch),
     });
   }
+
+  async linkReservation(id: number, reservationId: number): Promise<{
+    id: number;
+    reservation_id: number;
+    follow_up_status: FollowUpStatus;
+    follow_up_updated_at: string;
+  }> {
+    return apiRequest(`${API_URL}/voice-calls/${id}/link`, {
+      method: 'PATCH',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservation_id: reservationId }),
+    });
+  }
 }
 
 export const voiceCallsApiService = new VoiceCallsApiService();

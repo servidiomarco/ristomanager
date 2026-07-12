@@ -124,6 +124,12 @@ const App: React.FC = () => {
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
+  // Prefill applied when opening the new-reservation modal (currently used
+  // when converting a voice call into a booking).
+  const [newReservationPrefill, setNewReservationPrefill] = useState<{ customer_name?: string; phone?: string } | undefined>(undefined);
+  // If set, the next reservation that gets created is linked to this voice
+  // call. Cleared once the link finishes (or the modal is dismissed).
+  const linkVoiceCallOnCreateRef = useRef<number | null>(null);
   const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
   const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
@@ -838,6 +844,18 @@ const App: React.FC = () => {
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>) => {
     try {
       const returnedRes = await createReservation(newRes);
+      // If this reservation was created from a voice call, link it and drop
+      // the call out of the pending queue. Best-effort — a link failure
+      // should not block the user's booking flow.
+      const linkCallId = linkVoiceCallOnCreateRef.current;
+      if (linkCallId != null) {
+        linkVoiceCallOnCreateRef.current = null;
+        voiceCallsApiService.linkReservation(linkCallId, returnedRes.id)
+          .then(() => voiceCallsApiService.pendingCount()
+            .then(({ count }) => setVoiceCallsPendingCount(count))
+            .catch(() => {}))
+          .catch((err) => console.warn('linkReservation failed:', err));
+      }
       // Optimistically include the new row so checks that scan `reservations`
       // (e.g. the duplicate preflight) see it immediately instead of waiting
       // for the socket round-trip. The socket handler dedupes by id.
@@ -1355,8 +1373,14 @@ const App: React.FC = () => {
             modalOnly
             autoOpenNew
             autoOpenNewKind={newReservationKind}
+            newReservationPrefill={newReservationPrefill}
             onAutoOpenNewHandled={() => { /* keep flag until modal closes */ }}
-            onModalClose={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); }}
+            onModalClose={() => {
+              setAutoOpenNewReservation(false);
+              setNewReservationKind('standard');
+              setNewReservationPrefill(undefined);
+              linkVoiceCallOnCreateRef.current = null;
+            }}
           />
         )}
 
@@ -1376,7 +1400,8 @@ const App: React.FC = () => {
                 canEdit={hasPermission('reservations:full')}
                 autoOpenNew={autoOpenNewReservation}
                 autoOpenNewKind={newReservationKind}
-                onAutoOpenNewHandled={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); }}
+                newReservationPrefill={newReservationPrefill}
+                onAutoOpenNewHandled={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); setNewReservationPrefill(undefined); }}
                 initialSearchTerm={reservationsSearchPrefill}
                 onInitialSearchTermHandled={() => setReservationsSearchPrefill(undefined)}
                 globalDate={globalDate}
@@ -1472,6 +1497,12 @@ const App: React.FC = () => {
               voiceCallsApiService.pendingCount()
                 .then(({ count }) => setVoiceCallsPendingCount(count))
                 .catch(() => {});
+            }}
+            onCreateReservationFromCall={({ callId, customer_name, phone }) => {
+              linkVoiceCallOnCreateRef.current = callId;
+              setNewReservationPrefill({ customer_name, phone });
+              setNewReservationKind('standard');
+              setAutoOpenNewReservation(true);
             }}
           />
         )}

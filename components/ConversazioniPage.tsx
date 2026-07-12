@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
-  CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote,
+  CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
 } from 'lucide-react';
 import {
   voiceCallsApiService,
@@ -68,9 +68,10 @@ interface DetailModalProps {
   callId: number;
   onClose: () => void;
   onFollowUpChanged?: () => void;
+  onCreateReservation?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged, onCreateReservation }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -256,19 +257,37 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
                     ) : null}
                   </div>
                   {detail.reservation_id == null && (
-                    <button
-                      onClick={() => applyFollowUpPatch({
-                        status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
-                      })}
-                      disabled={saving}
-                      className={`text-[12px] px-2.5 py-1 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
-                        detail.follow_up_status === 'CONTACTED'
-                          ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                      }`}
-                    >
-                      {detail.follow_up_status === 'CONTACTED' ? 'Segna come da ricontattare' : 'Segna come ricontattato'}
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => applyFollowUpPatch({
+                          status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
+                        })}
+                        disabled={saving}
+                        className={`text-[12px] px-2.5 py-1 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
+                          detail.follow_up_status === 'CONTACTED'
+                            ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                      >
+                        {detail.follow_up_status === 'CONTACTED' ? 'Segna come da ricontattare' : 'Segna come ricontattato'}
+                      </button>
+                      {onCreateReservation && (
+                        <button
+                          onClick={() => {
+                            onCreateReservation({
+                              callId,
+                              customer_name: detail.customer_name || '',
+                              phone: detail.phone || '',
+                            });
+                            onClose();
+                          }}
+                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+                        >
+                          <CalendarPlus className="h-3.5 w-3.5" />
+                          Crea prenotazione
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
@@ -373,9 +392,10 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
 
 interface ConversazioniPageProps {
   onFollowUpChanged?: () => void;
+  onCreateReservationFromCall?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
 }
 
-const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged }) => {
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged, onCreateReservationFromCall }) => {
   const [items, setItems] = useState<VoiceCallSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -607,6 +627,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged
           callId={selectedId}
           onClose={() => setSelectedId(null)}
           onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
+          onCreateReservation={onCreateReservationFromCall}
         />
       )}
     </div>

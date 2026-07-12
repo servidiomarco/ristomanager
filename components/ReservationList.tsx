@@ -330,6 +330,9 @@ interface ReservationListProps {
   // Optional pre-fill mode for the new-reservation form. Defaults to 'standard';
   // 'walkin' opens it with customer="Walk-in", arrival=ARRIVED, time=now.
   autoOpenNewKind?: 'standard' | 'walkin';
+  // Optional prefill applied when the form auto-opens (used when converting a
+  // voice call into a booking).
+  newReservationPrefill?: { customer_name?: string; phone?: string };
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
   onModalClose?: () => void;
@@ -358,6 +361,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   canEdit = true,
   autoOpenNew = false,
   autoOpenNewKind = 'standard',
+  newReservationPrefill,
   onAutoOpenNewHandled,
   modalOnly = false,
   onModalClose,
@@ -1438,8 +1442,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }
 
 
-  const handleOpenNew = (opts: { walkIn?: boolean } = {}) => {
+  const handleOpenNew = (opts: { walkIn?: boolean; prefill?: { customer_name?: string; phone?: string } } = {}) => {
       const walkIn = !!opts.walkIn;
+      const prefill = opts.prefill;
       // For a walk-in we use "now" (and derive the shift from current time), so the
       // operator only has to pick a table and confirm. For standard bookings we keep
       // the date/shift currently in view.
@@ -1453,7 +1458,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ? formatLocalDateTime(now)
         : `${dateOnly}T${getDefaultTime(newShift)}`;
       setFormData({
-        customer_name: walkIn ? 'Walk-in' : '',
+        customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
+        phone: prefill?.phone || undefined,
         guests: 2,
         children: 0,
         reservation_time: reservationTime,
@@ -1491,7 +1497,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Auto-open new reservation form when triggered from outside (e.g. Dashboard CTA)
   useEffect(() => {
     if (autoOpenNew) {
-      handleOpenNew({ walkIn: autoOpenNewKind === 'walkin' });
+      handleOpenNew({ walkIn: autoOpenNewKind === 'walkin', prefill: newReservationPrefill });
       onAutoOpenNewHandled?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

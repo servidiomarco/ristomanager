@@ -6764,6 +6764,38 @@ app.patch('/voice-calls/:id/follow-up', authenticate, voiceCallsAuthorize, async
     }
 });
 
+// Link a voice call to a reservation created from it (e.g. after a manual
+// call-back). Also flips the follow-up state to CONTACTED so the call drops
+// out of the pending queue.
+app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const reservationIdRaw = req.body?.reservation_id;
+        const reservationId = typeof reservationIdRaw === 'number'
+            ? reservationIdRaw
+            : parseInt(reservationIdRaw, 10);
+        if (!Number.isFinite(reservationId)) return res.status(400).json({ error: 'Invalid reservation_id' });
+
+        const result = await queryWithRetry(
+            `UPDATE voice_calls
+             SET reservation_id = $1,
+                 follow_up_status = 'CONTACTED',
+                 follow_up_updated_at = NOW(),
+                 follow_up_updated_by = $2
+             WHERE id = $3
+             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at`,
+            [reservationId, req.user?.userId ?? null, id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('PATCH /voice-calls/:id/link error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Detail with full transcript.
 app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {
