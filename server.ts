@@ -6652,6 +6652,10 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     vc.summary,
                     vc.reservation_id,
                     vc.created_at,
+                    vc.follow_up_status,
+                    vc.notes,
+                    vc.follow_up_updated_at,
+                    u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
@@ -6660,6 +6664,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     cust.customer_name
              FROM voice_calls vc
              LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN users u ON u.id = vc.follow_up_updated_by
              LEFT JOIN LATERAL (
                  SELECT c.id AS customer_id, c.name AS customer_name
                  FROM customers c
@@ -6703,11 +6708,58 @@ app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (
             `SELECT COUNT(*)::int AS count
              FROM voice_calls
              WHERE reservation_id IS NULL
+               AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
                AND created_at >= NOW() - INTERVAL '7 days'`
         );
         res.json({ count: result.rows[0]?.count ?? 0 });
     } catch (err) {
         console.error('GET /voice-calls/pending-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update follow-up state for a call: mark as contacted / pending, and store
+// free-text notes for whoever picks it up next. Fields are patched
+// individually — omitted fields stay as-is.
+app.patch('/voice-calls/:id/follow-up', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const { status, notes } = req.body ?? {};
+        const sets: string[] = [];
+        const params: any[] = [];
+
+        if (status !== undefined) {
+            if (status !== 'PENDING' && status !== 'CONTACTED') {
+                return res.status(400).json({ error: 'Invalid status' });
+            }
+            params.push(status);
+            sets.push(`follow_up_status = $${params.length}`);
+        }
+        if (notes !== undefined) {
+            if (notes !== null && typeof notes !== 'string') {
+                return res.status(400).json({ error: 'Invalid notes' });
+            }
+            params.push(notes === null || notes.trim() === '' ? null : notes);
+            sets.push(`notes = $${params.length}`);
+        }
+        if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+        params.push(req.user?.userId ?? null);
+        sets.push(`follow_up_updated_by = $${params.length}`);
+        sets.push(`follow_up_updated_at = NOW()`);
+
+        params.push(id);
+        const result = await queryWithRetry(
+            `UPDATE voice_calls SET ${sets.join(', ')} WHERE id = $${params.length}
+             RETURNING id, follow_up_status, notes, follow_up_updated_at`,
+            params
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('PATCH /voice-calls/:id/follow-up error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -6727,6 +6779,10 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     vc.summary,
                     vc.reservation_id,
                     vc.created_at,
+                    vc.follow_up_status,
+                    vc.notes,
+                    vc.follow_up_updated_at,
+                    u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
@@ -6735,6 +6791,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     cust.customer_name
              FROM voice_calls vc
              LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN users u ON u.id = vc.follow_up_updated_by
              LEFT JOIN LATERAL (
                  SELECT c.id AS customer_id, c.name AS customer_name
                  FROM customers c

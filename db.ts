@@ -405,6 +405,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_phone ON voice_calls(phone);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_reservation ON voice_calls(reservation_id) WHERE reservation_id IS NOT NULL;`);
 
+        // Follow-up tracking for calls that didn't produce a reservation:
+        // staff mark the call as PENDING/CONTACTED and can leave notes for
+        // whoever picks it up next.
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_status VARCHAR(20) DEFAULT 'PENDING';`);
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS notes TEXT;`);
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_at TIMESTAMPTZ;`);
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+
         // Add reservation_status column to existing tables if it doesn't exist
         await client.query(`
             DO $$

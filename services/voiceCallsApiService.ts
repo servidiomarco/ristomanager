@@ -3,6 +3,8 @@ import { socketClient } from './socketClient';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
+export type FollowUpStatus = 'PENDING' | 'CONTACTED';
+
 export interface VoiceCallSummary {
   id: number;
   conversation_id: string;
@@ -11,12 +13,21 @@ export interface VoiceCallSummary {
   summary: string | null;
   reservation_id: number | null;
   created_at: string;
+  follow_up_status: FollowUpStatus | null;
+  notes: string | null;
+  follow_up_updated_at: string | null;
+  follow_up_updated_by_name: string | null;
   reservation_customer_name: string | null;
   reservation_time: string | null;
   reservation_guests: number | null;
   reservation_status: string | null;
   customer_id: number | null;
   customer_name: string | null;
+}
+
+export interface VoiceCallFollowUpUpdate {
+  status?: FollowUpStatus;
+  notes?: string | null;
 }
 
 export interface VoiceCallDetail extends VoiceCallSummary {
@@ -133,6 +144,19 @@ class VoiceCallsApiService {
   async pendingCount(): Promise<{ count: number }> {
     return apiRequest<{ count: number }>(`${API_URL}/voice-calls/pending-count`, {
       headers: getHeaders(),
+    });
+  }
+
+  async updateFollowUp(id: number, patch: VoiceCallFollowUpUpdate): Promise<{
+    id: number;
+    follow_up_status: FollowUpStatus;
+    notes: string | null;
+    follow_up_updated_at: string;
+  }> {
+    return apiRequest(`${API_URL}/voice-calls/${id}/follow-up`, {
+      method: 'PATCH',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
     });
   }
 }

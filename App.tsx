@@ -1467,7 +1467,13 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.CONVERSAZIONI && (
-          <ConversazioniPage />
+          <ConversazioniPage
+            onFollowUpChanged={() => {
+              voiceCallsApiService.pendingCount()
+                .then(({ count }) => setVoiceCallsPendingCount(count))
+                .catch(() => {});
+            }}
+          />
         )}
 
         {view === ViewState.RECEPTION && (

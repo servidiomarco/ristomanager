@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
-  CheckCircle2, AlertCircle, Filter, ExternalLink, Play,
+  CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote,
 } from 'lucide-react';
 import {
   voiceCallsApiService,
   VoiceCallSummary,
   VoiceCallDetail,
   VoiceCallsListParams,
+  FollowUpStatus,
 } from '../services/voiceCallsApiService';
 
 const formatDuration = (secs: number | null | undefined): string => {
@@ -66,9 +67,10 @@ const parseTranscript = (raw: string | null): TranscriptTurn[] => {
 interface DetailModalProps {
   callId: number;
   onClose: () => void;
+  onFollowUpChanged?: () => void;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,16 +80,46 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose }) => {
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioObjectUrlRef = useRef<string | null>(null);
 
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesDirty, setNotesDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     voiceCallsApiService.getById(callId)
-      .then(d => { if (!cancelled) setDetail(d); })
+      .then(d => {
+        if (cancelled) return;
+        setDetail(d);
+        setNotesDraft(d.notes ?? '');
+        setNotesDirty(false);
+      })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [callId]);
+
+  const applyFollowUpPatch = useCallback(async (patch: { status?: FollowUpStatus; notes?: string | null }) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await voiceCallsApiService.updateFollowUp(callId, patch);
+      setDetail(prev => prev ? {
+        ...prev,
+        follow_up_status: updated.follow_up_status,
+        notes: updated.notes,
+        follow_up_updated_at: updated.follow_up_updated_at,
+      } : prev);
+      if (patch.notes !== undefined) setNotesDirty(false);
+      onFollowUpChanged?.();
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }, [callId, onFollowUpChanged]);
 
   useEffect(() => {
     return () => {
@@ -208,6 +240,81 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose }) => {
                 </div>
               )}
 
+              <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
+                    <StickyNote className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                    <span className="font-medium">Follow-up</span>
+                    {detail.follow_up_status === 'CONTACTED' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-200">
+                        Ricontattato
+                      </span>
+                    ) : detail.reservation_id == null ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200">
+                        Da ricontattare
+                      </span>
+                    ) : null}
+                  </div>
+                  {detail.reservation_id == null && (
+                    <button
+                      onClick={() => applyFollowUpPatch({
+                        status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
+                      })}
+                      disabled={saving}
+                      className={`text-[12px] px-2.5 py-1 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
+                        detail.follow_up_status === 'CONTACTED'
+                          ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {detail.follow_up_status === 'CONTACTED' ? 'Segna come da ricontattare' : 'Segna come ricontattato'}
+                    </button>
+                  )}
+                </div>
+                {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
+                  <div className="text-[11px] text-[var(--color-fg-muted)]">
+                    {detail.follow_up_updated_by_name && `Ricontattato da ${detail.follow_up_updated_by_name}`}
+                    {detail.follow_up_updated_by_name && detail.follow_up_updated_at && ' · '}
+                    {detail.follow_up_updated_at && formatDateTime(detail.follow_up_updated_at)}
+                  </div>
+                )}
+                <div>
+                  <textarea
+                    value={notesDraft}
+                    onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
+                    placeholder="Note utili per la prenotazione…"
+                    rows={3}
+                    className="w-full px-3 py-2 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-y"
+                  />
+                  {(notesDirty || saveError) && (
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      {saveError ? (
+                        <span className="text-[11px] text-rose-600">{saveError}</span>
+                      ) : <span />}
+                      <div className="flex items-center gap-2">
+                        {notesDirty && (
+                          <button
+                            onClick={() => { setNotesDraft(detail.notes ?? ''); setNotesDirty(false); setSaveError(null); }}
+                            disabled={saving}
+                            className="text-[12px] px-2.5 py-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                          >
+                            Annulla
+                          </button>
+                        )}
+                        <button
+                          onClick={() => applyFollowUpPatch({ notes: notesDraft })}
+                          disabled={saving || !notesDirty}
+                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+                          Salva note
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2">Audio</div>
                 {audioUrl ? (
@@ -264,7 +371,11 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose }) => {
   );
 };
 
-const ConversazioniPage: React.FC = () => {
+interface ConversazioniPageProps {
+  onFollowUpChanged?: () => void;
+}
+
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged }) => {
   const [items, setItems] = useState<VoiceCallSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -456,7 +567,12 @@ const ConversazioniPage: React.FC = () => {
                           {resBadge.label}
                         </span>
                       )}
-                      {item.reservation_id == null && (
+                      {item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-emerald-50 text-emerald-700 ring-emerald-200">
+                          Ricontattato
+                        </span>
+                      )}
+                      {item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
                           Da ricontattare
                         </span>
@@ -487,7 +603,11 @@ const ConversazioniPage: React.FC = () => {
       </div>
 
       {selectedId !== null && (
-        <DetailModal callId={selectedId} onClose={() => setSelectedId(null)} />
+        <DetailModal
+          callId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
+        />
       )}
     </div>
   );
