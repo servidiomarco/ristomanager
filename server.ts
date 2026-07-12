@@ -86,8 +86,13 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Health check endpoint for Railway
+// Health check endpoint for Railway. On the public booking subdomain
+// (prenotazioni.vecchiofrantoio.com) the root path redirects to /prenota
+// so visitors who type only the hostname land on the form.
 app.get('/', (req, res) => {
+  if (req.hostname === 'prenotazioni.vecchiofrantoio.com') {
+    return res.redirect(301, '/prenota');
+  }
   res.json({ status: 'ok', message: 'RistoManager API is running' });
 });
 
