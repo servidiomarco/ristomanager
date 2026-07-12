@@ -155,7 +155,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
         className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-[var(--color-line)] flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
             <div className="flex flex-col min-w-0">
@@ -169,13 +169,26 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-fg-muted)]"
-            aria-label="Chiudi"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {detail?.phone && (
+              <a
+                href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`}
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-[12px] font-medium transition-colors"
+                aria-label="Chiama"
+                title="Chiama"
+              >
+                <Phone className="h-3.5 w-3.5" />
+                Chiama
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-fg-muted)]"
+              aria-label="Chiudi"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
