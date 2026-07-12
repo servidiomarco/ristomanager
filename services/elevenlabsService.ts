@@ -306,6 +306,11 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM table_merges tm
+              WHERE tm.date = $2 AND tm.shift = $3
+                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
+          )
         GROUP BY r.location
     `, [guests, date, shift]);
 
@@ -357,6 +362,11 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM table_merges tm
+              WHERE tm.date = $2 AND tm.shift = $3
+                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
     `, [guests, date, otherShift]);
     const altFree = altResult.rows[0]?.free ?? 0;
@@ -444,6 +454,11 @@ async function pickAutoAssignTable(
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM table_merges tm
+              WHERE tm.date = $2 AND tm.shift = $3
+                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
         ORDER BY t.seats ASC, t.id ASC
         LIMIT 1
