@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { flushSync } from 'react-dom';
+import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
@@ -98,6 +98,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [showHidden, setShowHidden] = useState(false);
   const [closedRoomIdsForShift, setClosedRoomIdsForShift] = useState<Set<number>>(new Set());
   const [roomClosureMenuOpen, setRoomClosureMenuOpen] = useState(false);
+  // Anchor rect for the room-closure dropdown (portal target). We render the
+  // menu at body level so the toolbar's overflow-x doesn't clip it vertically.
+  const [roomClosureAnchor, setRoomClosureAnchor] = useState<DOMRect | null>(null);
+  const roomClosureButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
   // re-enables drag-to-position so the floor plan can mirror the real room.
@@ -1332,9 +1336,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const isAnyClosed = isExtendedClosed || isShiftClosed;
             const shiftLabel = selectedShift === Shift.LUNCH ? 'pranzo' : 'cena';
             return (
-              <div className="relative">
+              <>
                 <button
-                  onClick={() => setRoomClosureMenuOpen(v => !v)}
+                  ref={roomClosureButtonRef}
+                  onClick={() => {
+                    if (roomClosureMenuOpen) {
+                      setRoomClosureMenuOpen(false);
+                    } else {
+                      const rect = roomClosureButtonRef.current?.getBoundingClientRect() ?? null;
+                      setRoomClosureAnchor(rect);
+                      setRoomClosureMenuOpen(true);
+                    }
+                  }}
                   className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
                     isAnyClosed
                       ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
@@ -1346,13 +1359,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   <span className="hidden lg:inline">Chiusura</span>
                   <ChevronDown className="h-3 w-3" />
                 </button>
-                {roomClosureMenuOpen && (
+                {roomClosureMenuOpen && roomClosureAnchor && createPortal(
                   <>
                     <div
-                      className="fixed inset-0 z-40"
+                      className="fixed inset-0 z-[60]"
                       onClick={() => setRoomClosureMenuOpen(false)}
                     />
-                    <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] shadow-lg overflow-hidden">
+                    <div
+                      className="fixed z-[61] w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] shadow-lg overflow-hidden"
+                      style={{
+                        top: roomClosureAnchor.bottom + 4,
+                        left: Math.max(8, Math.min(roomClosureAnchor.right - 288, window.innerWidth - 296)),
+                      }}
+                    >
                       <button
                         onClick={() => {
                           setRoomClosureMenuOpen(false);
@@ -1392,9 +1411,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         </div>
                       </button>
                     </div>
-                  </>
+                  </>,
+                  document.body
                 )}
-              </div>
+              </>
             );
           })()}
 
