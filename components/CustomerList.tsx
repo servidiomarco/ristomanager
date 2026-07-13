@@ -627,6 +627,56 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none resize-none"
                   />
                 </div>
+
+                {form.id && (() => {
+                  const s = stats.get(form.id);
+                  const list = s ? [...s.reservations].sort(
+                    (a, b) => b.reservation_time.localeCompare(a.reservation_time)
+                  ) : [];
+                  return (
+                    <div className="pt-3 mt-3 border-t border-[var(--color-line)]">
+                      <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
+                        <History className="h-3.5 w-3.5" />
+                        Storico prenotazioni
+                        {list.length > 0 && (
+                          <span className="ml-1 inline-flex items-center justify-center h-4 min-w-[18px] px-1 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-semibold">
+                            {list.length}
+                          </span>
+                        )}
+                      </div>
+                      {list.length === 0 ? (
+                        <p className="text-xs text-slate-500 italic">Nessuna prenotazione registrata.</p>
+                      ) : (
+                        <ul className="space-y-1.5 max-h-52 overflow-y-auto">
+                          {list.map(r => {
+                            const { date, time } = formatReservationDateTime(r.reservation_time);
+                            const isLunch = r.shift === Shift.LUNCH;
+                            return (
+                              <li
+                                key={r.id}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100"
+                              >
+                                {isLunch ? (
+                                  <Sun className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                                ) : (
+                                  <Moon className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
+                                )}
+                                <div className="flex-1 min-w-0 flex items-center gap-2 text-xs">
+                                  <span className="font-semibold text-slate-700 whitespace-nowrap">{date}</span>
+                                  <span className="text-slate-500 whitespace-nowrap">{time}</span>
+                                  <span className="inline-flex items-center gap-0.5 text-slate-500 whitespace-nowrap ml-auto">
+                                    <UsersIcon className="h-3 w-3" />
+                                    {r.guests}
+                                  </span>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
                 <button
