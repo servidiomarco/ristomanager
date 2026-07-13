@@ -94,8 +94,8 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
   { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
-  { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: true, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
-  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
+  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
@@ -1738,12 +1738,13 @@ const App: React.FC = () => {
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
             </div>
-            {canAccessView(ViewState.MENU) && (
+            {canAccessView(ViewState.CONVERSAZIONI) && (
               <BottomNavItem
-                icon={<UtensilsCrossed size={20} />}
-                label="Menu"
-                active={view === ViewState.MENU}
-                onClick={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+                icon={<Phone size={20} />}
+                label="Conversazioni"
+                active={view === ViewState.CONVERSAZIONI}
+                badge={voiceCallsPendingCount}
+                onClick={() => setView(ViewState.CONVERSAZIONI)}
               />
             )}
             {altroNavItems.length > 0 && (
@@ -2018,7 +2019,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
 );
 
 // Helper Component for Bottom Navigation (mobile)
-const BottomNavItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
+const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badge?: number }) => (
   <button
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
@@ -2028,7 +2029,14 @@ const BottomNavItem = ({ icon, label, active, onClick }: { icon: React.ReactNode
         : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
     }`}
   >
-    {icon}
+    <span className="relative">
+      {icon}
+      {badge !== undefined && badge > 0 && (
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-semibold flex items-center justify-center">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
+    </span>
     <span className="text-[10px] font-medium whitespace-nowrap">
       {label}
     </span>
