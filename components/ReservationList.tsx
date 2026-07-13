@@ -1208,6 +1208,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     ? reservations.find(r => r.id === selectedReservationId) ?? null
     : null;
 
+  // When a reservation with a table is selected, switch the map to that
+  // reservation's room so the highlighted table is actually visible.
+  useEffect(() => {
+    if (!selectedReservation?.table_id) return;
+    const table = displayTables.find(t => t.id === selectedReservation.table_id);
+    if (!table) return;
+    if (table.room_id !== activeMapRoomId) {
+      setActiveMapRoomId(table.room_id);
+    }
+  }, [selectedReservation?.id, selectedReservation?.table_id, displayTables]);
+
   // Flash animation for newly arriving reservations
   useEffect(() => {
     if (newReservationFlashId !== null) {
