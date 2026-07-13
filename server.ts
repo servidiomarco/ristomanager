@@ -7811,18 +7811,32 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 app.get('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (_req, res) => {
     try {
         const status = await getRevolutConfigStatus();
-        const meta = await queryWithRetry(
-            `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
-        );
-        const row = meta.rows[0];
+
+        // integration_settings may not exist yet on a brand-new deploy where
+        // the schema-init CTE that creates it hasn't finished running. Treat
+        // any error here as "no metadata" so the card renders anyway with the
+        // env-fallback status.
+        let updatedAt: string | null = null;
         let updatedByEmail: string | null = null;
-        if (row?.updated_by_user_id) {
-            const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
-            updatedByEmail = u.rows[0]?.email ?? null;
+        try {
+            const meta = await queryWithRetry(
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
+            );
+            const row = meta.rows[0];
+            if (row) {
+                updatedAt = row.updated_at ?? null;
+                if (row.updated_by_user_id) {
+                    const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
+                    updatedByEmail = u.rows[0]?.email ?? null;
+                }
+            }
+        } catch (metaErr: any) {
+            console.warn('[Revolut] integration_settings metadata unavailable:', metaErr?.message || metaErr);
         }
+
         res.json({
             ...status,
-            updated_at: row?.updated_at ?? null,
+            updated_at: updatedAt,
             updated_by: updatedByEmail,
         });
     } catch (err: any) {

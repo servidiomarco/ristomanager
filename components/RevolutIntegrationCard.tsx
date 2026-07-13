@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Loader2, CreditCard, Save, Eye, EyeOff } from 'lucide-react';
 import {
     getRevolutIntegration,
@@ -36,6 +36,12 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
     const [showApiKey, setShowApiKey] = useState(false);
     const [showWebhookSecret, setShowWebhookSecret] = useState(false);
 
+    // Hold showToast in a ref so the fetch effect only runs on mount, not on
+    // every parent re-render (App.tsx re-renders on every socket event, and
+    // its addToast is a fresh reference each time).
+    const showToastRef = useRef(showToast);
+    useEffect(() => { showToastRef.current = showToast; });
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -46,13 +52,14 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setApiVersionInput(data.api_version);
                 }
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento di Revolut', 'error');
+                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento di Revolut', 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
         })();
         return () => { cancelled = true; };
-    }, [showToast]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const effectiveEnv: RevolutEnvironment = draftEnv ?? status?.environment ?? 'sandbox';
     const isConfigured = !!status?.has_api_key;
