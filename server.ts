@@ -7913,7 +7913,7 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
                 req.user.email,
                 ActivityAction.UPDATE,
                 ResourceType.SETTINGS,
-                null,
+                undefined,
                 `Integrazione Revolut aggiornata (${updates.environment || 'campi credenziali'})`
             );
         }
