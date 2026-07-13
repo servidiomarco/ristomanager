@@ -1690,6 +1690,48 @@ function buildPaymentMessage(customerName: string, amountCents: number, url: str
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
 }
 
+// Ack sent to the customer when a public web booking with >8 guests triggers
+// an automatic deposit request (€10/person). Combines the "richiesta ricevuta"
+// wording with the Revolut checkout link so the guest knows exactly what to
+// do next.
+function buildDepositRequestMessage(
+    customerName: string,
+    guestsLabel: string,
+    dateLabel: string,
+    time: string,
+    amountCents: number,
+    checkoutUrl: string
+): string {
+    const amount = formatEuroMinor(amountCents);
+    return `Ciao ${customerName}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (€ 10 a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
+}
+
+// Message sent to the customer as soon as the Revolut ORDER_COMPLETED webhook
+// arrives on a reservation-linked payment. Confirms both the deposit receipt
+// and the reservation itself (which we auto-flip to CONFIRMED at the same time).
+function buildDepositConfirmationMessage(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined,
+    amountCents: number,
+    roomName?: string | null
+): string {
+    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    const hours = String(dt.getHours()).padStart(2, '0');
+    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const fullName = (customerName ?? '').trim();
+    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
+    const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const room = (roomName ?? '').trim();
+    const roomPart = room ? ` in ${room}` : '';
+    const amount = formatEuroMinor(amountCents);
+    return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}${roomPart} e' confermata. A presto!`;
+}
+
 // List all payment requests attached to a reservation. Powers the small
 // history list rendered inside the reservation modal.
 app.get('/payments/requests', authenticate, requirePermission('reservations:view'), async (req, res) => {
@@ -1828,7 +1870,9 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
 // Revolut webhook receiver. HMAC signature is validated against the raw
 // request body captured by the global express.json verify hook. Idempotent:
 // duplicate events (Revolut retries until 2xx) update the same row without
-// side-effects because we key on `provider_order_id`.
+// side-effects because we key on `provider_order_id` and gate the
+// "first-completion" side-effects on the old `completed_at` being NULL under
+// a row-level lock.
 app.post('/webhook/revolut', async (req, res) => {
     const verification = verifyRevolutWebhook(req);
     if (!verification.valid) {
@@ -1869,28 +1913,52 @@ app.post('/webhook/revolut', async (req, res) => {
                 return res.status(200).json({ ok: true, ignored: event });
         }
 
-        const updated = await queryWithRetry(
-            `UPDATE payment_requests
-             SET status = $1,
-                 completed_at = CASE WHEN $2 THEN CURRENT_TIMESTAMP ELSE completed_at END,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE provider_order_id = $3
-             RETURNING *`,
-            [nextStatus, markCompleted, orderId]
-        );
-        if (updated.rowCount === 0) {
-            console.warn('[Revolut] webhook: no payment_request found for order_id', orderId);
-            return res.status(200).json({ ok: true, ignored: 'unknown order' });
+        // Atomic transition: lock the row, capture its pre-update state, then
+        // update. `wasCompleted` lets us detect the FIRST ORDER_COMPLETED and
+        // fire the customer confirmation exactly once — even if Revolut
+        // retries the webhook concurrently.
+        const client = await pool.connect();
+        let row: any;
+        let wasCompleted = false;
+        try {
+            await client.query('BEGIN');
+            const before = await client.query(
+                `SELECT id, status, completed_at, reservation_id
+                 FROM payment_requests WHERE provider_order_id = $1 FOR UPDATE`,
+                [orderId]
+            );
+            if (before.rowCount === 0) {
+                await client.query('ROLLBACK');
+                console.warn('[Revolut] webhook: no payment_request found for order_id', orderId);
+                return res.status(200).json({ ok: true, ignored: 'unknown order' });
+            }
+            wasCompleted = before.rows[0].completed_at !== null;
+            const updated = await client.query(
+                `UPDATE payment_requests
+                 SET status = $1,
+                     completed_at = CASE WHEN $2 AND completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $3
+                 RETURNING *`,
+                [nextStatus, markCompleted, before.rows[0].id]
+            );
+            row = updated.rows[0];
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
         }
-        const row = updated.rows[0];
 
         try { socketService?.broadcastToAll('paymentRequest:updated', row); }
         catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
 
-        // Push notification to managers on completed payments so they can
-        // confirm the booking in real time — same roles as the booking
-        // pushes so it lands in the right hands.
-        if (markCompleted) {
+        const isFirstCompletion = markCompleted && !wasCompleted;
+
+        // Push notification to managers on the FIRST completed transition so
+        // they can act in real time. Skip retries so they don't get spammed.
+        if (isFirstCompletion) {
             const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
             pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
                 title: 'Pagamento ricevuto',
@@ -1900,6 +1968,62 @@ app.post('/webhook/revolut', async (req, res) => {
             }, { excludeUserId: null }).catch(err => {
                 console.warn('[Revolut] push send failed:', err?.message || err);
             });
+        }
+
+        // On the first ORDER_COMPLETED for a reservation-linked payment:
+        // 1) auto-flip the reservation from PENDING → CONFIRMED (this happens
+        //    for web bookings above the deposit threshold, which land as PENDING)
+        // 2) notify the customer that the deposit was received and their table
+        //    is now confirmed. Fire and forget — never fail the webhook.
+        if (isFirstCompletion && row.reservation_id) {
+            (async () => {
+                try {
+                    const resvRes = await queryWithRetry(
+                        `SELECT id, customer_name, phone, reservation_time, guests,
+                                reservation_status, table_id, notes
+                         FROM reservations WHERE id = $1`,
+                        [row.reservation_id]
+                    );
+                    if (resvRes.rowCount === 0) return;
+                    const reservation = resvRes.rows[0];
+
+                    // Only auto-confirm if the reservation is still PENDING.
+                    // If staff already CONFIRMED it, DECLINED, or CANCELLED,
+                    // we don't touch the status — but we still send a message
+                    // if PENDING/CONFIRMED so the customer is not left in
+                    // silence after paying.
+                    if (reservation.reservation_status === 'PENDING') {
+                        const upd = await queryWithRetry(
+                            `UPDATE reservations
+                             SET reservation_status = 'CONFIRMED',
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE id = $1
+                             RETURNING *`,
+                            [reservation.id]
+                        );
+                        if (upd.rows[0] && socketService) {
+                            try { socketService.broadcastReservationUpdated(upd.rows[0]); }
+                            catch (err) { console.warn('[Revolut] reservation broadcast failed:', err); }
+                        }
+                    }
+
+                    if (reservation.phone &&
+                        (reservation.reservation_status === 'PENDING' ||
+                         reservation.reservation_status === 'CONFIRMED')) {
+                        const roomName = await resolveReservationRoomName(reservation);
+                        const message = buildDepositConfirmationMessage(
+                            reservation.customer_name,
+                            reservation.reservation_time,
+                            reservation.guests,
+                            row.amount_cents,
+                            roomName
+                        );
+                        await sendBookingConfirmation(reservation.phone, message, reservation.id);
+                    }
+                } catch (err: any) {
+                    console.error('[Revolut] deposit confirmation flow failed:', err?.message || err);
+                }
+            })();
         }
 
         res.status(200).json({ ok: true });
@@ -8066,13 +8190,69 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         const [yyyy, mm, dd] = date.split('-');
         const dateLabel = `${dd}/${mm}/${yyyy}`;
         const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
-        const freeText = `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
+
+        // Large web bookings (>8 pax) require a €10/person deposit before the
+        // table is guaranteed. We create the Revolut order synchronously so we
+        // can include the checkout link in the ack. On any Revolut failure we
+        // silently degrade to the plain "richiesta ricevuta" flow — staff will
+        // then confirm manually as usual.
+        let depositCheckoutUrl: string | null = null;
+        let depositAmountCents = 0;
+        if (guestsNum > 8 && isRevolutConfigured()) {
+            depositAmountCents = guestsNum * 1000; // €10 per person, in cents
+            const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
+            try {
+                const order = await revolutCreateOrder({
+                    amount: depositAmountCents,
+                    currency: 'EUR',
+                    description: orderDescription,
+                    merchant_order_ext_ref: `reservation:${created.id}`,
+                });
+                const insertedPayment = await queryWithRetry(
+                    `INSERT INTO payment_requests
+                        (reservation_id, amount_cents, currency, description, status, provider,
+                         provider_order_id, checkout_url, metadata)
+                     VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7)
+                     RETURNING *`,
+                    [
+                        created.id,
+                        depositAmountCents,
+                        orderDescription,
+                        (order.state || 'PENDING').toUpperCase(),
+                        order.id,
+                        order.checkout_url,
+                        JSON.stringify({ revolut_token: order.token || null, source: 'public_booking_auto_deposit' }),
+                    ]
+                );
+                depositCheckoutUrl = order.checkout_url;
+                try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
+                catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
+            } catch (err: any) {
+                console.error('[public-booking] deposit link creation failed:', err?.message || err);
+                depositAmountCents = 0;
+            }
+        }
+
+        const ackText = depositCheckoutUrl
+            ? buildDepositRequestMessage(
+                toTitleCase(customer_name),
+                guestsLabel,
+                dateLabel,
+                time,
+                depositAmountCents,
+                depositCheckoutUrl
+              )
+            : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         if (isTwilioSmsConfigured()) {
-            sendTwilioSms(phoneE164, freeText)
+            sendTwilioSms(phoneE164, ackText)
                 .then(r => recordConfirmationSent(created.id, r))
                 .catch(err => console.error('[public-booking] SMS ack failed:', err));
-        } else if (isMetaWhatsAppConfigured()) {
+        } else if (isMetaWhatsAppConfigured() && !depositCheckoutUrl) {
+            // Only use the approved Meta template for the plain ack — it has
+            // no variable slot for the checkout URL. When a deposit link is
+            // required we fall through to sendWhatsAppText so the link goes
+            // out in the message body.
             const templateName = process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
             const templateLang = process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
             sendMetaWhatsAppTemplate(phoneE164, {
@@ -8088,7 +8268,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 ],
             }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
         } else {
-            sendWhatsAppText(phoneE164, freeText)
+            sendWhatsAppText(phoneE164, ackText)
                 .then(r => recordConfirmationSent(created.id, r))
                 .catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
         }
