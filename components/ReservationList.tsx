@@ -422,6 +422,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [filterHasAllergens, setFilterHasAllergens] = useState(false);
   const [filterHasNotes, setFilterHasNotes] = useState(false);
   const [filterNoTable, setFilterNoTable] = useState(false);
+  const [filterSource, setFilterSource] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'created-asc' | 'created-desc' | 'time-asc' | 'time-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc'>('created-asc');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? '');
@@ -1058,7 +1059,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     (filterGuestRange !== 'ALL' ? 1 : 0) +
     (filterHasAllergens ? 1 : 0) +
     (filterHasNotes ? 1 : 0) +
-    (filterNoTable ? 1 : 0);
+    (filterNoTable ? 1 : 0) +
+    (filterSource !== 'ALL' ? 1 : 0);
 
   const matchesGuestRange = (guests: number): boolean => {
     switch (filterGuestRange) {
@@ -1078,6 +1080,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterHasAllergens(false);
     setFilterHasNotes(false);
     setFilterNoTable(false);
+    setFilterSource('ALL');
     setSortBy('created-asc');
   };
 
@@ -1102,6 +1105,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
+      const matchesSource = filterSource === 'ALL'
+        ? true
+        : (r.source ?? ReservationSource.MANUAL) === filterSource;
       const trimmedSearch = searchTerm.trim().toLowerCase();
       let matchesSearch = true;
       if (trimmedSearch) {
@@ -1110,7 +1116,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const tableHit = !!table && table.name.toLowerCase().includes(trimmedSearch);
         matchesSearch = nameHit || tableHit;
       }
-      return matchesDate && matchesShift && matchesRoom && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSearch;
+      return matchesDate && matchesShift && matchesRoom && matchesStatus && matchesArrival && matchesGuests && matchesAllergens && matchesNotes && matchesNoTable && matchesSource && matchesSearch;
     });
 
     const pending: Reservation[] = [];
@@ -1194,7 +1200,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
       { key: 'cancelled', label: 'Annullate', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, searchTerm, displayTables, sortBy]);
+  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
@@ -2748,6 +2754,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
               <div>
+                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Canale</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'ALL', label: 'Tutti' },
+                    { value: ReservationSource.MANUAL, label: 'Utente' },
+                    { value: ReservationSource.GOOGLE, label: 'Web' },
+                    { value: ReservationSource.VOICE, label: 'Agente vocale' },
+                    { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
+                  ].map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                        filterSource === opt.value
+                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                      }`}>{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
                 <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
@@ -3524,6 +3549,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
                           className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                             filterStatus === opt.value
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Canale</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: 'Tutti' },
+                        { value: ReservationSource.MANUAL, label: 'Utente' },
+                        { value: ReservationSource.GOOGLE, label: 'Web' },
+                        { value: ReservationSource.VOICE, label: 'Agente vocale' },
+                        { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                            filterSource === opt.value
                               ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
                               : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
                           }`}>{opt.label}</button>
