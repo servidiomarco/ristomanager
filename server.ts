@@ -925,6 +925,48 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call recap lookup failed:', err?.message || err);
     }
+
+    // If the call ended without a booking, alert managers so they can call the
+    // customer back before they try another restaurant. Skipped if staff has
+    // already marked the call as CONTACTED (webhook retry after manual handling).
+    try {
+        const pending = await queryWithRetry(
+            `SELECT vc.phone,
+                    cust.name AS customer_name
+             FROM voice_calls vc
+             LEFT JOIN LATERAL (
+                 SELECT c.name
+                 FROM customers c
+                 WHERE vc.phone IS NOT NULL
+                   AND c.phone IS NOT NULL
+                   AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
+                   AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
+                     = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
+                 LIMIT 1
+             ) cust ON true
+             WHERE vc.conversation_id = $1
+               AND vc.reservation_id IS NULL
+               AND (vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')`,
+            [conversationId]
+        );
+        const row = pending.rows[0];
+        if (row) {
+            const label = row.customer_name || row.phone || 'Numero sconosciuto';
+            const bodyLine = row.customer_name && row.phone ? `${row.customer_name} · ${row.phone}` : label;
+            pushSendToRoles(
+                ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+                {
+                    title: 'Chiamata da ricontattare',
+                    body: bodyLine,
+                    url: '/?view=CONVERSAZIONI',
+                    tag: `voice-followup-${conversationId}`,
+                },
+                { excludeUserId: null }
+            ).catch(err => console.error('Push (voice follow-up) failed:', err));
+        }
+    } catch (err: any) {
+        console.warn('[ElevenLabs] post-call follow-up push failed:', err?.message || err);
+    }
 });
 
 // ============================================
