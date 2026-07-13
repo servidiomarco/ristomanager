@@ -19,6 +19,18 @@
                 radial-gradient(900px 500px at 0% 15%, rgba(120, 53, 15, 0.05), transparent 60%);
         }
         .serif { font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif; }
+        /* iOS Safari gives native date inputs an intrinsic min-width and a
+           centered value, so the field ignores width:100% and spills past the
+           viewport edge on mobile. Reset the appearance and let it shrink. */
+        input[type="date"] {
+            -webkit-appearance: none;
+            appearance: none;
+            min-width: 0;
+        }
+        input[type="date"]::-webkit-date-and-time-value {
+            text-align: left;
+            min-width: 0;
+        }
         .hp { position: absolute; left: -9999px; top: -9999px; height: 0; width: 0; opacity: 0; pointer-events: none; }
         @keyframes pop { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .slot-chip { animation: pop 0.15s ease-out; }
