@@ -21,6 +21,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
+import { isRevolutConfigured, createOrder as revolutCreateOrder, verifyWebhookSignature as verifyRevolutWebhook } from './services/revolutService.js';
 import {
     verifyElevenLabsSignature,
     findAvailability,
@@ -1665,6 +1666,246 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
     } catch (err) {
         console.error('Error sending confirmation:', err);
         res.status(500).json({ error: 'Failed to send confirmation' });
+    }
+});
+
+
+// ============================================
+// PAYMENT LINK REQUESTS (Revolut hosted checkout)
+// ============================================
+
+// Format an amount in minor units as an Italian euro string ("€ 15,00").
+function formatEuroMinor(cents: number): string {
+    return `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+}
+
+// Compose the message we send to the customer with the Revolut checkout link.
+// Kept intentionally short so it fits comfortably inside an SMS segment when
+// WhatsApp isn't available.
+function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null): string {
+    const amount = formatEuroMinor(amountCents);
+    const desc = (description || '').trim();
+    const intro = `Ciao ${customerName}, per completare la prenotazione al Vecchio Frantoio serve un anticipo di ${amount}.`;
+    const line = desc ? `${intro}\n${desc}` : intro;
+    return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
+}
+
+// List all payment requests attached to a reservation. Powers the small
+// history list rendered inside the reservation modal.
+app.get('/payments/requests', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const reservationId = req.query.reservation_id ? parseInt(String(req.query.reservation_id), 10) : NaN;
+        if (!Number.isFinite(reservationId)) {
+            return res.status(400).json({ error: 'reservation_id is required' });
+        }
+        const result = await queryWithRetry(
+            `SELECT id, reservation_id, amount_cents, currency, description, status, provider,
+                    provider_order_id, checkout_url, delivery_channel, delivery_provider_sid,
+                    delivery_error, created_by_user_id, created_at, updated_at, completed_at, metadata
+             FROM payment_requests
+             WHERE reservation_id = $1
+             ORDER BY created_at DESC`,
+            [reservationId]
+        );
+        res.json(result.rows);
+    } catch (err: any) {
+        console.error('GET /payments/requests error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Create a payment link for a reservation. Body: { reservation_id, amount, description? }
+// where `amount` is in euros (accepts decimal). Sends the link over
+// WhatsApp/SMS with the same dispatcher used for booking confirmations, so
+// the channel decision (SMS while Meta verification is pending, WhatsApp
+// after) mirrors reservation confirmations exactly.
+app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!isRevolutConfigured()) {
+            return res.status(503).json({ error: 'Revolut non è configurato (REVOLUT_API_KEY mancante)' });
+        }
+
+        const { reservation_id, amount, description } = req.body ?? {};
+        const reservationId = parseInt(String(reservation_id), 10);
+        const amountEur = Number(amount);
+        if (!Number.isFinite(reservationId)) return res.status(400).json({ error: 'reservation_id is required' });
+        if (!Number.isFinite(amountEur) || amountEur <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+
+        const amountCents = Math.round(amountEur * 100);
+        if (amountCents < 50) return res.status(400).json({ error: 'importo minimo € 0,50' });
+
+        // Fetch the reservation so we can pre-fill the message and require a
+        // phone number (otherwise there's no channel to deliver the link).
+        const resvResult = await queryWithRetry(
+            'SELECT id, customer_name, phone, reservation_time, guests FROM reservations WHERE id = $1',
+            [reservationId]
+        );
+        if (resvResult.rowCount === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
+        const reservation = resvResult.rows[0];
+        if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
+
+        // Create the Revolut order first — if the API call fails we don't
+        // want to persist a half-baked row. `merchant_order_ext_ref` is how
+        // the webhook will correlate the event back to our reservation.
+        const orderDescription = (typeof description === 'string' && description.trim())
+            ? description.trim()
+            : `Prenotazione #${reservation.id} - ${reservation.guests} persone`;
+        const order = await revolutCreateOrder({
+            amount: amountCents,
+            currency: 'EUR',
+            description: orderDescription,
+            merchant_order_ext_ref: `reservation:${reservation.id}`,
+        });
+
+        const inserted = await queryWithRetry(
+            `INSERT INTO payment_requests
+                (reservation_id, amount_cents, currency, description, status, provider,
+                 provider_order_id, checkout_url, created_by_user_id, metadata)
+             VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7, $8)
+             RETURNING *`,
+            [
+                reservation.id,
+                amountCents,
+                orderDescription,
+                (order.state || 'PENDING').toUpperCase(),
+                order.id,
+                order.checkout_url,
+                req.user?.userId ?? null,
+                JSON.stringify({ revolut_token: order.token || null }),
+            ]
+        );
+        const paymentRequest = inserted.rows[0];
+
+        // Fire-and-forget delivery: same channel policy as booking
+        // confirmations. Failures update delivery_error but don't fail the
+        // API call — the operator can still copy the link from the UI.
+        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkout_url, orderDescription);
+        sendBookingConfirmation(reservation.phone, message).then(async (delivery) => {
+            try {
+                await queryWithRetry(
+                    `UPDATE payment_requests
+                     SET delivery_channel = $1, delivery_provider_sid = $2, delivery_error = NULL, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $3`,
+                    [delivery.channel || null, delivery.sid || null, paymentRequest.id]
+                );
+            } catch (err) {
+                console.warn('[payments] delivery persist failed:', (err as any)?.message || err);
+            }
+        }).catch(async (err) => {
+            console.error('[payments] delivery send failed:', err?.message || err);
+            try {
+                await queryWithRetry(
+                    `UPDATE payment_requests
+                     SET delivery_error = $1, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $2`,
+                    [String(err?.message || err).slice(0, 500), paymentRequest.id]
+                );
+            } catch { /* ignore */ }
+        });
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.RESERVATION,
+                reservation.id,
+                `${reservation.customer_name} — richiesta pagamento ${formatEuroMinor(amountCents)}`
+            );
+        }
+
+        try { socketService?.broadcastToAll('paymentRequest:created', paymentRequest); }
+        catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
+
+        res.status(201).json(paymentRequest);
+    } catch (err: any) {
+        console.error('POST /payments/requests error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Revolut webhook receiver. HMAC signature is validated against the raw
+// request body captured by the global express.json verify hook. Idempotent:
+// duplicate events (Revolut retries until 2xx) update the same row without
+// side-effects because we key on `provider_order_id`.
+app.post('/webhook/revolut', async (req, res) => {
+    const verification = verifyRevolutWebhook(req);
+    if (!verification.valid) {
+        console.warn('[Revolut] webhook rejected:', verification.reason);
+        return res.status(401).json({ error: 'invalid signature', reason: verification.reason });
+    }
+
+    try {
+        const body = req.body || {};
+        const event = String(body.event || '').toUpperCase();
+        const orderId: string | undefined = body.order_id || body.data?.order_id || body.data?.id;
+        if (!orderId) {
+            console.warn('[Revolut] webhook missing order_id, event=', event);
+            return res.status(200).json({ ok: true, ignored: 'missing order_id' });
+        }
+
+        // Map Revolut event → our internal status. Everything else is logged
+        // and acknowledged so Revolut stops retrying, but doesn't mutate the row.
+        let nextStatus: string | null = null;
+        let markCompleted = false;
+        switch (event) {
+            case 'ORDER_COMPLETED':
+                nextStatus = 'COMPLETED';
+                markCompleted = true;
+                break;
+            case 'ORDER_AUTHORISED':
+                nextStatus = 'AUTHORISED';
+                break;
+            case 'ORDER_CANCELLED':
+                nextStatus = 'CANCELLED';
+                break;
+            case 'ORDER_PAYMENT_DECLINED':
+            case 'ORDER_PAYMENT_FAILED':
+                nextStatus = 'FAILED';
+                break;
+            default:
+                console.log('[Revolut] unhandled event:', event);
+                return res.status(200).json({ ok: true, ignored: event });
+        }
+
+        const updated = await queryWithRetry(
+            `UPDATE payment_requests
+             SET status = $1,
+                 completed_at = CASE WHEN $2 THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE provider_order_id = $3
+             RETURNING *`,
+            [nextStatus, markCompleted, orderId]
+        );
+        if (updated.rowCount === 0) {
+            console.warn('[Revolut] webhook: no payment_request found for order_id', orderId);
+            return res.status(200).json({ ok: true, ignored: 'unknown order' });
+        }
+        const row = updated.rows[0];
+
+        try { socketService?.broadcastToAll('paymentRequest:updated', row); }
+        catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
+
+        // Push notification to managers on completed payments so they can
+        // confirm the booking in real time — same roles as the booking
+        // pushes so it lands in the right hands.
+        if (markCompleted) {
+            const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
+            pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+                title: 'Pagamento ricevuto',
+                body: bodyLine,
+                url: `/?view=RESERVATIONS`,
+                tag: `payment-${row.id}`,
+            }, { excludeUserId: null }).catch(err => {
+                console.warn('[Revolut] push send failed:', err?.message || err);
+            });
+        }
+
+        res.status(200).json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /webhook/revolut error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 

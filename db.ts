@@ -429,6 +429,35 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_at TIMESTAMPTZ;`);
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
 
+        // Payment link requests (Revolut hosted checkout). Amounts are in
+        // minor units (cents) — same convention as Revolut / Stripe so we
+        // don't lose precision on rounding. `status` mirrors the Revolut
+        // order state (PENDING/AUTHORISED/COMPLETED/CANCELLED/FAILED) plus
+        // our own EXPIRED terminal state for orders we've abandoned.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id SERIAL PRIMARY KEY,
+                reservation_id INTEGER REFERENCES reservations(id) ON DELETE CASCADE,
+                amount_cents INTEGER NOT NULL,
+                currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+                description TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                provider VARCHAR(20) NOT NULL DEFAULT 'revolut',
+                provider_order_id VARCHAR(100) UNIQUE,
+                checkout_url TEXT,
+                delivery_channel VARCHAR(20),
+                delivery_provider_sid VARCHAR(100),
+                delivery_error TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMPTZ,
+                metadata JSONB
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_reservation ON payment_requests(reservation_id) WHERE reservation_id IS NOT NULL;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests(status);`);
+
         // Add reservation_status column to existing tables if it doesn't exist
         await client.query(`
             DO $$

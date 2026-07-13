@@ -211,6 +211,28 @@ export interface Reservation {
 export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'undelivered';
 export type ConfirmationChannel = 'sms' | 'whatsapp';
 
+export type PaymentRequestStatus = 'PENDING' | 'AUTHORISED' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'EXPIRED';
+
+export interface PaymentRequest {
+  id: number;
+  reservation_id: number | null;
+  amount_cents: number;
+  currency: string;
+  description: string | null;
+  status: PaymentRequestStatus;
+  provider: 'revolut';
+  provider_order_id: string | null;
+  checkout_url: string | null;
+  delivery_channel: ConfirmationChannel | null;
+  delivery_provider_sid: string | null;
+  delivery_error: string | null;
+  created_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  metadata: Record<string, any> | null;
+}
+
 export interface Notification {
   id: string;
   title: string;

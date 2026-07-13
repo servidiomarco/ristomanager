@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets } from '../services/apiService';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink } from 'lucide-react';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -512,6 +512,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{show: boolean, reservationId: number | null, customerName: string}>({show: false, reservationId: null, customerName: ''});
+
+  // Revolut payment-link requests attached to the reservation currently open
+  // in the modal. Loaded on open (only when editing) and mutated by the
+  // "Richiedi acconto" flow. Socket updates keep the list live.
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [paymentDescription, setPaymentDescription] = useState<string>('');
+  const [isCreatingPayment, setIsCreatingPayment] = useState(false);
+  const [copiedPaymentId, setCopiedPaymentId] = useState<number | null>(null);
   const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -1511,6 +1520,58 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
     wasFormOpenRef.current = isFormOpen;
   }, [isFormOpen, modalOnly, onModalClose]);
+
+  // Load the reservation's payment requests when the modal opens in edit
+  // mode. Resets when closed / when creating a new reservation.
+  useEffect(() => {
+    if (!isFormOpen || !isEditing || !formData.id) {
+      setPaymentRequests([]);
+      setPaymentAmount('');
+      setPaymentDescription('');
+      return;
+    }
+    let cancelled = false;
+    getPaymentRequests(formData.id as number)
+      .then(rows => { if (!cancelled) setPaymentRequests(rows); })
+      .catch(err => console.warn('[payments] load failed:', err?.message || err));
+    return () => { cancelled = true; };
+  }, [isFormOpen, isEditing, formData.id]);
+
+  const handleCreatePaymentRequest = async () => {
+    if (!formData.id) return;
+    const amount = Number(String(paymentAmount).replace(',', '.'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Inserisci un importo valido', 'error');
+      return;
+    }
+    setIsCreatingPayment(true);
+    try {
+      const created = await createPaymentRequest({
+        reservation_id: formData.id as number,
+        amount,
+        description: paymentDescription.trim() || undefined,
+      });
+      setPaymentRequests(prev => [created, ...prev]);
+      setPaymentAmount('');
+      setPaymentDescription('');
+      showToast('Link di pagamento inviato', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore creazione link di pagamento', 'error');
+    } finally {
+      setIsCreatingPayment(false);
+    }
+  };
+
+  const copyPaymentLink = async (pr: PaymentRequest) => {
+    if (!pr.checkout_url) return;
+    try {
+      await navigator.clipboard.writeText(pr.checkout_url);
+      setCopiedPaymentId(pr.id);
+      setTimeout(() => setCopiedPaymentId(prev => prev === pr.id ? null : prev), 1500);
+    } catch {
+      showToast('Copia non riuscita, apri il link manualmente', 'error');
+    }
+  };
 
   const handleRestoreDraft = () => {
       const existing = loadDraft<{
@@ -4434,6 +4495,115 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              )}
                         </div>
                     </form>
+
+                    {/* Revolut payment link — only in edit mode (needs a saved reservation to attach to) */}
+                    {isEditing && formData.id && (
+                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
+                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <CreditCard className="h-4 w-4 text-emerald-600" />
+                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Richiedi acconto (Revolut)</h4>
+                            {formData.phone && (
+                              <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">Invio via {formData.phone}</span>
+                            )}
+                          </div>
+
+                          {paymentRequests.length > 0 && (
+                            <ul className="mb-3 space-y-1.5">
+                              {paymentRequests.map(pr => {
+                                const euros = (pr.amount_cents / 100).toFixed(2).replace('.', ',');
+                                const statusColor =
+                                  pr.status === 'COMPLETED' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300' :
+                                  pr.status === 'AUTHORISED' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300' :
+                                  pr.status === 'FAILED' || pr.status === 'CANCELLED' || pr.status === 'EXPIRED' ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300' :
+                                  'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300';
+                                const statusLabel =
+                                  pr.status === 'PENDING' ? 'In attesa' :
+                                  pr.status === 'AUTHORISED' ? 'Autorizzato' :
+                                  pr.status === 'COMPLETED' ? 'Pagato' :
+                                  pr.status === 'CANCELLED' ? 'Annullato' :
+                                  pr.status === 'FAILED' ? 'Fallito' :
+                                  'Scaduto';
+                                return (
+                                  <li key={pr.id} className="flex items-center gap-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] px-2.5 py-1.5">
+                                    <span className="text-[13px] font-semibold text-[var(--color-fg)]">€ {euros}</span>
+                                    <span className={`inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold ${statusColor}`}>
+                                      {statusLabel}
+                                    </span>
+                                    {pr.delivery_channel && (
+                                      <span className="text-[10px] text-[var(--color-fg-subtle)] uppercase tracking-wide">
+                                        via {pr.delivery_channel}
+                                      </span>
+                                    )}
+                                    <div className="ml-auto flex items-center gap-1">
+                                      {pr.checkout_url && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => copyPaymentLink(pr)}
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-500/15"
+                                            title="Copia link"
+                                          >
+                                            {copiedPaymentId === pr.id ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                          </button>
+                                          <a
+                                            href={pr.checkout_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
+                                            title="Apri link"
+                                          >
+                                            <ExternalLink className="h-3.5 w-3.5" />
+                                          </a>
+                                        </>
+                                      )}
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_auto] gap-2">
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0,00"
+                                value={paymentAmount}
+                                onChange={e => setPaymentAmount(e.target.value)}
+                                disabled={isCreatingPayment}
+                                className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              placeholder="Descrizione (opzionale)"
+                              value={paymentDescription}
+                              onChange={e => setPaymentDescription(e.target.value)}
+                              disabled={isCreatingPayment}
+                              className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleCreatePaymentRequest}
+                              disabled={isCreatingPayment || !formData.phone}
+                              className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : 'Genera link e invia via WhatsApp/SMS'}
+                            >
+                              {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                              Invia link
+                            </button>
+                          </div>
+                          {!formData.phone && (
+                            <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-400">
+                              Aggiungi un numero di telefono per inviare il link di pagamento.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                 </div>
 
                 <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">

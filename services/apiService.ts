@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -452,6 +452,26 @@ export const mergeCustomers = async (sourceId: number, targetId: number): Promis
   return apiRequest<Customer>(`${API_URL}/customers/${sourceId}/merge-into/${targetId}`, {
     method: 'POST',
     headers: getHeaders(),
+  });
+};
+
+// ============================================
+// PAYMENT REQUESTS (Revolut hosted checkout)
+// ============================================
+
+export const getPaymentRequests = async (reservationId: number): Promise<PaymentRequest[]> => {
+  return apiRequest<PaymentRequest[]>(`${API_URL}/payments/requests?reservation_id=${reservationId}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createPaymentRequest = async (
+  input: { reservation_id: number; amount: number; description?: string }
+): Promise<PaymentRequest> => {
+  return apiRequest<PaymentRequest>(`${API_URL}/payments/requests`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
   });
 };
 
