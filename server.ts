@@ -32,6 +32,7 @@ import {
 import {
     verifyElevenLabsSignature,
     findAvailability,
+    findCustomerByPhone,
     createVoiceReservation,
     cancelVoiceReservation,
     recordVoiceCall,
@@ -352,6 +353,69 @@ function authorizeElevenLabs(req: express.Request, res: express.Response): boole
     res.status(401).json({ error: 'invalid_credentials' });
     return false;
 }
+
+// Tool 0 — lookup_customer
+// Called by the agent at the very start of the call using {{system__caller_id}}.
+// If the caller's phone is already in the rubrica we return the name so the
+// agent can greet them personally and skip asking for name+phone during the
+// booking flow. Returns `exists:false` for unknown numbers or anonymous
+// callers; agent falls back to the standard "come si chiama?" opening.
+app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const callerIdRaw = String(p.caller_id ?? '').trim();
+    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
+
+    if (!phoneRaw) {
+        console.log('[ElevenLabs] lookup-customer no phone provided');
+        return res.json({
+            exists: false,
+            greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
+        });
+    }
+
+    try {
+        const normalized = normalizeItalianPhone(phoneRaw);
+        const lookup = await findCustomerByPhone(normalized);
+        if (!lookup.exists) {
+            console.log('[ElevenLabs] lookup-customer miss', { phone: normalized });
+            return res.json({
+                exists: false,
+                greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
+            });
+        }
+
+        // Personalised greeting the agent should read verbatim so it can't
+        // pick the wrong first-name form on its own.
+        const greeting = `Ristorante Vecchio Frantoio, buongiorno ${lookup.first_name}, come posso aiutarla?`;
+        console.log('[ElevenLabs] lookup-customer hit', {
+            phone: normalized,
+            customer_id: lookup.customer_id,
+            first_name: lookup.first_name,
+            last_visit: lookup.last_visit,
+        });
+        res.json({
+            exists: true,
+            customer_id: lookup.customer_id,
+            customer_name: lookup.customer_name,
+            first_name: lookup.first_name,
+            last_visit: lookup.last_visit,
+            greeting_phrase: greeting,
+        });
+    } catch (err) {
+        console.error('[ElevenLabs] lookup-customer error', err);
+        res.json({
+            exists: false,
+            greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
+        });
+    }
+});
 
 // Tool 1 — check_availability
 // Body shape (per ElevenLabs tools spec): { parameters: { date, shift, guests }, conversation_id?, agent_id? }

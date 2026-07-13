@@ -259,6 +259,74 @@ export function normalizeItalianPhone(input: string): string {
 }
 
 // ============================================
+// CUSTOMER LOOKUP BY PHONE
+// ============================================
+
+export interface CustomerLookupResult {
+    exists: boolean;
+    customer_id?: number;
+    customer_name?: string;
+    first_name?: string;
+    last_visit?: string; // ISO date of most recent non-cancelled reservation, if any
+}
+
+/**
+ * Match `phone` against the customers table on last-10-digits — same rule used
+ * by upsertCustomerFromReservation, so "+39 333 1234567" and "3331234567"
+ * collide. Also fetches the most recent non-cancelled reservation date so the
+ * agent can greet returning callers with "bentornato".
+ */
+export async function findCustomerByPhone(phone: string): Promise<CustomerLookupResult> {
+    if (!phone) return { exists: false };
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) return { exists: false };
+    const last10 = digits.slice(-10);
+
+    const result = await queryWithRetry(
+        `SELECT id, name
+         FROM customers
+         WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+         ORDER BY id ASC
+         LIMIT 1`,
+        [last10]
+    );
+    if (result.rows.length === 0) return { exists: false };
+
+    const row = result.rows[0];
+    const customerName: string = (row.name || '').trim();
+    const firstName = customerName.split(/\s+/)[0] || customerName;
+
+    // Best-effort last visit — used only for the greeting phrase, never blocks.
+    let lastVisit: string | undefined;
+    try {
+        const visit = await queryWithRetry(
+            `SELECT reservation_time
+             FROM reservations
+             WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+               AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
+               AND reservation_time < CURRENT_TIMESTAMP
+             ORDER BY reservation_time DESC
+             LIMIT 1`,
+            [last10]
+        );
+        if (visit.rows.length > 0) {
+            const dt = new Date(visit.rows[0].reservation_time);
+            lastVisit = utcDateToIso(new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate())));
+        }
+    } catch (err) {
+        console.warn('[ElevenLabs] findCustomerByPhone last_visit lookup failed:', (err as Error)?.message || err);
+    }
+
+    return {
+        exists: true,
+        customer_id: row.id,
+        customer_name: customerName,
+        first_name: firstName,
+        last_visit: lastVisit,
+    };
+}
+
+// ============================================
 // AVAILABILITY LOOKUP
 // ============================================
 
