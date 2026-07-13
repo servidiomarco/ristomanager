@@ -353,7 +353,8 @@ export enum ResourceType {
   STAFF = 'STAFF',
   STAFF_SHIFT = 'STAFF_SHIFT',
   STAFF_TIME_OFF = 'STAFF_TIME_OFF',
-  CUSTOMER = 'CUSTOMER'
+  CUSTOMER = 'CUSTOMER',
+  SETTINGS = 'SETTINGS'
 }
 
 export interface ActivityLog {

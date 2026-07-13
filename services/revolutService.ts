@@ -1,20 +1,125 @@
 // Revolut Merchant API wrapper — create hosted-checkout orders and validate
-// incoming webhook signatures. Everything is env-driven so the same code
-// runs against the sandbox (default) and production merchant endpoints.
+// incoming webhook signatures. Configuration is layered: DB row in
+// `integration_settings` wins, per-field fallback to env vars. So an install
+// without a DB row keeps behaving like the previous env-only version, and
+// updates from the Settings UI take effect on the next request (cache is
+// refreshed lazily and can be invalidated explicitly after a save).
 //
 // https://developer.revolut.com/docs/merchant/create-order
 // https://developer.revolut.com/docs/guides/accept-payments/tutorials/work-with-webhooks/verify-the-payload-signature
 
 import crypto from 'crypto';
 import type express from 'express';
+import { queryWithRetry } from '../db.js';
 
-const REVOLUT_API_BASE = process.env.REVOLUT_API_BASE || 'https://sandbox-merchant.revolut.com';
-const REVOLUT_API_VERSION = process.env.REVOLUT_API_VERSION || '2024-09-01';
-const REVOLUT_API_KEY = process.env.REVOLUT_API_KEY || '';
-const REVOLUT_WEBHOOK_SIGNING_SECRET = process.env.REVOLUT_WEBHOOK_SIGNING_SECRET || '';
+export type RevolutEnvironment = 'sandbox' | 'production';
 
-export function isRevolutConfigured(): boolean {
-    return !!REVOLUT_API_KEY;
+const SANDBOX_BASE = 'https://sandbox-merchant.revolut.com';
+const PRODUCTION_BASE = 'https://merchant.revolut.com';
+
+export interface RevolutConfig {
+    environment: RevolutEnvironment;
+    apiBase: string;
+    apiVersion: string;
+    apiKey: string;
+    webhookSecret: string;
+}
+
+// In-memory cache to keep the hot path (createOrder, verifyWebhookSignature)
+// synchronous where possible. TTL is short so a manual DB edit still
+// propagates; explicit invalidation is preferred after PUT /settings/....
+const CACHE_TTL_MS = 30_000;
+let cache: { config: RevolutConfig; loadedAt: number } | null = null;
+
+// Env-only defaults used before the DB is reachable or when no row exists.
+function envDefaults(): RevolutConfig {
+    const environment: RevolutEnvironment = process.env.REVOLUT_API_BASE?.includes('sandbox') !== false
+        ? 'sandbox'
+        : 'production';
+    return {
+        environment,
+        apiBase: process.env.REVOLUT_API_BASE || SANDBOX_BASE,
+        apiVersion: process.env.REVOLUT_API_VERSION || '2024-09-01',
+        apiKey: process.env.REVOLUT_API_KEY || '',
+        webhookSecret: process.env.REVOLUT_WEBHOOK_SIGNING_SECRET || '',
+    };
+}
+
+function baseForEnvironment(env: RevolutEnvironment): string {
+    return env === 'production' ? PRODUCTION_BASE : SANDBOX_BASE;
+}
+
+// Merge DB row over env-var defaults on a per-field basis. Empty strings in
+// the DB are treated as "not set" so partial saves work as expected.
+async function loadFromDb(): Promise<RevolutConfig> {
+    const defaults = envDefaults();
+    try {
+        const result = await queryWithRetry(
+            `SELECT environment, api_key, webhook_secret, api_version
+             FROM integration_settings WHERE provider = 'revolut' LIMIT 1`
+        );
+        const row = result.rows[0];
+        if (!row) return defaults;
+        const environment: RevolutEnvironment =
+            row.environment === 'production' ? 'production' : 'sandbox';
+        const apiKey = (row.api_key && String(row.api_key).trim()) || defaults.apiKey;
+        const webhookSecret = (row.webhook_secret && String(row.webhook_secret).trim()) || defaults.webhookSecret;
+        const apiVersion = (row.api_version && String(row.api_version).trim()) || defaults.apiVersion;
+        return {
+            environment,
+            apiBase: baseForEnvironment(environment),
+            apiVersion,
+            apiKey,
+            webhookSecret,
+        };
+    } catch (err) {
+        console.warn('[Revolut] loadFromDb failed, using env fallbacks:', (err as any)?.message || err);
+        return defaults;
+    }
+}
+
+async function getConfig(force = false): Promise<RevolutConfig> {
+    const now = Date.now();
+    if (!force && cache && now - cache.loadedAt < CACHE_TTL_MS) return cache.config;
+    const config = await loadFromDb();
+    cache = { config, loadedAt: now };
+    return config;
+}
+
+// Called by the settings endpoint after a successful DB write so the next
+// createOrder/verifyWebhookSignature picks up the new values immediately.
+export function invalidateRevolutConfigCache(): void {
+    cache = null;
+}
+
+// Kept as an async function so future callers can await a fresh config load
+// (the /settings endpoint uses this). Callers that only care about "do we
+// have any API key at all" can await this cheaply — it's cached.
+export async function isRevolutConfigured(): Promise<boolean> {
+    const config = await getConfig();
+    return !!config.apiKey;
+}
+
+// Snapshot of the current config, without secrets. Used by GET /settings/....
+export async function getRevolutConfigStatus(): Promise<{
+    environment: RevolutEnvironment;
+    api_base: string;
+    api_version: string;
+    has_api_key: boolean;
+    has_webhook_secret: boolean;
+    api_key_last4: string | null;
+    webhook_secret_last4: string | null;
+}> {
+    const config = await getConfig(true);
+    return {
+        environment: config.environment,
+        api_base: config.apiBase,
+        api_version: config.apiVersion,
+        has_api_key: !!config.apiKey,
+        has_webhook_secret: !!config.webhookSecret,
+        api_key_last4: config.apiKey ? config.apiKey.slice(-4) : null,
+        webhook_secret_last4: config.webhookSecret ? config.webhookSecret.slice(-4) : null,
+    };
 }
 
 export interface RevolutCreateOrderInput {
@@ -44,8 +149,9 @@ export interface RevolutOrder {
 // URL to hand to the customer. Throws on non-2xx responses; the error message
 // includes the Revolut error body to make debugging easier.
 export async function createOrder(input: RevolutCreateOrderInput): Promise<RevolutOrder> {
-    if (!REVOLUT_API_KEY) {
-        throw new Error('Revolut is not configured (REVOLUT_API_KEY is missing)');
+    const config = await getConfig();
+    if (!config.apiKey) {
+        throw new Error('Revolut is not configured (API key missing)');
     }
 
     const body = {
@@ -56,11 +162,11 @@ export async function createOrder(input: RevolutCreateOrderInput): Promise<Revol
         redirect_url: input.redirect_url,
     };
 
-    const response = await fetch(`${REVOLUT_API_BASE}/api/orders`, {
+    const response = await fetch(`${config.apiBase}/api/orders`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${REVOLUT_API_KEY}`,
-            'Revolut-Api-Version': REVOLUT_API_VERSION,
+            'Authorization': `Bearer ${config.apiKey}`,
+            'Revolut-Api-Version': config.apiVersion,
             'Content-Type': 'application/json',
             'Accept': 'application/json',
         },
@@ -105,9 +211,10 @@ export interface WebhookVerificationResult {
 // `v1.{timestamp}.{rawBody}`, HMAC-SHA256 with the webhook signing secret.
 // `Revolut-Request-Timestamp` header prevents replay attacks — we reject
 // requests older than 5 minutes.
-export function verifyWebhookSignature(req: express.Request): WebhookVerificationResult {
-    if (!REVOLUT_WEBHOOK_SIGNING_SECRET) {
-        return { valid: false, reason: 'REVOLUT_WEBHOOK_SIGNING_SECRET not set' };
+export async function verifyWebhookSignature(req: express.Request): Promise<WebhookVerificationResult> {
+    const config = await getConfig();
+    if (!config.webhookSecret) {
+        return { valid: false, reason: 'webhook signing secret not set' };
     }
 
     const signatureHeader = req.header('Revolut-Signature') || req.header('revolut-signature');
@@ -127,7 +234,7 @@ export function verifyWebhookSignature(req: express.Request): WebhookVerificatio
     }
 
     const payload = `v1.${timestampHeader}.${rawBody.toString('utf8')}`;
-    const expected = crypto.createHmac('sha256', REVOLUT_WEBHOOK_SIGNING_SECRET).update(payload).digest('hex');
+    const expected = crypto.createHmac('sha256', config.webhookSecret).update(payload).digest('hex');
 
     // Support comma-separated multi-signature during rotation, and both
     // "v1=..." and bare hex forms defensively.

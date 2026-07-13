@@ -1334,6 +1334,27 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // INTEGRATION SETTINGS (per-provider secrets + environment)
+        // ============================================
+        // One row per external provider (currently only Revolut). Values are
+        // stored in plaintext to match the existing Twilio/Meta/Vonage pattern;
+        // add row-level encryption at the same time for all providers if we
+        // need it later. Any NULL/empty column here falls back to the matching
+        // env var at read time (see services/revolutService.ts), so an install
+        // without a DB row keeps behaving exactly like before.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS integration_settings (
+                provider           VARCHAR(50) PRIMARY KEY,
+                environment        VARCHAR(20) NOT NULL DEFAULT 'sandbox',
+                api_key            TEXT,
+                webhook_secret     TEXT,
+                api_version        VARCHAR(20),
+                updated_at         TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            );
+        `);
+
+        // ============================================
         // RESERVATION NOTE PRESETS
         // ============================================
         // Configurable quick-notes list shown as chips in the reservation

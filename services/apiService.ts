@@ -682,6 +682,46 @@ export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promis
   });
 };
 
+// ============================================
+// INTEGRATION SETTINGS (Revolut)
+// ============================================
+export type RevolutEnvironment = 'sandbox' | 'production';
+
+export interface RevolutIntegrationStatus {
+  environment: RevolutEnvironment;
+  api_base: string;
+  api_version: string;
+  has_api_key: boolean;
+  has_webhook_secret: boolean;
+  api_key_last4: string | null;
+  webhook_secret_last4: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface RevolutIntegrationUpdate {
+  environment?: RevolutEnvironment;
+  api_key?: string;
+  webhook_secret?: string;
+  api_version?: string;
+}
+
+export const getRevolutIntegration = async (): Promise<RevolutIntegrationStatus> => {
+  return apiRequest<RevolutIntegrationStatus>(`${API_URL}/settings/integrations/revolut`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateRevolutIntegration = async (
+  updates: RevolutIntegrationUpdate
+): Promise<RevolutIntegrationStatus> => {
+  return apiRequest<RevolutIntegrationStatus>(`${API_URL}/settings/integrations/revolut`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 export interface ReservationNotePreset {
   id: number;
   label: string;

@@ -23,6 +23,7 @@ import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
+import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { useSocket } from './hooks/useSocket';
@@ -1746,24 +1747,27 @@ const App: React.FC = () => {
             {/* Integrations */}
             <div className="mb-8">
               <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Integrazioni</h3>
-              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
-                      <svg className="w-5 h-5 text-[var(--color-fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                      </svg>
+              <div className="space-y-3">
+                <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
+                        <svg className="w-5 h-5 text-[var(--color-fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Stripe Connect</h4>
+                        <p className="text-[13px] text-[var(--color-fg-muted)]">Gateway di pagamento</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Stripe Connect</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Gateway di pagamento</p>
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
+                      Attivo (Simulato)
                     </div>
-                  </div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-                    Attivo (Simulato)
                   </div>
                 </div>
+                <RevolutIntegrationCard showToast={addToast} />
               </div>
             </div>
           </div>

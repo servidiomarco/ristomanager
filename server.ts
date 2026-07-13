@@ -21,7 +21,14 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
-import { isRevolutConfigured, createOrder as revolutCreateOrder, verifyWebhookSignature as verifyRevolutWebhook } from './services/revolutService.js';
+import {
+    isRevolutConfigured,
+    createOrder as revolutCreateOrder,
+    verifyWebhookSignature as verifyRevolutWebhook,
+    getRevolutConfigStatus,
+    invalidateRevolutConfigCache,
+    type RevolutEnvironment,
+} from './services/revolutService.js';
 import {
     verifyElevenLabsSignature,
     findAvailability,
@@ -1763,8 +1770,8 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
 // after) mirrors reservation confirmations exactly.
 app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        if (!isRevolutConfigured()) {
-            return res.status(503).json({ error: 'Revolut non è configurato (REVOLUT_API_KEY mancante)' });
+        if (!(await isRevolutConfigured())) {
+            return res.status(503).json({ error: 'Revolut non è configurato (API key mancante)' });
         }
 
         const { reservation_id, amount, description } = req.body ?? {};
@@ -1874,7 +1881,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
 // "first-completion" side-effects on the old `completed_at` being NULL under
 // a row-level lock.
 app.post('/webhook/revolut', async (req, res) => {
-    const verification = verifyRevolutWebhook(req);
+    const verification = await verifyRevolutWebhook(req);
     if (!verification.valid) {
         console.warn('[Revolut] webhook rejected:', verification.reason);
         return res.status(401).json({ error: 'invalid signature', reason: verification.reason });
@@ -7795,6 +7802,117 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 });
 
 // ============================================
+// INTEGRATION SETTINGS (Revolut)
+// ============================================
+// GET returns a masked snapshot (last 4 chars of secrets + booleans) so the
+// UI can render the current state without leaking credentials. PUT accepts
+// partial updates: any field left out is preserved. Sending an empty string
+// clears that field back to the env-var fallback.
+app.get('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const status = await getRevolutConfigStatus();
+        const meta = await queryWithRetry(
+            `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
+        );
+        const row = meta.rows[0];
+        let updatedByEmail: string | null = null;
+        if (row?.updated_by_user_id) {
+            const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
+            updatedByEmail = u.rows[0]?.email ?? null;
+        }
+        res.json({
+            ...status,
+            updated_at: row?.updated_at ?? null,
+            updated_by: updatedByEmail,
+        });
+    } catch (err: any) {
+        console.error('GET /settings/integrations/revolut error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const updates: Record<string, string | null> = {};
+
+        if (body.environment !== undefined) {
+            if (body.environment !== 'sandbox' && body.environment !== 'production') {
+                return res.status(400).json({ error: 'invalid_environment' });
+            }
+            updates.environment = body.environment;
+        }
+        // Empty string is a legit signal to CLEAR the DB value (fall back to
+        // env). Undefined means "leave alone". null is treated the same as
+        // empty string.
+        const nullableString = (v: unknown): string | null | undefined => {
+            if (v === undefined) return undefined;
+            if (v === null) return null;
+            if (typeof v !== 'string') return undefined;
+            const trimmed = v.trim();
+            return trimmed === '' ? null : trimmed;
+        };
+        const apiKey = nullableString(body.api_key);
+        if (apiKey !== undefined) updates.api_key = apiKey;
+        const webhookSecret = nullableString(body.webhook_secret);
+        if (webhookSecret !== undefined) updates.webhook_secret = webhookSecret;
+        const apiVersion = nullableString(body.api_version);
+        if (apiVersion !== undefined) updates.api_version = apiVersion;
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+
+        // Build an UPSERT: on first save the row doesn't exist yet so we need
+        // to insert with the provided fields (defaulting environment to
+        // 'sandbox') and, on conflict, update only the columns we were asked
+        // to change.
+        const providedCols = Object.keys(updates);
+        const providedVals = providedCols.map(c => updates[c]);
+        const userId = req.user?.userId ?? null;
+
+        // Insert: fill known columns; for columns not provided, insert NULL
+        // (environment defaults to 'sandbox' via the table default).
+        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
+        const insertValues = ['revolut', ...providedVals, userId, new Date()];
+
+        const updateSet = [
+            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
+            `updated_by_user_id = $${providedCols.length + 2}`,
+            `updated_at = CURRENT_TIMESTAMP`,
+        ].join(', ');
+
+        await queryWithRetry(
+            `INSERT INTO integration_settings (${insertCols.join(', ')})
+             VALUES (${insertPlaceholders})
+             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+            insertValues
+        );
+
+        invalidateRevolutConfigCache();
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                null,
+                `Integrazione Revolut aggiornata (${updates.environment || 'campi credenziali'})`
+            );
+        }
+
+        const status = await getRevolutConfigStatus();
+        res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
+    } catch (err: any) {
+        console.error('PUT /settings/integrations/revolut error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
 // RESERVATION NOTE PRESETS (quick-notes chips)
 // ============================================
 // GET is authenticated but not permission-gated — every operator that can
@@ -8198,7 +8316,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // then confirm manually as usual.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        if (guestsNum > 8 && isRevolutConfigured()) {
+        if (guestsNum > 8 && (await isRevolutConfigured())) {
             depositAmountCents = guestsNum * 1000; // €10 per person, in cents
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {

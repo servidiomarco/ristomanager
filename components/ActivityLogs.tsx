@@ -27,7 +27,8 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
   [ResourceType.STAFF]: 'Personale',
   [ResourceType.STAFF_SHIFT]: 'Turno Personale',
   [ResourceType.STAFF_TIME_OFF]: 'Permesso Personale',
-  [ResourceType.CUSTOMER]: 'Cliente'
+  [ResourceType.CUSTOMER]: 'Cliente',
+  [ResourceType.SETTINGS]: 'Impostazioni'
 };
 
 const ACTION_COLORS: Record<ActivityAction, string> = {
