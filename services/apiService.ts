@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 
@@ -201,9 +201,17 @@ export const deleteTableMerge = async (
 // PER-SHIFT HIDDEN TABLES
 // ============================================
 
-export const getTableHidden = async (date: string, shift: Shift): Promise<TableHiddenOverride[]> => {
-  const params = new URLSearchParams({ date, shift });
-  return apiRequest<TableHiddenOverride[]>(`${API_URL}/table-hidden?${params.toString()}`, {
+export const getTableHidden = async (
+  date?: string,
+  shift?: Shift,
+  scope?: 'future' | 'all'
+): Promise<TableHiddenOverride[]> => {
+  const params = new URLSearchParams();
+  if (date) params.set('date', date);
+  if (shift) params.set('shift', shift);
+  if (scope === 'all') params.set('scope', 'all');
+  const qs = params.toString();
+  return apiRequest<TableHiddenOverride[]>(`${API_URL}/table-hidden${qs ? '?' + qs : ''}`, {
     headers: getHeaders(false),
   });
 };
@@ -229,6 +237,52 @@ export const deleteTableHidden = async (
     method: 'DELETE',
     headers: getHeaders(),
     body: JSON.stringify({ date, shift, table_id }),
+  }, false);
+};
+
+// ============================================
+// PER-SHIFT ROOM CLOSURE
+// ============================================
+
+// When date+shift are supplied, returns overrides for that (date, shift).
+// When both are omitted, returns future overrides ordered by (date, shift) —
+// used by the "Chiusure programmate" panel.
+export const getRoomClosed = async (
+  date?: string,
+  shift?: Shift,
+  scope?: 'future' | 'all'
+): Promise<RoomClosedOverride[]> => {
+  const params = new URLSearchParams();
+  if (date) params.set('date', date);
+  if (shift) params.set('shift', shift);
+  if (scope === 'all') params.set('scope', 'all');
+  const qs = params.toString();
+  return apiRequest<RoomClosedOverride[]>(`${API_URL}/room-closed${qs ? '?' + qs : ''}`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const createRoomClosed = async (
+  date: string,
+  shift: Shift,
+  room_id: number
+): Promise<RoomClosedOverride> => {
+  return apiRequest<RoomClosedOverride>(`${API_URL}/room-closed`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, room_id }),
+  });
+};
+
+export const deleteRoomClosed = async (
+  date: string,
+  shift: Shift,
+  room_id: number
+): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/room-closed`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+    body: JSON.stringify({ date, shift, room_id }),
   }, false);
 };
 
@@ -381,6 +435,24 @@ export const deleteCustomer = async (id: number): Promise<void> => {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);
+};
+
+export interface CustomerDuplicateGroup {
+  key: string;
+  customers: Customer[];
+}
+
+export const getCustomerDuplicates = async (): Promise<{ groups: CustomerDuplicateGroup[] }> => {
+  return apiRequest<{ groups: CustomerDuplicateGroup[] }>(`${API_URL}/customers/duplicates`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const mergeCustomers = async (sourceId: number, targetId: number): Promise<Customer> => {
+  return apiRequest<Customer>(`${API_URL}/customers/${sourceId}/merge-into/${targetId}`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
 };
 
 // ============================================

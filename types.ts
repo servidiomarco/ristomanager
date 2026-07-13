@@ -137,6 +137,13 @@ export interface TableHiddenOverride {
   table_id: number;
 }
 
+export interface RoomClosedOverride {
+  id: number;
+  date: string; // YYYY-MM-DD
+  shift: Shift;
+  room_id: number;
+}
+
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa - green border
   ARRIVED = 'ARRIVED',      // Arrivato - orange border

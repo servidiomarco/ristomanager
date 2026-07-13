@@ -298,6 +298,12 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.id NOT IN (
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+          )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
@@ -355,6 +361,12 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.id NOT IN (
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+          )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
@@ -446,6 +458,12 @@ async function pickAutoAssignTable(
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.id NOT IN (
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+          )
           AND t.seats >= $1
           ${locationFilter}
           AND NOT EXISTS (

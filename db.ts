@@ -207,6 +207,22 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_hidden_date_shift ON table_hidden_overrides(date, shift);`);
 
+        // Per-shift room closure. Parallel to table_hidden_overrides but at the
+        // room level: staff can close a room only for a specific (date, shift)
+        // without touching the extended rooms.is_closed flag. Both signals are
+        // OR-ed by the public/voice channels when computing availability.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS room_closed_overrides (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                shift VARCHAR(10) NOT NULL CHECK (shift IN ('LUNCH', 'DINNER')),
+                room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (date, shift, room_id)
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_room_closed_date_shift ON room_closed_overrides(date, shift);`);
+
         // One-time migration: copy any pre-existing global merges into today's
         // LUNCH and DINNER so the user's current setup remains visible after
         // deploy. Runs only when table_merges is empty (first time).

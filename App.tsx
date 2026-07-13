@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -20,6 +20,7 @@ import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
+import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
@@ -133,6 +134,7 @@ const App: React.FC = () => {
   const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
   const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
+  const [autoEditCustomerByPhone, setAutoEditCustomerByPhone] = useState<string | null>(null);
   const [autoOpenNewStaff, setAutoOpenNewStaff] = useState(false);
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
   const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
@@ -1597,6 +1599,28 @@ const App: React.FC = () => {
                 </summary>
                 <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
                   <OpeningHoursManager showToast={addToast} />
+                </div>
+              </details>
+            </div>
+
+            {/* Chiusure programmate — per-shift closures of rooms and tables (future occurrences aggregated) */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Chiusure programmate</h3>
+              <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
+                      <DoorClosed className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Sale chiuse e tavoli nascosti</h4>
+                      <p className="text-[13px] text-[var(--color-fg-muted)]">Programma o rimuovi chiusure per turno di sale e tavoli.</p>
+                    </div>
+                  </div>
+                  <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
+                  <ScheduledClosuresManager showToast={addToast} />
                 </div>
               </details>
             </div>

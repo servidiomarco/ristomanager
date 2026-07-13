@@ -1935,18 +1935,28 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
 // ============================================
 
 // GET /table-hidden?date=YYYY-MM-DD&shift=LUNCH|DINNER
+// If neither param is supplied, returns future overrides (or all with scope=all)
+// ordered by (date, shift) — used by the "Chiusure programmate" panel.
 app.get('/table-hidden', authenticate, async (req, res) => {
     try {
-        const { date, shift } = req.query;
-        if (!date || !shift) {
-            return res.status(400).json({ error: 'date and shift query params are required' });
+        const { date, shift, scope } = req.query;
+        if (date || shift) {
+            if (!date || !shift) {
+                return res.status(400).json({ error: 'date and shift query params are required together' });
+            }
+            if (shift !== 'LUNCH' && shift !== 'DINNER') {
+                return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+            }
+            const result = await queryWithRetry(
+                'SELECT id, date, shift, table_id FROM table_hidden_overrides WHERE date = $1 AND shift = $2',
+                [date, shift]
+            );
+            return res.json(result.rows);
         }
-        if (shift !== 'LUNCH' && shift !== 'DINNER') {
-            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
-        }
+        const whereClause = scope === 'all' ? '' : 'WHERE date >= CURRENT_DATE';
         const result = await queryWithRetry(
-            'SELECT id, date, shift, table_id FROM table_hidden_overrides WHERE date = $1 AND shift = $2',
-            [date, shift]
+            `SELECT id, date, shift, table_id FROM table_hidden_overrides ${whereClause}
+             ORDER BY date ASC, shift ASC`
         );
         res.json(result.rows);
     } catch (err) {
@@ -2065,6 +2075,150 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
         res.json(deleted);
     } catch (err) {
         console.error('Error unhiding table:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// ============================================
+// PER-SHIFT ROOM CLOSURE
+// ============================================
+
+// GET /room-closed?date=YYYY-MM-DD&shift=LUNCH|DINNER
+// If neither param is supplied, returns all future overrides ordered by
+// (date, shift) so the "Chiusure programmate" panel can render the aggregate
+// list without one round-trip per (date, shift) tuple.
+app.get('/room-closed', authenticate, async (req, res) => {
+    try {
+        const { date, shift, scope } = req.query;
+        if (date || shift) {
+            if (!date || !shift) {
+                return res.status(400).json({ error: 'date and shift query params are required together' });
+            }
+            if (shift !== 'LUNCH' && shift !== 'DINNER') {
+                return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+            }
+            const result = await queryWithRetry(
+                'SELECT id, date, shift, room_id FROM room_closed_overrides WHERE date = $1 AND shift = $2',
+                [date, shift]
+            );
+            return res.json(result.rows);
+        }
+        // Aggregate list. scope=all returns everything, otherwise only future
+        // (date >= today) rows so the panel defaults to what's actionable.
+        const whereClause = scope === 'all' ? '' : 'WHERE date >= CURRENT_DATE';
+        const result = await queryWithRetry(
+            `SELECT id, date, shift, room_id FROM room_closed_overrides ${whereClause}
+             ORDER BY date ASC, shift ASC`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching room closed overrides:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /room-closed body: { date, shift, room_id }
+// Refuses to close a room that has active reservations (not CANCELLED /
+// DECLINED) for the same (date, shift) — caller must reassign/cancel first.
+app.post('/room-closed', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, room_id } = req.body;
+        if (!date || !shift || room_id == null) {
+            return res.status(400).json({ error: 'date, shift and room_id are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+
+        // Block if any active reservation is on a table of this room for the
+        // given date+shift. Uses the same "active" semantics as public/rooms:
+        // CANCELLED and DECLINED don't count.
+        const reservationCheck = await queryWithRetry(
+            `SELECT res.id, res.customer_name
+             FROM reservations res
+             JOIN tables t ON t.id = res.table_id
+             WHERE t.room_id = $1
+               AND res.shift = $2
+               AND DATE(res.reservation_time AT TIME ZONE 'Europe/Rome') = $3
+               AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
+            [room_id, shift, date]
+        );
+        if (reservationCheck.rowCount && reservationCheck.rowCount > 0) {
+            return res.status(409).json({
+                error: 'Sala con prenotazioni',
+                detail: `La sala ha ${reservationCheck.rowCount} prenotazione/i attive per questo turno. Riassegnale prima di chiudere la sala.`,
+                blocking_reservation_ids: reservationCheck.rows.map((r: any) => r.id),
+            });
+        }
+
+        const result = await queryWithRetry(
+            `INSERT INTO room_closed_overrides (date, shift, room_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (date, shift, room_id) DO UPDATE SET date = EXCLUDED.date
+             RETURNING id, date, shift, room_id`,
+            [date, shift, room_id]
+        );
+        const closed = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.CREATE,
+                ResourceType.ROOM,
+                room_id,
+                `Close ${date} ${shift}`,
+                { date, shift }
+            );
+        }
+
+        if (socketService) socketService.broadcastRoomClosedCreated(closed);
+
+        res.status(201).json(closed);
+    } catch (err) {
+        console.error('Error closing room:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// DELETE /room-closed body: { date, shift, room_id }
+app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { date, shift, room_id } = req.body;
+        if (!date || !shift || room_id == null) {
+            return res.status(400).json({ error: 'date, shift and room_id are required' });
+        }
+        const result = await queryWithRetry(
+            `DELETE FROM room_closed_overrides
+             WHERE date = $1 AND shift = $2 AND room_id = $3
+             RETURNING id, date, shift, room_id`,
+            [date, shift, room_id]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Room closed override not found' });
+        }
+        const deleted = result.rows[0];
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.ROOM,
+                room_id,
+                `Reopen ${date} ${shift}`,
+                { date, shift }
+            );
+        }
+
+        if (socketService) socketService.broadcastRoomClosedDeleted(deleted);
+
+        res.json(deleted);
+    } catch (err) {
+        console.error('Error reopening room:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -2916,6 +3070,157 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
     } catch (err: any) {
         console.error('PUT /customers/:id error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// List customer duplicates grouped by the last 10 digits of the phone. Used
+// by the rubrica "Duplicati" panel to surface pairs that slipped past the
+// per-row unique index (e.g. different country-code prefixes on the same
+// underlying number).
+app.get('/customers/duplicates', authenticate, requirePermission('customers:read'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `WITH digits AS (
+                 SELECT id,
+                        regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS d
+                 FROM customers
+                 WHERE phone IS NOT NULL
+                   AND length(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')) >= 8
+             ),
+             groups AS (
+                 SELECT right(d, 10) AS key,
+                        array_agg(id ORDER BY id) AS ids
+                 FROM digits
+                 GROUP BY right(d, 10)
+                 HAVING count(*) > 1
+             )
+             SELECT g.key,
+                    json_agg(
+                        json_build_object(
+                            'id', c.id,
+                            'name', c.name,
+                            'phone', c.phone,
+                            'email', c.email,
+                            'is_vip', c.is_vip,
+                            'created_at', c.created_at,
+                            'updated_at', c.updated_at
+                        )
+                        ORDER BY c.id
+                    ) AS customers
+             FROM groups g
+             JOIN customers c ON c.id = ANY(g.ids)
+             GROUP BY g.key
+             ORDER BY g.key`
+        );
+        res.json({ groups: result.rows });
+    } catch (err: any) {
+        console.error('GET /customers/duplicates error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Merge one customer into another. Reservations linked to the source's phone
+// are re-tagged to the target (so the merged customer keeps the history),
+// banquet_menus are re-parented, and empty fields on the target are backfilled
+// from the source before the source row is deleted.
+app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermission('customers:full'), async (req, res) => {
+    const sourceId = parseInt(req.params.sourceId, 10);
+    const targetId = parseInt(req.params.targetId, 10);
+    if (!Number.isFinite(sourceId) || !Number.isFinite(targetId)) {
+        return res.status(400).json({ error: 'Invalid ids' });
+    }
+    if (sourceId === targetId) {
+        return res.status(400).json({ error: 'Cannot merge a customer into itself' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const src = await client.query('SELECT * FROM customers WHERE id = $1 FOR UPDATE', [sourceId]);
+        const tgt = await client.query('SELECT * FROM customers WHERE id = $1 FOR UPDATE', [targetId]);
+        if (src.rowCount === 0 || tgt.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+        const source = src.rows[0];
+        const target = tgt.rows[0];
+
+        // Re-tag reservations that used the source's phone so the merged
+        // customer inherits the history (the stats aggregator joins on phone).
+        if (source.phone) {
+            await client.query(
+                `UPDATE reservations
+                 SET phone = $1,
+                     customer_name = $2
+                 WHERE phone = $3`,
+                [target.phone || source.phone, target.name, source.phone]
+            );
+        }
+
+        // Re-parent banquet menus (real FK, ON DELETE SET NULL — we want to
+        // preserve the association).
+        await client.query(
+            `UPDATE banquet_menus SET customer_id = $1 WHERE customer_id = $2`,
+            [targetId, sourceId]
+        );
+
+        // Backfill target fields that are empty from the source. Notes are
+        // concatenated when both have content.
+        const mergedNotes = [target.notes, source.notes]
+            .map(n => (n || '').trim())
+            .filter(Boolean)
+            .join('\n');
+
+        const updated = await client.query(
+            `UPDATE customers
+             SET email = COALESCE(NULLIF(email, ''), $2),
+                 address = COALESCE(NULLIF(address, ''), $3),
+                 city = COALESCE(NULLIF(city, ''), $4),
+                 postal_code = COALESCE(NULLIF(postal_code, ''), $5),
+                 notes = NULLIF($6, ''),
+                 preferred_table_id = COALESCE(preferred_table_id, $7),
+                 preferences_notes = COALESCE(NULLIF(preferences_notes, ''), $8),
+                 dietary_notes = COALESCE(NULLIF(dietary_notes, ''), $9),
+                 is_vip = is_vip OR $10,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+            [
+                targetId,
+                source.email || null,
+                source.address || null,
+                source.city || null,
+                source.postal_code || null,
+                mergedNotes,
+                source.preferred_table_id || null,
+                source.preferences_notes || null,
+                source.dietary_notes || null,
+                source.is_vip === true,
+            ]
+        );
+
+        await client.query('DELETE FROM customers WHERE id = $1', [sourceId]);
+        await client.query('COMMIT');
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.CUSTOMER,
+                targetId,
+                `${target.name} (merged from #${sourceId} "${source.name}")`
+            );
+        }
+
+        res.json(updated.rows[0]);
+    } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+        console.error('POST /customers/:sourceId/merge-into/:targetId error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
     }
 });
 
@@ -7345,10 +7650,16 @@ app.get('/public/rooms', async (req, res) => {
             `SELECT r.id, r.name
              FROM rooms r
              WHERE r.is_closed = false
+               AND r.id NOT IN (
+                   SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+               )
                AND EXISTS (
                    SELECT 1 FROM tables t
                    WHERE t.room_id = r.id
                      AND t.seats >= $1
+                     AND t.id NOT IN (
+                         SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+                     )
                      AND NOT EXISTS (
                          SELECT 1 FROM reservations res
                          WHERE res.table_id = t.id
@@ -7444,14 +7755,24 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         }
 
         // Resolve the requested room name (if any) so the staff sees the
-        // preference in the notes column without needing extra joins.
+        // preference in the notes column without needing extra joins. Reject
+        // rooms closed globally OR overridden as closed for this (date, shift).
         let requestedRoomName: string | null = null;
         if (requestedRoomId && Number.isFinite(requestedRoomId)) {
             const roomRes = await queryWithRetry(
-                'SELECT name FROM rooms WHERE id = $1 AND is_closed = false',
-                [requestedRoomId]
+                `SELECT name FROM rooms
+                 WHERE id = $1
+                   AND is_closed = false
+                   AND id NOT IN (
+                       SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+                   )`,
+                [requestedRoomId, date, shift]
             );
-            if (roomRes.rows[0]) requestedRoomName = roomRes.rows[0].name;
+            if (roomRes.rows[0]) {
+                requestedRoomName = roomRes.rows[0].name;
+            } else {
+                return res.status(409).json({ error: 'room_unavailable', message: 'La sala scelta non è disponibile per il turno selezionato' });
+            }
         }
 
         // Normalize phone to E.164 if it starts with a leading 3 (IT mobile) and no +.

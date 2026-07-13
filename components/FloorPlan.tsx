@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
@@ -9,7 +9,7 @@ import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
-import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden } from '../services/apiService';
+import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -96,6 +96,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+  const [closedRoomIdsForShift, setClosedRoomIdsForShift] = useState<Set<number>>(new Set());
+  const [roomClosureMenuOpen, setRoomClosureMenuOpen] = useState(false);
 
   // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
   // re-enables drag-to-position so the floor plan can mirror the real room.
@@ -177,6 +179,32 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
   };
 
+  // Close/reopen a room for the currently selected (date, shift) only.
+  // Parallel to handleToggleHide but at the room level. The extended
+  // rooms.is_closed flag is handled separately by onToggleRoomClosed.
+  const handleToggleRoomShiftClosed = async (room_id: number) => {
+    const isClosedForShift = closedRoomIdsForShift.has(room_id);
+    try {
+      if (isClosedForShift) {
+        await deleteRoomClosed(selectedDate, selectedShift, room_id);
+        setClosedRoomIdsForShift(prev => {
+          const next = new Set(prev);
+          next.delete(room_id);
+          return next;
+        });
+      } else {
+        await createRoomClosed(selectedDate, selectedShift, room_id);
+        setClosedRoomIdsForShift(prev => {
+          const next = new Set(prev);
+          next.add(room_id);
+          return next;
+        });
+      }
+    } catch (err: any) {
+      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+    }
+  };
+
   // Fetch merges whenever date/shift changes
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +231,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       .catch(err => {
         console.error('Error fetching hidden tables:', err);
         if (!cancelled) setHiddenTableIds(new Set());
+      });
+    return () => { cancelled = true; };
+  }, [selectedDate, selectedShift]);
+
+  // Fetch per-shift closed rooms for the current date/shift
+  useEffect(() => {
+    let cancelled = false;
+    getRoomClosed(selectedDate, selectedShift)
+      .then(rows => {
+        if (!cancelled) setClosedRoomIdsForShift(new Set(rows.map(r => r.room_id)));
+      })
+      .catch(err => {
+        console.error('Error fetching closed rooms:', err);
+        if (!cancelled) setClosedRoomIdsForShift(new Set());
       });
     return () => { cancelled = true; };
   }, [selectedDate, selectedShift]);
@@ -270,6 +312,38 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return () => {
       socket.off('tableHidden:created', handleHiddenCreated);
       socket.off('tableHidden:deleted', handleHiddenDeleted);
+    };
+  }, [socket, selectedDate, selectedShift]);
+
+  // Listen for room-closed socket events filtered by current date+shift
+  useEffect(() => {
+    if (!socket) return;
+
+    const matches = (c: RoomClosedOverride) => c.date === selectedDate && c.shift === selectedShift;
+
+    const handleRoomClosedCreated = (c: RoomClosedOverride) => {
+      if (!matches(c)) return;
+      setClosedRoomIdsForShift(prev => {
+        const next = new Set(prev);
+        next.add(c.room_id);
+        return next;
+      });
+    };
+
+    const handleRoomClosedDeleted = (c: RoomClosedOverride) => {
+      if (!matches(c)) return;
+      setClosedRoomIdsForShift(prev => {
+        const next = new Set(prev);
+        next.delete(c.room_id);
+        return next;
+      });
+    };
+
+    socket.on('roomClosed:created', handleRoomClosedCreated);
+    socket.on('roomClosed:deleted', handleRoomClosedDeleted);
+    return () => {
+      socket.off('roomClosed:created', handleRoomClosedCreated);
+      socket.off('roomClosed:deleted', handleRoomClosedDeleted);
     };
   }, [socket, selectedDate, selectedShift]);
 
@@ -1141,16 +1215,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }}
               className={`rounded-full px-4 py-2.5 text-sm font-medium transition whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
                   activeRoomId === room.id
-                  ? room.is_closed
+                  ? (room.is_closed || closedRoomIdsForShift.has(room.id))
                     ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
                     : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                  : room.is_closed
+                  : (room.is_closed || closedRoomIdsForShift.has(room.id))
                     ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)] line-through'
                     : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
               }`}
-              title={room.is_closed ? `${room.name} (Chiusa)` : room.name}
+              title={room.is_closed
+                ? `${room.name} (Chiusa)`
+                : closedRoomIdsForShift.has(room.id)
+                  ? `${room.name} (Chiusa per questo turno)`
+                  : room.name}
             >
-              {room.is_closed && <DoorClosed size={14} />}
+              {(room.is_closed || closedRoomIdsForShift.has(room.id)) && <DoorClosed size={14} />}
               {room.name}
             </button>
           ))}
@@ -1245,24 +1323,78 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
 
-          {/* Toggle Room Closed Button */}
+          {/* Room Closure Menu: per-shift override + extended (global) closure */}
           {(() => {
             const activeRoom = rooms.find(r => r.id === activeRoomId);
             if (!activeRoom) return null;
-            const isClosed = activeRoom.is_closed === true;
+            const isExtendedClosed = activeRoom.is_closed === true;
+            const isShiftClosed = closedRoomIdsForShift.has(activeRoom.id);
+            const isAnyClosed = isExtendedClosed || isShiftClosed;
+            const shiftLabel = selectedShift === Shift.LUNCH ? 'pranzo' : 'cena';
             return (
-              <button
-                onClick={() => onToggleRoomClosed(activeRoom.id, !isClosed)}
-                className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
-                  isClosed
-                    ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
-                    : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25'
-                }`}
-                title={isClosed ? `Riapri Sala: ${activeRoom.name}` : `Chiudi Sala: ${activeRoom.name}`}
-              >
-                {isClosed ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />}
-                <span className="hidden lg:inline">{isClosed ? 'Riapri' : 'Chiudi'}</span>
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setRoomClosureMenuOpen(v => !v)}
+                  className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
+                    isAnyClosed
+                      ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
+                      : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25'
+                  }`}
+                  title={`Gestisci chiusura: ${activeRoom.name}`}
+                >
+                  {isAnyClosed ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />}
+                  <span className="hidden lg:inline">Chiusura</span>
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                {roomClosureMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setRoomClosureMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] shadow-lg overflow-hidden">
+                      <button
+                        onClick={() => {
+                          setRoomClosureMenuOpen(false);
+                          handleToggleRoomShiftClosed(activeRoom.id);
+                        }}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--color-surface-hover)] flex items-start gap-2 border-b border-[var(--color-line)]"
+                      >
+                        {isShiftClosed
+                          ? <DoorOpen className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                          : <DoorClosed className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
+                        <div>
+                          <div className="font-medium text-[var(--color-fg)]">
+                            {isShiftClosed ? 'Riapri per questo turno' : 'Chiudi solo per questo turno'}
+                          </div>
+                          <div className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                            {selectedDate} · {shiftLabel}
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRoomClosureMenuOpen(false);
+                          onToggleRoomClosed(activeRoom.id, !isExtendedClosed);
+                        }}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--color-surface-hover)] flex items-start gap-2"
+                      >
+                        {isExtendedClosed
+                          ? <DoorOpen className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                          : <DoorClosed className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
+                        <div>
+                          <div className="font-medium text-[var(--color-fg)]">
+                            {isExtendedClosed ? 'Riapri (chiusura estesa)' : 'Chiusura estesa'}
+                          </div>
+                          <div className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                            Chiusa finché non riapri
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             );
           })()}
 
@@ -1518,11 +1650,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </div>
           )}
 
-          {rooms.find(r => r.id === activeRoomId)?.is_closed && (
+          {(() => {
+            const activeRoom = rooms.find(r => r.id === activeRoomId);
+            if (!activeRoom) return null;
+            const extended = activeRoom.is_closed === true;
+            const shiftOnly = closedRoomIdsForShift.has(activeRoom.id);
+            if (!extended && !shiftOnly) return null;
+            const label = extended ? 'Sala Chiusa' : 'Sala Chiusa per il turno';
+            return (
               <div className="absolute top-4 right-4 bg-amber-500 text-[#ffffff] px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
-                  <DoorClosed size={12} /> Sala Chiusa
+                <DoorClosed size={12} /> {label}
               </div>
-          )}
+            );
+          })()}
 
           {/* Legend - collapsible */}
           <div className="absolute bottom-4 right-4 z-10 select-none">
