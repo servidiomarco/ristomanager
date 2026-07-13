@@ -3,51 +3,74 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#4f46e5" />
-    <title>Prenota un tavolo</title>
+    <meta name="theme-color" content="#78350f" />
+    <title>Prenota un tavolo · Il Vecchio Frantoio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { -webkit-font-smoothing: antialiased; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body {
+            -webkit-font-smoothing: antialiased;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #fbf9f4;
+            background-image:
+                radial-gradient(1100px 550px at 100% -10%, rgba(180, 83, 9, 0.07), transparent 60%),
+                radial-gradient(900px 500px at 0% 15%, rgba(120, 53, 15, 0.05), transparent 60%);
+        }
+        .serif { font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif; }
         .hp { position: absolute; left: -9999px; top: -9999px; height: 0; width: 0; opacity: 0; pointer-events: none; }
-        /* Slot chip pulse on load */
         @keyframes pop { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .slot-chip { animation: pop 0.15s ease-out; }
+        /* Ornament rule used to frame the hero eyebrow line. */
+        .rule { height: 1px; width: 2rem; background: linear-gradient(to right, transparent, #d6cfc0, transparent); }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen">
-    <div class="max-w-md mx-auto px-4 py-6 pb-32">
-        <header class="text-center mb-6">
-            <h1 class="text-2xl font-bold text-slate-900">Prenota un tavolo</h1>
-            <p class="text-sm text-slate-500 mt-1">Compila il modulo, ti contatteremo per confermare.</p>
+<body class="min-h-screen">
+    <div class="max-w-md md:max-w-xl mx-auto px-4 sm:px-6 py-6 md:py-10 pb-32">
+        <header class="text-center mb-8 md:mb-10">
+            <img
+                src="/prenota/logo.png"
+                alt="Il Vecchio Frantoio — Cucina Tradizionale"
+                class="mx-auto h-28 sm:h-36 md:h-44 w-auto select-none"
+                draggable="false"
+            />
+            <div class="mt-5 flex items-center justify-center gap-3">
+                <span class="rule"></span>
+                <span class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Prenota un tavolo</span>
+                <span class="rule"></span>
+            </div>
+            <h1 class="serif text-3xl sm:text-4xl text-stone-900 mt-3 font-medium">Riserva la tua tavola</h1>
+            <p class="text-sm text-stone-500 mt-2">Compila il modulo, ti contatteremo per confermare.</p>
         </header>
 
         <!-- Maintenance card. Visible by default — the bootstrap script
              removes it when /public/contact reports bookingsEnabled: true.
              Safe default: if the fetch fails, bookings stay paused. -->
-        <div id="maintenanceCard" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 text-center">
-            <div class="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
-                <svg class="w-7 h-7 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div id="maintenanceCard" class="bg-white/90 backdrop-blur rounded-2xl shadow-sm ring-1 ring-stone-200 p-8 text-center">
+            <div class="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4 ring-1 ring-amber-100">
+                <svg class="w-7 h-7 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
                 </svg>
             </div>
-            <h2 class="text-lg font-semibold text-slate-900 mb-2">Prenotazioni temporaneamente sospese</h2>
-            <p class="text-sm text-slate-600 leading-relaxed">Le prenotazioni web non sono disponibili al momento.</p>
+            <h2 class="serif text-2xl text-stone-900 mb-2">Prenotazioni temporaneamente sospese</h2>
+            <p class="text-sm text-stone-600 leading-relaxed">Le prenotazioni web non sono disponibili al momento.</p>
         </div>
 
         <a id="callCta" href="tel:+447451263812"
-           class="hidden flex items-center justify-between bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-4 active:bg-slate-50 transition">
+           class="hidden flex items-center justify-between bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-4 mb-4 active:bg-stone-50 hover:bg-stone-50 transition">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center">
-                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center ring-1 ring-amber-100">
+                    <svg class="w-5 h-5 text-amber-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h2.28a2 2 0 011.94 1.515l.7 2.8a2 2 0 01-.45 1.84l-1.27 1.27a16 16 0 006.36 6.36l1.27-1.27a2 2 0 011.84-.45l2.8.7A2 2 0 0121 17.72V20a2 2 0 01-2 2h-1C9.716 22 2 14.284 2 5V4a1 1 0 011-1z"/>
                     </svg>
                 </div>
                 <div>
-                    <div class="text-sm font-semibold text-slate-900">Preferisci chiamare?</div>
-                    <div class="text-xs text-slate-500">Il nostro assistente risponde 24/7</div>
+                    <div class="text-sm font-semibold text-stone-900">Preferisci chiamare?</div>
+                    <div class="text-xs text-stone-500">Il nostro assistente risponde 24/7</div>
                 </div>
             </div>
-            <div id="callCtaNumber" class="text-sm font-semibold text-indigo-600">+44 7451 263812</div>
+            <div id="callCtaNumber" class="text-sm font-semibold text-amber-800">+44 7451 263812</div>
         </a>
 
         <form id="bookingForm" class="hidden" novalidate>
@@ -59,63 +82,63 @@
             </div>
 
             <!-- Section 1: Date -->
-            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
-                <label for="date" class="block text-sm font-semibold text-slate-900 mb-2">Quando vuoi venire?</label>
+            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
+                <label for="date" class="block text-sm font-semibold text-stone-900 mb-3">Quando vuoi venire?</label>
                 <input
                     type="date"
                     id="date"
                     name="date"
                     required
-                    class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                    class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
                 />
             </section>
 
             <!-- Section 2: Guests -->
-            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
-                <label class="block text-sm font-semibold text-slate-900 mb-3">Quanti siete?</label>
-                <div class="flex items-center justify-between bg-slate-50 rounded-xl px-2 py-1.5">
+            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
+                <label class="block text-sm font-semibold text-stone-900 mb-3">Quanti siete?</label>
+                <div class="flex items-center justify-between bg-stone-50 rounded-xl px-2 py-1.5">
                     <button type="button" id="guestsDec" aria-label="Diminuisci"
-                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-slate-600 active:bg-slate-200 disabled:opacity-30">−</button>
+                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-stone-600 active:bg-stone-200 disabled:opacity-30">−</button>
                     <div class="text-center">
-                        <div class="text-3xl font-bold text-slate-900 tabular-nums" id="guestsValue">2</div>
-                        <div class="text-xs text-slate-500" id="guestsLabel">persone</div>
+                        <div class="serif text-4xl font-semibold text-stone-900 tabular-nums leading-none" id="guestsValue">2</div>
+                        <div class="text-[11px] uppercase tracking-widest text-stone-500 mt-1" id="guestsLabel">persone</div>
                     </div>
                     <button type="button" id="guestsInc" aria-label="Aumenta"
-                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-slate-600 active:bg-slate-200 disabled:opacity-30">+</button>
+                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-stone-600 active:bg-stone-200 disabled:opacity-30">+</button>
                 </div>
             </section>
 
             <!-- Section 3: Shift + Slots -->
-            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
-                <label class="block text-sm font-semibold text-slate-900 mb-3">A che ora?</label>
+            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
+                <label class="block text-sm font-semibold text-stone-900 mb-3">A che ora?</label>
                 <div class="grid grid-cols-2 gap-2 mb-4">
-                    <button type="button" data-shift="LUNCH" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-slate-200 bg-white text-slate-700">
+                    <button type="button" data-shift="LUNCH" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-700">
                         ☀ Pranzo
                     </button>
-                    <button type="button" data-shift="DINNER" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-slate-200 bg-white text-slate-700">
+                    <button type="button" data-shift="DINNER" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-700">
                         🌙 Cena
                     </button>
                 </div>
                 <div id="slotsContainer" class="min-h-[44px]">
-                    <p class="text-sm text-slate-400 text-center py-3" id="slotsHint">Seleziona prima data e turno.</p>
+                    <p class="text-sm text-stone-400 text-center py-3" id="slotsHint">Seleziona prima data e turno.</p>
                 </div>
             </section>
 
             <!-- Section 4: Room preference (revealed after slot pick) -->
-            <section id="roomSection" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4 hidden">
-                <label class="block text-sm font-semibold text-slate-900 mb-1">Dove preferisci sederti?</label>
-                <p class="text-xs text-slate-500 mb-3">Indicazione preferenziale, lo staff ti assegnerà un tavolo libero.</p>
+            <section id="roomSection" class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4 hidden">
+                <label class="block text-sm font-semibold text-stone-900 mb-1">Dove preferisci sederti?</label>
+                <p class="text-xs text-stone-500 mb-3">Indicazione preferenziale, lo staff ti assegnerà un tavolo libero.</p>
                 <div id="roomsContainer" class="min-h-[44px]">
-                    <p class="text-sm text-slate-400 text-center py-3">Caricamento sale…</p>
+                    <p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>
                 </div>
             </section>
 
             <!-- Section 5: Contact (revealed after slot pick) -->
-            <section id="contactSection" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4 hidden">
-                <h2 class="text-sm font-semibold text-slate-900 mb-3">I tuoi contatti</h2>
+            <section id="contactSection" class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4 hidden">
+                <h2 class="text-sm font-semibold text-stone-900 mb-3">I tuoi contatti</h2>
                 <div class="space-y-3">
                     <div>
-                        <label for="customer_name" class="block text-xs font-medium text-slate-600 mb-1">Nome e cognome</label>
+                        <label for="customer_name" class="block text-xs font-medium text-stone-600 mb-1">Nome e cognome</label>
                         <input
                             type="text"
                             id="customer_name"
@@ -125,11 +148,11 @@
                             maxlength="80"
                             autocomplete="name"
                             placeholder="Mario Rossi"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
                         />
                     </div>
                     <div>
-                        <label for="phone" class="block text-xs font-medium text-slate-600 mb-1">Telefono</label>
+                        <label for="phone" class="block text-xs font-medium text-stone-600 mb-1">Telefono</label>
                         <input
                             type="tel"
                             id="phone"
@@ -139,30 +162,30 @@
                             autocomplete="tel"
                             inputmode="tel"
                             placeholder="333 1234567"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
                         />
                     </div>
                     <div>
-                        <label for="notes" class="block text-xs font-medium text-slate-600 mb-1">Note (opzionale)</label>
+                        <label for="notes" class="block text-xs font-medium text-stone-600 mb-1">Note (opzionale)</label>
                         <textarea
                             id="notes"
                             name="notes"
                             rows="2"
                             maxlength="500"
                             placeholder="Allergie, esigenze, occasioni speciali…"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition resize-none"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition resize-none"
                         ></textarea>
                     </div>
                 </div>
             </section>
 
-            <!-- Submit (sticky bottom on mobile) -->
-            <div id="submitWrap" class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent pt-6 pb-4 px-4 hidden">
-                <div class="max-w-md mx-auto">
+            <!-- Submit (sticky bottom on mobile, inline on desktop) -->
+            <div id="submitWrap" class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#fbf9f4] via-[#fbf9f4]/95 to-transparent pt-6 pb-4 px-4 hidden md:static md:pt-0 md:pb-0 md:px-0 md:bg-none">
+                <div class="max-w-md md:max-w-none mx-auto">
                     <button
                         type="submit"
                         id="submitBtn"
-                        class="w-full bg-indigo-600 text-white text-base font-semibold py-4 rounded-2xl shadow-lg shadow-indigo-200 active:bg-indigo-700 disabled:opacity-50 disabled:shadow-none transition"
+                        class="w-full bg-amber-800 text-white text-base font-semibold py-4 rounded-2xl shadow-lg shadow-amber-900/20 hover:bg-amber-900 active:bg-amber-900 disabled:opacity-50 disabled:shadow-none transition"
                     >
                         Invia richiesta
                     </button>
@@ -173,17 +196,27 @@
         <!-- Error toast -->
         <div id="errorBox" class="hidden mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm"></div>
 
+        <!-- Footer -->
+        <footer class="mt-10 text-center text-[11px] uppercase tracking-[0.24em] text-stone-400">
+            Il Vecchio Frantoio · Cucina Tradizionale
+        </footer>
+
         <!-- Confirmation overlay -->
-        <div id="confirmation" class="hidden fixed inset-0 bg-white z-50 flex items-center justify-center px-6">
-            <div class="text-center max-w-xs">
-                <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
-                    <svg class="w-10 h-10 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+        <div id="confirmation" class="hidden fixed inset-0 z-50 flex items-center justify-center px-6" style="background-color: #fbf9f4;">
+            <div class="text-center max-w-sm">
+                <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5 ring-1 ring-emerald-200">
+                    <svg class="w-10 h-10 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
                 </div>
-                <h2 class="text-2xl font-bold text-slate-900 mb-2">Richiesta ricevuta</h2>
-                <p class="text-slate-600 leading-relaxed">
+                <h2 class="serif text-3xl text-stone-900 mb-2">Richiesta ricevuta</h2>
+                <p class="text-stone-600 leading-relaxed">
                     Grazie! Ti contatteremo via telefono o WhatsApp per confermare la prenotazione.
                 </p>
-                <p id="confirmRecap" class="text-sm text-slate-500 mt-4"></p>
+                <p id="confirmRecap" class="text-sm text-stone-500 mt-4"></p>
+                <div class="mt-8 flex items-center justify-center gap-3">
+                    <span class="rule"></span>
+                    <span class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Il Vecchio Frantoio</span>
+                    <span class="rule"></span>
+                </div>
             </div>
         </div>
     </div>
@@ -287,7 +320,7 @@
             shiftBtns.forEach(b => {
                 const active = b === btn;
                 b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
-                    active ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-700'
+                    active ? 'border-amber-800 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-700'
                 }`;
             });
             await loadAvailability();
@@ -298,7 +331,7 @@
 
     async function loadAvailability() {
         if (!state.date) return;
-        slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Caricamento orari…</p>';
+        slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento orari…</p>';
         try {
             const resp = await fetch(`/public/availability?date=${encodeURIComponent(state.date)}`);
             if (!resp.ok) throw new Error('availability fetch failed');
@@ -311,12 +344,12 @@
 
     function renderSlots() {
         if (!state.shift) {
-            slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Seleziona il turno.</p>';
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Seleziona il turno.</p>';
             return;
         }
         const slots = (state.availability?.[state.shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
         if (slots.length === 0) {
-            slotsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Per questa data non ci sono orari disponibili.</p>';
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questa data non ci sono orari disponibili.</p>';
             return;
         }
         slotsContainer.innerHTML = '<div class="grid grid-cols-4 gap-2"></div>';
@@ -328,7 +361,7 @@
             b.dataset.time = time;
             const active = state.time === time;
             b.className = `slot-chip py-2.5 rounded-lg text-sm font-semibold border-2 transition ${
-                active ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-700'
+                active ? 'border-amber-800 bg-amber-800 text-white' : 'border-stone-200 bg-white text-stone-700'
             }`;
             b.addEventListener('click', () => {
                 state.time = time;
@@ -344,7 +377,7 @@
 
     async function loadRooms() {
         if (!state.date || !state.shift || !state.guests) return;
-        roomsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Caricamento sale…</p>';
+        roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>';
         try {
             const url = `/public/rooms?date=${encodeURIComponent(state.date)}&shift=${encodeURIComponent(state.shift)}&guests=${encodeURIComponent(state.guests)}`;
             const resp = await fetch(url);
@@ -360,11 +393,11 @@
 
     function renderRooms() {
         if (!Array.isArray(state.rooms)) {
-            roomsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Caricamento sale…</p>';
+            roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>';
             return;
         }
         if (state.rooms.length === 0) {
-            roomsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center py-3">Nessuna sala disponibile per questa richiesta.</p>';
+            roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Nessuna sala disponibile per questa richiesta.</p>';
             return;
         }
         roomsContainer.innerHTML = '<div class="grid grid-cols-1 gap-2"></div>';
@@ -375,8 +408,8 @@
             b.type = 'button';
             b.className = `w-full text-left px-4 py-3 rounded-xl text-sm font-semibold border-2 transition ${
                 isActive
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-slate-200 bg-white text-slate-700 active:bg-slate-50'
+                    ? 'border-amber-800 bg-amber-50 text-amber-900'
+                    : 'border-stone-200 bg-white text-stone-700 active:bg-stone-50 hover:bg-stone-50'
             }`;
             b.textContent = label;
             b.addEventListener('click', onClick);

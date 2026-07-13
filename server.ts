@@ -7863,6 +7863,13 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
+// Restaurant logo used by the /prenota landing page. Served explicitly rather
+// than via express.static to avoid exposing the whole public/ folder.
+app.get('/prenota/logo.png', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf.png'));
+});
+
 // WhatsApp diagnostic — sends a real message via the active provider and
 // returns the raw response so we can see exactly what's happening.
 // "auto" prefers Twilio → Meta → Vonage (same priority as the dispatcher).
