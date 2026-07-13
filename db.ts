@@ -1355,6 +1355,35 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // OUTBOUND MESSAGES LOG (SMS / WhatsApp)
+        // ============================================
+        // Persistent log of every SMS/WhatsApp we hand to a provider so the
+        // operator can see the message history per customer without opening
+        // the Twilio console. `to_phone_digits` is the digits-only form of
+        // the recipient (used to match a voice-call phone against this log).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS outbound_messages (
+                id                SERIAL PRIMARY KEY,
+                provider          VARCHAR(20) NOT NULL,
+                channel           VARCHAR(20) NOT NULL,
+                to_phone          VARCHAR(30) NOT NULL,
+                to_phone_digits   VARCHAR(20) NOT NULL,
+                body              TEXT NOT NULL,
+                status            VARCHAR(20),
+                provider_sid      VARCHAR(64),
+                reservation_id    INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                sent_at           TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                delivered_at      TIMESTAMPTZ,
+                failed_at         TIMESTAMPTZ,
+                error_code        VARCHAR(20),
+                error_message     TEXT
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_to_phone_digits ON outbound_messages(to_phone_digits);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_provider_sid ON outbound_messages(provider_sid);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_sent_at ON outbound_messages(sent_at DESC);`);
+
+        // ============================================
         // RESERVATION NOTE PRESETS
         // ============================================
         // Configurable quick-notes list shown as chips in the reservation

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
-  BookUser,
+  BookUser, Send,
 } from 'lucide-react';
 import {
   voiceCallsApiService,
@@ -10,6 +10,7 @@ import {
   VoiceCallDetail,
   VoiceCallsListParams,
   FollowUpStatus,
+  OutboundMessage,
 } from '../services/voiceCallsApiService';
 
 const formatDuration = (secs: number | null | undefined): string => {
@@ -33,6 +34,20 @@ const formatDateTime = (iso: string | null | undefined): string => {
 const formatPhone = (phone: string | null | undefined): string => {
   if (!phone) return 'Numero sconosciuto';
   return phone;
+};
+
+const messageStatusBadge = (status: string | null | undefined): { label: string; cls: string } => {
+  const s = (status || '').toLowerCase();
+  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
+  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', cls: 'bg-sky-50 text-sky-700 ring-sky-200' };
+  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', cls: 'bg-rose-50 text-rose-700 ring-rose-200' };
+  return { label: s || 'In coda', cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
+};
+
+const channelLabel = (channel: string): string => {
+  if (channel === 'sms') return 'SMS';
+  if (channel === 'whatsapp') return 'WhatsApp';
+  return channel;
 };
 
 const reservationStatusBadge = (status: string | null | undefined): { label: string; cls: string } | null => {
@@ -88,6 +103,10 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const [messages, setMessages] = useState<OutboundMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -101,6 +120,17 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
       })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [callId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMessagesLoading(true);
+    setMessagesError(null);
+    voiceCallsApiService.listMessages(callId)
+      .then(r => { if (!cancelled) setMessages(r.items); })
+      .catch((err: Error) => { if (!cancelled) setMessagesError(err.message); })
+      .finally(() => { if (!cancelled) setMessagesLoading(false); });
     return () => { cancelled = true; };
   }, [callId]);
 
@@ -378,6 +408,56 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
                     {audioLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
                     {audioLoading ? 'Carico…' : 'Carica audio'}
                   </button>
+                )}
+              </div>
+
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2 flex items-center gap-1.5">
+                  <Send className="h-3 w-3" />
+                  Messaggi inviati
+                  {messages.length > 0 && (
+                    <span className="text-[var(--color-fg-muted)] font-normal">· {messages.length}</span>
+                  )}
+                </div>
+                {messagesLoading ? (
+                  <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Carico messaggi…</span>
+                  </div>
+                ) : messagesError ? (
+                  <div className="flex items-start gap-2 p-2 rounded-lg bg-rose-50 text-rose-700 text-[12px]">
+                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>{messagesError}</span>
+                  </div>
+                ) : messages.length === 0 ? (
+                  <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Nessun messaggio inviato a questo numero.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {messages.map(msg => {
+                      const badge = messageStatusBadge(msg.status);
+                      return (
+                        <div key={msg.id} className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
+                              <span className="font-medium text-[var(--color-fg)]">{channelLabel(msg.channel)}</span>
+                              <span>·</span>
+                              <span className="tabular">{formatDateTime(msg.sent_at)}</span>
+                            </div>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                          </div>
+                          <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">{msg.body}</p>
+                          {msg.error_message && (
+                            <div className="mt-1.5 text-[11px] text-rose-600 flex items-start gap-1">
+                              <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                              <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 

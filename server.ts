@@ -271,6 +271,31 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
             try { socketService.broadcastReservationUpdated(updated.rows[0]); }
             catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
         }
+
+        // Also update the outbound_messages log so the SMS section in the
+        // conversation modal reflects the final delivery state.
+        try {
+            await queryWithRetry(
+                `UPDATE outbound_messages
+                 SET status = $1,
+                     delivered_at = CASE
+                         WHEN $1 = 'delivered' AND delivered_at IS NULL
+                             THEN CURRENT_TIMESTAMP
+                         ELSE delivered_at
+                     END,
+                     failed_at = CASE
+                         WHEN $1 IN ('failed', 'undelivered') AND failed_at IS NULL
+                             THEN CURRENT_TIMESTAMP
+                         ELSE failed_at
+                     END,
+                     error_code = $2,
+                     error_message = $3
+                 WHERE provider_sid = $4`,
+                [status, ErrorCode || null, errText, MessageSid]
+            );
+        } catch (err: any) {
+            console.warn('[Twilio] outbound_messages update failed:', err?.message || err);
+        }
     } catch (err: any) {
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
@@ -6499,6 +6524,45 @@ interface OutboundConfirmationResult {
     channel: 'sms' | 'whatsapp';
 }
 
+// Persist a row in outbound_messages so the operator can see the full
+// SMS/WhatsApp history per customer without opening the Twilio console.
+// Never lets a logging error break the actual send — errors are just warned.
+async function logOutboundMessage(params: {
+    provider: 'twilio' | 'vonage' | 'meta';
+    channel: 'sms' | 'whatsapp';
+    to: string;
+    body: string;
+    sid?: string | null;
+    reservationId?: number | null;
+    status?: string | null;
+    errorMessage?: string | null;
+}): Promise<void> {
+    try {
+        const digits = String(params.to).replace(/\D/g, '');
+        const status = params.status
+            ?? (params.errorMessage ? 'failed' : (params.sid ? 'queued' : 'sent'));
+        await queryWithRetry(
+            `INSERT INTO outbound_messages
+             (provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+                params.provider,
+                params.channel,
+                params.to,
+                digits,
+                params.body,
+                status,
+                params.sid ?? null,
+                params.reservationId ?? null,
+                params.errorMessage ?? null,
+                params.errorMessage ? new Date() : null,
+            ]
+        );
+    } catch (err: any) {
+        console.warn('[outbound-log] insert failed:', err?.message || err);
+    }
+}
+
 // Public URL used as StatusCallback for Twilio outbound messages so Twilio can
 // notify us of delivery/failure. Falls back to VITE_API_URL, then null (no
 // callback attached — messages still send, just no delivery tracking).
@@ -6508,7 +6572,7 @@ function twilioStatusCallbackUrl(): string | null {
     return `${base.replace(/\/+$/, '')}/webhook/twilio-whatsapp-status`;
 }
 
-async function sendTwilioWhatsApp(to: string, text: string): Promise<OutboundConfirmationResult> {
+async function sendTwilioWhatsApp(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const FROM = process.env.TWILIO_WHATSAPP_FROM;
@@ -6534,32 +6598,59 @@ async function sendTwilioWhatsApp(to: string, text: string): Promise<OutboundCon
     const callback = twilioStatusCallbackUrl();
     if (callback) body.set('StatusCallback', callback);
 
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: body.toString(),
-    });
+    try {
+        const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Basic ${auth}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+        });
 
-    const result = await response.json().catch(() => ({} as any)) as { sid?: string };
-    if (!response.ok) {
-        console.error('[Twilio] ❌ Error sending message:', result);
-        throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
+        const result = await response.json().catch(() => ({} as any)) as { sid?: string };
+        if (!response.ok) {
+            console.error('[Twilio] ❌ Error sending message:', result);
+            await logOutboundMessage({
+                provider: 'twilio', channel: 'whatsapp', to, body: text,
+                reservationId, errorMessage: `Twilio API error: ${response.status} - ${JSON.stringify(result)}`,
+            });
+            throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
+        }
+        console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
+        await logOutboundMessage({
+            provider: 'twilio', channel: 'whatsapp', to, body: text,
+            sid: result.sid, reservationId,
+        });
+        return { sid: result.sid, channel: 'whatsapp' };
+    } catch (err: any) {
+        if (err?.message && !err.message.startsWith('Twilio API error')) {
+            await logOutboundMessage({
+                provider: 'twilio', channel: 'whatsapp', to, body: text,
+                reservationId, errorMessage: err.message,
+            });
+        }
+        throw err;
     }
-    console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
-    return { sid: result.sid, channel: 'whatsapp' };
 }
 
 // Plain-text WhatsApp dispatcher. Prefers Twilio when configured, falls back
 // to Vonage. Meta is template-only (separate path) so it isn't in this chain.
-async function sendWhatsAppText(to: string, text: string): Promise<OutboundConfirmationResult> {
+async function sendWhatsAppText(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
     if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(to, text);
+        return sendTwilioWhatsApp(to, text, reservationId);
     }
-    await sendVonageWhatsApp(to, text);
-    return { channel: 'whatsapp' };
+    try {
+        await sendVonageWhatsApp(to, text);
+        await logOutboundMessage({ provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
+        return { channel: 'whatsapp' };
+    } catch (err: any) {
+        await logOutboundMessage({
+            provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId,
+            errorMessage: err?.message || String(err),
+        });
+        throw err;
+    }
 }
 
 // Twilio SMS — temporary stand-in for booking confirmations while Meta
@@ -6575,7 +6666,7 @@ function isTwilioSmsConfigured(): boolean {
         && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
 }
 
-async function sendTwilioSms(to: string, text: string): Promise<OutboundConfirmationResult> {
+async function sendTwilioSms(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
@@ -6609,22 +6700,40 @@ async function sendTwilioSms(to: string, text: string): Promise<OutboundConfirma
 
     const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
 
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: body.toString(),
-    });
+    try {
+        const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Basic ${auth}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+        });
 
-    const result = await response.json().catch(() => ({} as any)) as { sid?: string };
-    if (!response.ok) {
-        console.error('[Twilio SMS] ❌ Error sending message:', result);
-        throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
+        const result = await response.json().catch(() => ({} as any)) as { sid?: string };
+        if (!response.ok) {
+            console.error('[Twilio SMS] ❌ Error sending message:', result);
+            await logOutboundMessage({
+                provider: 'twilio', channel: 'sms', to, body: text,
+                reservationId, errorMessage: `Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`,
+            });
+            throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
+        }
+        console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
+        await logOutboundMessage({
+            provider: 'twilio', channel: 'sms', to, body: text,
+            sid: result.sid, reservationId,
+        });
+        return { sid: result.sid, channel: 'sms' };
+    } catch (err: any) {
+        if (err?.message && !err.message.startsWith('Twilio SMS API error')) {
+            await logOutboundMessage({
+                provider: 'twilio', channel: 'sms', to, body: text,
+                reservationId, errorMessage: err.message,
+            });
+        }
+        throw err;
     }
-    console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
-    return { sid: result.sid, channel: 'sms' };
 }
 
 // Booking-confirmation dispatcher. When a Twilio SMS sender is configured
@@ -6639,8 +6748,8 @@ async function sendBookingConfirmation(
     reservationId?: number | null
 ): Promise<OutboundConfirmationResult> {
     const result = isTwilioSmsConfigured()
-        ? await sendTwilioSms(to, text)
-        : await sendWhatsAppText(to, text);
+        ? await sendTwilioSms(to, text, reservationId)
+        : await sendWhatsAppText(to, text, reservationId);
     if (reservationId != null) {
         recordConfirmationSent(reservationId, result).catch(err =>
             console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
@@ -7610,6 +7719,43 @@ app.get('/voice-calls/:id/audio', authenticate, voiceCallsAuthorize, async (req,
     }
 });
 
+// Outbound SMS/WhatsApp history for a given call. We match on the last 10
+// digits of the recipient phone against the call's phone so operator can see
+// every message ever sent to that customer regardless of reservation linkage.
+app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const callRow = await queryWithRetry(
+            'SELECT phone FROM voice_calls WHERE id = $1',
+            [id]
+        );
+        if (callRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        const phone: string | null = callRow.rows[0].phone;
+        if (!phone) return res.json({ items: [] });
+
+        const digits = String(phone).replace(/\D/g, '');
+        if (digits.length < 8) return res.json({ items: [] });
+        const suffix = digits.slice(-10);
+
+        const result = await queryWithRetry(
+            `SELECT id, provider, channel, to_phone, body, status, provider_sid,
+                    reservation_id, sent_at, delivered_at, failed_at,
+                    error_code, error_message
+             FROM outbound_messages
+             WHERE right(to_phone_digits, 10) = $1
+             ORDER BY sent_at DESC
+             LIMIT 50`,
+            [suffix]
+        );
+        res.json({ items: result.rows });
+    } catch (err) {
+        console.error('GET /voice-calls/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Manual sync: pulls the agent's recent conversations from ElevenLabs and
 // upserts any conversation_id we're missing (post-call webhook timeouts /
 // redeploys lose calls otherwise). For each new conversation we fetch the
@@ -8377,7 +8523,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         if (isTwilioSmsConfigured()) {
-            sendTwilioSms(phoneE164, ackText)
+            sendTwilioSms(phoneE164, ackText, created.id)
                 .then(r => recordConfirmationSent(created.id, r))
                 .catch(err => console.error('[public-booking] SMS ack failed:', err));
         } else if (isMetaWhatsAppConfigured() && !depositCheckoutUrl) {
@@ -8400,7 +8546,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 ],
             }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
         } else {
-            sendWhatsAppText(phoneE164, ackText)
+            sendWhatsAppText(phoneE164, ackText, created.id)
                 .then(r => recordConfirmationSent(created.id, r))
                 .catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
         }

@@ -58,6 +58,22 @@ export interface VoiceCallsSyncResult {
   total_fetched: number;
 }
 
+export interface OutboundMessage {
+  id: number;
+  provider: string;
+  channel: 'sms' | 'whatsapp';
+  to_phone: string;
+  body: string;
+  status: string | null;
+  provider_sid: string | null;
+  reservation_id: number | null;
+  sent_at: string;
+  delivered_at: string | null;
+  failed_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+}
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
   const socketId = socketClient.getSocket()?.id;
@@ -170,6 +186,12 @@ class VoiceCallsApiService {
       method: 'PATCH',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ reservation_id: reservationId }),
+    });
+  }
+
+  async listMessages(id: number): Promise<{ items: OutboundMessage[] }> {
+    return apiRequest(`${API_URL}/voice-calls/${id}/messages`, {
+      headers: getHeaders(),
     });
   }
 }
