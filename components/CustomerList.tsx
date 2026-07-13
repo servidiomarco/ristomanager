@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../services/apiService';
+import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge } from 'lucide-react';
 
 interface Props {
   reservations: Reservation[];
@@ -12,6 +12,8 @@ interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   autoOpenNew?: boolean;
   onAutoOpenNewHandled?: () => void;
+  autoEditByPhone?: string | null;
+  onAutoEditHandled?: () => void;
 }
 
 interface FormState {
@@ -74,7 +76,7 @@ const formatReservationDateTime = (isoString: string): { date: string; time: str
   return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
 };
 
-export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tables, rooms, showToast, autoOpenNew, onAutoOpenNewHandled }) => {
+export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tables, rooms, showToast, autoOpenNew, onAutoOpenNewHandled, autoEditByPhone, onAutoEditHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
@@ -89,6 +91,62 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
+
+  // Duplicate detection: customers sharing the last 10 digits of their phone.
+  // We surface them in a dedicated modal + prompt an inline merge when the
+  // backend rejects a save with a 409 conflict.
+  const [duplicateGroups, setDuplicateGroups] = useState<CustomerDuplicateGroup[]>([]);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [mergingIds, setMergingIds] = useState<{ source: number; target: number } | null>(null);
+  // Non-null when a save was rejected because another customer already owns
+  // the phone. `sourceId` is null on create (nothing to merge from) — the
+  // prompt then simply offers to open the existing record.
+  const [conflictPrompt, setConflictPrompt] = useState<{
+    sourceId: number | null;
+    sourceName: string;
+    targetId: number;
+    targetName: string;
+  } | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+
+  const reloadDuplicates = async () => {
+    try {
+      const { groups } = await getCustomerDuplicates();
+      setDuplicateGroups(groups);
+    } catch {
+      // Non-fatal: the duplicates badge just won't show.
+      setDuplicateGroups([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!canEdit) return;
+    reloadDuplicates();
+  }, [canEdit]);
+
+  const duplicatesCount = useMemo(
+    () => duplicateGroups.reduce((sum, g) => sum + Math.max(0, g.customers.length - 1), 0),
+    [duplicateGroups]
+  );
+
+  const runMerge = async (sourceId: number, targetId: number) => {
+    setIsMerging(true);
+    setMergingIds({ source: sourceId, target: targetId });
+    try {
+      const updated = await mergeCustomers(sourceId, targetId);
+      setCustomers(prev => prev.filter(c => c.id !== sourceId).map(c => c.id === updated.id ? updated : c));
+      showToast('Clienti uniti', 'success');
+      await reloadDuplicates();
+      if (detailCustomer?.id === sourceId) setDetailCustomer(updated);
+      setConflictPrompt(null);
+      setFormOpen(false);
+    } catch (err: any) {
+      showToast(err?.message || 'Errore unione clienti', 'error');
+    } finally {
+      setIsMerging(false);
+      setMergingIds(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +261,20 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     setFormOpen(true);
   };
 
+  useEffect(() => {
+    if (!autoEditByPhone || customers.length === 0) return;
+    const normalize = (s: string): string => s.replace(/[^\d+]/g, '');
+    const target = normalize(autoEditByPhone);
+    if (!target) { onAutoEditHandled?.(); return; }
+    const match = customers.find(c => c.phone && normalize(c.phone) === target);
+    if (match) {
+      openEdit(match);
+    } else {
+      showToast('Cliente non trovato in rubrica', 'info');
+    }
+    onAutoEditHandled?.();
+  }, [autoEditByPhone, customers]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.phone.trim()) return;
@@ -232,7 +304,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       }
       setFormOpen(false);
     } catch (err: any) {
-      showToast(err?.message || 'Errore salvataggio cliente', 'error');
+      // Phone conflict: another customer already owns this number. Offer to
+      // merge (only when editing an existing record — on create there is no
+      // source row yet, so we just point the user at the existing customer).
+      if (err?.status === 409 && err?.data?.existing_customer_id) {
+        setConflictPrompt({
+          sourceId: form.id ?? null,
+          sourceName: form.name.trim(),
+          targetId: err.data.existing_customer_id,
+          targetName: err.data.existing_customer_name || 'cliente esistente',
+        });
+      } else {
+        showToast(err?.message || 'Errore salvataggio cliente', 'error');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -252,15 +336,31 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <div className="mb-4 relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Cerca per nome, telefono, email, città..."
-          className="w-full h-9 pl-9 pr-3 text-sm rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:outline-none focus:border-[var(--color-fg)]"
-        />
+      <div className="mb-4 flex items-center gap-2">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Cerca per nome, telefono, email, città..."
+            className="w-full h-9 pl-9 pr-3 text-sm rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:outline-none focus:border-[var(--color-fg)]"
+          />
+        </div>
+        {canEdit && duplicateGroups.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setDuplicatesOpen(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30"
+            title="Clienti con lo stesso numero di telefono"
+          >
+            <GitMerge className="h-4 w-4" />
+            <span>Duplicati</span>
+            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-600 text-white text-[11px] font-semibold">
+              {duplicatesCount}
+            </span>
+          </button>
+        )}
       </div>
 
       {error && (
@@ -736,6 +836,135 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Duplicates panel: groups customers sharing the same phone digits */}
+      {duplicatesOpen && (
+        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-0 sm:p-4" onClick={() => !isMerging && setDuplicatesOpen(false)}>
+          <div
+            className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-2xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-center gap-2">
+                <GitMerge className="h-5 w-5 text-amber-600" />
+                <h2 className="text-[16px] font-semibold text-[var(--color-fg)]">Clienti duplicati</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicatesOpen(false)}
+                disabled={isMerging}
+                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {duplicateGroups.length === 0 ? (
+                <div className="text-center text-sm text-slate-500 py-10">
+                  Nessun duplicato rilevato.
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500">
+                    Ogni gruppo contiene clienti con lo stesso numero di telefono. Scegli quale voce mantenere: le altre verranno unite in essa (storico prenotazioni e banchetti inclusi).
+                  </p>
+                  {duplicateGroups.map(group => (
+                    <div key={group.key} className="border border-[var(--color-line)] rounded-xl p-3 bg-[var(--color-surface-2)] dark:bg-white/[0.03]">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">
+                        {group.customers.length} voci · num. terminante {group.key}
+                      </div>
+                      <div className="space-y-2">
+                        {group.customers.map(c => {
+                          const others = group.customers.filter(o => o.id !== c.id);
+                          return (
+                            <div key={c.id} className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg p-3 flex items-start gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 font-semibold text-slate-800 truncate">
+                                  {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />}
+                                  <span className="truncate">{c.name}</span>
+                                </div>
+                                <div className="text-xs text-slate-500 mt-0.5">
+                                  {c.phone && <span>{c.phone}</span>}
+                                  {c.email && <span className="ml-2">{c.email}</span>}
+                                </div>
+                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                  ID #{c.id}
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-1.5 items-stretch">
+                                {others.map(other => {
+                                  const isThisPair = mergingIds?.source === other.id && mergingIds?.target === c.id;
+                                  return (
+                                    <button
+                                      key={other.id}
+                                      type="button"
+                                      onClick={() => runMerge(other.id, c.id)}
+                                      disabled={isMerging}
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                                      title={`Unisci "${other.name}" (#${other.id}) in questo`}
+                                    >
+                                      {isThisPair ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
+                                      Unisci #{other.id} qui
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phone-conflict merge prompt shown when the save endpoint returns 409 */}
+      {conflictPrompt && (
+        <div className="fixed inset-0 z-[70] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => !isMerging && setConflictPrompt(null)}>
+          <div
+            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <h4 className="font-semibold text-[15px] text-[var(--color-fg)]">Numero già in rubrica</h4>
+            </div>
+            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
+              Questo numero è già associato a <strong>{conflictPrompt.targetName}</strong>.
+              {conflictPrompt.sourceId != null ? (
+                <> Vuoi unire <strong>{conflictPrompt.sourceName || 'questa voce'}</strong> in <strong>{conflictPrompt.targetName}</strong>? Storico prenotazioni e banchetti verranno mantenuti.</>
+              ) : (
+                <> Non è possibile creare un nuovo cliente con lo stesso numero.</>
+              )}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConflictPrompt(null)}
+                disabled={isMerging}
+                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+              >
+                {conflictPrompt.sourceId != null ? 'Annulla' : 'Chiudi'}
+              </button>
+              {conflictPrompt.sourceId != null && (
+                <button
+                  type="button"
+                  onClick={() => runMerge(conflictPrompt.sourceId!, conflictPrompt.targetId)}
+                  disabled={isMerging}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
+                  Unisci
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

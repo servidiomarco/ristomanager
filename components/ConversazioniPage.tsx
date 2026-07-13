@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
+  BookUser,
 } from 'lucide-react';
 import {
   voiceCallsApiService,
@@ -69,9 +70,10 @@ interface DetailModalProps {
   onClose: () => void;
   onFollowUpChanged?: () => void;
   onCreateReservation?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
+  onOpenCustomerProfile?: (args: { phone: string }) => void;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged, onCreateReservation }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +172,17 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {detail?.phone && onOpenCustomerProfile && (
+              <button
+                type="button"
+                onClick={() => onOpenCustomerProfile({ phone: detail.phone! })}
+                className="inline-flex items-center justify-center h-8 w-8 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+                aria-label="Apri anagrafica cliente"
+                title="Apri anagrafica cliente"
+              >
+                <BookUser className="h-4 w-4" />
+              </button>
+            )}
             {detail?.phone && (
               <a
                 href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`}
@@ -406,9 +419,10 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
 interface ConversazioniPageProps {
   onFollowUpChanged?: () => void;
   onCreateReservationFromCall?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
+  onOpenCustomerProfile?: (args: { phone: string }) => void;
 }
 
-const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged, onCreateReservationFromCall }) => {
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile }) => {
   const [items, setItems] = useState<VoiceCallSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -641,6 +655,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged
           onClose={() => setSelectedId(null)}
           onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
           onCreateReservation={onCreateReservationFromCall}
+          onOpenCustomerProfile={onOpenCustomerProfile}
         />
       )}
     </div>

@@ -3077,7 +3077,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
 // by the rubrica "Duplicati" panel to surface pairs that slipped past the
 // per-row unique index (e.g. different country-code prefixes on the same
 // underlying number).
-app.get('/customers/duplicates', authenticate, requirePermission('customers:read'), async (_req, res) => {
+app.get('/customers/duplicates', authenticate, requirePermission('customers:view'), async (_req, res) => {
     try {
         const result = await queryWithRetry(
             `WITH digits AS (

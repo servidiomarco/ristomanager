@@ -1473,6 +1473,8 @@ const App: React.FC = () => {
             showToast={addToast}
             autoOpenNew={autoOpenNewCustomer}
             onAutoOpenNewHandled={() => setAutoOpenNewCustomer(false)}
+            autoEditByPhone={autoEditCustomerByPhone}
+            onAutoEditHandled={() => setAutoEditCustomerByPhone(null)}
           />
         )}
 
@@ -1505,6 +1507,10 @@ const App: React.FC = () => {
               setNewReservationPrefill({ customer_name, phone });
               setNewReservationKind('standard');
               setAutoOpenNewReservation(true);
+            }}
+            onOpenCustomerProfile={({ phone }) => {
+              setAutoEditCustomerByPhone(phone);
+              setView(ViewState.CLIENTI);
             }}
           />
         )}
