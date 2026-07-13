@@ -476,6 +476,34 @@ export const createPaymentRequest = async (
 };
 
 // ============================================
+// OUTBOUND MESSAGES (SMS / WhatsApp log)
+// ============================================
+
+export interface OutboundMessage {
+  id: number;
+  provider: string;
+  channel: 'sms' | 'whatsapp';
+  to_phone: string;
+  body: string;
+  status: string | null;
+  provider_sid: string | null;
+  reservation_id: number | null;
+  sent_at: string;
+  delivered_at: string | null;
+  failed_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+}
+
+export const getReservationMessages = async (reservationId: number): Promise<OutboundMessage[]> => {
+  const response = await apiRequest<{ items: OutboundMessage[] }>(
+    `${API_URL}/reservations/${reservationId}/messages`,
+    { headers: getHeaders(false) }
+  );
+  return response.items;
+};
+
+// ============================================
 // INVENTORY
 // ============================================
 

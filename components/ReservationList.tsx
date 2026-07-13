@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest } from '../services/apiService';
+import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
@@ -521,6 +521,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [paymentDescription, setPaymentDescription] = useState<string>('');
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [copiedPaymentId, setCopiedPaymentId] = useState<number | null>(null);
+
+  // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
+  // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
+  const [outboundMessages, setOutboundMessages] = useState<OutboundMessage[]>([]);
+  const [outboundMessagesLoading, setOutboundMessagesLoading] = useState(false);
   const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -1534,6 +1539,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     getPaymentRequests(formData.id as number)
       .then(rows => { if (!cancelled) setPaymentRequests(rows); })
       .catch(err => console.warn('[payments] load failed:', err?.message || err));
+    return () => { cancelled = true; };
+  }, [isFormOpen, isEditing, formData.id]);
+
+  // Load outbound SMS/WhatsApp log for this reservation. Same trigger as
+  // paymentRequests — only in edit mode, once per open.
+  useEffect(() => {
+    if (!isFormOpen || !isEditing || !formData.id) {
+      setOutboundMessages([]);
+      return;
+    }
+    let cancelled = false;
+    setOutboundMessagesLoading(true);
+    getReservationMessages(formData.id as number)
+      .then(rows => { if (!cancelled) setOutboundMessages(rows); })
+      .catch(err => console.warn('[outbound-messages] load failed:', err?.message || err))
+      .finally(() => { if (!cancelled) setOutboundMessagesLoading(false); });
     return () => { cancelled = true; };
   }, [isFormOpen, isEditing, formData.id]);
 
@@ -4600,6 +4621,75 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-400">
                               Aggiungi un numero di telefono per inviare il link di pagamento.
                             </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Outbound SMS / WhatsApp log — history of what we've sent to the customer for this booking. Edit-mode only, same as the payment card. */}
+                    {isEditing && formData.id && (
+                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
+                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <MessageCircle className="h-4 w-4 text-indigo-600" />
+                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Messaggi inviati</h4>
+                            {outboundMessages.length > 0 && (
+                              <span className="text-[11px] text-[var(--color-fg-subtle)]">· {outboundMessages.length}</span>
+                            )}
+                          </div>
+
+                          {outboundMessagesLoading ? (
+                            <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>Carico messaggi…</span>
+                            </div>
+                          ) : outboundMessages.length === 0 ? (
+                            <p className="text-[12px] text-[var(--color-fg-subtle)] italic">
+                              Nessun messaggio inviato per questa prenotazione.
+                            </p>
+                          ) : (
+                            <ul className="space-y-2">
+                              {outboundMessages.map(msg => {
+                                const s = (msg.status || '').toLowerCase();
+                                const badgeCls =
+                                  s === 'delivered' || s === 'read'
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
+                                    : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending'
+                                    ? 'bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300'
+                                    : s === 'failed' || s === 'undelivered'
+                                    ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300'
+                                    : 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-500/15 dark:border-slate-500/30 dark:text-slate-300';
+                                const badgeLabel =
+                                  s === 'delivered' || s === 'read' ? 'Consegnato'
+                                  : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending' ? 'Inviato'
+                                  : s === 'failed' || s === 'undelivered' ? 'Fallito'
+                                  : (s || 'In coda');
+                                const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : msg.channel;
+                                return (
+                                  <li key={msg.id} className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] p-2.5">
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                      <div className="flex items-center gap-2 text-[11px] text-[var(--color-fg-muted)]">
+                                        <span className="font-medium text-[var(--color-fg)]">{channelLabel}</span>
+                                        <span>·</span>
+                                        <span className="tabular">{formatDateTime(msg.sent_at)}</span>
+                                      </div>
+                                      <span className={`inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold ${badgeCls}`}>
+                                        {badgeLabel}
+                                      </span>
+                                    </div>
+                                    <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">
+                                      {msg.body}
+                                    </p>
+                                    {msg.error_message && (
+                                      <div className="mt-1 flex items-start gap-1 text-[11px] text-rose-600 dark:text-rose-400">
+                                        <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                                        <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
+                                      </div>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
                           )}
                         </div>
                       </div>

@@ -1701,6 +1701,48 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
     }
 });
 
+// Outbound SMS/WhatsApp history for a reservation. Matches messages either
+// tagged with this reservation_id or sent to the same phone (last 10 digits),
+// so historical messages sent before we started stamping reservation_id still
+// surface for the customer.
+app.get('/reservations/:id/messages', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const resRow = await queryWithRetry(
+            'SELECT phone FROM reservations WHERE id = $1',
+            [id]
+        );
+        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        const phone: string | null = resRow.rows[0].phone;
+        const digits = phone ? String(phone).replace(/\D/g, '') : '';
+        const suffix = digits.length >= 8 ? digits.slice(-10) : null;
+
+        const conditions: string[] = ['reservation_id = $1'];
+        const params: any[] = [id];
+        if (suffix) {
+            params.push(suffix);
+            conditions.push(`right(to_phone_digits, 10) = $${params.length}`);
+        }
+
+        const result = await queryWithRetry(
+            `SELECT id, provider, channel, to_phone, body, status, provider_sid,
+                    reservation_id, sent_at, delivered_at, failed_at,
+                    error_code, error_message
+             FROM outbound_messages
+             WHERE ${conditions.join(' OR ')}
+             ORDER BY sent_at DESC
+             LIMIT 50`,
+            params
+        );
+        res.json({ items: result.rows });
+    } catch (err) {
+        console.error('GET /reservations/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 
 // ============================================
 // PAYMENT LINK REQUESTS (Revolut hosted checkout)
@@ -1854,7 +1896,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         // confirmations. Failures update delivery_error but don't fail the
         // API call — the operator can still copy the link from the UI.
         const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkout_url, orderDescription);
-        sendBookingConfirmation(reservation.phone, message).then(async (delivery) => {
+        sendBookingConfirmation(reservation.phone, message, reservation.id).then(async (delivery) => {
             try {
                 await queryWithRetry(
                     `UPDATE payment_requests
