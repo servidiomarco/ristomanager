@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Loader2, Save, GripVertical, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, GripVertical } from 'lucide-react';
 import {
     getReservationAllergenPresets,
     updateReservationAllergenPresets,
@@ -142,18 +142,6 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-amber-600 dark:text-amber-400 flex-shrink-0">
-                    <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Intolleranze</h4>
-                    <p className="text-[13px] text-[var(--color-fg-muted)]">
-                        Chip suggeriti nella sezione Intolleranze del modal prenotazione. Trascina per riordinare.
-                    </p>
-                </div>
-            </div>
-
             {drafts.length === 0 ? (
                 <p className="text-[13px] text-[var(--color-fg-subtle)] italic px-1">Nessuna intolleranza configurata.</p>
             ) : (

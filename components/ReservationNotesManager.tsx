@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Loader2, Save, GripVertical, StickyNote, Smile, X } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, GripVertical, Smile, X } from 'lucide-react';
 import {
     getReservationNotePresets,
     updateReservationNotePresets,
@@ -223,18 +223,6 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
-                    <StickyNote className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Note rapide prenotazione</h4>
-                    <p className="text-[13px] text-[var(--color-fg-muted)]">
-                        Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare.
-                    </p>
-                </div>
-            </div>
-
             {drafts.length === 0 ? (
                 <p className="text-[13px] text-[var(--color-fg-subtle)] italic px-1">Nessuna nota configurata.</p>
             ) : (
