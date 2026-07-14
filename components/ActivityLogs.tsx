@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, RefreshCw, Filter, Search } from 'lucide-react';
 import { ActivityLog, ActivityAction, ResourceType, LogFilters } from '../types';
 import { logApiService, LogUser } from '../services/logApiService';
+import { CookingPotLoader } from './CookingPotLoader';
 
 interface ActivityLogsProps {
   isOpen: boolean;
@@ -286,8 +287,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
             </div>
           ) : loading && logs.length === 0 ? (
             <div className="p-8 text-center text-[var(--color-fg-muted)]">
-              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
-              Caricamento...
+              <CookingPotLoader label="Caricamento…" size={40} />
             </div>
           ) : logs.length === 0 ? (
             <div className="p-8 text-center text-[var(--color-fg-muted)]">

@@ -6,6 +6,7 @@ import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
+import { CookingPotLoader } from './components/CookingPotLoader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
@@ -909,10 +910,7 @@ const App: React.FC = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[var(--color-surface-2)] flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-[var(--color-fg)] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-[var(--color-fg-muted)]">Caricamento...</p>
-        </div>
+        <CookingPotLoader label="Caricamento..." />
       </div>
     );
   }

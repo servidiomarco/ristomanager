@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Clock, CalendarOff, Plus, Save, Trash2, Loader2, Sun, Moon } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 import { Shift } from '../types';
 import {
     getOpeningHours,
@@ -157,8 +158,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)] py-4">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Caricamento orari…
+                <CookingPotLoader label="Caricamento orari…" size={40} />
             </div>
         );
     }

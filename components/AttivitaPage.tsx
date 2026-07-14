@@ -10,6 +10,7 @@ import {
   Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Loader2,
   ListTodo, UserCircle, UsersRound, Edit2, Search, Utensils,
 } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 
 interface AttivitaPageProps {
   banquetMenus: BanquetMenu[];
@@ -383,8 +384,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
         <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl">
           {loading ? (
             <div className="py-12 text-center">
-              <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
-              <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento attività...</p>
+              <CookingPotLoader label="Caricamento attività..." />
             </div>
           ) : filtered.length === 0 ? (
             <div className="py-12 text-center">

@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
 import { useTodos } from '../contexts/TodosContext';
+import { CookingPotLoader } from './CookingPotLoader';
 
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
   [TodoCategory.GENERAL]: 'bg-slate-400',
@@ -1476,8 +1477,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 overflow-y-auto max-h-[300px] space-y-1.5">
             {lowStockLoading ? (
               <div className="py-8 text-center">
-                <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
+                <CookingPotLoader label="Caricamento..." size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
               <div className="py-8 text-center">
@@ -1522,7 +1522,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
         {staffLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-subtle)]" />
+            <CookingPotLoader label="Caricamento..." size={40} />
           </div>
         ) : (
           (() => {

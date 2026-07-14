@@ -4,6 +4,7 @@ import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Roo
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink } from 'lucide-react';
 import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
+import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
@@ -3012,8 +3013,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
                 <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                  <CookingPotLoader label="Caricamento tavoli…" size={40} />
                 </div>
               </div>
             )}
@@ -3121,8 +3121,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
                 <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                  <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                  <CookingPotLoader label="Caricamento tavoli…" size={40} />
                 </div>
               </div>
             )}
@@ -4378,8 +4377,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
                                         <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                                            <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                                            <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                                            <CookingPotLoader label="Caricamento tavoli…" size={40} />
                                         </div>
                                     </div>
                                 )}

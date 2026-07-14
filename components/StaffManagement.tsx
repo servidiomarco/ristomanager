@@ -6,6 +6,7 @@ import {
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
 import { toTitleCase } from '../utils/text';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { CookingPotLoader } from './CookingPotLoader';
 import {
   Users, UserPlus, Edit2, Trash2, X, Plus, ChevronLeft, ChevronRight,
   Calendar, Clock, Sun, Moon, Coffee, UtensilsCrossed, Check, AlertTriangle,
@@ -587,7 +588,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
+        <CookingPotLoader label="Caricamento…" />
       </div>
     );
   }

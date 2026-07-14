@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Loader2, Save, GripVertical, Smile, X } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 import {
     getReservationNotePresets,
     updateReservationNotePresets,
@@ -216,7 +217,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> Caricamento…
+                <CookingPotLoader label="Caricamento…" size={40} />
             </div>
         );
     }
