@@ -260,8 +260,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 bg-[var(--color-surface-2)] min-h-full">
-      <div className="max-w-5xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
             <h1 className="text-[22px] sm:text-[28px] font-semibold text-[var(--color-fg)] tracking-tight">

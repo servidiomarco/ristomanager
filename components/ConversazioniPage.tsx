@@ -183,12 +183,12 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
   const resBadge = reservationStatusBadge(detail?.reservation_status);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
+        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
             <div className="flex flex-col min-w-0">
@@ -563,8 +563,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged
   }, [fetchItems]);
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] pb-20 md:pb-8">
-      <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 md:py-6 space-y-4">
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-xl md:text-2xl font-semibold text-[var(--color-fg)]">Conversazioni</h1>

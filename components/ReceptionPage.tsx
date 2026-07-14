@@ -628,7 +628,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
         className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-line)]">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-[var(--color-fg)]" />
             <h3 className="text-lg font-semibold text-[var(--color-fg)]">Walk-in</h3>
@@ -1269,9 +1269,9 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
   const tableName = (id?: number | null) =>
     tables.find(t => t.id === id)?.name ?? '—';
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-[var(--color-line)]">
-        <div className="p-5 border-b border-[var(--color-line)]">
+    <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md overflow-hidden">
+        <div className="p-4 border-b border-[var(--color-line)]">
           <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold mb-1">
             Conferma scambio tavoli
           </div>
