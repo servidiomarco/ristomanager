@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard } from 'lucide-react';
-import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole } from './types';
+import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -337,6 +337,101 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // Latest reservations snapshot for socket handlers (avoids stale closures).
+  const reservationsRef = useRef<Reservation[]>([]);
+  useEffect(() => { reservationsRef.current = reservations; }, [reservations]);
+
+  const sourceLabelIt = (source?: ReservationSource | null): string => {
+    switch (source) {
+      case ReservationSource.WHATSAPP: return 'WhatsApp';
+      case ReservationSource.VOICE: return 'Agente vocale';
+      case ReservationSource.GOOGLE: return 'Web';
+      case ReservationSource.MANUAL:
+      default: return 'Utente';
+    }
+  };
+
+  type ReservationNotifKind = 'created' | 'confirmed' | 'declined' | 'cancelled' | 'noshow' | 'deleted';
+
+  // Push a reservation notification into the bell dropdown. Deduplicates
+  // repeats for the same reservation+kind within a 5s window so that local
+  // optimistic actions + their socket rebroadcast don't produce two entries.
+  const addReservationNotification = (res: Reservation, kind: ReservationNotifKind) => {
+    const name = toTitleCase(res.customer_name);
+    const when = (() => {
+      try {
+        const dt = new Date(res.reservation_time);
+        return dt.toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      } catch { return res.reservation_time; }
+    })();
+    const source = sourceLabelIt(res.source);
+    let title = '';
+    let message = '';
+    let type: Notification['type'] = 'info';
+    switch (kind) {
+      case 'created':
+        title = `Nuova prenotazione · ${source}`;
+        message = `${name} · ${res.guests} ospiti · ${when}`;
+        type = 'info';
+        break;
+      case 'confirmed':
+        title = 'Prenotazione confermata';
+        message = `${name} · ${res.guests} ospiti · ${when}`;
+        type = 'success';
+        break;
+      case 'declined':
+        title = 'Prenotazione rifiutata';
+        message = `${name} · ${when}`;
+        type = 'warning';
+        break;
+      case 'cancelled':
+        title = 'Prenotazione annullata';
+        message = `${name} · ${when}`;
+        type = 'warning';
+        break;
+      case 'noshow':
+        title = 'Prenotazione no show';
+        message = `${name} · ${when}`;
+        type = 'warning';
+        break;
+      case 'deleted':
+        title = 'Prenotazione eliminata';
+        message = `${name} · ${when}`;
+        type = 'warning';
+        break;
+    }
+    setNotifications(prev => {
+      const now = Date.now();
+      const isDup = prev.some(n =>
+        n.reservationId === res.id
+        && n.title === title
+        && (now - n.timestamp.getTime()) < 5000
+      );
+      if (isDup) return prev;
+      return [{
+        id: Math.random().toString(),
+        title, message, type,
+        reservationId: res.id,
+        timestamp: new Date(),
+        read: false,
+      }, ...prev];
+    });
+  };
+
+  // Classify a reservation update as a notification-worthy status transition.
+  // Returns null for edits that shouldn't spam the bell (notes/guests/table).
+  const classifyReservationUpdate = (prev: Reservation, next: Reservation): ReservationNotifKind | null => {
+    const prevStatus = prev.reservation_status;
+    const nextStatus = next.reservation_status;
+    if (prevStatus !== nextStatus) {
+      if (nextStatus === ReservationStatus.CANCELLED) return 'cancelled';
+      if (nextStatus === ReservationStatus.DECLINED) return 'declined';
+      if (nextStatus === ReservationStatus.NO_SHOW) return 'noshow';
+      if (nextStatus === ReservationStatus.CONFIRMED && prevStatus === ReservationStatus.PENDING) return 'confirmed';
+    }
+    return null;
+  };
+
   // Toast/Snackbar State
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -467,18 +562,26 @@ const App: React.FC = () => {
         return [...prev, reservation];
       });
       addToast(`Nuova prenotazione: ${toTitleCase(reservation.customer_name)}`, 'info');
+      addReservationNotification(reservation, 'created');
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
+      const previous = reservationsRef.current.find(r => r.id === reservation.id);
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
       addToast(`Prenotazione aggiornata: ${toTitleCase(reservation.customer_name)}`, 'info');
+      if (previous) {
+        const kind = classifyReservationUpdate(previous, reservation);
+        if (kind) addReservationNotification(reservation, kind);
+      }
     });
 
     socket.on('reservation:deleted', (id: number) => {
+      const deleted = reservationsRef.current.find(r => r.id === id);
       setReservations(prev => prev.filter(r => r.id !== id));
       addToast('Prenotazione eliminata', 'info');
+      if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
     // Table events
@@ -881,14 +984,9 @@ const App: React.FC = () => {
       // (e.g. the duplicate preflight) see it immediately instead of waiting
       // for the socket round-trip. The socket handler dedupes by id.
       setReservations(prev => prev.some(r => r.id === returnedRes.id) ? prev : [...prev, returnedRes]);
-      setNotifications(prev => [{
-        id: Math.random().toString(),
-        title: 'Nuova Prenotazione',
-        message: `Creata prenotazione per ${returnedRes.customer_name} il ${new Date(returnedRes.reservation_time).toLocaleString()}`,
-        type: 'info',
-        timestamp: new Date(),
-        read: false
-      }, ...prev]);
+      // The bell notification is added by the reservation:created socket
+      // handler (see Socket.IO effect) — that path covers all channels
+      // uniformly and dedupes against the local optimistic path.
 
       addToast('Prenotazione inserita con successo', 'success', {
         title: 'Nuova Prenotazione',
@@ -906,14 +1004,8 @@ const App: React.FC = () => {
     try {
       await deleteReservation(id);
       setReservations(prev => prev.filter(r => r.id !== id));
-      setNotifications(prev => [{
-        id: Math.random().toString(),
-        title: 'Prenotazione Cancellata',
-        message: 'La prenotazione è stata rimossa con successo.',
-        type: 'warning',
-        timestamp: new Date(),
-        read: false
-      }, ...prev]);
+      // The bell notification is added by the reservation:deleted socket
+      // handler (see Socket.IO effect).
       addToast('Prenotazione cancellata', 'info', targetRes
         ? { title: 'Prenotazione Cancellata', details: buildReservationDetails(targetRes) }
         : undefined);
@@ -1335,15 +1427,35 @@ const App: React.FC = () => {
                                {notifications.length === 0 ? (
                                    <div className="p-6 text-center text-sm text-[var(--color-fg-subtle)]">Nessuna notifica</div>
                                ) : (
-                                   notifications.map(notif => (
-                                       <div key={notif.id} className="p-3 hover:bg-[var(--color-surface-hover)] border-b border-[var(--color-line)] last:border-0">
-                                           <div className="flex justify-between items-start gap-2">
-                                                <p className="text-sm font-medium text-[var(--color-fg)]">{notif.title}</p>
-                                                <span className="text-[10px] text-[var(--color-fg-subtle)] tabular shrink-0">{notif.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                           </div>
-                                           <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">{notif.message}</p>
-                                       </div>
-                                   ))
+                                   notifications.map(notif => {
+                                       const clickable = notif.reservationId != null && getAccessibleViews().includes(ViewState.RESERVATIONS);
+                                       const handleClick = () => {
+                                           setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+                                           setShowNotifications(false);
+                                           if (clickable && notif.reservationId != null) {
+                                               setPendingReservationId(notif.reservationId);
+                                               setView(ViewState.RESERVATIONS);
+                                           }
+                                       };
+                                       const rowClass = `w-full text-left p-3 border-b border-[var(--color-line)] last:border-0 transition-colors ${clickable ? 'cursor-pointer hover:bg-[var(--color-surface-hover)]' : ''} ${notif.read ? 'opacity-70' : ''}`;
+                                       const content = (
+                                           <>
+                                               <div className="flex justify-between items-start gap-2">
+                                                    <p className="text-sm font-medium text-[var(--color-fg)] flex items-center gap-1.5">
+                                                        {!notif.read && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0" aria-hidden />}
+                                                        {notif.title}
+                                                    </p>
+                                                    <span className="text-[10px] text-[var(--color-fg-subtle)] tabular shrink-0">{notif.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                               </div>
+                                               <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">{notif.message}</p>
+                                           </>
+                                       );
+                                       return clickable ? (
+                                           <button key={notif.id} type="button" onClick={handleClick} className={rowClass}>{content}</button>
+                                       ) : (
+                                           <div key={notif.id} className={rowClass}>{content}</div>
+                                       );
+                                   })
                                )}
                            </div>
                        </div>

@@ -240,6 +240,7 @@ export interface Notification {
   type: 'info' | 'success' | 'warning' | 'error';
   timestamp: Date;
   read: boolean;
+  reservationId?: number;
 }
 
 export interface Toast {
