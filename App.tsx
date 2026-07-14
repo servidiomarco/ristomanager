@@ -445,6 +445,52 @@ const App: React.FC = () => {
     });
   };
 
+  // Rebuild bell entries for reservations created in the last window from the
+  // server payload. Needed for mobile/PWA sessions that were closed (or with
+  // a suspended socket) when the reservation was actually created — without
+  // this the bell would be empty on those devices even though the reservation
+  // is visible in the list.
+  const BELL_HYDRATE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6h
+  const hydrateBellFromRecentReservations = (list: Reservation[]) => {
+    const cutoff = Date.now() - BELL_HYDRATE_WINDOW_MS;
+    const recent = list.filter(r => {
+      if (!r.created_at) return false;
+      const t = new Date(r.created_at).getTime();
+      return !isNaN(t) && t >= cutoff;
+    });
+    if (recent.length === 0) return;
+    setNotifications(prev => {
+      const existingReservationIds = new Set(
+        prev.map(n => n.reservationId).filter((v): v is number => v != null)
+      );
+      const additions: Notification[] = [];
+      for (const r of recent) {
+        if (existingReservationIds.has(r.id)) continue;
+        const when = (() => {
+          try {
+            const dt = new Date(r.reservation_time);
+            return dt.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+          } catch { return ''; }
+        })();
+        const name = toTitleCase(r.customer_name);
+        const channel = sourceLabelIt(r.source);
+        additions.push({
+          id: `hydrate-${r.id}-${r.created_at}`,
+          title: `Nuova prenotazione · ${channel}`,
+          message: `${name} · ${when}`,
+          type: 'info',
+          reservationId: r.id,
+          timestamp: new Date(r.created_at as string),
+          read: false,
+        });
+      }
+      if (additions.length === 0) return prev;
+      const merged = [...additions, ...prev];
+      merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      return merged.slice(0, NOTIFICATIONS_MAX);
+    });
+  };
+
   // Classify a reservation update as a notification-worthy status transition.
   // Returns null for edits that shouldn't spam the bell (notes/guests/table).
   const classifyReservationUpdate = (prev: Reservation, next: Reservation): ReservationNotifKind | null => {
@@ -545,6 +591,7 @@ const App: React.FC = () => {
       setDishes(dishesData);
       setBanquetMenus(banquetMenusData);
       setReservations(reservationsData);
+      hydrateBellFromRecentReservations(reservationsData);
     } catch (error) {
       console.error("Error fetching data:", error);
       addToast('Error fetching data', 'error');

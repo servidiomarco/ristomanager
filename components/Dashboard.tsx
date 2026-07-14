@@ -638,12 +638,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           : hour >= 12 && hour < 18 ? 'Buon pomeriggio'
           : hour >= 18 && hour < 23 ? 'Buonasera'
           : 'Buonanotte';
-        const emailFallback = user?.email?.split('@')[0];
-        const capitalizedEmail = emailFallback
-          ? emailFallback.charAt(0).toUpperCase() + emailFallback.slice(1)
+        const roleLabels: Record<string, string> = {
+          OWNER: 'Proprietario',
+          GENERAL_MANAGER: 'General Manager',
+          MANAGER: 'Manager',
+          RECEPTION: 'Reception',
+          WAITER: 'Cameriere',
+          KITCHEN: 'Cucina',
+        };
+        const emailPrefix = user?.email?.split('@')[0];
+        const capitalizedEmail = emailPrefix
+          ? emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)
           : null;
         const firstName =
           user?.full_name?.trim().split(' ')[0]
+          || (user?.role ? roleLabels[user.role] : null)
           || capitalizedEmail
           || 'Utente';
         // Service window: lunch 11:00-15:30, dinner 18:00-23:30
