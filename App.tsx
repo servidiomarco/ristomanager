@@ -333,9 +333,36 @@ const App: React.FC = () => {
   const [banquetMenus, setBanquetMenus] = useState<BanquetMenu[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
 
-  // Notification State
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  // Notification State — persisted to localStorage so they survive PWA
+  // reloads and mobile app suspend/resume (iOS drops websocket in background
+  // and would otherwise lose the bell history).
+  const NOTIFICATIONS_STORAGE_KEY = 'ristomanager_notifications_v1';
+  const NOTIFICATIONS_MAX = 50;
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    try {
+      const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((n: any) => ({
+        ...n,
+        timestamp: new Date(n.timestamp),
+      })).filter((n: Notification) => !isNaN(n.timestamp.getTime()));
+    } catch {
+      return [];
+    }
+  });
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    try {
+      const serializable = notifications.slice(0, NOTIFICATIONS_MAX).map(n => ({
+        ...n,
+        timestamp: n.timestamp.toISOString(),
+      }));
+      localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(serializable));
+    } catch { /* quota or private mode — ignore */ }
+  }, [notifications]);
 
   // Latest reservations snapshot for socket handlers (avoids stale closures).
   const reservationsRef = useRef<Reservation[]>([]);
@@ -414,7 +441,7 @@ const App: React.FC = () => {
         reservationId: res.id,
         timestamp: new Date(),
         read: false,
-      }, ...prev];
+      }, ...prev].slice(0, NOTIFICATIONS_MAX);
     });
   };
 

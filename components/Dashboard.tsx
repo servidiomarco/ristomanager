@@ -638,7 +638,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           : hour >= 12 && hour < 18 ? 'Buon pomeriggio'
           : hour >= 18 && hour < 23 ? 'Buonasera'
           : 'Buonanotte';
-        const firstName = user?.full_name?.trim().split(' ')[0] || 'Utente';
+        const emailFallback = user?.email?.split('@')[0];
+        const capitalizedEmail = emailFallback
+          ? emailFallback.charAt(0).toUpperCase() + emailFallback.slice(1)
+          : null;
+        const firstName =
+          user?.full_name?.trim().split(' ')[0]
+          || capitalizedEmail
+          || 'Utente';
         // Service window: lunch 11:00-15:30, dinner 18:00-23:30
         const minutes = hour * 60 + currentTime.getMinutes();
         const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
