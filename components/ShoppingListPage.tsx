@@ -9,6 +9,7 @@ import {
   Loader2, Clock, X, Search, Printer, Share2, ChevronDown, Wheat,
   CheckCircle2, Circle, Truck, Settings2, ListChecks,
 } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 
 interface ShoppingListPageProps {
   reservations: Reservation[];
@@ -814,8 +815,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
         <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl divide-y divide-[var(--color-line)]">
           {loading ? (
             <div className="py-12 text-center">
-              <Loader2 className="h-6 w-6 text-[var(--color-fg-subtle)] mx-auto mb-2 animate-spin" />
-              <p className="text-[var(--color-fg-subtle)] text-sm">Caricamento...</p>
+              <CookingPotLoader label="Caricamento..." />
             </div>
           ) : filteredItems.length === 0 ? (
             <div className="py-12 text-center">

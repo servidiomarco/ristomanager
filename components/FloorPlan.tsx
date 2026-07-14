@@ -3,6 +3,7 @@ import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { CookingPotLoader } from './CookingPotLoader';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
@@ -1652,8 +1653,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)]">
-                      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-fg-muted)]" />
-                      <span className="text-sm text-[var(--color-fg-muted)]">Caricamento tavoli…</span>
+                      <CookingPotLoader label="Caricamento tavoli…" size={40} />
                   </div>
               </div>
           )}

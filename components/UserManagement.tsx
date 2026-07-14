@@ -4,6 +4,7 @@ import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { CookingPotLoader } from './CookingPotLoader';
 
 interface UserManagementProps {
   // When provided, the component renders as a modal with a close button.
@@ -329,7 +330,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
           {/* Users List */}
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-[var(--color-fg-muted)]" />
+              <CookingPotLoader label="Caricamento…" size={40} />
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

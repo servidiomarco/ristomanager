@@ -30,6 +30,7 @@ import {
   ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer,
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
+import { CookingPotLoader } from './CookingPotLoader';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -586,7 +587,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       {/* Loading / Error / Empty */}
       {isLoading && (
         <div className="flex items-center justify-center py-12 text-[var(--color-fg-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" /> Caricamento...
+          <CookingPotLoader label="Caricamento..." />
         </div>
       )}
       {!isLoading && error && (

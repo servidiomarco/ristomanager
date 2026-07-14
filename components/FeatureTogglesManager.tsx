@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Globe, Phone, Loader2 } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -76,8 +77,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Caricamento…
+                <CookingPotLoader label="Caricamento…" size={40} />
             </div>
         );
     }
