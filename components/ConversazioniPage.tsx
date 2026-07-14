@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
   BookUser, Send,
 } from 'lucide-react';
+import { CookingPotLoader } from './CookingPotLoader';
 import {
   voiceCallsApiService,
   VoiceCallSummary,
@@ -236,9 +237,8 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {loading && (
-            <div className="flex items-center justify-center py-12 text-[var(--color-fg-muted)]">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" />
-              <span className="text-sm">Carico dettaglio…</span>
+            <div className="flex items-center justify-center py-12">
+              <CookingPotLoader label="Carico dettaglio…" size={40} />
             </div>
           )}
 
@@ -655,9 +655,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-[var(--color-fg-muted)]">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" />
-            <span className="text-sm">Carico…</span>
+          <div className="flex items-center justify-center py-16">
+            <CookingPotLoader label="Carico…" />
           </div>
         ) : items.length === 0 ? (
           <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
