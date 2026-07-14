@@ -725,8 +725,6 @@ export interface RevolutIntegrationStatus {
   webhook_secret_last4: string | null;
   updated_at: string | null;
   updated_by: string | null;
-  auto_deposit_enabled: boolean;
-  auto_deposit_min_guests: number;
 }
 
 export interface RevolutIntegrationUpdate {
@@ -734,8 +732,6 @@ export interface RevolutIntegrationUpdate {
   api_key?: string;
   webhook_secret?: string;
   api_version?: string;
-  auto_deposit_enabled?: boolean;
-  auto_deposit_min_guests?: number;
 }
 
 export const getRevolutIntegration = async (): Promise<RevolutIntegrationStatus> => {
@@ -748,6 +744,34 @@ export const updateRevolutIntegration = async (
   updates: RevolutIntegrationUpdate
 ): Promise<RevolutIntegrationStatus> => {
   return apiRequest<RevolutIntegrationStatus>(`${API_URL}/settings/integrations/revolut`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+// ============================================
+// AUTO-DEPOSIT POLICY (public web bookings)
+// ============================================
+export interface AutoDepositSettings {
+  enabled: boolean;
+  min_guests: number;
+  // True when a Revolut API key is stored (env or DB). The toggle can still be
+  // enabled without it, but the deposit link won't actually be generated —
+  // used by the UI to warn the operator.
+  revolut_configured: boolean;
+}
+
+export const getAutoDepositSettings = async (): Promise<AutoDepositSettings> => {
+  return apiRequest<AutoDepositSettings>(`${API_URL}/settings/auto-deposit`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateAutoDepositSettings = async (
+  updates: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests'>>
+): Promise<AutoDepositSettings> => {
+  return apiRequest<AutoDepositSettings>(`${API_URL}/settings/auto-deposit`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(updates),

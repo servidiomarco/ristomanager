@@ -8070,20 +8070,13 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
         // env-fallback status.
         let updatedAt: string | null = null;
         let updatedByEmail: string | null = null;
-        let autoDepositEnabled = false;
-        let autoDepositMinGuests = 9;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id, auto_deposit_enabled, auto_deposit_min_guests
-                   FROM integration_settings WHERE provider = 'revolut'`
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
             );
             const row = meta.rows[0];
             if (row) {
                 updatedAt = row.updated_at ?? null;
-                autoDepositEnabled = Boolean(row.auto_deposit_enabled);
-                autoDepositMinGuests = Number.isFinite(Number(row.auto_deposit_min_guests))
-                    ? Number(row.auto_deposit_min_guests)
-                    : 9;
                 if (row.updated_by_user_id) {
                     const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
                     updatedByEmail = u.rows[0]?.email ?? null;
@@ -8097,8 +8090,6 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
             ...status,
             updated_at: updatedAt,
             updated_by: updatedByEmail,
-            auto_deposit_enabled: autoDepositEnabled,
-            auto_deposit_min_guests: autoDepositMinGuests,
         });
     } catch (err: any) {
         console.error('GET /settings/integrations/revolut error:', err);
@@ -8109,11 +8100,7 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
 app.put('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const body = req.body ?? {};
-        // Two shapes stored in the same row: nullable strings (credentials)
-        // and typed scalars (auto-deposit policy). Kept in one map because the
-        // UPSERT below applies them all at once; the SQL cast picks the right
-        // column type.
-        const updates: Record<string, string | number | boolean | null> = {};
+        const updates: Record<string, string | null> = {};
 
         if (body.environment !== undefined) {
             if (body.environment !== 'sandbox' && body.environment !== 'production') {
@@ -8137,20 +8124,6 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
         if (webhookSecret !== undefined) updates.webhook_secret = webhookSecret;
         const apiVersion = nullableString(body.api_version);
         if (apiVersion !== undefined) updates.api_version = apiVersion;
-
-        if (body.auto_deposit_enabled !== undefined) {
-            if (typeof body.auto_deposit_enabled !== 'boolean') {
-                return res.status(400).json({ error: 'invalid_auto_deposit_enabled' });
-            }
-            updates.auto_deposit_enabled = body.auto_deposit_enabled;
-        }
-        if (body.auto_deposit_min_guests !== undefined) {
-            const n = Number(body.auto_deposit_min_guests);
-            if (!Number.isInteger(n) || n < 1 || n > 100) {
-                return res.status(400).json({ error: 'invalid_auto_deposit_min_guests' });
-            }
-            updates.auto_deposit_min_guests = n;
-        }
 
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({ error: 'no_updates' });
@@ -8198,24 +8171,107 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
         }
 
         const status = await getRevolutConfigStatus();
-        // Re-read the auto-deposit fields so the client sees the persisted
-        // values (including anything not touched by this PUT).
-        const meta = await queryWithRetry(
+        res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
+    } catch (err: any) {
+        console.error('PUT /settings/integrations/revolut error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
+// AUTO-DEPOSIT POLICY (public web bookings)
+// ============================================
+// Stored on the Revolut integration row (both concerns share credentials);
+// exposed here as a dedicated endpoint so the Settings UI can surface the
+// feature under "Opzioni prenotazioni" rather than buried in the Revolut card.
+// GET is auth-only so any operator can read the current policy; PUT requires
+// settings:full because the setting affects customer-facing charges.
+app.get('/settings/auto-deposit', authenticate, async (_req, res) => {
+    try {
+        const revolutConfigured = await isRevolutConfigured();
+        const row = await queryWithRetry(
             `SELECT auto_deposit_enabled, auto_deposit_min_guests
                FROM integration_settings WHERE provider = 'revolut'`
         );
-        const row = meta.rows[0] || {};
+        const r = row.rows[0];
         res.json({
-            ...status,
-            updated_at: new Date().toISOString(),
-            updated_by: req.user?.email ?? null,
-            auto_deposit_enabled: Boolean(row.auto_deposit_enabled),
-            auto_deposit_min_guests: Number.isFinite(Number(row.auto_deposit_min_guests))
-                ? Number(row.auto_deposit_min_guests)
+            enabled: Boolean(r?.auto_deposit_enabled),
+            min_guests: Number.isInteger(Number(r?.auto_deposit_min_guests))
+                ? Number(r.auto_deposit_min_guests)
                 : 9,
+            revolut_configured: revolutConfigured,
         });
     } catch (err: any) {
-        console.error('PUT /settings/integrations/revolut error:', err);
+        console.error('GET /settings/auto-deposit error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const updates: Array<{ col: string; val: boolean | number }> = [];
+        if (body.enabled !== undefined) {
+            if (typeof body.enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_enabled' });
+            }
+            updates.push({ col: 'auto_deposit_enabled', val: body.enabled });
+        }
+        if (body.min_guests !== undefined) {
+            const n = Number(body.min_guests);
+            if (!Number.isInteger(n) || n < 1 || n > 100) {
+                return res.status(400).json({ error: 'invalid_min_guests' });
+            }
+            updates.push({ col: 'auto_deposit_min_guests', val: n });
+        }
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+
+        // UPSERT so the first save works even when the Revolut row doesn't
+        // exist yet (e.g. auto-deposit configured before credentials).
+        const cols = ['provider', ...updates.map(u => u.col), 'updated_by_user_id', 'updated_at'];
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const values: any[] = ['revolut', ...updates.map(u => u.val), req.user?.userId ?? null, new Date()];
+        const updateSet = [
+            ...updates.map((u, i) => `${u.col} = $${i + 2}`),
+            `updated_by_user_id = $${updates.length + 2}`,
+            `updated_at = CURRENT_TIMESTAMP`,
+        ].join(', ');
+        await queryWithRetry(
+            `INSERT INTO integration_settings (${cols.join(', ')})
+             VALUES (${placeholders})
+             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+            values
+        );
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                undefined,
+                `Caparra automatica aggiornata`
+            );
+        }
+
+        const revolutConfigured = await isRevolutConfigured();
+        const after = await queryWithRetry(
+            `SELECT auto_deposit_enabled, auto_deposit_min_guests
+               FROM integration_settings WHERE provider = 'revolut'`
+        );
+        const r = after.rows[0] || {};
+        res.json({
+            enabled: Boolean(r.auto_deposit_enabled),
+            min_guests: Number.isInteger(Number(r.auto_deposit_min_guests))
+                ? Number(r.auto_deposit_min_guests)
+                : 9,
+            revolut_configured: revolutConfigured,
+        });
+    } catch (err: any) {
+        console.error('PUT /settings/auto-deposit error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });

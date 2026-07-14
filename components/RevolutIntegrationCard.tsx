@@ -36,9 +36,6 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
     const [apiVersionInput, setApiVersionInput] = useState('');
     const [showApiKey, setShowApiKey] = useState(false);
     const [showWebhookSecret, setShowWebhookSecret] = useState(false);
-    // Auto-deposit policy drafts. `null` means "match the server value".
-    const [draftAutoDepositEnabled, setDraftAutoDepositEnabled] = useState<boolean | null>(null);
-    const [autoDepositMinGuestsInput, setAutoDepositMinGuestsInput] = useState('');
 
     // Hold showToast in a ref so the fetch effect only runs on mount, not on
     // every parent re-render (App.tsx re-renders on every socket event, and
@@ -54,7 +51,6 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 if (!cancelled) {
                     setStatus(data);
                     setApiVersionInput(data.api_version);
-                    setAutoDepositMinGuestsInput(String(data.auto_deposit_min_guests));
                 }
             } catch (err: any) {
                 if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento di Revolut', 'error');
@@ -67,7 +63,6 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
     }, []);
 
     const effectiveEnv: RevolutEnvironment = draftEnv ?? status?.environment ?? 'sandbox';
-    const isConfigured = !!status?.has_api_key;
 
     const statusPill = useMemo(() => {
         if (!status) return null;
@@ -92,43 +87,19 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
         );
     }, [status]);
 
-    const parsedMinGuests = (() => {
-        const n = parseInt(autoDepositMinGuestsInput, 10);
-        return Number.isFinite(n) ? n : NaN;
-    })();
-    const minGuestsChanged = status
-        ? autoDepositMinGuestsInput.trim() !== ''
-            && Number.isInteger(parsedMinGuests)
-            && parsedMinGuests !== status.auto_deposit_min_guests
-        : false;
-    const minGuestsValid = Number.isInteger(parsedMinGuests) && parsedMinGuests >= 1 && parsedMinGuests <= 100;
-    const effectiveAutoDepositEnabled = draftAutoDepositEnabled ?? status?.auto_deposit_enabled ?? false;
-
     const hasChanges = draftEnv !== null
         || apiKeyInput.trim() !== ''
         || webhookSecretInput.trim() !== ''
-        || (status && apiVersionInput.trim() !== '' && apiVersionInput.trim() !== status.api_version)
-        || draftAutoDepositEnabled !== null
-        || minGuestsChanged;
+        || (status && apiVersionInput.trim() !== '' && apiVersionInput.trim() !== status.api_version);
 
     const handleSave = async () => {
         if (!canEdit || saving || !status) return;
-        if (autoDepositMinGuestsInput.trim() !== '' && !minGuestsValid) {
-            showToast('Il numero di coperti deve essere un intero tra 1 e 100', 'error');
-            return;
-        }
         const payload: RevolutIntegrationUpdate = {};
         if (draftEnv !== null && draftEnv !== status.environment) payload.environment = draftEnv;
         if (apiKeyInput.trim() !== '') payload.api_key = apiKeyInput.trim();
         if (webhookSecretInput.trim() !== '') payload.webhook_secret = webhookSecretInput.trim();
         if (apiVersionInput.trim() !== '' && apiVersionInput.trim() !== status.api_version) {
             payload.api_version = apiVersionInput.trim();
-        }
-        if (draftAutoDepositEnabled !== null && draftAutoDepositEnabled !== status.auto_deposit_enabled) {
-            payload.auto_deposit_enabled = draftAutoDepositEnabled;
-        }
-        if (minGuestsChanged) {
-            payload.auto_deposit_min_guests = parsedMinGuests;
         }
         if (Object.keys(payload).length === 0) return;
         setSaving(true);
@@ -139,8 +110,6 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
             setApiKeyInput('');
             setWebhookSecretInput('');
             setApiVersionInput(updated.api_version);
-            setDraftAutoDepositEnabled(null);
-            setAutoDepositMinGuestsInput(String(updated.auto_deposit_min_guests));
             showToast('Configurazione Revolut aggiornata', 'success');
         } catch (err: any) {
             showToast(err?.message || 'Errore aggiornamento Revolut', 'error');
@@ -306,64 +275,6 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving}
                             className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
                         />
-                    </div>
-
-                    {/* Auto-deposit policy for public web bookings */}
-                    <div className="pt-3 border-t border-[var(--color-line)] space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <p className="text-[13px] font-medium text-[var(--color-fg)]">Caparra automatica per prenotazioni web</p>
-                                <p className="text-[12px] text-[var(--color-fg-muted)]">
-                                    Quando attiva, per le richieste dal modulo /prenota il sistema genera automaticamente un link Revolut (€10/persona) inviato via SMS al cliente.
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={effectiveAutoDepositEnabled}
-                                aria-label={effectiveAutoDepositEnabled ? 'Disattiva caparra automatica' : 'Attiva caparra automatica'}
-                                onClick={() => canEdit && setDraftAutoDepositEnabled(!effectiveAutoDepositEnabled)}
-                                disabled={!canEdit || saving}
-                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                                    effectiveAutoDepositEnabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
-                                }`}
-                            >
-                                <span
-                                    aria-hidden="true"
-                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
-                                        effectiveAutoDepositEnabled ? 'translate-x-5' : 'translate-x-0.5'
-                                    } translate-y-0.5`}
-                                />
-                            </button>
-                        </div>
-
-                        <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">
-                                Richiedi caparra da (numero di coperti)
-                            </label>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={100}
-                                    step={1}
-                                    inputMode="numeric"
-                                    value={autoDepositMinGuestsInput}
-                                    onChange={(e) => setAutoDepositMinGuestsInput(e.target.value)}
-                                    disabled={!canEdit || saving || !effectiveAutoDepositEnabled}
-                                    className="w-24 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
-                                />
-                                <span className="text-[12px] text-[var(--color-fg-muted)]">coperti o più</span>
-                            </div>
-                            <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
-                                Le prenotazioni con almeno questo numero di persone riceveranno il link di pagamento. Sotto la soglia il flusso è invariato.
-                            </p>
-                            {!isConfigured && effectiveAutoDepositEnabled && (
-                                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                                    Configura l'API key qui sopra: senza credenziali Revolut valide la caparra non verrà richiesta.
-                                </p>
-                            )}
-                        </div>
                     </div>
 
                     {status.updated_at && (
