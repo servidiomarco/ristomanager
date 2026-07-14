@@ -8070,13 +8070,20 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
         // env-fallback status.
         let updatedAt: string | null = null;
         let updatedByEmail: string | null = null;
+        let autoDepositEnabled = false;
+        let autoDepositMinGuests = 9;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
+                `SELECT updated_at, updated_by_user_id, auto_deposit_enabled, auto_deposit_min_guests
+                   FROM integration_settings WHERE provider = 'revolut'`
             );
             const row = meta.rows[0];
             if (row) {
                 updatedAt = row.updated_at ?? null;
+                autoDepositEnabled = Boolean(row.auto_deposit_enabled);
+                autoDepositMinGuests = Number.isFinite(Number(row.auto_deposit_min_guests))
+                    ? Number(row.auto_deposit_min_guests)
+                    : 9;
                 if (row.updated_by_user_id) {
                     const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
                     updatedByEmail = u.rows[0]?.email ?? null;
@@ -8090,6 +8097,8 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
             ...status,
             updated_at: updatedAt,
             updated_by: updatedByEmail,
+            auto_deposit_enabled: autoDepositEnabled,
+            auto_deposit_min_guests: autoDepositMinGuests,
         });
     } catch (err: any) {
         console.error('GET /settings/integrations/revolut error:', err);
@@ -8100,7 +8109,11 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
 app.put('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const body = req.body ?? {};
-        const updates: Record<string, string | null> = {};
+        // Two shapes stored in the same row: nullable strings (credentials)
+        // and typed scalars (auto-deposit policy). Kept in one map because the
+        // UPSERT below applies them all at once; the SQL cast picks the right
+        // column type.
+        const updates: Record<string, string | number | boolean | null> = {};
 
         if (body.environment !== undefined) {
             if (body.environment !== 'sandbox' && body.environment !== 'production') {
@@ -8124,6 +8137,20 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
         if (webhookSecret !== undefined) updates.webhook_secret = webhookSecret;
         const apiVersion = nullableString(body.api_version);
         if (apiVersion !== undefined) updates.api_version = apiVersion;
+
+        if (body.auto_deposit_enabled !== undefined) {
+            if (typeof body.auto_deposit_enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_auto_deposit_enabled' });
+            }
+            updates.auto_deposit_enabled = body.auto_deposit_enabled;
+        }
+        if (body.auto_deposit_min_guests !== undefined) {
+            const n = Number(body.auto_deposit_min_guests);
+            if (!Number.isInteger(n) || n < 1 || n > 100) {
+                return res.status(400).json({ error: 'invalid_auto_deposit_min_guests' });
+            }
+            updates.auto_deposit_min_guests = n;
+        }
 
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({ error: 'no_updates' });
@@ -8171,7 +8198,22 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
         }
 
         const status = await getRevolutConfigStatus();
-        res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
+        // Re-read the auto-deposit fields so the client sees the persisted
+        // values (including anything not touched by this PUT).
+        const meta = await queryWithRetry(
+            `SELECT auto_deposit_enabled, auto_deposit_min_guests
+               FROM integration_settings WHERE provider = 'revolut'`
+        );
+        const row = meta.rows[0] || {};
+        res.json({
+            ...status,
+            updated_at: new Date().toISOString(),
+            updated_by: req.user?.email ?? null,
+            auto_deposit_enabled: Boolean(row.auto_deposit_enabled),
+            auto_deposit_min_guests: Number.isFinite(Number(row.auto_deposit_min_guests))
+                ? Number(row.auto_deposit_min_guests)
+                : 9,
+        });
     } catch (err: any) {
         console.error('PUT /settings/integrations/revolut error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -8575,14 +8617,30 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         const dateLabel = `${dd}/${mm}/${yyyy}`;
         const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
 
-        // Large web bookings (>8 pax) require a €10/person deposit before the
-        // table is guaranteed. We create the Revolut order synchronously so we
-        // can include the checkout link in the ack. On any Revolut failure we
-        // silently degrade to the plain "richiesta ricevuta" flow — staff will
-        // then confirm manually as usual.
+        // Large web bookings require a €10/person deposit before the table
+        // is guaranteed. The enabled toggle and guest threshold live on the
+        // Revolut integration row (Settings → Integrazioni → Revolut). We
+        // create the order synchronously so we can include the checkout link
+        // in the ack. On any Revolut failure we silently degrade to the plain
+        // "richiesta ricevuta" flow — staff will then confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        if (guestsNum > 8 && (await isRevolutConfigured())) {
+        let autoDepositEnabled = false;
+        let autoDepositMinGuests = 9;
+        try {
+            const cfgRow = await queryWithRetry(
+                `SELECT auto_deposit_enabled, auto_deposit_min_guests
+                   FROM integration_settings WHERE provider = 'revolut'`
+            );
+            if (cfgRow.rows[0]) {
+                autoDepositEnabled = Boolean(cfgRow.rows[0].auto_deposit_enabled);
+                const n = Number(cfgRow.rows[0].auto_deposit_min_guests);
+                if (Number.isInteger(n) && n >= 1) autoDepositMinGuests = n;
+            }
+        } catch (err) {
+            console.warn('[public-booking] auto-deposit config lookup failed:', (err as any)?.message || err);
+        }
+        if (autoDepositEnabled && guestsNum >= autoDepositMinGuests && (await isRevolutConfigured())) {
             depositAmountCents = guestsNum * 1000; // €10 per person, in cents
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {

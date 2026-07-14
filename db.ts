@@ -1353,6 +1353,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
             );
         `);
+        // Auto-deposit policy, attached to the Revolut row: when enabled,
+        // public web bookings with `guests >= auto_deposit_min_guests` get a
+        // Revolut checkout link in their ack SMS. Kept here (rather than in
+        // app_settings) because the feature only makes sense with Revolut
+        // configured, and it lets us read/write everything in one row.
+        await client.query(`
+            ALTER TABLE integration_settings
+                ADD COLUMN IF NOT EXISTS auto_deposit_enabled    BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS auto_deposit_min_guests INTEGER NOT NULL DEFAULT 9;
+        `);
 
         // ============================================
         // OUTBOUND MESSAGES LOG (SMS / WhatsApp)

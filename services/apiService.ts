@@ -725,6 +725,8 @@ export interface RevolutIntegrationStatus {
   webhook_secret_last4: string | null;
   updated_at: string | null;
   updated_by: string | null;
+  auto_deposit_enabled: boolean;
+  auto_deposit_min_guests: number;
 }
 
 export interface RevolutIntegrationUpdate {
@@ -732,6 +734,8 @@ export interface RevolutIntegrationUpdate {
   api_key?: string;
   webhook_secret?: string;
   api_version?: string;
+  auto_deposit_enabled?: boolean;
+  auto_deposit_min_guests?: number;
 }
 
 export const getRevolutIntegration = async (): Promise<RevolutIntegrationStatus> => {
