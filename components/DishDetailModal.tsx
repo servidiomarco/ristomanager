@@ -20,7 +20,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
   return (
     <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="relative bg-slate-100 flex items-center justify-center" style={{ minHeight: '50vh' }}>

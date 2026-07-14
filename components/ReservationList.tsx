@@ -5171,7 +5171,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           return (
             <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setShowUnassignedModal(false)}>
-              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div>
                     <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Prenotazioni senza tavolo</h3>
@@ -5250,7 +5250,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 onClick={() => setTableChooserModal(null)}
             >
               <div
-                  className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
+                  className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
                   onClick={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
@@ -5351,7 +5351,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           return (
             <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAssignTableModal(null)}>
-              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
                   <div className="min-w-0">
                     <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
