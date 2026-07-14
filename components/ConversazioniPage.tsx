@@ -13,6 +13,7 @@ import {
   FollowUpStatus,
   OutboundMessage,
 } from '../services/voiceCallsApiService';
+import { Reservation } from '../types';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -83,13 +84,14 @@ const parseTranscript = (raw: string | null): TranscriptTurn[] => {
 
 interface DetailModalProps {
   callId: number;
+  reservations: Reservation[];
   onClose: () => void;
   onFollowUpChanged?: () => void;
   onCreateReservation?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
   onOpenCustomerProfile?: (args: { phone: string }) => void;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +184,23 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
   const turns = useMemo(() => parseTranscript(detail?.transcript ?? null), [detail]);
   const resBadge = reservationStatusBadge(detail?.reservation_status);
 
+  // Reservations for this phone number — includes reservations that weren't
+  // explicitly linked to the call but were later created for the same number
+  // (e.g. reception calls back and books manually). Sorted newest first.
+  const callDigits = (detail?.phone || '').replace(/\D/g, '');
+  const reservationsForPhone = useMemo(() => {
+    if (!callDigits || callDigits.length < 6) return [];
+    return reservations
+      .filter(r => (r.phone || '').replace(/\D/g, '') === callDigits)
+      .filter(r => r.reservation_status !== 'CANCELLED' && r.reservation_status !== 'DECLINED')
+      .sort((a, b) => {
+        const ta = new Date(a.reservation_time).getTime();
+        const tb = new Date(b.reservation_time).getTime();
+        return tb - ta;
+      });
+  }, [reservations, callDigits]);
+  const hasReservationsForPhone = reservationsForPhone.length > 0;
+
   return (
     <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
@@ -262,7 +281,54 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
                 </div>
               </div>
 
-              {detail.reservation_id && (
+              {hasReservationsForPhone && (
+                <div className="space-y-2">
+                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium flex items-center gap-1.5">
+                    <Calendar className="h-3 w-3" />
+                    Prenotazioni per questo numero
+                    <span className="text-[var(--color-fg-muted)] font-normal">· {reservationsForPhone.length}</span>
+                  </div>
+                  {reservationsForPhone.map(res => {
+                    const badge = reservationStatusBadge(res.reservation_status ?? null);
+                    const isLinked = detail.reservation_id === res.id;
+                    return (
+                      <div key={res.id} className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                            <span className="font-medium truncate">{res.customer_name || 'Prenotazione'}</span>
+                            {badge && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
+                                {badge.label}
+                              </span>
+                            )}
+                            {isLinked && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-indigo-50 text-indigo-700 ring-indigo-200 shrink-0">
+                                Collegata
+                              </span>
+                            )}
+                          </div>
+                          <a
+                            href={`/?view=RESERVATIONS&reservationId=${res.id}`}
+                            className="text-[12px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1 shrink-0"
+                          >
+                            Apri <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                        <div className="text-[12px] text-[var(--color-fg-muted)] mt-1">
+                          {formatDateTime(res.reservation_time)}
+                          {res.guests != null && ` · ${res.guests} ospiti`}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Fallback: call is linked to a reservation that isn't in the
+                  current list (e.g. filtered out by date range or phone
+                  mismatch after normalization) — still show its summary. */}
+              {!hasReservationsForPhone && detail.reservation_id && (
                 <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
@@ -275,7 +341,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
                       )}
                     </div>
                     <a
-                      href={`/?view=RESERVATIONS`}
+                      href={`/?view=RESERVATIONS&reservationId=${detail.reservation_id}`}
                       className="text-[12px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
                     >
                       Apri <ExternalLink className="h-3 w-3" />
@@ -306,13 +372,13 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-200">
                         Ricontattato
                       </span>
-                    ) : detail.reservation_id == null ? (
+                    ) : (detail.reservation_id == null && !hasReservationsForPhone) ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200">
                         Da ricontattare
                       </span>
                     ) : null}
                   </div>
-                  {detail.reservation_id == null && (
+                  {detail.reservation_id == null && !hasReservationsForPhone && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => applyFollowUpPatch({
@@ -497,12 +563,13 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, onClose, onFollowUpCh
 };
 
 interface ConversazioniPageProps {
+  reservations: Reservation[];
   onFollowUpChanged?: () => void;
   onCreateReservationFromCall?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
   onOpenCustomerProfile?: (args: { phone: string }) => void;
 }
 
-const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile }) => {
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile }) => {
   const [items, setItems] = useState<VoiceCallSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -731,6 +798,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ onFollowUpChanged
       {selectedId !== null && (
         <DetailModal
           callId={selectedId}
+          reservations={reservations}
           onClose={() => setSelectedId(null)}
           onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
           onCreateReservation={onCreateReservationFromCall}

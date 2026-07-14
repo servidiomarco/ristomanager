@@ -1705,6 +1705,7 @@ const App: React.FC = () => {
 
         {view === ViewState.CONVERSAZIONI && (
           <ConversazioniPage
+            reservations={reservations}
             onFollowUpChanged={() => {
               voiceCallsApiService.pendingCount()
                 .then(({ count }) => setVoiceCallsPendingCount(count))
