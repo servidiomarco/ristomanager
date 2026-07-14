@@ -598,13 +598,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (reservations.length > 0) onOpenReservationHandled?.();
       return;
     }
-    // Align the day filter so the booking is visible.
+    // Align the day filter so the booking is visible. Use target.shift instead
+    // of 'ALL' so the auto-switch effect (which snaps 'ALL' to the current-hour
+    // shift) doesn't drop us on the wrong turno for the booking.
     try {
       const dt = new Date(target.reservation_time);
       if (!isNaN(dt.getTime())) {
         const [, timePart] = selectedDate.split('T');
         setSelectedDate(formatLocalDate(dt) + 'T' + (timePart || '20:00'));
-        setSelectedShift('ALL');
+        if (target.shift) setSelectedShift(target.shift);
       }
     } catch { /* ignore */ }
     // Make sure the group containing the target is expanded so the row renders.
