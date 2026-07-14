@@ -586,7 +586,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
-  // Deep-link from a notification: open the target booking's detail drawer.
+  // Deep-link from a notification: open the target booking's edit modal.
   // Runs when openReservationId changes or once the reservations finish loading.
   useEffect(() => {
     if (openReservationId == null) return;
@@ -608,6 +608,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     } catch { /* ignore */ }
     setSelectedReservationId(target.id as number);
     setDetailDrawerOpen(true);
+    handleEditClick(target);
     onOpenReservationHandled?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openReservationId, reservations]);
