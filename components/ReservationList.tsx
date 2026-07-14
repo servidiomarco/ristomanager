@@ -586,8 +586,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
-  // Deep-link from a notification: open the target booking's edit modal.
-  // Runs when openReservationId changes or once the reservations finish loading.
+  // Deep-link from a notification: highlight the target booking in the list
+  // (read-only), don't open the edit modal — avoids accidental edits when the
+  // user is just checking a new-reservation notification.
   useEffect(() => {
     if (openReservationId == null) return;
     const target = reservations.find(r => r.id === openReservationId);
@@ -597,7 +598,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (reservations.length > 0) onOpenReservationHandled?.();
       return;
     }
-    // Align the day filter so the booking is also visible in the list behind.
+    // Align the day filter so the booking is visible.
     try {
       const dt = new Date(target.reservation_time);
       if (!isNaN(dt.getTime())) {
@@ -606,9 +607,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         setSelectedShift('ALL');
       }
     } catch { /* ignore */ }
+    // Make sure the group containing the target is expanded so the row renders.
+    const targetGroupKey = (() => {
+      const state = getReservationState(target);
+      if (state === 'declined' || state === 'pending') return 'waiting';
+      return state;
+    })();
+    setExpandedGroups(prev => prev.has(targetGroupKey) ? prev : new Set(prev).add(targetGroupKey));
     setSelectedReservationId(target.id as number);
     setDetailDrawerOpen(true);
-    handleEditClick(target);
+    setNewReservationFlashId(target.id as number);
+    // Scroll after the row has had a chance to render/expand.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`reservation-row-${target.id}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
     onOpenReservationHandled?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openReservationId, reservations]);
@@ -2289,6 +2304,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return (
       <div
         key={res.id}
+        id={`reservation-row-${res.id}`}
         className={`w-full flex flex-col border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
           ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
           ${isFlashing ? 'animate-flash-row' : ''}
@@ -3353,9 +3369,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
                             const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
 
+                            const isFlashing = newReservationFlashId === res.id;
                             return (
                               <div key={res.id}
-                                className={`bg-[var(--color-surface)] rounded-2xl border cursor-pointer p-3.5 ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''}`}
+                                id={`reservation-row-${res.id}`}
+                                className={`bg-[var(--color-surface)] rounded-2xl border cursor-pointer p-3.5 ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''} ${isFlashing ? 'animate-flash-row' : ''}`}
                                 onMouseEnter={() => setHoveredReservationId(res.id)}
                                 onMouseLeave={() => setHoveredReservationId(null)}
                                 onClick={() => handleRowClick(res)}>
