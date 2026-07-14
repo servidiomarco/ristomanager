@@ -368,13 +368,17 @@ const App: React.FC = () => {
   const reservationsRef = useRef<Reservation[]>([]);
   useEffect(() => { reservationsRef.current = reservations; }, [reservations]);
 
-  const sourceLabelIt = (source?: ReservationSource | null): string => {
-    switch (source) {
+  // Channel label for the bell notification title. For MANUAL (in-app)
+  // reservations we prefer the creator's actual name so the shared Reception
+  // account doesn't just read "Utente" over and over.
+  const channelLabelForReservation = (res: Reservation): string => {
+    switch (res.source) {
       case ReservationSource.WHATSAPP: return 'WhatsApp';
       case ReservationSource.VOICE: return 'Agente vocale';
       case ReservationSource.GOOGLE: return 'Web';
       case ReservationSource.MANUAL:
-      default: return 'Utente';
+      default:
+        return toTitleCase((res.created_by_user_name || '').trim()) || 'Utente';
     }
   };
 
@@ -391,7 +395,7 @@ const App: React.FC = () => {
         return dt.toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
       } catch { return res.reservation_time; }
     })();
-    const source = sourceLabelIt(res.source);
+    const source = channelLabelForReservation(res);
     let title = '';
     let message = '';
     let type: Notification['type'] = 'info';
@@ -473,7 +477,7 @@ const App: React.FC = () => {
           } catch { return ''; }
         })();
         const name = toTitleCase(r.customer_name);
-        const channel = sourceLabelIt(r.source);
+        const channel = channelLabelForReservation(r);
         additions.push({
           id: `hydrate-${r.id}-${r.created_at}`,
           title: `Nuova prenotazione · ${channel}`,
