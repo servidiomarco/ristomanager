@@ -161,6 +161,9 @@ const App: React.FC = () => {
   }, [showCreateMenu]);
   const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
+  // Set when a notification deep-links to a specific booking (?reservationId=…);
+  // handed to ReservationList so it opens that booking's detail drawer.
+  const [pendingReservationId, setPendingReservationId] = useState<number | null>(null);
 
   // Count of voice calls in the last 7 days without a linked reservation —
   // drives the follow-up badge on the Conversazioni sidebar icon.
@@ -253,14 +256,22 @@ const App: React.FC = () => {
 
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get('view');
+    // A notification may deep-link to a specific booking; capture it so the
+    // Prenotazioni view opens that booking's detail once mounted.
+    const requestedReservationId = params.get('reservationId');
+    if (requestedReservationId) {
+      const parsed = Number(requestedReservationId);
+      if (Number.isFinite(parsed)) setPendingReservationId(parsed);
+    }
     if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
         setView(target);
         appliedPreferredLandingRef.current = true;
       }
-      // Strip the param either way so reloads don't keep re-navigating.
+      // Strip the params either way so reloads don't keep re-navigating.
       params.delete('view');
+      params.delete('reservationId');
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
@@ -301,6 +312,11 @@ const App: React.FC = () => {
         if (!(Object.values(ViewState) as string[]).includes(requestedView)) return;
         const target = requestedView as ViewState;
         if (getAccessibleViews().includes(target)) {
+          const requestedReservationId = url.searchParams.get('reservationId');
+          if (requestedReservationId) {
+            const parsed = Number(requestedReservationId);
+            if (Number.isFinite(parsed)) setPendingReservationId(parsed);
+          }
           setView(target);
         }
       } catch {
@@ -1406,6 +1422,8 @@ const App: React.FC = () => {
                 onAutoOpenNewHandled={() => { setAutoOpenNewReservation(false); setNewReservationKind('standard'); setNewReservationPrefill(undefined); }}
                 initialSearchTerm={reservationsSearchPrefill}
                 onInitialSearchTermHandled={() => setReservationsSearchPrefill(undefined)}
+                openReservationId={pendingReservationId}
+                onOpenReservationHandled={() => setPendingReservationId(null)}
                 globalDate={globalDate}
                 globalShiftFilter={globalShiftFilter}
                 onDateChange={setGlobalDate}

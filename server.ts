@@ -687,7 +687,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             {
                 title: 'Nuova prenotazione vocale',
                 body: `${toTitleCase(created.customer_name)} · ${created.guests} ospiti · ${reservationLabel}`,
-                url: '/?view=RESERVATIONS',
+                url: `/?view=RESERVATIONS&reservationId=${created.id}`,
                 tag: `reservation-${created.id}`,
             },
             { excludeUserId: null }
@@ -889,7 +889,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
             {
                 title: 'Prenotazione cancellata (voce)',
                 body: `${toTitleCase(cancelled.customer_name)} · ${cancelled.guests} ospiti · ${reservationLabel}`,
-                url: '/?view=RESERVATIONS',
+                url: `/?view=RESERVATIONS&reservationId=${cancelled.id}`,
                 tag: `reservation-${cancelled.id}`,
             },
             { excludeUserId: null }
@@ -1381,7 +1381,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             {
                 title: 'Nuova prenotazione',
                 body: `${toTitleCase(customer_name)} · ${guests} ospiti · ${reservationLabel}`,
-                url: '/?view=RESERVATIONS',
+                url: `/?view=RESERVATIONS&reservationId=${newReservation.id}`,
                 tag: `reservation-${newReservation.id}`,
             },
             { excludeUserId: req.user?.userId ?? null }
@@ -1527,7 +1527,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 {
                     title: 'Prenotazione annullata',
                     body: `${toTitleCase(updatedReservation.customer_name)} · ${updatedReservation.guests} ospiti · ${reservationLabel}`,
-                    url: '/?view=RESERVATIONS',
+                    url: `/?view=RESERVATIONS&reservationId=${updatedReservation.id}`,
                     tag: `reservation-${updatedReservation.id}`,
                 },
                 { excludeUserId: req.user?.userId ?? null }
@@ -2101,7 +2101,7 @@ app.post('/webhook/revolut', async (req, res) => {
             pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
                 title: 'Pagamento ricevuto',
                 body: bodyLine,
-                url: `/?view=RESERVATIONS`,
+                url: row.reservation_id ? `/?view=RESERVATIONS&reservationId=${row.reservation_id}` : `/?view=RESERVATIONS`,
                 tag: `payment-${row.id}`,
             }, { excludeUserId: null }).catch(err => {
                 console.warn('[Revolut] push send failed:', err?.message || err);
@@ -8660,7 +8660,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             {
                 title: 'Nuova richiesta prenotazione',
                 body: `${toTitleCase(customer_name)} · ${guestsNum} ospiti · ${date} ${time}`,
-                url: '/?view=RESERVATIONS',
+                url: `/?view=RESERVATIONS&reservationId=${created.id}`,
                 tag: `pending-${created.id}`,
             }
         ).catch(err => console.error('Push (public booking) failed:', err));

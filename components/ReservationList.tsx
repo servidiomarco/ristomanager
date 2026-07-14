@@ -340,6 +340,9 @@ interface ReservationListProps {
   // Pre-fill search term when navigating in from the global header search
   initialSearchTerm?: string;
   onInitialSearchTermHandled?: () => void;
+  // When set (e.g. from a notification deep-link), open this booking's detail drawer.
+  openReservationId?: number | null;
+  onOpenReservationHandled?: () => void;
   // Global date/shift from App header (desktop)
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
@@ -368,6 +371,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onModalClose,
   initialSearchTerm,
   onInitialSearchTermHandled,
+  openReservationId,
+  onOpenReservationHandled,
   globalDate,
   globalShiftFilter: globalShiftFilterProp,
   onDateChange,
@@ -580,6 +585,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Split-view state
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
+
+  // Deep-link from a notification: open the target booking's detail drawer.
+  // Runs when openReservationId changes or once the reservations finish loading.
+  useEffect(() => {
+    if (openReservationId == null) return;
+    const target = reservations.find(r => r.id === openReservationId);
+    if (!target) {
+      // Reservations may still be loading; wait. Once some are loaded but the
+      // booking still isn't found, give up so the flag doesn't linger.
+      if (reservations.length > 0) onOpenReservationHandled?.();
+      return;
+    }
+    // Align the day filter so the booking is also visible in the list behind.
+    try {
+      const dt = new Date(target.reservation_time);
+      if (!isNaN(dt.getTime())) {
+        const [, timePart] = selectedDate.split('T');
+        setSelectedDate(formatLocalDate(dt) + 'T' + (timePart || '20:00'));
+        setSelectedShift('ALL');
+      }
+    } catch { /* ignore */ }
+    setSelectedReservationId(target.id as number);
+    setDetailDrawerOpen(true);
+    onOpenReservationHandled?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openReservationId, reservations]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
