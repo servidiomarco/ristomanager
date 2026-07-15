@@ -1408,6 +1408,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_to_phone_digits ON outbound_messages(to_phone_digits);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_provider_sid ON outbound_messages(provider_sid);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_sent_at ON outbound_messages(sent_at DESC);`);
+        // Broaden the log to also cover outbound emails. to_phone/to_phone_digits
+        // are dropped-NOT-NULL because email rows leave them empty; to_email is
+        // added for the recipient address.
+        await client.query(`ALTER TABLE outbound_messages ALTER COLUMN to_phone DROP NOT NULL;`);
+        await client.query(`ALTER TABLE outbound_messages ALTER COLUMN to_phone_digits DROP NOT NULL;`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS to_email TEXT;`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS subject TEXT;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_to_email ON outbound_messages(lower(to_email));`);
 
         // ============================================
         // RESERVATION NOTE PRESETS

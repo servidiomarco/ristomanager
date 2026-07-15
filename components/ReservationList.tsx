@@ -4799,13 +4799,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       </div>
                     )}
 
-                    {/* Outbound SMS / WhatsApp log — history of what we've sent to the customer for this booking. Edit-mode only, same as the payment card. */}
+                    {/* Unified customer-communication log — SMS, WhatsApp, and email history for this booking. Edit-mode only, same as the payment card. */}
                     {isEditing && formData.id && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
                         <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
                           <div className="flex items-center gap-2 mb-3">
                             <MessageCircle className="h-4 w-4 text-indigo-600" />
-                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Messaggi inviati</h4>
+                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Comunicazione con il cliente</h4>
                             {outboundMessages.length > 0 && (
                               <span className="text-[11px] text-[var(--color-fg-subtle)]">· {outboundMessages.length}</span>
                             )}
@@ -4828,11 +4828,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           {outboundMessagesLoading ? (
                             <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
                               <Loader2 className="h-3 w-3 animate-spin" />
-                              <span>Carico messaggi…</span>
+                              <span>Carico comunicazioni…</span>
                             </div>
                           ) : outboundMessages.length === 0 ? (
                             <p className="text-[12px] text-[var(--color-fg-subtle)] italic">
-                              Nessun messaggio inviato per questa prenotazione.
+                              Nessuna comunicazione inviata per questa prenotazione.
                             </p>
                           ) : (
                             <ul className="space-y-2">
@@ -4851,12 +4851,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending' ? 'Inviato'
                                   : s === 'failed' || s === 'undelivered' ? 'Fallito'
                                   : (s || 'In coda');
-                                const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : msg.channel;
+                                const isEmail = msg.channel === 'email';
+                                const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : isEmail ? 'Email' : msg.channel;
+                                const ChannelIcon = isEmail ? Mail : MessageCircle;
+                                const recipient = isEmail ? msg.to_email : msg.to_phone;
                                 return (
                                   <li key={msg.id} className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] p-2.5">
                                     <div className="flex items-center justify-between gap-2 mb-1">
                                       <div className="flex items-center gap-2 text-[11px] text-[var(--color-fg-muted)]">
+                                        <ChannelIcon className="h-3 w-3 text-indigo-600" />
                                         <span className="font-medium text-[var(--color-fg)]">{channelLabel}</span>
+                                        {recipient && (
+                                          <>
+                                            <span>·</span>
+                                            <span className="truncate max-w-[180px]" title={recipient}>{recipient}</span>
+                                          </>
+                                        )}
                                         <span>·</span>
                                         <span className="tabular">{formatDateTime(msg.sent_at)}</span>
                                       </div>
@@ -4864,6 +4874,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         {badgeLabel}
                                       </span>
                                     </div>
+                                    {isEmail && msg.subject && (
+                                      <p className="text-[12px] font-semibold text-[var(--color-fg)] mb-0.5">
+                                        {msg.subject}
+                                      </p>
+                                    )}
                                     <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">
                                       {msg.body}
                                     </p>

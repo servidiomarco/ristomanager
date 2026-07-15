@@ -482,8 +482,10 @@ export const createPaymentRequest = async (
 export interface OutboundMessage {
   id: number;
   provider: string;
-  channel: 'sms' | 'whatsapp';
-  to_phone: string;
+  channel: 'sms' | 'whatsapp' | 'email';
+  to_phone: string | null;
+  to_email: string | null;
+  subject: string | null;
   body: string;
   status: string | null;
   provider_sid: string | null;

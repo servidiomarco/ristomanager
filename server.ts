@@ -1955,10 +1955,34 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         const dt = new Date(reservation.reservation_time);
         const subject = `Conferma prenotazione - ${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
 
-        const sent = await sendMail({
+        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+        let sent;
+        try {
+            sent = await sendMail({
+                to: String(reservation.email),
+                subject,
+                text,
+            });
+        } catch (sendErr: any) {
+            await logOutboundEmail({
+                provider: emailProvider,
+                to: String(reservation.email),
+                subject,
+                body: text,
+                reservationId: reservation.id,
+                errorMessage: sendErr?.message || String(sendErr),
+            });
+            throw sendErr;
+        }
+
+        await logOutboundEmail({
+            provider: emailProvider,
             to: String(reservation.email),
             subject,
-            text,
+            body: text,
+            messageId: sent.messageId || null,
+            reservationId: reservation.id,
         });
 
         const updated = await queryWithRetry(
@@ -1986,21 +2010,22 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
     }
 });
 
-// Outbound SMS/WhatsApp history for a reservation. Matches messages either
-// tagged with this reservation_id or sent to the same phone (last 10 digits),
-// so historical messages sent before we started stamping reservation_id still
-// surface for the customer.
+// Outbound SMS/WhatsApp/email history for a reservation. Matches messages
+// tagged with this reservation_id OR sent to the same phone (last 10 digits)
+// OR sent to the same email address, so historical messages sent before we
+// started stamping reservation_id still surface for the customer.
 app.get('/reservations/:id/messages', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const resRow = await queryWithRetry(
-            'SELECT phone FROM reservations WHERE id = $1',
+            'SELECT phone, email FROM reservations WHERE id = $1',
             [id]
         );
         if (resRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const phone: string | null = resRow.rows[0].phone;
+        const email: string | null = resRow.rows[0].email;
         const digits = phone ? String(phone).replace(/\D/g, '') : '';
         const suffix = digits.length >= 8 ? digits.slice(-10) : null;
 
@@ -2010,9 +2035,13 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
             params.push(suffix);
             conditions.push(`right(to_phone_digits, 10) = $${params.length}`);
         }
+        if (email) {
+            params.push(email);
+            conditions.push(`lower(to_email) = lower($${params.length})`);
+        }
 
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, to_phone, body, status, provider_sid,
+            `SELECT id, provider, channel, to_phone, to_email, subject, body, status, provider_sid,
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message
              FROM outbound_messages
@@ -6887,6 +6916,41 @@ async function logOutboundMessage(params: {
         );
     } catch (err: any) {
         console.warn('[outbound-log] insert failed:', err?.message || err);
+    }
+}
+
+// Email sibling of logOutboundMessage. Same table so the reservation-history
+// timeline surfaces SMS/WhatsApp/Email in one chronological list. to_phone*
+// columns are left NULL for email rows; to_email carries the recipient.
+async function logOutboundEmail(params: {
+    provider: 'smtp' | 'resend';
+    to: string;
+    subject: string;
+    body: string;
+    messageId?: string | null;
+    reservationId?: number | null;
+    errorMessage?: string | null;
+}): Promise<void> {
+    try {
+        const status = params.errorMessage ? 'failed' : 'sent';
+        await queryWithRetry(
+            `INSERT INTO outbound_messages
+             (provider, channel, to_email, subject, body, status, provider_sid, reservation_id, error_message, failed_at)
+             VALUES ($1, 'email', $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+                params.provider,
+                params.to,
+                params.subject,
+                params.body,
+                status,
+                params.messageId ?? null,
+                params.reservationId ?? null,
+                params.errorMessage ?? null,
+                params.errorMessage ? new Date() : null,
+            ]
+        );
+    } catch (err: any) {
+        console.warn('[outbound-log] email insert failed:', err?.message || err);
     }
 }
 
