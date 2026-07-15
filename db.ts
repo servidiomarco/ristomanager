@@ -1262,6 +1262,23 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
+        // Payments (Revolut hosted checkout dashboard). :view lets front-of-
+        // house see and open payment links; :full is needed to create/void
+        // requests (invoked via /payments/requests endpoints).
+        const paymentsPermissions = [
+            ['OWNER', 'payments:view'], ['OWNER', 'payments:full'],
+            ['GENERAL_MANAGER', 'payments:view'], ['GENERAL_MANAGER', 'payments:full'],
+            ['MANAGER', 'payments:view'], ['MANAGER', 'payments:full'],
+            ['RECEPTION', 'payments:view'],
+            ['WAITER', 'payments:view'],
+        ];
+        for (const [role, permission] of paymentsPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
         // ============================================
         // PUSH SUBSCRIPTIONS TABLE (Web Push)
         // ============================================
