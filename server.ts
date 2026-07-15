@@ -434,8 +434,13 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         }
 
         const firstName = (lookup.first_name || '').trim();
+        // Open-ended greeting for known callers: we can't assume they're
+        // calling to book (they might want to change/cancel a reservation
+        // or ask something out of scope). The agent classifies intent from
+        // the reply — booking → normal flow, everything else → the AMBITO
+        // redirect rule already in the prompt.
         const personalisedFirstMessage = firstName
-            ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio. Per quando vorresti prenotare?`
+            ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio, come posso aiutarti?`
             : VOICE_FIRST_MESSAGE_FALLBACK;
 
         console.log('[ElevenLabs] init-conversation hit', {
