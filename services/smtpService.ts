@@ -106,6 +106,12 @@ function buildTransporter(config: SmtpConfig): Transporter {
         port: config.port,
         secure: config.secure,
         auth: { user: config.user, pass: config.password },
+        // Aggressive timeouts so a blocked/unreachable SMTP host fails fast
+        // instead of hanging the UI for minutes (Railway US-West → Aruba can
+        // be slow, or egress on 465/587 may be blocked outright).
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 20_000,
     });
 }
 
