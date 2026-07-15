@@ -355,13 +355,129 @@ function authorizeElevenLabs(req: express.Request, res: express.Response): boole
     return false;
 }
 
-// Tool 0 — lookup_customer
-// Called by the agent at the very start of the call using {{system__caller_id}}.
-// If the caller's phone is already in the rubrica we return the name so the
-// agent can personalise the follow-up (using `first_name` / `customer_name`)
-// and skip asking for name+phone during the booking flow. Returns
-// `exists:false` for unknown numbers or anonymous callers; agent falls back
-// to the standard "come si chiama?" opening.
+// Static first message used both by the ElevenLabs agent (configured on the
+// dashboard) and as the fallback we return from the init-conversation
+// webhook when the caller is anonymous, unknown, or lookup fails. Keeping
+// the two literally identical means "webhook down" is indistinguishable
+// from "no personalisation possible" for the caller.
+const VOICE_FIRST_MESSAGE_FALLBACK =
+    'Ciao, sono Sofia del Vecchio Frantoio. Posso aiutarti a prenotare un tavolo. ' +
+    'Per altre richieste chiama dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30. ' +
+    'Per quando vorresti prenotare?';
+
+// Conversation Initiation Webhook — called by ElevenLabs BEFORE the first
+// message is spoken. We look up the caller in the rubrica and inject
+// dynamic variables + a personalised `first_message` override so returning
+// customers are greeted by name from second zero (no double-greeting from
+// a mid-conversation lookup_customer tool call).
+//
+// Dashboard setup (one-time):
+//   Agent → Security → Fetch conversation initiation data from webhook
+//   URL:    https://prenotazioni.vecchiofrantoio.com/webhook/elevenlabs/init-conversation
+//   Secret: same value as ELEVENLABS_WEBHOOK_SECRET
+//
+// If the webhook 5xx/timeouts, ElevenLabs falls back to the static
+// first_message on the agent — so failure mode is "generic greeting",
+// never a broken call. That's why we return 200 with the fallback message
+// on errors instead of 5xx.
+app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+
+    const baseDynamicVars = {
+        customer_first_name: '',
+        customer_full_name: '',
+        customer_id: '',
+        caller_id_spelled: '',
+        customer_known: 'false',
+    };
+    const fallbackResponse = {
+        type: 'conversation_initiation_client_data',
+        dynamic_variables: baseDynamicVars,
+        conversation_config_override: {
+            agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+        },
+    };
+
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.json(fallbackResponse);
+    }
+
+    // ElevenLabs sends caller_id at the top level for SIP calls; guard
+    // against alternate shapes just in case.
+    const body = req.body || {};
+    const callerIdRaw = String(
+        body.caller_id
+        ?? body.parameters?.caller_id
+        ?? body.dynamic_variables?.system__caller_id
+        ?? ''
+    ).trim();
+
+    if (!callerIdRaw) {
+        console.log('[ElevenLabs] init-conversation anonymous caller');
+        return res.json(fallbackResponse);
+    }
+
+    const normalized = normalizeItalianPhone(callerIdRaw);
+    const callerIdSpelled = spellItalianPhoneDigits(normalized);
+
+    try {
+        const lookup = await findCustomerByPhone(normalized);
+        if (!lookup.exists) {
+            console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
+            return res.json({
+                type: 'conversation_initiation_client_data',
+                dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+                conversation_config_override: {
+                    agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+                },
+            });
+        }
+
+        const firstName = (lookup.first_name || '').trim();
+        const personalisedFirstMessage = firstName
+            ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio. Per quando vorresti prenotare?`
+            : VOICE_FIRST_MESSAGE_FALLBACK;
+
+        console.log('[ElevenLabs] init-conversation hit', {
+            phone: normalized,
+            customer_id: lookup.customer_id,
+            first_name: firstName,
+        });
+        return res.json({
+            type: 'conversation_initiation_client_data',
+            dynamic_variables: {
+                customer_first_name: firstName,
+                customer_full_name: lookup.customer_name || '',
+                customer_id: String(lookup.customer_id || ''),
+                caller_id_spelled: callerIdSpelled,
+                customer_known: 'true',
+            },
+            conversation_config_override: {
+                agent: { first_message: personalisedFirstMessage },
+            },
+        });
+    } catch (err) {
+        console.error('[ElevenLabs] init-conversation error', err);
+        // Always 200 — see comment at top of handler.
+        return res.json({
+            type: 'conversation_initiation_client_data',
+            dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+            conversation_config_override: {
+                agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+            },
+        });
+    }
+});
+
+// Tool 0 — lookup_customer  (defensive no-op fallback)
+// Historically called by the agent at the very start of the call using
+// {{system__caller_id}}. Now largely redundant: init-conversation webhook
+// already injects the same data as dynamic variables before first_message
+// is spoken. We keep this endpoint live so an old prompt that still
+// references the tool continues to work, and so that a mid-call re-lookup
+// (e.g. caller said "in realtà chiamatemi su un altro numero") still
+// resolves. Returns `exists:false` for unknown numbers or anonymous
+// callers; agent falls back to the standard "come si chiama?" opening.
 // NB: no `greeting_phrase` field on purpose — the static `first_message`
 // already greets the caller, and adding a second server-provided greeting
 // caused the agent to say hello twice (once generic, once by name).
