@@ -6975,20 +6975,29 @@ async function sendTwilioSms(to: string, text: string, reservationId?: number | 
     }
 }
 
-// Booking-confirmation dispatcher. When a Twilio SMS sender is configured
-// (either TWILIO_MESSAGING_SERVICE_SID or TWILIO_SMS_FROM) the confirmation
-// goes out as SMS (used while Meta WhatsApp verification is pending). As soon
-// as SMS is unconfigured the existing WhatsApp chain kicks back in — no code
-// change needed to switch back. When `reservationId` is passed we persist the
-// Twilio SID so the StatusCallback can update the delivery status on the card.
+// Booking-confirmation dispatcher. WhatsApp is the primary channel (cheaper,
+// richer, higher open rate); Twilio SMS acts as fallback when the WA send
+// fails synchronously — e.g. recipient not on WhatsApp, Twilio WA sender not
+// yet registered, template not approved. Delivery-time failures (Twilio
+// queues the message but Meta drops it later) are handled by the
+// StatusCallback path, not here. When `reservationId` is passed we persist
+// the Twilio SID so the StatusCallback can update the delivery status.
 async function sendBookingConfirmation(
     to: string,
     text: string,
     reservationId?: number | null
 ): Promise<OutboundConfirmationResult> {
-    const result = isTwilioSmsConfigured()
-        ? await sendTwilioSms(to, text, reservationId)
-        : await sendWhatsAppText(to, text, reservationId);
+    let result: OutboundConfirmationResult;
+    try {
+        result = await sendWhatsAppText(to, text, reservationId);
+    } catch (waErr: any) {
+        if (isTwilioSmsConfigured()) {
+            console.warn('[confirmation] WA send failed, falling back to SMS:', waErr?.message || waErr);
+            result = await sendTwilioSms(to, text, reservationId);
+        } else {
+            throw waErr;
+        }
+    }
     if (reservationId != null) {
         recordConfirmationSent(reservationId, result).catch(err =>
             console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
