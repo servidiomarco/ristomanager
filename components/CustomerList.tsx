@@ -122,6 +122,17 @@ const editDistance = (a: string, b: string, limit: number): number => {
 //    30-  — term is a small edit distance from a word (typo tolerance,
 //            scales with word length so "rosi" still finds "rossi").
 // Both strings are pre-folded (no diacritics, lowercase).
+// Bucket customers by initial. Non-letter first characters (numbers,
+// symbols) collapse under '#'. Empty names → '#' too (charAt(0) → '').
+const bucketForCustomer = (c: Customer): string => {
+  const first = (c.name || '').trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(first) ? first : '#';
+};
+
+// Full Latin alphabet + '#'. J/K/W/X/Y are rare in Italian first names
+// but common in surnames, so we keep them.
+const ALPHABET = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','#'];
+
 const fuzzyNameScore = (nameFolded: string, termFolded: string): number => {
   if (!termFolded) return 0;
   if (nameFolded.startsWith(termFolded)) return 100;
@@ -153,6 +164,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
+  // When set, only customers whose name starts with this letter are shown.
+  // '#' bucket = names not starting with an A-Z character. Cleared by
+  // tapping the active letter again or when a search is typed.
+  const [letterFilter, setLetterFilter] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -316,7 +331,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   const filtered = useMemo(() => {
     if (!isSearching) {
-      return [...customers].sort((a, b) =>
+      const base = letterFilter
+        ? customers.filter(c => bucketForCustomer(c) === letterFilter)
+        : customers;
+      return [...base].sort((a, b) =>
         a.name.localeCompare(b.name, 'it', { sensitivity: 'base' })
       );
     }
@@ -339,21 +357,17 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       return a.c.name.localeCompare(b.c.name, 'it', { sensitivity: 'base' });
     });
     return scored.map(s => s.c);
-  }, [customers, trimmedSearch, isSearching]);
+  }, [customers, trimmedSearch, isSearching, letterFilter]);
 
-  // Bucket customers by initial. Non-letter first characters (numbers,
-  // symbols) collapse under '#'. Empty names are safe: charAt(0) → ''.
-  const bucketForCustomer = (c: Customer): string => {
-    const first = (c.name || '').trim().charAt(0).toUpperCase();
-    return /[A-Z]/.test(first) ? first : '#';
-  };
-
-  // Full Latin alphabet + '#'. We keep J/K/W/X/Y even though they're rare in
-  // Italian: surnames often use them and it costs nothing to render.
-  const ALPHABET = useMemo(
-    () => ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','#'],
-    []
-  );
+  // Set of initials that actually exist across the entire address book.
+  // Based on `customers` (not `filtered`) so the strip stays stable while
+  // the user cycles through letters: switching letter shouldn't dim the
+  // others just because the current filter emptied them out.
+  const availableLetters = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) set.add(bucketForCustomer(c));
+    return set;
+  }, [customers]);
 
   const groupedByLetter = useMemo(() => {
     const map = new Map<string, Customer[]>();
@@ -366,14 +380,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     return map;
   }, [filtered]);
 
-  const jumpToLetter = (letter: string) => {
-    const el = document.getElementById(`cust-letter-${letter}`);
-    if (!el) return;
-    // Offset for the sticky search/alphabet band above; adjust if that
-    // header height changes.
-    const y = el.getBoundingClientRect().top + window.pageYOffset - 8;
-    window.scrollTo({ top: y, behavior: 'smooth' });
-  };
+  // Typing a search clears the letter filter so the two selection
+  // mechanisms don't compound each other silently.
+  useEffect(() => {
+    if (isSearching && letterFilter) setLetterFilter(null);
+  }, [isSearching, letterFilter]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -487,32 +498,53 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         )}
       </div>
 
-      {/* Horizontal alphabet index. Hidden during search since results are
-          sorted by relevance, not alphabetically. Tap a letter to jump to
-          its section; letters without customers are shown but disabled so
-          the user sees at a glance which initials exist. */}
+      {/* Horizontal alphabet filter. Hidden during search since results are
+          sorted by relevance. Tap a letter to keep only customers whose
+          name starts with it; tap it again to clear. Letters not present
+          in the address book are disabled. */}
       {!isSearching && (
         <div className="mb-4 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex items-center gap-0.5 min-w-max">
             {ALPHABET.map(letter => {
-              const has = groupedByLetter.has(letter);
+              const has = availableLetters.has(letter);
+              const active = letterFilter === letter;
               return (
                 <button
                   key={letter}
                   type="button"
-                  onClick={() => has && jumpToLetter(letter)}
+                  onClick={() => has && setLetterFilter(active ? null : letter)}
                   disabled={!has}
-                  aria-label={has ? `Vai alla lettera ${letter}` : `Nessun cliente con lettera ${letter}`}
-                  className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
+                  aria-pressed={active}
+                  aria-label={
                     has
-                      ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
-                      : 'text-slate-300 dark:text-slate-600 cursor-default'
+                      ? active
+                        ? `Rimuovi filtro lettera ${letter}`
+                        : `Filtra per lettera ${letter}`
+                      : `Nessun cliente con lettera ${letter}`
+                  }
+                  className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                      : has
+                        ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
+                        : 'text-slate-300 dark:text-slate-600 cursor-default'
                   }`}
                 >
                   {letter}
                 </button>
               );
             })}
+            {letterFilter && (
+              <button
+                type="button"
+                onClick={() => setLetterFilter(null)}
+                className="ml-1 inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-white/[0.05]"
+                aria-label="Rimuovi filtro lettera"
+              >
+                <X className="h-3 w-3" />
+                Tutti
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -633,6 +665,16 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           if (isSearching) {
             // Search mode: flat list ordered by relevance. No section
             // headers because letters lose meaning when sorted by score.
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filtered.map(renderCard)}
+              </div>
+            );
+          }
+
+          if (letterFilter) {
+            // Letter filter: only one initial visible, so a section header
+            // would just repeat the highlighted chip in the strip above.
             return (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {filtered.map(renderCard)}
