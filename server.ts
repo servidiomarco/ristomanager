@@ -1855,8 +1855,15 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        // Optional `channel` query/body param: 'sms' forces Twilio SMS, 'whatsapp'
+        // forces Twilio WhatsApp, anything else (default) falls back to the
+        // auto-pick logic in sendBookingConfirmation.
+        const rawChannel = String(req.query.channel ?? req.body?.channel ?? '').toLowerCase();
+        const channelChoice: 'sms' | 'whatsapp' | 'auto' =
+            rawChannel === 'sms' ? 'sms' :
+            rawChannel === 'whatsapp' ? 'whatsapp' :
+            'auto';
 
-        // Get reservation details
         const result = await queryWithRetry(
             'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1',
             [id]
@@ -1873,24 +1880,40 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
         }
 
         const roomName = await resolveReservationRoomName(reservation);
-        await sendBookingConfirmation(
-            reservation.phone,
-            buildConfirmationMessage(
-                reservation.customer_name,
-                reservation.reservation_time,
-                reservation.guests,
-                roomName
-            ),
-            reservation.id
+        const message = buildConfirmationMessage(
+            reservation.customer_name,
+            reservation.reservation_time,
+            reservation.guests,
+            roomName
         );
 
-        const channel = isTwilioSmsConfigured() ? 'SMS' : 'WhatsApp';
-        console.log(`[${channel}] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
+        let outcome: OutboundConfirmationResult;
+        if (channelChoice === 'sms') {
+            if (!isTwilioSmsConfigured()) {
+                return res.status(400).json({ error: 'SMS non configurato' });
+            }
+            outcome = await sendTwilioSms(reservation.phone, message, reservation.id);
+            recordConfirmationSent(reservation.id, outcome).catch(err =>
+                console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
+            );
+        } else if (channelChoice === 'whatsapp') {
+            if (!isTwilioWhatsAppConfigured() && !isMetaWhatsAppConfigured()) {
+                return res.status(400).json({ error: 'WhatsApp non configurato' });
+            }
+            outcome = await sendWhatsAppText(reservation.phone, message, reservation.id);
+            recordConfirmationSent(reservation.id, outcome).catch(err =>
+                console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
+            );
+        } else {
+            outcome = await sendBookingConfirmation(reservation.phone, message, reservation.id);
+        }
 
-        res.json({ success: true, message: `Confirmation sent via ${channel}`, channel });
-    } catch (err) {
+        const label = outcome.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
+        console.log(`[${label}] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
+        res.json({ success: true, message: `Confirmation sent via ${label}`, channel: outcome.channel });
+    } catch (err: any) {
         console.error('Error sending confirmation:', err);
-        res.status(500).json({ error: 'Failed to send confirmation' });
+        res.status(500).json({ error: err?.message || 'Failed to send confirmation' });
     }
 });
 

@@ -625,11 +625,18 @@ export const postInventoryMovement = async (move: {
   });
 };
 
-export const sendWhatsAppConfirmation = async (reservationId: number): Promise<{ success: boolean; message: string }> => {
-  return apiRequest<{ success: boolean; message: string }>(`${API_URL}/reservations/${reservationId}/confirm-whatsapp`, {
-    method: 'POST',
-    headers: getHeaders(),
-  });
+export const sendWhatsAppConfirmation = async (
+  reservationId: number,
+  channel?: 'sms' | 'whatsapp',
+): Promise<{ success: boolean; message: string; channel?: string }> => {
+  const qs = channel ? `?channel=${channel}` : '';
+  return apiRequest<{ success: boolean; message: string; channel?: string }>(
+    `${API_URL}/reservations/${reservationId}/confirm-whatsapp${qs}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+    },
+  );
 };
 
 // ============================================

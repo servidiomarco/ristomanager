@@ -1043,7 +1043,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddReservation = async (newRes: Omit<Reservation, 'id'>) => {
+  const handleAddReservation = async (newRes: Omit<Reservation, 'id'>): Promise<Reservation> => {
     try {
       const returnedRes = await createReservation(newRes);
       // If this reservation was created from a voice call, link it and drop
@@ -1070,6 +1070,7 @@ const App: React.FC = () => {
         title: 'Nuova Prenotazione',
         details: buildReservationDetails(returnedRes),
       });
+      return returnedRes;
     } catch (error: any) {
       console.error("Error adding reservation:", error);
       addToast(error?.message || 'Errore creazione prenotazione', 'error');

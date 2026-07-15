@@ -320,7 +320,7 @@ interface ReservationListProps {
   tables: Table[];
   rooms: Room[];
   onUpdateReservation: (r: Reservation) => void;
-  onAddReservation: (r: Omit<Reservation, 'id'>) => void;
+  onAddReservation: (r: Omit<Reservation, 'id'>) => Promise<Reservation>;
   onDeleteReservation: (id: number) => void;
   onMergeTables: (tableIds: number[], date: string, shift: Shift) => Promise<void>;
   onSplitTable: (tableId: number, date: string, shift: Shift) => Promise<void>;
@@ -503,6 +503,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     warnings: PreflightWarning[];
     payload: Omit<Reservation, 'id'>;
   } | null>(null);
+  // Channel picker shown after a successful save (both new bookings and edits).
+  // `reservation` is the saved row so the picker knows the id + which channels
+  // are available. Setting to null closes the picker and, when it was opened
+  // from the save path, closes the parent form as well.
+  const [confirmationPicker, setConfirmationPicker] = useState<{
+    reservation: Reservation;
+    fromSave: boolean;
+  } | null>(null);
+  const [sendingConfirmation, setSendingConfirmation] = useState<'sms' | 'whatsapp' | 'email' | null>(null);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   // Fetched from /settings/reservation-notes on mount so admins can edit the
@@ -1920,21 +1929,75 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
+  // Dispatch a confirmation message on the chosen channel. Called by the
+  // picker modal after either a fresh save or a click on the "Invia conferma"
+  // button on the card. Email goes through the mailto: shortcut used elsewhere
+  // in this file; SMS/WhatsApp hit the backend.
+  const handlePickConfirmationChannel = async (channel: 'sms' | 'whatsapp' | 'email') => {
+      const target = confirmationPicker?.reservation;
+      if (!target) return;
+      const fromSave = confirmationPicker?.fromSave === true;
+
+      if (channel === 'email') {
+          if (!target.email) {
+              showToast('Email cliente mancante.', 'error');
+              return;
+          }
+          handleSendEmail(target);
+          setConfirmationPicker(null);
+          if (fromSave) setIsFormOpen(false);
+          return;
+      }
+
+      if (!target.phone) {
+          showToast('Numero di telefono mancante per questa prenotazione.', 'error');
+          return;
+      }
+      if (!target.id) {
+          showToast('Prenotazione non ancora salvata.', 'error');
+          return;
+      }
+
+      try {
+          setSendingConfirmation(channel);
+          await sendWhatsAppConfirmation(target.id, channel);
+          const label = channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
+          showToast(`Conferma ${label} inviata a ${toTitleCase(target.customer_name)}`, 'success');
+          setConfirmationPicker(null);
+          if (fromSave) setIsFormOpen(false);
+      } catch (err: any) {
+          console.error('Errore invio conferma:', err);
+          showToast(err?.message || `Errore invio conferma ${channel}`, 'error');
+      } finally {
+          setSendingConfirmation(null);
+      }
+  };
+
   // Performs the actual save and closes the form. Shared between the direct
   // submit path (no warnings) and the preflight confirm button.
   const performSave = async (dataToSave: Omit<Reservation, 'id'> | Reservation) => {
       try {
           setIsSavingReservation(true);
+          let saved: Reservation;
           if (isEditing) {
               await onUpdateReservation(dataToSave as Reservation);
+              saved = dataToSave as Reservation;
           } else {
-              await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
+              saved = await onAddReservation(dataToSave as Omit<Reservation, 'id'>);
               clearDraft(DRAFT_KEYS.RESERVATION_NEW);
           }
 
           setDraftBanner(null);
-          setIsFormOpen(false);
           setPreflightModal(null);
+
+          // If the booking is contactable, offer to send a confirmation before
+          // closing the form. Otherwise close directly — nothing to prompt for.
+          const canContact = !!(saved.phone && saved.phone.trim()) || !!(saved.email && saved.email.trim());
+          if (canContact && !saved.confirmation_sent_at) {
+              setConfirmationPicker({ reservation: saved, fromSave: true });
+          } else {
+              setIsFormOpen(false);
+          }
       } finally {
           setIsSavingReservation(false);
       }
@@ -1943,6 +2006,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
+      if (!formData.phone || !formData.phone.trim()) {
+          showToast('Il numero di telefono è obbligatorio.', 'error');
+          return;
+      }
       if (isSavingReservation) return;
 
       // Combine allergens, quick notes, and additional notes
@@ -4013,10 +4080,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Phone & Email */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono</label>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono <span className="text-rose-600">*</span></label>
                                     <div className="relative">
                                         <input
                                             type="tel"
+                                            required
                                             className={`w-full rounded-md border border-[var(--color-line)] py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors ${formData.phone ? 'pl-3 pr-10' : 'px-3'}`}
                                             value={formData.phone || ''}
                                             onChange={e => {
@@ -4741,6 +4809,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {outboundMessages.length > 0 && (
                               <span className="text-[11px] text-[var(--color-fg-subtle)]">· {outboundMessages.length}</span>
                             )}
+                            {(formData.phone || formData.email) && (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmationPicker({
+                                  reservation: { ...(formData as Reservation) },
+                                  fromSave: false,
+                                })}
+                                className="ml-auto inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-indigo-600 text-white text-[11px] font-medium hover:bg-indigo-700"
+                                title="Invia una conferma prenotazione al cliente"
+                              >
+                                <Send className="h-3 w-3" />
+                                Invia conferma
+                              </button>
+                            )}
                           </div>
 
                           {outboundMessagesLoading ? (
@@ -5047,6 +5129,96 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 >
                   {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                   Conferma e salva
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Confirmation-channel picker — shown after a save (fromSave=true) or via
+          the "Invia conferma" button on the card (fromSave=false). Options are
+          filtered by which contact fields are filled on the booking. */}
+      {confirmationPicker && (() => {
+        const target = confirmationPicker.reservation;
+        const hasPhone = !!(target.phone && target.phone.trim());
+        const hasEmail = !!(target.email && target.email.trim());
+        const closePicker = () => {
+          if (sendingConfirmation) return;
+          setConfirmationPicker(null);
+          if (confirmationPicker.fromSave) setIsFormOpen(false);
+        };
+        return (
+          <div
+            className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4"
+            onClick={closePicker}
+          >
+            <div
+              className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-md overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-[var(--color-line)]">
+                <h3 className="text-lg font-semibold text-[var(--color-fg)]">Invia conferma al cliente?</h3>
+                <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
+                  Vuoi mandare una conferma della prenotazione a <strong>{toTitleCase(target.customer_name || '')}</strong>?
+                </p>
+              </div>
+              <div className="p-5 space-y-2">
+                {hasPhone && (
+                  <button
+                    type="button"
+                    onClick={() => handlePickConfirmationChannel('sms')}
+                    disabled={sendingConfirmation !== null}
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {sendingConfirmation === 'sms'
+                      ? <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
+                      : <MessageCircle className="h-5 w-5 text-emerald-600" />}
+                    <div className="text-left flex-1">
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">SMS</div>
+                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
+                    </div>
+                  </button>
+                )}
+                {hasPhone && (
+                  <button
+                    type="button"
+                    onClick={() => handlePickConfirmationChannel('whatsapp')}
+                    disabled={sendingConfirmation !== null}
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {sendingConfirmation === 'whatsapp'
+                      ? <Loader2 className="h-5 w-5 animate-spin text-green-600" />
+                      : <MessageCircle className="h-5 w-5 text-green-600" />}
+                    <div className="text-left flex-1">
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">WhatsApp</div>
+                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
+                    </div>
+                  </button>
+                )}
+                {hasEmail && (
+                  <button
+                    type="button"
+                    onClick={() => handlePickConfirmationChannel('email')}
+                    disabled={sendingConfirmation !== null}
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="h-5 w-5 text-indigo-600" />
+                    <div className="text-left flex-1">
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">Email</div>
+                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.email}</div>
+                    </div>
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+                <button
+                  type="button"
+                  onClick={closePicker}
+                  disabled={sendingConfirmation !== null}
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                >
+                  Non ora
                 </button>
               </div>
             </div>
