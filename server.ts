@@ -8884,34 +8884,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
               )
             : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
-        if (isTwilioSmsConfigured()) {
-            sendTwilioSms(phoneE164, ackText, created.id)
-                .then(r => recordConfirmationSent(created.id, r))
-                .catch(err => console.error('[public-booking] SMS ack failed:', err));
-        } else if (isMetaWhatsAppConfigured() && !depositCheckoutUrl) {
-            // Only use the approved Meta template for the plain ack — it has
-            // no variable slot for the checkout URL. When a deposit link is
-            // required we fall through to sendWhatsAppText so the link goes
-            // out in the message body.
-            const templateName = process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
-            const templateLang = process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
-            sendMetaWhatsAppTemplate(phoneE164, {
-                templateName,
-                languageCode: templateLang,
-                // Body params order MUST match the template approved in Meta:
-                // {{1}} customer name, {{2}} guests, {{3}} date, {{4}} time.
-                bodyParams: [
-                    toTitleCase(customer_name),
-                    guestsLabel,
-                    dateLabel,
-                    time,
-                ],
-            }).catch(err => console.error('[public-booking] Meta WhatsApp ack failed:', err));
-        } else {
-            sendWhatsAppText(phoneE164, ackText, created.id)
-                .then(r => recordConfirmationSent(created.id, r))
-                .catch(err => console.error('[public-booking] WhatsApp ack failed:', err));
-        }
+        sendBookingConfirmation(phoneE164, ackText, created.id).catch(err =>
+            console.error('[public-booking] confirmation send failed:', err?.message || err)
+        );
 
         res.status(201).json({ ok: true, id: created.id });
     } catch (err: any) {
