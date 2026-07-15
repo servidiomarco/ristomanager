@@ -372,13 +372,13 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-200">
                         Ricontattato
                       </span>
-                    ) : (detail.reservation_id == null && !hasReservationsForPhone) ? (
+                    ) : detail.reservation_id == null ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200">
                         Da ricontattare
                       </span>
                     ) : null}
                   </div>
-                  {detail.reservation_id == null && !hasReservationsForPhone && (
+                  {detail.reservation_id == null && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => applyFollowUpPatch({
@@ -393,7 +393,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                       >
                         {detail.follow_up_status === 'CONTACTED' ? 'Segna come da ricontattare' : 'Segna come ricontattato'}
                       </button>
-                      {onCreateReservation && (
+                      {!hasReservationsForPhone && onCreateReservation && (
                         <button
                           onClick={() => {
                             onCreateReservation({
