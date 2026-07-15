@@ -251,6 +251,40 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     return [...list].sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }));
   }, [customers, search]);
 
+  // Bucket customers by initial. Non-letter first characters (numbers,
+  // symbols) collapse under '#'. Empty names are safe: charAt(0) → ''.
+  const bucketForCustomer = (c: Customer): string => {
+    const first = (c.name || '').trim().charAt(0).toUpperCase();
+    return /[A-Z]/.test(first) ? first : '#';
+  };
+
+  // Full Latin alphabet + '#'. We keep J/K/W/X/Y even though they're rare in
+  // Italian: surnames often use them and it costs nothing to render.
+  const ALPHABET = useMemo(
+    () => ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','#'],
+    []
+  );
+
+  const groupedByLetter = useMemo(() => {
+    const map = new Map<string, Customer[]>();
+    for (const c of filtered) {
+      const key = bucketForCustomer(c);
+      const arr = map.get(key);
+      if (arr) arr.push(c);
+      else map.set(key, [c]);
+    }
+    return map;
+  }, [filtered]);
+
+  const jumpToLetter = (letter: string) => {
+    const el = document.getElementById(`cust-letter-${letter}`);
+    if (!el) return;
+    // Offset for the sticky search/alphabet band above; adjust if that
+    // header height changes.
+    const y = el.getBoundingClientRect().top + window.pageYOffset - 8;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  };
+
   const openCreate = () => {
     setForm(emptyForm);
     setFormOpen(true);
@@ -363,6 +397,34 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         )}
       </div>
 
+      {/* Horizontal alphabet index. Tap a letter to jump to its section.
+          Letters with no customers are shown but non-interactive so the
+          user can see which initials exist at a glance. Scrolls horizontally
+          on narrow screens; the whole strip is a single row. */}
+      <div className="mb-4 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-center gap-0.5 min-w-max">
+          {ALPHABET.map(letter => {
+            const has = groupedByLetter.has(letter);
+            return (
+              <button
+                key={letter}
+                type="button"
+                onClick={() => has && jumpToLetter(letter)}
+                disabled={!has}
+                aria-label={has ? `Vai alla lettera ${letter}` : `Nessun cliente con lettera ${letter}`}
+                className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
+                  has
+                    ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
+                    : 'text-slate-300 dark:text-slate-600 cursor-default'
+                }`}
+              >
+                {letter}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {error && (
         <div className="p-3 mb-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">{error}</div>
       )}
@@ -377,8 +439,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map(c => {
+        (() => {
+          const renderCard = (c: Customer) => {
             const s = stats.get(c.id);
             return (
               <div
@@ -474,8 +536,40 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                 ) : null}
               </div>
             );
-          })}
-        </div>
+          };
+
+          const sortedLetters = Array.from(groupedByLetter.keys()).sort((a, b) => {
+            if (a === '#') return 1;
+            if (b === '#') return -1;
+            return a.localeCompare(b);
+          });
+
+          return (
+            <div className="space-y-6">
+              {sortedLetters.map(letter => {
+                const list = groupedByLetter.get(letter)!;
+                return (
+                  <section key={letter}>
+                    <div
+                      id={`cust-letter-${letter}`}
+                      className="sticky top-0 z-[1] -mx-1 px-3 py-1.5 mb-2 bg-[var(--color-bg)]/95 backdrop-blur-sm border-b border-[var(--color-line)] flex items-center gap-2"
+                    >
+                      <span className="inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md bg-indigo-600 text-white text-[12px] font-semibold">
+                        {letter}
+                      </span>
+                      <span className="text-[11px] text-[var(--color-fg-subtle)] font-normal">
+                        {list.length} client{list.length === 1 ? 'e' : 'i'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {list.map(renderCard)}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          );
+        })()
       )}
 
       {/* Edit/Create form modal */}
