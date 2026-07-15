@@ -6995,10 +6995,26 @@ function buildDeclineMessage(
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
+// Absolute base URL for the running app — needed by email templates because
+// mail clients don't resolve relative paths. Priority order matches the rest
+// of the codebase (webhook > frontend). Returns null when nothing is set (dev
+// without env), in which case the email header falls back to text only.
+function publicAppBaseUrl(): string | null {
+    const raw = process.env.PUBLIC_WEBHOOK_BASE_URL || process.env.VITE_API_URL;
+    if (!raw) return null;
+    return raw.replace(/\/+$/, '');
+}
+
 // Shared HTML wrapper for customer-facing emails. Kept intentionally simple
-// (inline styles, no external assets) so it renders identically across Gmail,
-// Outlook, Apple Mail without a CSS-support surprise.
+// (inline styles, no external assets beyond the brand logo) so it renders
+// identically across Gmail, Outlook, Apple Mail without a CSS-support
+// surprise. When we don't know our own public URL (no env), the logo tag is
+// omitted and the header degrades gracefully to the serif brand name.
 function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
+    const base = publicAppBaseUrl();
+    const logoImg = base
+        ? `<img src="${base}/prenota/logo.png" alt="Il Vecchio Frantoio" width="140" style="display:block;margin:0 auto 12px;max-width:140px;height:auto;">`
+        : '';
     return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title></head>
 <body style="margin:0;padding:0;background:#fbf9f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#292524;">
 <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${escapeHtml(preheader)}</span>
@@ -7006,6 +7022,7 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
   <tr><td align="center">
     <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:hidden;">
       <tr><td style="padding:32px 32px 8px;text-align:center;">
+        ${logoImg}
         <div style="font-family:'Cormorant Garamond',Georgia,serif;font-size:26px;font-weight:600;color:#1c1917;letter-spacing:0.5px;">Il Vecchio Frantoio</div>
         <div style="font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#78716c;margin-top:4px;">Cucina Tradizionale</div>
       </td></tr>
