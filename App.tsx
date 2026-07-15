@@ -16,6 +16,7 @@ import { Inventory } from './components/Inventory';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
+import PagamentiPage from './components/PagamentiPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
@@ -101,6 +102,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
   { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'servizio', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
@@ -1726,6 +1728,10 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.PAGAMENTI && (
+          <PagamentiPage />
+        )}
+
         {view === ViewState.RECEPTION && (
           <ReceptionPage
             globalDate={globalDate}
@@ -1786,6 +1792,7 @@ const App: React.FC = () => {
                       [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
                       [ViewState.HACCP]: 'HACCP',
                       [ViewState.CONVERSAZIONI]: 'Conversazioni',
+                      [ViewState.PAGAMENTI]: 'Pagamenti',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',

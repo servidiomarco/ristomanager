@@ -28,7 +28,9 @@ export type Permission =
   | 'inventory:view'
   | 'inventory:full'
   | 'voice_calls:view'
-  | 'reception:view';
+  | 'reception:view'
+  | 'payments:view'
+  | 'payments:full';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -59,7 +61,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:view',
     'inventory:full',
     'voice_calls:view',
-    'reception:view'
+    'reception:view',
+    'payments:view',
+    'payments:full'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -83,7 +87,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:view',
     'inventory:full',
     'voice_calls:view',
-    'reception:view'
+    'reception:view',
+    'payments:view',
+    'payments:full'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -104,7 +110,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:view',
     'inventory:full',
     'voice_calls:view',
-    'reception:view'
+    'reception:view',
+    'payments:view'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -115,7 +122,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:view',
     'customers:full',
     'reception:view',
-    'voice_calls:view'
+    'voice_calls:view',
+    'payments:view'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -150,7 +158,8 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.CLIENTI]: ['customers:view'],
   [ViewState.INVENTARIO]: ['inventory:view'],
   [ViewState.USERS]: ['users:view'],
-  [ViewState.SETTINGS]: ['settings:view']
+  [ViewState.SETTINGS]: ['settings:view'],
+  [ViewState.PAGAMENTI]: ['payments:view']
 };
 
 export class PermissionService {
