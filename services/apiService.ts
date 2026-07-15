@@ -772,7 +772,10 @@ export const updateRevolutIntegration = async (
 // ============================================
 // INTEGRATION SETTINGS (SMTP)
 // ============================================
+export type EmailProvider = 'smtp' | 'resend';
+
 export interface SmtpIntegrationStatus {
+  provider: EmailProvider;
   host: string;
   port: number;
   secure: boolean;
@@ -781,17 +784,21 @@ export interface SmtpIntegrationStatus {
   from_name: string;
   has_password: boolean;
   password_last4: string | null;
+  has_resend_api_key: boolean;
+  resend_api_key_last4: string | null;
   configured: boolean;
   updated_at: string | null;
   updated_by: string | null;
 }
 
 export interface SmtpIntegrationUpdate {
+  provider?: EmailProvider;
   host?: string;
   port?: number;
   secure?: boolean;
   user?: string;
   password?: string;
+  resend_api_key?: string;
   from_email?: string;
   from_name?: string;
 }

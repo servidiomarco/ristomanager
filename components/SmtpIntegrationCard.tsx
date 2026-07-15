@@ -7,6 +7,7 @@ import {
     sendSmtpTestEmail,
     type SmtpIntegrationStatus,
     type SmtpIntegrationUpdate,
+    type EmailProvider,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -27,14 +28,17 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
 
+    const [providerInput, setProviderInput] = useState<EmailProvider | null>(null);
     const [hostInput, setHostInput] = useState('');
     const [portInput, setPortInput] = useState('');
     const [secureInput, setSecureInput] = useState<boolean | null>(null);
     const [userInput, setUserInput] = useState('');
     const [passwordInput, setPasswordInput] = useState('');
+    const [resendKeyInput, setResendKeyInput] = useState('');
     const [fromEmailInput, setFromEmailInput] = useState('');
     const [fromNameInput, setFromNameInput] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [showResendKey, setShowResendKey] = useState(false);
     const [testRecipient, setTestRecipient] = useState('');
 
     const showToastRef = useRef(showToast);
@@ -55,7 +59,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setTestRecipient(data.from_email || '');
                 }
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento SMTP', 'error');
+                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento email', 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -64,6 +68,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    const effectiveProvider: EmailProvider = providerInput ?? status?.provider ?? 'smtp';
     const effectiveSecure = secureInput ?? status?.secure ?? false;
 
     const statusPill = useMemo(() => {
@@ -76,53 +81,66 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 </span>
             );
         }
+        const label = status.provider === 'resend' ? 'Attivo (Resend)' : 'Attivo (SMTP)';
         return (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                Attivo
+                {label}
             </span>
         );
     }, [status]);
 
     const hasChanges = useMemo(() => {
         if (!status) return false;
-        if (hostInput.trim() !== (status.host || '')) return true;
-        if (portInput.trim() !== (status.port ? String(status.port) : '')) return true;
-        if (secureInput !== null && secureInput !== status.secure) return true;
-        if (userInput.trim() !== (status.user || '')) return true;
-        if (passwordInput !== '') return true;
+        if (providerInput !== null && providerInput !== status.provider) return true;
         if (fromEmailInput.trim() !== (status.from_email || '')) return true;
         if (fromNameInput.trim() !== (status.from_name || '')) return true;
+        if (effectiveProvider === 'smtp') {
+            if (hostInput.trim() !== (status.host || '')) return true;
+            if (portInput.trim() !== (status.port ? String(status.port) : '')) return true;
+            if (secureInput !== null && secureInput !== status.secure) return true;
+            if (userInput.trim() !== (status.user || '')) return true;
+            if (passwordInput !== '') return true;
+        } else {
+            if (resendKeyInput.trim() !== '') return true;
+        }
         return false;
-    }, [status, hostInput, portInput, secureInput, userInput, passwordInput, fromEmailInput, fromNameInput]);
+    }, [status, providerInput, effectiveProvider, hostInput, portInput, secureInput, userInput, passwordInput, resendKeyInput, fromEmailInput, fromNameInput]);
 
     const handleSave = async () => {
         if (!canEdit || saving || !status) return;
         const payload: SmtpIntegrationUpdate = {};
-        if (hostInput.trim() !== (status.host || '')) payload.host = hostInput.trim();
-        if (portInput.trim() !== (status.port ? String(status.port) : '')) {
-            const n = Number(portInput);
-            if (!Number.isInteger(n) || n < 1 || n > 65535) {
-                showToast('Porta non valida (1-65535)', 'error');
-                return;
-            }
-            payload.port = n;
-        }
-        if (secureInput !== null && secureInput !== status.secure) payload.secure = secureInput;
-        if (userInput.trim() !== (status.user || '')) payload.user = userInput.trim();
-        if (passwordInput !== '') payload.password = passwordInput;
+        if (providerInput !== null && providerInput !== status.provider) payload.provider = providerInput;
         if (fromEmailInput.trim() !== (status.from_email || '')) payload.from_email = fromEmailInput.trim();
         if (fromNameInput.trim() !== (status.from_name || '')) payload.from_name = fromNameInput.trim();
+        if (effectiveProvider === 'smtp') {
+            if (hostInput.trim() !== (status.host || '')) payload.host = hostInput.trim();
+            if (portInput.trim() !== (status.port ? String(status.port) : '')) {
+                const n = Number(portInput);
+                if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                    showToast('Porta non valida (1-65535)', 'error');
+                    return;
+                }
+                payload.port = n;
+            }
+            if (secureInput !== null && secureInput !== status.secure) payload.secure = secureInput;
+            if (userInput.trim() !== (status.user || '')) payload.user = userInput.trim();
+            if (passwordInput !== '') payload.password = passwordInput;
+        } else {
+            if (resendKeyInput.trim() !== '') payload.resend_api_key = resendKeyInput.trim();
+        }
         if (Object.keys(payload).length === 0) return;
         setSaving(true);
         try {
             const updated = await updateSmtpIntegration(payload);
             setStatus(updated);
+            setProviderInput(null);
             setSecureInput(null);
             setPasswordInput('');
-            showToast('Configurazione SMTP aggiornata', 'success');
+            setResendKeyInput('');
+            showToast('Configurazione email aggiornata', 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento SMTP', 'error');
+            showToast(err?.message || 'Errore aggiornamento email', 'error');
         } finally {
             setSaving(false);
         }
@@ -168,7 +186,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <Mail className="w-5 h-5 text-[var(--color-fg)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Server Email (SMTP)</h4>
+                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Server Email</h4>
                         <p className="text-[13px] text-[var(--color-fg-muted)] truncate">Invio conferme email ai clienti</p>
                     </div>
                 </div>
@@ -182,113 +200,185 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
             {expanded && (
                 <div className="border-t border-[var(--color-line)] p-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="sm:col-span-2">
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Host SMTP</label>
-                            <input
-                                type="text"
-                                value={hostInput}
-                                onChange={(e) => setHostInput(e.target.value)}
-                                placeholder="smtps.aruba.it"
-                                disabled={!canEdit || saving}
-                                autoComplete="off"
-                                spellCheck={false}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Porta</label>
-                            <input
-                                type="number"
-                                min={1}
-                                max={65535}
-                                value={portInput}
-                                onChange={(e) => setPortInput(e.target.value)}
-                                placeholder="465"
-                                disabled={!canEdit || saving}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
-                            />
-                        </div>
-                    </div>
-
+                    {/* Provider switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--color-fg)]">Connessione sicura (TLS)</p>
+                            <p className="text-[13px] font-medium text-[var(--color-fg)]">Provider</p>
                             <p className="text-[12px] text-[var(--color-fg-muted)]">
-                                {effectiveSecure
-                                    ? 'SSL implicito (di solito porta 465).'
-                                    : 'STARTTLS o non cifrato (di solito porta 587).'}
+                                {effectiveProvider === 'resend'
+                                    ? 'Invio via API HTTPS Resend. Consigliato in cloud.'
+                                    : 'Invio SMTP diretto (Aruba, Gmail, server on-prem…).'}
                             </p>
                         </div>
                         <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
-                                onClick={() => canEdit && setSecureInput(false)}
+                                onClick={() => canEdit && setProviderInput('smtp')}
                                 disabled={!canEdit}
                                 className={`px-3 py-1.5 transition-colors ${
-                                    !effectiveSecure
+                                    effectiveProvider === 'smtp'
                                         ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                         : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                STARTTLS
+                                SMTP
                             </button>
                             <button
                                 type="button"
-                                onClick={() => canEdit && setSecureInput(true)}
+                                onClick={() => canEdit && setProviderInput('resend')}
                                 disabled={!canEdit}
                                 className={`px-3 py-1.5 transition-colors border-l border-[var(--color-line)] ${
-                                    effectiveSecure
+                                    effectiveProvider === 'resend'
                                         ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
                                         : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                SSL
+                                Resend
                             </button>
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Utente</label>
-                        <input
-                            type="text"
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            placeholder="noreply@vecchiofrantoio.it"
-                            disabled={!canEdit || saving}
-                            autoComplete="off"
-                            spellCheck={false}
-                            className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
-                        />
-                    </div>
+                    {effectiveProvider === 'smtp' && (
+                        <>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="sm:col-span-2">
+                                    <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Host SMTP</label>
+                                    <input
+                                        type="text"
+                                        value={hostInput}
+                                        onChange={(e) => setHostInput(e.target.value)}
+                                        placeholder="smtps.aruba.it"
+                                        disabled={!canEdit || saving}
+                                        autoComplete="off"
+                                        spellCheck={false}
+                                        className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Porta</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={65535}
+                                        value={portInput}
+                                        onChange={(e) => setPortInput(e.target.value)}
+                                        placeholder="465"
+                                        disabled={!canEdit || saving}
+                                        className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                    />
+                                </div>
+                            </div>
 
-                    <div>
-                        <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Password</label>
-                        <div className="relative">
-                            <input
-                                type={showPassword ? 'text' : 'password'}
-                                value={passwordInput}
-                                onChange={(e) => setPasswordInput(e.target.value)}
-                                placeholder={maskPlaceholder(status.password_last4)}
-                                disabled={!canEdit || saving}
-                                autoComplete="new-password"
-                                spellCheck={false}
-                                className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword((v) => !v)}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
-                                aria-label={showPassword ? 'Nascondi' : 'Mostra'}
-                                tabIndex={-1}
-                            >
-                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[13px] font-medium text-[var(--color-fg)]">Connessione sicura (TLS)</p>
+                                    <p className="text-[12px] text-[var(--color-fg-muted)]">
+                                        {effectiveSecure
+                                            ? 'SSL implicito (di solito porta 465).'
+                                            : 'STARTTLS o non cifrato (di solito porta 587).'}
+                                    </p>
+                                </div>
+                                <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden text-[12px] font-medium">
+                                    <button
+                                        type="button"
+                                        onClick={() => canEdit && setSecureInput(false)}
+                                        disabled={!canEdit}
+                                        className={`px-3 py-1.5 transition-colors ${
+                                            !effectiveSecure
+                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                                    >
+                                        STARTTLS
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => canEdit && setSecureInput(true)}
+                                        disabled={!canEdit}
+                                        className={`px-3 py-1.5 transition-colors border-l border-[var(--color-line)] ${
+                                            effectiveSecure
+                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
+                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                                    >
+                                        SSL
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Utente</label>
+                                <input
+                                    type="text"
+                                    value={userInput}
+                                    onChange={(e) => setUserInput(e.target.value)}
+                                    placeholder="noreply@vecchiofrantoio.it"
+                                    disabled={!canEdit || saving}
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Password</label>
+                                <div className="relative">
+                                    <input
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={passwordInput}
+                                        onChange={(e) => setPasswordInput(e.target.value)}
+                                        placeholder={maskPlaceholder(status.password_last4)}
+                                        disabled={!canEdit || saving}
+                                        autoComplete="new-password"
+                                        spellCheck={false}
+                                        className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword((v) => !v)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                        aria-label={showPassword ? 'Nascondi' : 'Mostra'}
+                                        tabIndex={-1}
+                                    >
+                                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                                    Lascia vuoto per mantenere quella attuale.
+                                </p>
+                            </div>
+                        </>
+                    )}
+
+                    {effectiveProvider === 'resend' && (
+                        <div>
+                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">API Key Resend</label>
+                            <div className="relative">
+                                <input
+                                    type={showResendKey ? 'text' : 'password'}
+                                    value={resendKeyInput}
+                                    onChange={(e) => setResendKeyInput(e.target.value)}
+                                    placeholder={maskPlaceholder(status.resend_api_key_last4)}
+                                    disabled={!canEdit || saving}
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowResendKey((v) => !v)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                    aria-label={showResendKey ? 'Nascondi' : 'Mostra'}
+                                    tabIndex={-1}
+                                >
+                                    {showResendKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                            <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                                Ottieni la chiave da resend.com → API Keys. Il dominio del mittente deve essere verificato lì (SPF+DKIM).
+                            </p>
                         </div>
-                        <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
-                            Lascia vuoto per mantenere quella attuale.
-                        </p>
-                    </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
@@ -362,7 +452,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         </div>
                         {!status.configured && (
                             <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2">
-                                Salva prima una configurazione completa (host, porta, utente, password, mittente) per poter inviare un test.
+                                Salva prima una configurazione completa per poter inviare un test.
                             </p>
                         )}
                     </div>

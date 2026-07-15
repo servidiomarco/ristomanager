@@ -8464,6 +8464,21 @@ app.put('/settings/integrations/smtp', authenticate, requirePermission('settings
             return trimmed === '' ? null : trimmed;
         };
 
+        if (body.provider !== undefined) {
+            if (body.provider !== 'smtp' && body.provider !== 'resend') {
+                return res.status(400).json({ error: 'invalid_provider' });
+            }
+            updates.email_provider = body.provider;
+        }
+        // Resend API key. Empty string / null clears back to env fallback.
+        if (body.resend_api_key !== undefined) {
+            if (body.resend_api_key === null || (typeof body.resend_api_key === 'string' && body.resend_api_key.trim() === '')) {
+                updates.resend_api_key = null;
+            } else if (typeof body.resend_api_key === 'string') {
+                updates.resend_api_key = body.resend_api_key.trim();
+            }
+        }
+
         const host = nullableString(body.host);
         if (host !== undefined) updates.smtp_host = host;
         const user = nullableString(body.user);
