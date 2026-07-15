@@ -358,9 +358,13 @@ function authorizeElevenLabs(req: express.Request, res: express.Response): boole
 // Tool 0 — lookup_customer
 // Called by the agent at the very start of the call using {{system__caller_id}}.
 // If the caller's phone is already in the rubrica we return the name so the
-// agent can greet them personally and skip asking for name+phone during the
-// booking flow. Returns `exists:false` for unknown numbers or anonymous
-// callers; agent falls back to the standard "come si chiama?" opening.
+// agent can personalise the follow-up (using `first_name` / `customer_name`)
+// and skip asking for name+phone during the booking flow. Returns
+// `exists:false` for unknown numbers or anonymous callers; agent falls back
+// to the standard "come si chiama?" opening.
+// NB: no `greeting_phrase` field on purpose — the static `first_message`
+// already greets the caller, and adding a second server-provided greeting
+// caused the agent to say hello twice (once generic, once by name).
 app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
@@ -378,7 +382,6 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
         return res.json({
             exists: false,
             caller_id_spelled: '',
-            greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
         });
     }
 
@@ -396,13 +399,9 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
             return res.json({
                 exists: false,
                 caller_id_spelled: callerIdSpelled,
-                greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
             });
         }
 
-        // Personalised greeting the agent should read verbatim so it can't
-        // pick the wrong first-name form on its own.
-        const greeting = `Ristorante Vecchio Frantoio, buongiorno ${lookup.first_name}, come posso aiutarla?`;
         console.log('[ElevenLabs] lookup-customer hit', {
             phone: normalized,
             customer_id: lookup.customer_id,
@@ -416,14 +415,12 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
             first_name: lookup.first_name,
             last_visit: lookup.last_visit,
             caller_id_spelled: callerIdSpelled,
-            greeting_phrase: greeting,
         });
     } catch (err) {
         console.error('[ElevenLabs] lookup-customer error', err);
         res.json({
             exists: false,
             caller_id_spelled: callerIdSpelled,
-            greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
         });
     }
 });
