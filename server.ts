@@ -7852,7 +7852,7 @@ const voiceCallsAuthorize = authorize(...VOICE_CALLS_ROLES);
 // List with optional filters. Default newest-first, capped to 200 rows.
 app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {
-        const { from, to, q, linked } = req.query as Record<string, string | undefined>;
+        const { from, to, q, linked, follow_up } = req.query as Record<string, string | undefined>;
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
@@ -7868,12 +7868,36 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
             where.push(`vc.created_at < ($${params.length}::date + INTERVAL '1 day')`);
         }
         if (q && q.trim()) {
+            // Search across phone, summary, transcript, notes, and the linked
+            // customer name so users can type "Mario" and find calls even when
+            // the caller only appears in the customer registry, not the raw
+            // ElevenLabs payload.
             params.push(`%${q.trim()}%`);
             const idx = params.length;
-            where.push(`(vc.phone ILIKE $${idx} OR vc.summary ILIKE $${idx} OR vc.transcript ILIKE $${idx})`);
+            where.push(
+                `(vc.phone ILIKE $${idx}
+                  OR vc.summary ILIKE $${idx}
+                  OR vc.transcript ILIKE $${idx}
+                  OR vc.notes ILIKE $${idx}
+                  OR r.customer_name ILIKE $${idx}
+                  OR EXISTS (
+                      SELECT 1 FROM customers c2
+                      WHERE c2.phone IS NOT NULL
+                        AND vc.phone IS NOT NULL
+                        AND length(regexp_replace(c2.phone, '\\D', '', 'g')) >= 8
+                        AND right(regexp_replace(c2.phone, '\\D', '', 'g'), 10)
+                          = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
+                        AND c2.name ILIKE $${idx}
+                  ))`
+            );
         }
         if (linked === 'true') where.push('vc.reservation_id IS NOT NULL');
         else if (linked === 'false') where.push('vc.reservation_id IS NULL');
+        // Follow-up filter only makes sense on unlinked calls (calls with a
+        // reservation don't need to be contacted back). We don't force
+        // reservation_id IS NULL here so the UI can combine filters freely.
+        if (follow_up === 'contacted') where.push("vc.follow_up_status = 'CONTACTED'");
+        else if (follow_up === 'pending') where.push("(vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')");
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -7921,7 +7945,10 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
         );
 
         const countResult = await queryWithRetry(
-            `SELECT COUNT(*)::int AS total FROM voice_calls vc ${whereSql}`,
+            `SELECT COUNT(*)::int AS total
+             FROM voice_calls vc
+             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             ${whereSql}`,
             params.slice(0, params.length - 2)
         );
 

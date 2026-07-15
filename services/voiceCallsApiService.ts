@@ -46,6 +46,7 @@ export interface VoiceCallsListParams {
   to?: string;
   q?: string;
   linked?: 'true' | 'false';
+  follow_up?: 'pending' | 'contacted';
   limit?: number;
   offset?: number;
 }
@@ -122,6 +123,7 @@ class VoiceCallsApiService {
       to: params.to,
       q: params.q,
       linked: params.linked,
+      follow_up: params.follow_up,
       limit: params.limit,
       offset: params.offset,
     });

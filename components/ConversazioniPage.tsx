@@ -577,7 +577,10 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [linkedFilter, setLinkedFilter] = useState<'all' | 'true' | 'false'>('all');
+  // Single-select status filter that mirrors the badges shown on each call
+  // row. "to-contact" and "contacted" imply the call has no reservation —
+  // the backend translates this into linked=false + follow_up=<state>.
+  const [statusFilter, setStatusFilter] = useState<'all' | 'linked' | 'to-contact' | 'contacted'>('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
@@ -597,7 +600,15 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     try {
       const params: VoiceCallsListParams = { limit: 100 };
       if (searchDebounced.trim()) params.q = searchDebounced.trim();
-      if (linkedFilter !== 'all') params.linked = linkedFilter;
+      if (statusFilter === 'linked') {
+        params.linked = 'true';
+      } else if (statusFilter === 'to-contact') {
+        params.linked = 'false';
+        params.follow_up = 'pending';
+      } else if (statusFilter === 'contacted') {
+        params.linked = 'false';
+        params.follow_up = 'contacted';
+      }
       if (from) params.from = from;
       if (to) params.to = to;
       const result = await voiceCallsApiService.list(params);
@@ -608,11 +619,33 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     } finally {
       setLoading(false);
     }
-  }, [searchDebounced, linkedFilter, from, to]);
+  }, [searchDebounced, statusFilter, from, to]);
 
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // Client-side filter as a safety net: if the backend hasn't been redeployed
+  // yet (or ignores the follow_up param for any reason), we still show the
+  // right rows for each chip. Idempotent when the server already filters
+  // correctly. Kept in sync with the row-level badge logic.
+  const visibleItems = useMemo(() => {
+    if (statusFilter === 'linked') {
+      return items.filter(i => i.reservation_id != null);
+    }
+    if (statusFilter === 'to-contact') {
+      return items.filter(i => i.reservation_id == null && i.follow_up_status !== 'CONTACTED');
+    }
+    if (statusFilter === 'contacted') {
+      return items.filter(i => i.reservation_id == null && i.follow_up_status === 'CONTACTED');
+    }
+    return items;
+  }, [items, statusFilter]);
+
+  // Prefer the local count when a status filter is active — the server may
+  // return more rows than the chip advertises (e.g. before the follow_up
+  // param is redeployed). Once the server catches up, both counts match.
+  const displayedCount = statusFilter === 'all' ? total : visibleItems.length;
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -654,65 +687,111 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           </div>
         </div>
 
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)]" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cerca telefono, riassunto, trascrizione…"
-                className="w-full pl-8 pr-3 py-1.5 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
+        {(() => {
+          const statusChips = [
+            { v: 'all', l: 'Tutte', dot: null },
+            { v: 'linked', l: 'Con prenotazione', dot: 'bg-emerald-500' },
+            { v: 'to-contact', l: 'Da ricontattare', dot: 'bg-amber-500' },
+            { v: 'contacted', l: 'Ricontattati', dot: 'bg-emerald-500' },
+          ] as const;
+          const hasActiveFilters =
+            statusFilter !== 'all' || !!from || !!to || !!searchDebounced.trim();
+          const resetAll = () => {
+            setStatusFilter('all');
+            setFrom('');
+            setTo('');
+            setSearch('');
+          };
+          return (
+            <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 space-y-3">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Cerca telefono, nome, riassunto, trascrizione…"
+                  className="w-full pl-8 pr-8 py-2 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                    aria-label="Svuota ricerca"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Quick filter chips — scrolls horizontally on narrow screens */}
+              <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {statusChips.map(({ v, l, dot }) => {
+                  const active = statusFilter === v;
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => setStatusFilter(v)}
+                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
+                        active
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)]'
+                      }`}
+                    >
+                      {dot && (
+                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-white/90' : dot}`} />
+                      )}
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Period + count + reset */}
+              <div className="flex items-center gap-2 flex-wrap text-[12px] text-[var(--color-fg-muted)] pt-1 border-t border-[var(--color-line)]">
+                <div className="flex items-center gap-2 flex-wrap pt-2">
+                  <Filter className="h-3.5 w-3.5" />
+                  <span>Periodo:</span>
+                  <input
+                    type="date"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
+                  />
+                  <span>→</span>
+                  <input
+                    type="date"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                    className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
+                  />
+                  {(from || to) && (
+                    <button
+                      onClick={() => { setFrom(''); setTo(''); }}
+                      className="text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                      aria-label="Svuota periodo"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="ml-auto flex items-center gap-2 pt-2">
+                  {hasActiveFilters && (
+                    <button
+                      onClick={resetAll}
+                      className="text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      Reimposta filtri
+                    </button>
+                  )}
+                  <span className="tabular">{displayedCount} conversazion{displayedCount === 1 ? 'e' : 'i'}</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-1 rounded-lg border border-[var(--color-line)] p-0.5 bg-[var(--color-bg)]">
-              {([
-                { v: 'all', l: 'Tutte' },
-                { v: 'true', l: 'Con prenotazione' },
-                { v: 'false', l: 'Senza' },
-              ] as const).map(({ v, l }) => (
-                <button
-                  key={v}
-                  onClick={() => setLinkedFilter(v)}
-                  className={`px-2.5 py-1 text-[12px] rounded-md ${
-                    linkedFilter === v
-                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap text-[12px] text-[var(--color-fg-muted)]">
-            <Filter className="h-3.5 w-3.5" />
-            <span>Periodo:</span>
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular"
-            />
-            <span>→</span>
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular"
-            />
-            {(from || to) && (
-              <button
-                onClick={() => { setFrom(''); setTo(''); }}
-                className="text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <span className="ml-auto tabular">{total} conversazion{total === 1 ? 'e' : 'i'}</span>
-          </div>
-        </div>
+          );
+        })()}
 
         {error && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-sm">
@@ -725,16 +804,22 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           <div className="flex items-center justify-center py-16">
             <CookingPotLoader label="Carico…" />
           </div>
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
             <Phone className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
             <p className="text-[13px] text-[var(--color-fg-muted)]">
-              Nessuna conversazione. Prova a sincronizzare se ne hai di recenti.
+              {statusFilter === 'to-contact'
+                ? 'Nessuna chiamata da ricontattare.'
+                : statusFilter === 'contacted'
+                  ? 'Nessuna chiamata ricontattata.'
+                  : statusFilter === 'linked'
+                    ? 'Nessuna chiamata collegata a una prenotazione.'
+                    : 'Nessuna conversazione. Prova a sincronizzare se ne hai di recenti.'}
             </p>
           </div>
         ) : (
           <div className="space-y-2">
-            {items.map(item => {
+            {visibleItems.map(item => {
               const resBadge = reservationStatusBadge(item.reservation_status);
               return (
                 <button
