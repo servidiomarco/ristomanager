@@ -172,18 +172,31 @@
                         />
                     </div>
                     <div>
-                        <label for="phone" class="block text-xs font-medium text-stone-600 mb-1">Telefono</label>
+                        <label for="phone" class="block text-xs font-medium text-stone-600 mb-1">Telefono <span class="text-stone-400">(o email)</span></label>
                         <input
                             type="tel"
                             id="phone"
                             name="phone"
-                            required
                             pattern="[\+0-9 ]{6,20}"
                             autocomplete="tel"
                             inputmode="tel"
                             placeholder="333 1234567"
                             class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
                         />
+                    </div>
+                    <div>
+                        <label for="email" class="block text-xs font-medium text-stone-600 mb-1">Email <span class="text-stone-400">(o telefono)</span></label>
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            autocomplete="email"
+                            inputmode="email"
+                            maxlength="120"
+                            placeholder="tu@esempio.it"
+                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
+                        />
+                        <p class="text-[11px] text-stone-500 mt-1">Serve almeno un contatto — telefono o email — così possiamo confermarti la prenotazione.</p>
                     </div>
                     <div>
                         <label for="notes" class="block text-xs font-medium text-stone-600 mb-1">Note (opzionale)</label>
@@ -229,7 +242,7 @@
                 </div>
                 <h2 class="serif text-3xl text-stone-900 mb-2">Richiesta ricevuta</h2>
                 <p class="text-stone-600 leading-relaxed">
-                    Grazie! Ti contatteremo via telefono o WhatsApp per confermare la prenotazione.
+                    Grazie! Ti contatteremo via telefono, WhatsApp o email per confermare la prenotazione.
                 </p>
                 <p id="confirmRecap" class="text-sm text-stone-500 mt-4"></p>
                 <div class="mt-8 flex items-center justify-center gap-3">
@@ -471,11 +484,15 @@
 
         const customer_name = $('customer_name').value.trim();
         const phone = $('phone').value.trim();
+        const email = $('email').value.trim();
         const notes = $('notes').value.trim();
         const website = form.elements['website'].value;
 
         if (!customer_name) { showError('Inserisci il tuo nome'); return; }
-        if (!phone) { showError('Inserisci il numero di telefono'); return; }
+        if (!phone && !email) { showError('Inserisci almeno un contatto: telefono o email'); return; }
+        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) { showError('Numero di telefono non valido'); return; }
+        // Simple RFC-lite email check — server does authoritative validation.
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('Indirizzo email non valido'); return; }
 
         submitBtn.disabled = true;
         submitBtn.textContent = 'Invio in corso…';
@@ -487,6 +504,7 @@
                 body: JSON.stringify({
                     customer_name,
                     phone,
+                    email,
                     date: state.date,
                     time: state.time,
                     shift: state.shift,

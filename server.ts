@@ -1679,19 +1679,62 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (
             previousStatus === 'PENDING' &&
             reservation_status === 'CONFIRMED' &&
-            updatedReservation?.phone
+            (updatedReservation?.phone || updatedReservation?.email)
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
-            sendBookingConfirmation(
-                updatedReservation.phone,
-                buildConfirmationMessage(
-                    updatedReservation.customer_name,
-                    updatedReservation.reservation_time,
-                    updatedReservation.guests,
-                    roomName
-                ),
-                updatedReservation.id
-            ).catch(err => console.error('Auto-confirmation send failed:', err));
+            if (updatedReservation.phone) {
+                sendBookingConfirmation(
+                    updatedReservation.phone,
+                    buildConfirmationMessage(
+                        updatedReservation.customer_name,
+                        updatedReservation.reservation_time,
+                        updatedReservation.guests,
+                        roomName
+                    ),
+                    updatedReservation.id
+                ).catch(err => console.error('Auto-confirmation send failed:', err));
+            }
+            // Fire the email confirmation in parallel if the guest gave us an
+            // email address. Non-blocking; failures are logged in
+            // outbound_messages so staff can see them in the timeline.
+            if (updatedReservation.email) {
+                (async () => {
+                    try {
+                        if (!(await isSmtpConfigured())) return;
+                        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+                        const { subject, text, html } = buildBookingConfirmationEmail({
+                            customerName: updatedReservation.customer_name,
+                            reservationTime: updatedReservation.reservation_time,
+                            guests: updatedReservation.guests,
+                            roomName,
+                        });
+                        try {
+                            const sent = await sendMail({ to: String(updatedReservation.email), subject, text, html });
+                            await logOutboundEmail({
+                                provider: emailProvider,
+                                to: String(updatedReservation.email),
+                                subject,
+                                body: text,
+                                messageId: sent.messageId || null,
+                                reservationId: updatedReservation.id,
+                            });
+                        } catch (sendErr: any) {
+                            await logOutboundEmail({
+                                provider: emailProvider,
+                                to: String(updatedReservation.email),
+                                subject,
+                                body: text,
+                                reservationId: updatedReservation.id,
+                                errorMessage: sendErr?.message || String(sendErr),
+                            });
+                            throw sendErr;
+                        }
+                    } catch (err: any) {
+                        console.error('Auto-confirmation email failed:', err?.message || err);
+                    }
+                })();
+            }
         }
 
         // Auto-send the decline notice on any → DECLINED. The guest is told the
@@ -1946,14 +1989,12 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         }
 
         const roomName = await resolveReservationRoomName(reservation);
-        const text = buildConfirmationMessage(
-            reservation.customer_name,
-            reservation.reservation_time,
-            reservation.guests,
-            roomName
-        );
-        const dt = new Date(reservation.reservation_time);
-        const subject = `Conferma prenotazione - ${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+        const { subject, text, html } = buildBookingConfirmationEmail({
+            customerName: reservation.customer_name,
+            reservationTime: reservation.reservation_time,
+            guests: reservation.guests,
+            roomName,
+        });
 
         const emailStatus = await getSmtpConfigStatus().catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -1963,6 +2004,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
                 to: String(reservation.email),
                 subject,
                 text,
+                html,
             });
         } catch (sendErr: any) {
             await logOutboundEmail({
@@ -2119,6 +2161,159 @@ function buildDepositConfirmationMessage(
     const amount = formatEuroMinor(amountCents);
     return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}${roomPart} e' confermata. A presto!`;
 }
+
+// Global list of payment requests across all reservations, powering the
+// dedicated /pagamenti page. Supports the same filter vocabulary as the
+// UI: free-text search on customer/description/order id, status filter
+// (comma-separated), and a date range on created_at.
+app.get('/payments', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const { from, to, q, status } = req.query as Record<string, string | undefined>;
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 200);
+        const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+
+        const where: string[] = [];
+        const params: any[] = [];
+
+        if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+            params.push(from);
+            where.push(`pr.created_at >= $${params.length}::date`);
+        }
+        if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+            params.push(to);
+            where.push(`pr.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+        }
+        if (q && q.trim()) {
+            params.push(`%${q.trim()}%`);
+            const idx = params.length;
+            where.push(
+                `(r.customer_name ILIKE $${idx}
+                  OR r.phone ILIKE $${idx}
+                  OR pr.description ILIKE $${idx}
+                  OR pr.provider_order_id ILIKE $${idx})`
+            );
+        }
+        if (status && status.trim()) {
+            // Comma-separated, case-insensitive; we store uppercase status
+            // so we upper() both sides.
+            const values = status.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (values.length > 0) {
+                const placeholders = values.map(v => {
+                    params.push(v);
+                    return `$${params.length}`;
+                }).join(',');
+                where.push(`upper(pr.status) IN (${placeholders})`);
+            }
+        }
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+        params.push(limit);
+        params.push(offset);
+
+        const result = await queryWithRetry(
+            `SELECT pr.id, pr.reservation_id, pr.amount_cents, pr.currency, pr.description,
+                    pr.status, pr.provider, pr.provider_order_id, pr.checkout_url,
+                    pr.delivery_channel, pr.delivery_provider_sid, pr.delivery_error,
+                    pr.created_at, pr.updated_at, pr.completed_at,
+                    r.customer_name AS reservation_customer_name,
+                    r.phone AS reservation_phone,
+                    r.reservation_time AS reservation_time,
+                    r.guests AS reservation_guests,
+                    r.reservation_status AS reservation_status
+             FROM payment_requests pr
+             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             ${whereSql}
+             ORDER BY pr.created_at DESC
+             LIMIT $${params.length - 1} OFFSET $${params.length}`,
+            params
+        );
+
+        const countResult = await queryWithRetry(
+            `SELECT COUNT(*)::int AS total
+             FROM payment_requests pr
+             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             ${whereSql}`,
+            params.slice(0, params.length - 2)
+        );
+
+        res.json({
+            items: result.rows,
+            total: countResult.rows[0]?.total ?? 0,
+            limit,
+            offset,
+        });
+    } catch (err: any) {
+        console.error('GET /payments error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Messages associated with a payment. Since payments don't have their own
+// FK on outbound_messages we surface the whole reservation timeline — the
+// UI can spot the ones that actually relate to the payment (they contain
+// the checkout URL). Same shape as GET /reservations/:id/messages.
+app.get('/payments/:id/messages', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const payRow = await queryWithRetry(
+            `SELECT pr.reservation_id, pr.checkout_url, r.phone, r.email
+             FROM payment_requests pr
+             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             WHERE pr.id = $1`,
+            [id]
+        );
+        if (payRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        const row = payRow.rows[0];
+        const reservationId: number | null = row.reservation_id;
+        const phone: string | null = row.phone;
+        const email: string | null = row.email;
+        const checkoutUrl: string | null = row.checkout_url;
+
+        const digits = phone ? String(phone).replace(/\D/g, '') : '';
+        const suffix = digits.length >= 8 ? digits.slice(-10) : null;
+
+        const conditions: string[] = [];
+        const params: any[] = [];
+        if (reservationId != null) {
+            params.push(reservationId);
+            conditions.push(`reservation_id = $${params.length}`);
+        }
+        if (suffix) {
+            params.push(suffix);
+            conditions.push(`right(to_phone_digits, 10) = $${params.length}`);
+        }
+        if (email) {
+            params.push(email);
+            conditions.push(`lower(to_email) = lower($${params.length})`);
+        }
+        if (conditions.length === 0) return res.json({ items: [], checkout_url: checkoutUrl });
+
+        const result = await queryWithRetry(
+            `SELECT id, provider, channel, to_phone, to_email, subject, body, status, provider_sid,
+                    reservation_id, sent_at, delivered_at, failed_at,
+                    error_code, error_message
+             FROM outbound_messages
+             WHERE ${conditions.join(' OR ')}
+             ORDER BY sent_at DESC
+             LIMIT 100`,
+            params
+        );
+        // Attach `is_payment_link` so the client can highlight rows that
+        // actually contain this payment's checkout URL — the reservation
+        // timeline may also carry booking confirmations, reminders, etc.
+        const items = result.rows.map((m: any) => ({
+            ...m,
+            is_payment_link: !!(checkoutUrl && m.body && String(m.body).includes(checkoutUrl)),
+        }));
+        res.json({ items, checkout_url: checkoutUrl });
+    } catch (err: any) {
+        console.error('GET /payments/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
 
 // List all payment requests attached to a reservation. Powers the small
 // history list rendered inside the reservation modal.
@@ -6800,6 +6995,126 @@ function buildDeclineMessage(
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
+// Shared HTML wrapper for customer-facing emails. Kept intentionally simple
+// (inline styles, no external assets) so it renders identically across Gmail,
+// Outlook, Apple Mail without a CSS-support surprise.
+function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title></head>
+<body style="margin:0;padding:0;background:#fbf9f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#292524;">
+<span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${escapeHtml(preheader)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fbf9f4;padding:24px 12px;">
+  <tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:hidden;">
+      <tr><td style="padding:32px 32px 8px;text-align:center;">
+        <div style="font-family:'Cormorant Garamond',Georgia,serif;font-size:26px;font-weight:600;color:#1c1917;letter-spacing:0.5px;">Il Vecchio Frantoio</div>
+        <div style="font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#78716c;margin-top:4px;">Cucina Tradizionale</div>
+      </td></tr>
+      <tr><td style="padding:16px 32px 32px;">${bodyBlocks}</td></tr>
+      <tr><td style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Il Vecchio Frantoio · Cucina Tradizionale</td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
+function escapeHtml(s: string): string {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// Small helper that formats reservation date/time in Italian for the customer
+// emails. Returns { dateLabel: '15/07/2026', timeLabel: '20:30' }.
+function formatBookingDateTime(reservationTime: string | Date): { dateLabel: string; timeLabel: string } {
+    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    const hours = String(dt.getHours()).padStart(2, '0');
+    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    return { dateLabel: `${day}/${month}/${year}`, timeLabel: `${hours}:${minutes}` };
+}
+
+// Booking-request acknowledgement email — sent immediately when a customer
+// submits a reservation from /prenota with an email. The booking is still
+// PENDING; the wording makes clear that a staff confirmation is coming.
+function buildBookingRequestEmail(params: {
+    customerName: string;
+    reservationTime: string | Date;
+    guests: number;
+    roomName?: string | null;
+    notes?: string | null;
+}): { subject: string; text: string; html: string } {
+    const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
+    const name = (params.customerName || '').trim();
+    const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const room = (params.roomName || '').trim();
+    const roomPart = room ? ` (${room})` : '';
+    const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
+    const greetingText = name ? `Ciao ${name},` : 'Ciao,';
+    const text = `${greetingText}
+
+abbiamo ricevuto la tua richiesta di prenotazione:
+
+• Data: ${dateLabel}
+• Ora: ${timeLabel}
+• Ospiti: ${guestsNum} ${persone}${room ? `\n• Sala richiesta: ${room}` : ''}
+
+Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.
+
+Grazie e a presto!
+Il Vecchio Frantoio`;
+
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
+      </table>
+      <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
+      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
+    `;
+    const html = wrapEmailHtml(`Richiesta prenotazione ricevuta per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
+    return { subject, text, html };
+}
+
+// Booking-confirmation email — sent when staff flips a PENDING reservation to
+// CONFIRMED, or when the manual /confirm-email endpoint is invoked. Wraps the
+// same one-line text used by SMS/WhatsApp in a proper HTML layout.
+function buildBookingConfirmationEmail(params: {
+    customerName: string;
+    reservationTime: string | Date;
+    guests: number;
+    roomName?: string | null;
+}): { subject: string; text: string; html: string } {
+    const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
+    const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const room = (params.roomName || '').trim();
+    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
+    const name = (params.customerName || '').trim();
+    const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
+    const text = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
+
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
+      </table>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o chiamaci.</p>
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
+    `;
+    const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
+    return { subject, text, html };
+}
+
 // Normalize date to YYYY-MM-DD format
 function normalizeDate(dateStr: string): string {
     const parts = dateStr.split('/');
@@ -9076,6 +9391,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 
         const customer_name = typeof body.customer_name === 'string' ? body.customer_name.trim() : '';
         const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+        const email = typeof body.email === 'string' ? body.email.trim() : '';
         const date = typeof body.date === 'string' ? body.date : '';
         const time = typeof body.time === 'string' ? body.time : '';
         const shift = body.shift;
@@ -9089,8 +9405,14 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         if (!customer_name || customer_name.length < 2 || customer_name.length > 80) {
             return res.status(400).json({ error: 'invalid_name', message: 'Nome non valido' });
         }
-        if (!phone || !/^\+?[0-9 ]{6,20}$/.test(phone)) {
+        if (!phone && !email) {
+            return res.status(400).json({ error: 'missing_contact', message: 'Inserisci almeno un contatto: telefono o email' });
+        }
+        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) {
             return res.status(400).json({ error: 'invalid_phone', message: 'Numero di telefono non valido' });
+        }
+        if (email && (email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+            return res.status(400).json({ error: 'invalid_email', message: 'Indirizzo email non valido' });
         }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
             return res.status(400).json({ error: 'invalid_date', message: 'Data non valida' });
@@ -9133,9 +9455,13 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         }
 
         // Normalize phone to E.164 if it starts with a leading 3 (IT mobile) and no +.
-        const phoneE164 = phone.startsWith('+')
-            ? phone.replace(/\s/g, '')
-            : phone.replace(/\D/g, '').replace(/^3/, '+393').slice(0, 13);
+        // Nullable — email-only bookings skip normalization entirely.
+        const phoneE164 = phone
+            ? (phone.startsWith('+')
+                ? phone.replace(/\s/g, '')
+                : phone.replace(/\D/g, '').replace(/^3/, '+393').slice(0, 13))
+            : null;
+        const emailNormalized = email ? email.toLowerCase() : null;
 
         const reservation_time = `${date}T${time}:00`;
         const userNote = notesRaw ? notesRaw.slice(0, 500) : '';
@@ -9150,15 +9476,17 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 table_id, notes, email, phone, payment_status, arrival_status,
                 reservation_status, source, requires_review
             )
-            VALUES ($1, $2, $3, $4, 0, NULL, $5, NULL, $6, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
+            VALUES ($1, $2, $3, $4, 0, NULL, $5, $6, $7, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
             RETURNING *`,
-            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, phoneE164]
+            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164]
         );
         const created = result.rows[0];
 
         // Auto-save the booker into the rubrica so the contact appears even if
-        // staff never edit this booking from the internal app.
-        await upsertCustomerFromReservation(customer_name, phoneE164, null, null);
+        // staff never edit this booking from the internal app. Skipped for
+        // email-only bookings — upsertCustomerFromReservation early-returns
+        // without a phone.
+        await upsertCustomerFromReservation(customer_name, phoneE164, emailNormalized, null);
 
         // Notify staff dashboards in real time.
         if (socketService) {
@@ -9252,9 +9580,56 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
               )
             : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
-        sendBookingConfirmation(phoneE164, ackText, created.id).catch(err =>
-            console.error('[public-booking] confirmation send failed:', err?.message || err)
-        );
+        // SMS/WhatsApp ack — only if the guest gave us a phone number.
+        if (phoneE164) {
+            sendBookingConfirmation(phoneE164, ackText, created.id).catch(err =>
+                console.error('[public-booking] confirmation send failed:', err?.message || err)
+            );
+        }
+
+        // Email ack — fire-and-forget. Requires an email on the booking and a
+        // configured provider (SMTP or Resend). Failures are logged into
+        // outbound_messages just like the manual /confirm-email endpoint so
+        // staff can see them in the reservation card timeline.
+        if (emailNormalized) {
+            (async () => {
+                try {
+                    if (!(await isSmtpConfigured())) return;
+                    const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                    const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+                    const { subject, text, html } = buildBookingRequestEmail({
+                        customerName: toTitleCase(customer_name),
+                        reservationTime: reservation_time,
+                        guests: guestsNum,
+                        roomName: requestedRoomName,
+                        notes: userNote,
+                    });
+                    try {
+                        const sent = await sendMail({ to: emailNormalized, subject, text, html });
+                        await logOutboundEmail({
+                            provider: emailProvider,
+                            to: emailNormalized,
+                            subject,
+                            body: text,
+                            messageId: sent.messageId || null,
+                            reservationId: created.id,
+                        });
+                    } catch (sendErr: any) {
+                        await logOutboundEmail({
+                            provider: emailProvider,
+                            to: emailNormalized,
+                            subject,
+                            body: text,
+                            reservationId: created.id,
+                            errorMessage: sendErr?.message || String(sendErr),
+                        });
+                        throw sendErr;
+                    }
+                } catch (err: any) {
+                    console.error('[public-booking] email ack failed:', err?.message || err);
+                }
+            })();
+        }
 
         res.status(201).json({ ok: true, id: created.id });
     } catch (err: any) {
