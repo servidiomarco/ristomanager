@@ -7008,26 +7008,54 @@ function publicAppBaseUrl(): string | null {
 // Shared HTML wrapper for customer-facing emails. Kept intentionally simple
 // (inline styles, no external assets beyond the brand logo) so it renders
 // identically across Gmail, Outlook, Apple Mail without a CSS-support
-// surprise. When we don't know our own public URL (no env), the logo tag is
-// omitted and the header degrades gracefully to the serif brand name.
+// surprise.
+//
+// Dark-mode handling: the logo artwork is monochrome, so a black-on-transparent
+// PNG becomes invisible against a dark inbox background. We inline two <img>
+// tags — the "light" variant is visible by default, the "dark" variant is
+// hidden with display:none, and a @media (prefers-color-scheme: dark) rule
+// flips them. Backing colors (background, text, card) are swapped in the same
+// rule. Apple Mail and Gmail (iOS/Android) honour the media query; clients
+// that ignore it (older Outlook) simply see the light version — still legible
+// on their default light chrome.
 function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
     const base = publicAppBaseUrl();
-    const logoImg = base
-        ? `<img src="${base}/prenota/logo.png" alt="Il Vecchio Frantoio" width="140" style="display:block;margin:0 auto 12px;max-width:140px;height:auto;">`
+    const logoLight = base
+        ? `<img class="logo-light" src="${base}/prenota/logo.png" alt="Il Vecchio Frantoio" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto;">`
         : '';
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title></head>
-<body style="margin:0;padding:0;background:#fbf9f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#292524;">
-<span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${escapeHtml(preheader)}</span>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fbf9f4;padding:24px 12px;">
+    const logoDark = base
+        ? `<img class="logo-dark" src="${base}/prenota/logo-dark.png" alt="Il Vecchio Frantoio" width="160" style="display:none;margin:0 auto;max-width:160px;height:auto;">`
+        : '';
+    const preheaderText = escapeHtml(preheader);
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title>
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+  @media (prefers-color-scheme: dark) {
+    .bg-wrap { background: #1c1917 !important; }
+    .card { background: #292524 !important; box-shadow: none !important; }
+    .card td, .card p, .card li, .card strong, .card em { color: #e7e5e4 !important; }
+    .card .muted { color: #a8a29e !important; }
+    .footer { border-top-color: #44403c !important; color: #78716c !important; }
+    .detail-box { background: #1c1917 !important; }
+    .confirm-box { background: rgba(16, 185, 129, 0.12) !important; border-color: rgba(16, 185, 129, 0.35) !important; }
+    .confirm-box td { color: #6ee7b7 !important; }
+    .logo-light { display: none !important; }
+    .logo-dark { display: block !important; }
+  }
+</style>
+</head>
+<body class="bg-wrap" style="margin:0;padding:0;background:#fbf9f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#292524;">
+<span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${preheaderText}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="bg-wrap" style="background:#fbf9f4;padding:24px 12px;">
   <tr><td align="center">
-    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:hidden;">
-      <tr><td style="padding:32px 32px 8px;text-align:center;">
-        ${logoImg}
-        <div style="font-family:'Cormorant Garamond',Georgia,serif;font-size:26px;font-weight:600;color:#1c1917;letter-spacing:0.5px;">Il Vecchio Frantoio</div>
-        <div style="font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#78716c;margin-top:4px;">Cucina Tradizionale</div>
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" class="card" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.05);overflow:hidden;">
+      <tr><td style="padding:36px 32px 20px;text-align:center;">
+        ${logoLight}
+        ${logoDark}
       </td></tr>
-      <tr><td style="padding:16px 32px 32px;">${bodyBlocks}</td></tr>
-      <tr><td style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Il Vecchio Frantoio · Cucina Tradizionale</td></tr>
+      <tr><td style="padding:8px 32px 32px;">${bodyBlocks}</td></tr>
+      <tr><td class="footer muted" style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Cucina Tradizionale</td></tr>
     </table>
   </td></tr>
 </table>
@@ -7088,12 +7116,12 @@ Il Vecchio Frantoio`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
-      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
       </table>
-      <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
       <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Richiesta prenotazione ricevuta per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -7120,12 +7148,12 @@ function buildBookingConfirmationEmail(params: {
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
-      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
       </table>
-      <p style="margin:0;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o chiamaci.</p>
+      <p class="muted" style="margin:0;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o chiamaci.</p>
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -9663,11 +9691,19 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
-// Restaurant logo used by the /prenota landing page. Served explicitly rather
-// than via express.static to avoid exposing the whole public/ folder.
+// Restaurant logo used by the /prenota landing page and the customer emails.
+// Served explicitly rather than via express.static to avoid exposing the whole
+// public/ folder. Two variants: default (dark artwork on transparent) and
+// -dark.png (white artwork) — the email templates swap between them via
+// prefers-color-scheme so the mark stays visible in both light and dark
+// inboxes.
 app.get('/prenota/logo.png', (_req, res) => {
     res.set('Cache-Control', 'public, max-age=86400');
     res.sendFile(path.join(process.cwd(), 'public', 'logo-vf.png'));
+});
+app.get('/prenota/logo-dark.png', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
 });
 
 // WhatsApp diagnostic — sends a real message via the active provider and
