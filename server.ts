@@ -42,6 +42,7 @@ import {
     parseFlexibleDate,
     parseFlexibleTime,
     formatItalianDateReadback,
+    spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
 import { toTitleCase } from './utils/text.js';
 import {
@@ -376,17 +377,25 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
         console.log('[ElevenLabs] lookup-customer no phone provided');
         return res.json({
             exists: false,
+            caller_id_spelled: '',
             greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
         });
     }
 
+    // Pre-render the digit-by-digit Italian spelling so the agent can read
+    // this string verbatim during phone confirmation instead of trying to
+    // spell the digits itself (models hallucinate the prefix — see the
+    // Luigi Noviello call, conv_1501kxjanqxffc2bthbchnnvm3dq).
+    const normalized = normalizeItalianPhone(phoneRaw);
+    const callerIdSpelled = spellItalianPhoneDigits(normalized);
+
     try {
-        const normalized = normalizeItalianPhone(phoneRaw);
         const lookup = await findCustomerByPhone(normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] lookup-customer miss', { phone: normalized });
             return res.json({
                 exists: false,
+                caller_id_spelled: callerIdSpelled,
                 greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
             });
         }
@@ -406,12 +415,14 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
             customer_name: lookup.customer_name,
             first_name: lookup.first_name,
             last_visit: lookup.last_visit,
+            caller_id_spelled: callerIdSpelled,
             greeting_phrase: greeting,
         });
     } catch (err) {
         console.error('[ElevenLabs] lookup-customer error', err);
         res.json({
             exists: false,
+            caller_id_spelled: callerIdSpelled,
             greeting_phrase: 'Ristorante Vecchio Frantoio, buongiorno. Come posso aiutarla?'
         });
     }

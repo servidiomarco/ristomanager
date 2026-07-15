@@ -258,6 +258,59 @@ export function normalizeItalianPhone(input: string): string {
     return digits.startsWith('+') ? digits : '+' + digits;
 }
 
+/**
+ * Pre-render an Italian-language digit-by-digit readback for a phone number.
+ *
+ * ElevenLabs voice models are unreliable at speaking digit sequences: even
+ * when the system prompt hands them the caller_id verbatim they can hallucinate
+ * a wrong prefix mid-utterance (e.g. saying "tre-tre-cinque" instead of
+ * "tre-quattro-sette"). We work around that by pre-computing the exact spoken
+ * form here and telling the agent to read *this string* verbatim rather than
+ * generate it from the raw phone number.
+ *
+ * Format: 10 mobile digits grouped 3-3-4 (matches how Italians usually dictate
+ * a mobile number), country prefix included when present. Digits are separated
+ * by hyphens inside a group so ElevenLabs' TTS pauses briefly between them.
+ * Example: "+393477837689" → "più tre-nove, tre-quattro-sette, sette-otto-tre,
+ * sette-sei-otto-nove".
+ */
+export function spellItalianPhoneDigits(phone: string): string {
+    if (!phone) return '';
+    const digitsToWords: Record<string, string> = {
+        '0': 'zero', '1': 'uno', '2': 'due', '3': 'tre', '4': 'quattro',
+        '5': 'cinque', '6': 'sei', '7': 'sette', '8': 'otto', '9': 'nove',
+    };
+    const spellGroup = (chunk: string): string =>
+        chunk.split('').map(d => digitsToWords[d] ?? d).join('-');
+
+    const trimmed = phone.trim();
+    const hasPlus = trimmed.startsWith('+');
+    const digits = trimmed.replace(/\D/g, '');
+    if (!digits) return '';
+
+    const groups: string[] = [];
+
+    // Italian mobile: country code (2 digits) + 10 digits grouped 3-3-4.
+    // Landline lengths vary; fall back to a plain 3-digit grouping.
+    if (digits.length >= 12 && digits.startsWith('39')) {
+        groups.push(digits.slice(0, 2));                    // 39
+        groups.push(digits.slice(2, 5));                    // 3XX
+        groups.push(digits.slice(5, 8));                    // XXX
+        groups.push(digits.slice(8));                       // last
+    } else if (digits.length === 10 && digits.startsWith('3')) {
+        groups.push(digits.slice(0, 3));
+        groups.push(digits.slice(3, 6));
+        groups.push(digits.slice(6));
+    } else {
+        for (let i = 0; i < digits.length; i += 3) {
+            groups.push(digits.slice(i, i + 3));
+        }
+    }
+
+    const spelled = groups.map(spellGroup).join(', ');
+    return hasPlus ? `più ${spelled}` : spelled;
+}
+
 // ============================================
 // CUSTOMER LOOKUP BY PHONE
 // ============================================
