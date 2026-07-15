@@ -26,6 +26,7 @@ import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
+import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { useSocket } from './hooks/useSocket';
@@ -1995,6 +1996,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 <RevolutIntegrationCard showToast={addToast} />
+                <SmtpIntegrationCard showToast={addToast} />
               </div>
             </div>
           </div>

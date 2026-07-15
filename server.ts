@@ -30,6 +30,13 @@ import {
     type RevolutEnvironment,
 } from './services/revolutService.js';
 import {
+    isSmtpConfigured,
+    getSmtpConfigStatus,
+    invalidateSmtpConfigCache,
+    sendMail,
+    verifySmtpConnection,
+} from './services/smtpService.js';
+import {
     verifyElevenLabsSignature,
     findAvailability,
     findCustomerByPhone,
@@ -1914,6 +1921,68 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
     } catch (err: any) {
         console.error('Error sending confirmation:', err);
         res.status(500).json({ error: err?.message || 'Failed to send confirmation' });
+    }
+});
+
+// Send a booking confirmation via email through the configured SMTP server.
+// Records confirmation_status/channel/sent_at on the reservation, mirroring
+// the SMS/WhatsApp path — with channel='email' and provider_sid=messageId.
+app.post('/reservations/:id/confirm-email', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry(
+            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes FROM reservations WHERE id = $1',
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Reservation not found' });
+        }
+        const reservation = result.rows[0];
+        if (!reservation.email) {
+            return res.status(400).json({ error: 'Nessuna email per questa prenotazione' });
+        }
+        if (!(await isSmtpConfigured())) {
+            return res.status(400).json({ error: 'SMTP non è configurato. Configura il server email in Impostazioni.' });
+        }
+
+        const roomName = await resolveReservationRoomName(reservation);
+        const text = buildConfirmationMessage(
+            reservation.customer_name,
+            reservation.reservation_time,
+            reservation.guests,
+            roomName
+        );
+        const dt = new Date(reservation.reservation_time);
+        const subject = `Conferma prenotazione - ${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+
+        const sent = await sendMail({
+            to: String(reservation.email),
+            subject,
+            text,
+        });
+
+        const updated = await queryWithRetry(
+            `UPDATE reservations
+             SET confirmation_status = 'sent',
+                 confirmation_channel = 'email',
+                 confirmation_provider_sid = $1,
+                 confirmation_sent_at = CURRENT_TIMESTAMP,
+                 confirmation_delivered_at = NULL,
+                 confirmation_error = NULL
+             WHERE id = $2
+             RETURNING *`,
+            [sent.messageId || null, reservation.id]
+        );
+        if (updated.rows[0] && socketService) {
+            try { socketService.broadcastReservationUpdated(updated.rows[0]); }
+            catch (err) { console.warn('[confirmation] email broadcast failed:', err); }
+        }
+
+        console.log(`[Email] ✅ Confirmation sent for reservation ${id} to ${reservation.email}`);
+        res.json({ success: true, message: 'Confirmation sent via Email', channel: 'email' });
+    } catch (err: any) {
+        console.error('Error sending email confirmation:', err);
+        res.status(500).json({ error: err?.message || 'Failed to send email confirmation' });
     }
 });
 
@@ -8347,6 +8416,156 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
     } catch (err: any) {
         console.error('PUT /settings/integrations/revolut error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
+// INTEGRATION SETTINGS (SMTP / email)
+// ============================================
+// Same shape as the Revolut endpoints above: GET returns a masked snapshot,
+// PUT accepts partial updates (empty string = clear back to env fallback).
+app.get('/settings/integrations/smtp', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const status = await getSmtpConfigStatus();
+        let updatedAt: string | null = null;
+        let updatedByEmail: string | null = null;
+        try {
+            const meta = await queryWithRetry(
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'smtp'`
+            );
+            const row = meta.rows[0];
+            if (row) {
+                updatedAt = row.updated_at ?? null;
+                if (row.updated_by_user_id) {
+                    const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
+                    updatedByEmail = u.rows[0]?.email ?? null;
+                }
+            }
+        } catch (metaErr: any) {
+            console.warn('[SMTP] integration_settings metadata unavailable:', metaErr?.message || metaErr);
+        }
+        res.json({ ...status, updated_at: updatedAt, updated_by: updatedByEmail });
+    } catch (err: any) {
+        console.error('GET /settings/integrations/smtp error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/integrations/smtp', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const updates: Record<string, string | number | boolean | null> = {};
+
+        const nullableString = (v: unknown): string | null | undefined => {
+            if (v === undefined) return undefined;
+            if (v === null) return null;
+            if (typeof v !== 'string') return undefined;
+            const trimmed = v.trim();
+            return trimmed === '' ? null : trimmed;
+        };
+
+        const host = nullableString(body.host);
+        if (host !== undefined) updates.smtp_host = host;
+        const user = nullableString(body.user);
+        if (user !== undefined) updates.smtp_user = user;
+        // Password is not trimmed on the DB side — but null/empty means clear.
+        if (body.password !== undefined) {
+            if (body.password === null || (typeof body.password === 'string' && body.password === '')) {
+                updates.smtp_password = null;
+            } else if (typeof body.password === 'string') {
+                updates.smtp_password = body.password;
+            }
+        }
+        const fromEmail = nullableString(body.from_email);
+        if (fromEmail !== undefined) updates.smtp_from_email = fromEmail;
+        const fromName = nullableString(body.from_name);
+        if (fromName !== undefined) updates.smtp_from_name = fromName;
+        if (body.port !== undefined) {
+            if (body.port === null || body.port === '') {
+                updates.smtp_port = null;
+            } else {
+                const n = Number(body.port);
+                if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                    return res.status(400).json({ error: 'invalid_port' });
+                }
+                updates.smtp_port = n;
+            }
+        }
+        if (body.secure !== undefined) {
+            if (typeof body.secure !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_secure' });
+            }
+            updates.smtp_secure = body.secure;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+
+        const providedCols = Object.keys(updates);
+        const providedVals = providedCols.map(c => updates[c]);
+        const userId = req.user?.userId ?? null;
+
+        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
+        const insertValues = ['smtp', ...providedVals, userId, new Date()];
+        const updateSet = [
+            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
+            `updated_by_user_id = $${providedCols.length + 2}`,
+            `updated_at = CURRENT_TIMESTAMP`,
+        ].join(', ');
+
+        await queryWithRetry(
+            `INSERT INTO integration_settings (${insertCols.join(', ')})
+             VALUES (${insertPlaceholders})
+             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+            insertValues
+        );
+
+        invalidateSmtpConfigCache();
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                undefined,
+                `Configurazione SMTP aggiornata`
+            );
+        }
+
+        const status = await getSmtpConfigStatus();
+        res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
+    } catch (err: any) {
+        console.error('PUT /settings/integrations/smtp error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Sends a test email to the given recipient (or to smtp_user if omitted) using
+// the currently saved SMTP config. Verifies the transport first so a bad host
+// or bad password fails fast with a clear message.
+app.post('/settings/integrations/smtp/test', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const to = String(req.body?.to ?? '').trim();
+        if (!to || !/@/.test(to)) {
+            return res.status(400).json({ error: 'Indirizzo destinatario mancante o non valido' });
+        }
+        const verify = await verifySmtpConnection();
+        if (!verify.ok) {
+            return res.status(400).json({ error: verify.error || 'Verifica SMTP fallita' });
+        }
+        await sendMail({
+            to,
+            subject: 'Test SMTP RistoManager',
+            text: 'Questo è un messaggio di test dal tuo CRM RistoManager. Se lo hai ricevuto, la configurazione SMTP funziona correttamente.',
+        });
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('POST /settings/integrations/smtp/test error:', err);
+        res.status(500).json({ error: err?.message || 'Test SMTP fallito' });
     }
 });
 

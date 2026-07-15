@@ -639,6 +639,18 @@ export const sendWhatsAppConfirmation = async (
   );
 };
 
+export const sendEmailConfirmation = async (
+  reservationId: number,
+): Promise<{ success: boolean; message: string; channel?: string }> => {
+  return apiRequest<{ success: boolean; message: string; channel?: string }>(
+    `${API_URL}/reservations/${reservationId}/confirm-email`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+    },
+  );
+};
+
 // ============================================
 // OPENING HOURS & SPECIAL CLOSURES
 // ============================================
@@ -754,6 +766,57 @@ export const updateRevolutIntegration = async (
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(updates),
+  });
+};
+
+// ============================================
+// INTEGRATION SETTINGS (SMTP)
+// ============================================
+export interface SmtpIntegrationStatus {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  from_email: string;
+  from_name: string;
+  has_password: boolean;
+  password_last4: string | null;
+  configured: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface SmtpIntegrationUpdate {
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  user?: string;
+  password?: string;
+  from_email?: string;
+  from_name?: string;
+}
+
+export const getSmtpIntegration = async (): Promise<SmtpIntegrationStatus> => {
+  return apiRequest<SmtpIntegrationStatus>(`${API_URL}/settings/integrations/smtp`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateSmtpIntegration = async (
+  updates: SmtpIntegrationUpdate
+): Promise<SmtpIntegrationStatus> => {
+  return apiRequest<SmtpIntegrationStatus>(`${API_URL}/settings/integrations/smtp`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+export const sendSmtpTestEmail = async (to: string): Promise<{ success: boolean }> => {
+  return apiRequest<{ success: boolean }>(`${API_URL}/settings/integrations/smtp/test`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ to }),
   });
 };
 

@@ -1363,6 +1363,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ADD COLUMN IF NOT EXISTS auto_deposit_enabled    BOOLEAN NOT NULL DEFAULT FALSE,
                 ADD COLUMN IF NOT EXISTS auto_deposit_min_guests INTEGER NOT NULL DEFAULT 9;
         `);
+        // SMTP columns share the same table via provider='smtp'. Password is
+        // stored in plaintext (like every other secret on this table). Rows
+        // with provider='revolut' leave these NULL.
+        await client.query(`
+            ALTER TABLE integration_settings
+                ADD COLUMN IF NOT EXISTS smtp_host       TEXT,
+                ADD COLUMN IF NOT EXISTS smtp_port       INTEGER,
+                ADD COLUMN IF NOT EXISTS smtp_secure     BOOLEAN,
+                ADD COLUMN IF NOT EXISTS smtp_user       TEXT,
+                ADD COLUMN IF NOT EXISTS smtp_password   TEXT,
+                ADD COLUMN IF NOT EXISTS smtp_from_email TEXT,
+                ADD COLUMN IF NOT EXISTS smtp_from_name  TEXT;
+        `);
 
         // ============================================
         // OUTBOUND MESSAGES LOG (SMS / WhatsApp)

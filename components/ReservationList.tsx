@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink } from 'lucide-react';
-import { sendWhatsAppConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -1319,19 +1319,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
-  const handleSendEmail = (res: Reservation) => {
-      if (!res.email) {
-          showToast('Email cliente mancante.', 'error');
-          return;
-      }
-      const subject = `Conferma Prenotazione RistoManager - ${new Date(res.reservation_time).toLocaleDateString()}`;
-      const body = `Gentile ${toTitleCase(res.customer_name)},\n\nConfermiamo con piacere la sua prenotazione per:\nData: ${new Date(res.reservation_time).toLocaleDateString()}\nOra: ${new Date(res.reservation_time).toLocaleTimeString()}\nOspiti: ${res.guests}\n\nCordiali saluti,\nRistoManager Team`;
-      
-      const url = `mailto:${res.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.location.href = url;
-      showToast('Client di posta aperto', 'success');
-  };
-  
   const handleSendReminder = (res: Reservation) => {
       if (res.reminder_sent) {
           showToast('Promemoria già inviato per questa prenotazione', 'info');
@@ -1931,8 +1918,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Dispatch a confirmation message on the chosen channel. Called by the
   // picker modal after either a fresh save or a click on the "Invia conferma"
-  // button on the card. Email goes through the mailto: shortcut used elsewhere
-  // in this file; SMS/WhatsApp hit the backend.
+  // button on the card. All three channels hit the backend now — email uses
+  // the SMTP config from Impostazioni.
   const handlePickConfirmationChannel = async (channel: 'sms' | 'whatsapp' | 'email') => {
       const target = confirmationPicker?.reservation;
       if (!target) return;
@@ -1943,9 +1930,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               showToast('Email cliente mancante.', 'error');
               return;
           }
-          handleSendEmail(target);
-          setConfirmationPicker(null);
-          if (fromSave) setIsFormOpen(false);
+          if (!target.id) {
+              showToast('Prenotazione non ancora salvata.', 'error');
+              return;
+          }
+          try {
+              setSendingConfirmation('email');
+              await sendEmailConfirmation(target.id);
+              showToast(`Conferma email inviata a ${toTitleCase(target.customer_name)}`, 'success');
+              setConfirmationPicker(null);
+              if (fromSave) setIsFormOpen(false);
+          } catch (err: any) {
+              console.error('Errore invio conferma email:', err);
+              showToast(err?.message || 'Errore invio conferma email', 'error');
+          } finally {
+              setSendingConfirmation(null);
+          }
           return;
       }
 
