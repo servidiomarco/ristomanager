@@ -9639,6 +9639,10 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 });
 
 app.get('/prenota', (_req, res) => {
+    // Force browsers to revalidate the HTML on every visit — otherwise a form
+    // change (e.g. adding a new field) can stay invisible for days behind the
+    // default sendFile caching.
+    res.set('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
