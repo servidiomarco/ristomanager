@@ -8555,14 +8555,27 @@ app.post('/settings/integrations/smtp/test', authenticate, requirePermission('se
         }
         const verify = await verifySmtpConnection();
         if (!verify.ok) {
+            console.warn('[SMTP] verify failed before test send:', verify.error);
             return res.status(400).json({ error: verify.error || 'Verifica SMTP fallita' });
         }
-        await sendMail({
-            to,
-            subject: 'Test SMTP RistoManager',
-            text: 'Questo è un messaggio di test dal tuo CRM RistoManager. Se lo hai ricevuto, la configurazione SMTP funziona correttamente.',
-        });
-        res.json({ success: true });
+        try {
+            const info = await sendMail({
+                to,
+                subject: 'Test SMTP RistoManager',
+                text: 'Questo è un messaggio di test dal tuo CRM RistoManager. Se lo hai ricevuto, la configurazione SMTP funziona correttamente.',
+            });
+            console.log('[SMTP] test email sent:', { to, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected });
+            res.json({ success: true });
+        } catch (sendErr: any) {
+            console.error('[SMTP] test sendMail failed:', {
+                message: sendErr?.message,
+                code: sendErr?.code,
+                command: sendErr?.command,
+                response: sendErr?.response,
+                responseCode: sendErr?.responseCode,
+            });
+            res.status(500).json({ error: sendErr?.message || 'Invio email di test fallito' });
+        }
     } catch (err: any) {
         console.error('POST /settings/integrations/smtp/test error:', err);
         res.status(500).json({ error: err?.message || 'Test SMTP fallito' });
