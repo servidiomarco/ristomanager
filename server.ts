@@ -258,9 +258,9 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
             : null;
         const updated = await queryWithRetry(
             `UPDATE reservations
-             SET confirmation_status = $1,
+             SET confirmation_status = $1::text,
                  confirmation_delivered_at = CASE
-                     WHEN $1 = 'delivered' AND confirmation_delivered_at IS NULL
+                     WHEN $1::text = 'delivered' AND confirmation_delivered_at IS NULL
                          THEN CURRENT_TIMESTAMP
                      ELSE confirmation_delivered_at
                  END,
@@ -279,14 +279,14 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
         try {
             await queryWithRetry(
                 `UPDATE outbound_messages
-                 SET status = $1,
+                 SET status = $1::text,
                      delivered_at = CASE
-                         WHEN $1 = 'delivered' AND delivered_at IS NULL
+                         WHEN $1::text = 'delivered' AND delivered_at IS NULL
                              THEN CURRENT_TIMESTAMP
                          ELSE delivered_at
                      END,
                      failed_at = CASE
-                         WHEN $1 IN ('failed', 'undelivered') AND failed_at IS NULL
+                         WHEN $1::text IN ('failed', 'undelivered') AND failed_at IS NULL
                              THEN CURRENT_TIMESTAMP
                          ELSE failed_at
                      END,
