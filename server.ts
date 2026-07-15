@@ -6987,15 +6987,22 @@ async function sendBookingConfirmation(
     text: string,
     reservationId?: number | null
 ): Promise<OutboundConfirmationResult> {
+    // Try WA first only when Twilio WA is properly configured. Vonage is a
+    // deprecated sandbox that would generate noisy failed sends per booking,
+    // so skip it entirely — if TWILIO_WHATSAPP_FROM is unset we go straight
+    // to SMS.
+    const tryWhatsApp = isTwilioWhatsAppConfigured();
     let result: OutboundConfirmationResult;
     try {
-        result = await sendWhatsAppText(to, text, reservationId);
-    } catch (waErr: any) {
-        if (isTwilioSmsConfigured()) {
-            console.warn('[confirmation] WA send failed, falling back to SMS:', waErr?.message || waErr);
+        result = tryWhatsApp
+            ? await sendWhatsAppText(to, text, reservationId)
+            : await sendTwilioSms(to, text, reservationId);
+    } catch (err: any) {
+        if (tryWhatsApp && isTwilioSmsConfigured()) {
+            console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
             result = await sendTwilioSms(to, text, reservationId);
         } else {
-            throw waErr;
+            throw err;
         }
     }
     if (reservationId != null) {
