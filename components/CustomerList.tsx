@@ -76,6 +76,77 @@ const formatReservationDateTime = (isoString: string): { date: string; time: str
   return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
 };
 
+// Lowercase + strip diacritics so "cafe" matches "Café" and "d'onofrio"
+// matches "D'Onofrio". NFD decomposes accented chars into base+combining,
+// then we drop the combining marks (U+0300–U+036F).
+const foldText = (s: string): string =>
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+// Levenshtein distance with an early-exit cap. Rows of the DP table are
+// aborted when the running minimum exceeds `limit`, so this stays O(len*limit)
+// in practice — plenty fast for the ~10-char customer names we search.
+const editDistance = (a: string, b: string, limit: number): number => {
+  if (a === b) return 0;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > limit) return limit + 1;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  let prev = new Array<number>(lb + 1);
+  let curr = new Array<number>(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= lb; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > limit) return limit + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[lb];
+};
+
+// Fuzzy score for matching `term` against a customer's `name`. Higher is
+// better; 0 means no match. Rules (in priority order):
+//   100 — name starts with term (best: "Mario" for "mar")
+//    80 — a word inside the name starts with term ("Rossi" in "Mario Rossi")
+//    60 — term appears anywhere as a substring
+//    40 — all chars of term appear in order in name (subsequence: "mrs"→"Mario Rossi")
+//    30-  — term is a small edit distance from a word (typo tolerance,
+//            scales with word length so "rosi" still finds "rossi").
+// Both strings are pre-folded (no diacritics, lowercase).
+const fuzzyNameScore = (nameFolded: string, termFolded: string): number => {
+  if (!termFolded) return 0;
+  if (nameFolded.startsWith(termFolded)) return 100;
+  const words = nameFolded.split(/\s+/).filter(Boolean);
+  for (const w of words) {
+    if (w !== nameFolded && w.startsWith(termFolded)) return 80;
+  }
+  if (nameFolded.includes(termFolded)) return 60;
+  // Subsequence check
+  let ti = 0;
+  for (let i = 0; i < nameFolded.length && ti < termFolded.length; i++) {
+    if (nameFolded.charCodeAt(i) === termFolded.charCodeAt(ti)) ti++;
+  }
+  if (ti === termFolded.length) return 40;
+  // Typo tolerance per word: allow ~1 edit per 4 chars, min 1.
+  const maxDist = Math.max(1, Math.floor(termFolded.length / 4));
+  let bestDist = maxDist + 1;
+  for (const w of words) {
+    const d = editDistance(w, termFolded, maxDist);
+    if (d < bestDist) bestDist = d;
+  }
+  if (bestDist <= maxDist) return Math.max(1, 30 - bestDist * 5);
+  return 0;
+};
+
 export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tables, rooms, showToast, autoOpenNew, onAutoOpenNewHandled, autoEditByPhone, onAutoEditHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
@@ -240,16 +311,35 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     return t ? t.name : `Tav. ${id}`;
   };
 
+  const trimmedSearch = search.trim();
+  const isSearching = trimmedSearch.length > 0;
+
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    const list = !term
-      ? customers
-      : customers.filter(c => {
-          const haystack = [c.name, c.phone, c.email, c.city].filter(Boolean).join(' ').toLowerCase();
-          return haystack.includes(term);
-        });
-    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }));
-  }, [customers, search]);
+    if (!isSearching) {
+      return [...customers].sort((a, b) =>
+        a.name.localeCompare(b.name, 'it', { sensitivity: 'base' })
+      );
+    }
+    const term = foldText(trimmedSearch);
+    // Score everyone, keep positives, sort by score DESC then alphabetically.
+    // Name uses fuzzy scoring; phone/email/city fall back to substring so
+    // typing a phone fragment still works as before.
+    const scored: { c: Customer; score: number }[] = [];
+    for (const c of customers) {
+      const nameFolded = foldText(c.name || '');
+      let score = fuzzyNameScore(nameFolded, term);
+      if (score === 0) {
+        const others = foldText([c.phone, c.email, c.city].filter(Boolean).join(' '));
+        if (others.includes(term)) score = 20;
+      }
+      if (score > 0) scored.push({ c, score });
+    }
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.c.name.localeCompare(b.c.name, 'it', { sensitivity: 'base' });
+    });
+    return scored.map(s => s.c);
+  }, [customers, trimmedSearch, isSearching]);
 
   // Bucket customers by initial. Non-letter first characters (numbers,
   // symbols) collapse under '#'. Empty names are safe: charAt(0) → ''.
@@ -397,33 +487,35 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         )}
       </div>
 
-      {/* Horizontal alphabet index. Tap a letter to jump to its section.
-          Letters with no customers are shown but non-interactive so the
-          user can see which initials exist at a glance. Scrolls horizontally
-          on narrow screens; the whole strip is a single row. */}
-      <div className="mb-4 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex items-center gap-0.5 min-w-max">
-          {ALPHABET.map(letter => {
-            const has = groupedByLetter.has(letter);
-            return (
-              <button
-                key={letter}
-                type="button"
-                onClick={() => has && jumpToLetter(letter)}
-                disabled={!has}
-                aria-label={has ? `Vai alla lettera ${letter}` : `Nessun cliente con lettera ${letter}`}
-                className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
-                  has
-                    ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
-                    : 'text-slate-300 dark:text-slate-600 cursor-default'
-                }`}
-              >
-                {letter}
-              </button>
-            );
-          })}
+      {/* Horizontal alphabet index. Hidden during search since results are
+          sorted by relevance, not alphabetically. Tap a letter to jump to
+          its section; letters without customers are shown but disabled so
+          the user sees at a glance which initials exist. */}
+      {!isSearching && (
+        <div className="mb-4 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center gap-0.5 min-w-max">
+            {ALPHABET.map(letter => {
+              const has = groupedByLetter.has(letter);
+              return (
+                <button
+                  key={letter}
+                  type="button"
+                  onClick={() => has && jumpToLetter(letter)}
+                  disabled={!has}
+                  aria-label={has ? `Vai alla lettera ${letter}` : `Nessun cliente con lettera ${letter}`}
+                  className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
+                    has
+                      ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
+                      : 'text-slate-300 dark:text-slate-600 cursor-default'
+                  }`}
+                >
+                  {letter}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="p-3 mb-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">{error}</div>
@@ -537,6 +629,16 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               </div>
             );
           };
+
+          if (isSearching) {
+            // Search mode: flat list ordered by relevance. No section
+            // headers because letters lose meaning when sorted by score.
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filtered.map(renderCard)}
+              </div>
+            );
+          }
 
           const sortedLetters = Array.from(groupedByLetter.keys()).sort((a, b) => {
             if (a === '#') return 1;
