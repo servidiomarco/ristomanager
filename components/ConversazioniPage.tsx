@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
-  BookUser, Send,
+  BookUser, Send, ArrowDownAZ, History,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -581,6 +581,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   // row. "to-contact" and "contacted" imply the call has no reservation —
   // the backend translates this into linked=false + follow_up=<state>.
   const [statusFilter, setStatusFilter] = useState<'all' | 'linked' | 'to-contact' | 'contacted'>('all');
+  const [sortMode, setSortMode] = useState<'recent' | 'alpha'>('recent');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
@@ -598,7 +599,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     setLoading(true);
     setError(null);
     try {
-      const params: VoiceCallsListParams = { limit: 100 };
+      // Fetch the full server cap so alphabetical browsing has enough rows to
+      // navigate without paging.
+      const params: VoiceCallsListParams = { limit: 200 };
       if (searchDebounced.trim()) params.q = searchDebounced.trim();
       if (statusFilter === 'linked') {
         params.linked = 'true';
@@ -646,6 +649,50 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   // return more rows than the chip advertises (e.g. before the follow_up
   // param is redeployed). Once the server catches up, both counts match.
   const displayedCount = statusFilter === 'all' ? total : visibleItems.length;
+
+  // Bucket for alphabetical grouping. Numbers/symbols (calls with only a
+  // phone number, no linked customer name) collapse under '#'.
+  const bucketFor = (item: VoiceCallSummary): string => {
+    const name = (item.customer_name || '').trim();
+    if (name) {
+      const first = name.charAt(0).toUpperCase();
+      if (/[A-Z]/.test(first)) return first;
+    }
+    return '#';
+  };
+
+  const alphaGroups = useMemo(() => {
+    if (sortMode !== 'alpha') return null;
+    const sorted = [...visibleItems].sort((a, b) => {
+      const na = (a.customer_name || a.phone || '').trim();
+      const nb = (b.customer_name || b.phone || '').trim();
+      // Numeric-only entries go last, so "Mario" comes before "+3934...".
+      const aNum = !a.customer_name;
+      const bNum = !b.customer_name;
+      if (aNum !== bNum) return aNum ? 1 : -1;
+      return na.localeCompare(nb, 'it', { sensitivity: 'base' });
+    });
+    const map = new Map<string, VoiceCallSummary[]>();
+    for (const item of sorted) {
+      const key = bucketFor(item);
+      const arr = map.get(key);
+      if (arr) arr.push(item);
+      else map.set(key, [item]);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === '#') return 1;
+      if (b === '#') return -1;
+      return a.localeCompare(b);
+    });
+  }, [visibleItems, sortMode]);
+
+  const scrollToLetter = useCallback((letter: string) => {
+    const el = document.getElementById(`conv-letter-${letter}`);
+    if (!el) return;
+    // Offset so the sticky header doesn't hide under the top of the viewport.
+    const y = el.getBoundingClientRect().top + window.pageYOffset - 8;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }, []);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -726,27 +773,57 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 )}
               </div>
 
-              {/* Quick filter chips — scrolls horizontally on narrow screens */}
-              <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {statusChips.map(({ v, l, dot }) => {
-                  const active = statusFilter === v;
-                  return (
-                    <button
-                      key={v}
-                      onClick={() => setStatusFilter(v)}
-                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
-                        active
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                          : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)]'
-                      }`}
-                    >
-                      {dot && (
-                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-white/90' : dot}`} />
-                      )}
-                      {l}
-                    </button>
-                  );
-                })}
+              {/* Quick filter chips + sort mode toggle. Chips scroll
+                  horizontally on narrow screens; the sort toggle stays
+                  pinned on the right. */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {statusChips.map(({ v, l, dot }) => {
+                    const active = statusFilter === v;
+                    return (
+                      <button
+                        key={v}
+                        onClick={() => setStatusFilter(v)}
+                        className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
+                          active
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)]'
+                        }`}
+                      >
+                        {dot && (
+                          <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-white/90' : dot}`} />
+                        )}
+                        {l}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="shrink-0 flex items-center gap-0.5 rounded-lg border border-[var(--color-line)] p-0.5 bg-[var(--color-bg)]">
+                  <button
+                    onClick={() => setSortMode('recent')}
+                    className={`inline-flex items-center justify-center h-6 w-7 rounded-md transition-colors ${
+                      sortMode === 'recent'
+                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                    }`}
+                    aria-label="Ordina per data"
+                    title="Ordina per data (più recenti)"
+                  >
+                    <History className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSortMode('alpha')}
+                    className={`inline-flex items-center justify-center h-6 w-7 rounded-md transition-colors ${
+                      sortMode === 'alpha'
+                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                    }`}
+                    aria-label="Ordina alfabeticamente"
+                    title="Ordina alfabeticamente (A-Z)"
+                  >
+                    <ArrowDownAZ className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Period + count + reset */}
@@ -818,8 +895,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {visibleItems.map(item => {
+          (() => {
+            const renderCallRow = (item: VoiceCallSummary) => {
               const resBadge = reservationStatusBadge(item.reservation_status);
               return (
                 <button
@@ -875,10 +952,62 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                   )}
                 </button>
               );
-            })}
-          </div>
+            };
+
+            if (sortMode === 'alpha' && alphaGroups) {
+              return (
+                <div className="space-y-4">
+                  {alphaGroups.map(([letter, group]) => (
+                    <section key={letter}>
+                      <div
+                        id={`conv-letter-${letter}`}
+                        className="sticky top-0 z-[1] -mx-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-muted)] bg-[var(--color-bg)]/95 backdrop-blur-sm border-b border-[var(--color-line)] mb-2 flex items-center gap-2"
+                      >
+                        <span className="inline-flex items-center justify-center h-5 min-w-5 px-1 rounded-md bg-indigo-600 text-white text-[10px]">
+                          {letter}
+                        </span>
+                        <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">
+                          {group.length} conversazion{group.length === 1 ? 'e' : 'i'}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {group.map(renderCallRow)}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-2">
+                {visibleItems.map(renderCallRow)}
+              </div>
+            );
+          })()
         )}
       </div>
+
+      {/* Vertical alphabet index — only in A-Z mode. Fixed to the right of
+          the viewport so it follows scroll; tap a letter to jump to that
+          section. Positioned above the bottom nav on mobile. */}
+      {sortMode === 'alpha' && alphaGroups && alphaGroups.length > 0 && !loading && (
+        <nav
+          aria-label="Salta alla lettera"
+          className="fixed right-1 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-px py-1 px-0.5 rounded-full bg-[var(--color-surface)]/90 backdrop-blur-sm shadow-sm border border-[var(--color-line)] max-h-[70vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {alphaGroups.map(([letter]) => (
+            <button
+              key={letter}
+              onClick={() => scrollToLetter(letter)}
+              className="text-[10px] font-semibold text-[var(--color-fg-muted)] hover:text-white hover:bg-indigo-600 w-5 h-5 rounded-full flex items-center justify-center tabular leading-none transition-colors"
+              aria-label={`Vai alla lettera ${letter}`}
+            >
+              {letter}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {selectedId !== null && (
         <DetailModal
