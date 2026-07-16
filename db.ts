@@ -1466,6 +1466,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_message_id ON outbound_messages(message_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_in_reply_to ON outbound_messages(in_reply_to);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_from_email ON outbound_messages(lower(from_email));`);
+        // Inbound SMS/WhatsApp support. Symmetric to to_phone/to_phone_digits:
+        // outbound rows leave these NULL, inbound rows carry the sender number.
+        // The digits index lets the inbox group all messages to/from the same
+        // customer regardless of direction.
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS from_phone VARCHAR(30);`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS from_phone_digits VARCHAR(20);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_from_phone_digits ON outbound_messages(from_phone_digits);`);
+        // `read_at` is set when an operator marks an inbound message read via
+        // the inbox UI. Outbound rows leave it NULL.
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;`);
 
         // ============================================
         // RESERVATION NOTE PRESETS

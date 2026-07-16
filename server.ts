@@ -162,8 +162,16 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
             messageText = req.body.message.content.text;
         }
 
-        if (messageText) {
-            await processWhatsAppBooking(from, messageText);
+        if (messageText && from) {
+            // Vonage sandbox is deprecated but any inbound still lands here.
+            // Persist for the inbox — no auto-reply (see Twilio webhook note).
+            const row = await logInboundMessage({
+                provider: 'vonage', channel: 'whatsapp',
+                from: String(from), to: '', body: String(messageText),
+            });
+            if (row && socketService) {
+                socketService.broadcastToAll('message:inbound', row);
+            }
         } else {
             console.log('[Vonage] Non-text message received, ignoring');
         }
@@ -214,7 +222,11 @@ function validateTwilioSignature(req: express.Request): boolean {
     }
 }
 
-// Twilio WhatsApp inbound messages webhook
+// Twilio WhatsApp inbound messages webhook. Persists the inbound row into
+// outbound_messages (direction='inbound') and broadcasts it via socket so the
+// operator inbox can show it in real time. Deliberately NO auto-reply: the
+// old bot that tried to parse "DATA ORA OSPITI NOME" was misleading for
+// customers replying to a confirmation ("Ok perfetto") and has been retired.
 app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
     if (!validateTwilioSignature(req)) {
         console.warn('[Twilio] Inbound: invalid signature, rejecting');
@@ -225,16 +237,27 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
     res.set('Content-Type', 'text/xml').status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
     try {
-        const from = String(req.body?.From || '').replace(/^whatsapp:/, '');
+        const fromRaw = String(req.body?.From || '');
+        const toRaw = String(req.body?.To || '');
+        const from = fromRaw.replace(/^whatsapp:/, '');
+        const to = toRaw.replace(/^whatsapp:/, '');
         const body = String(req.body?.Body || '').trim();
+        const sid = req.body?.MessageSid || req.body?.SmsMessageSid || null;
+        const isWhatsApp = fromRaw.startsWith('whatsapp:');
+        const channel: 'sms' | 'whatsapp' = isWhatsApp ? 'whatsapp' : 'sms';
         const numMedia = Number(req.body?.NumMedia || 0);
         if (numMedia > 0) {
-            console.log('[Twilio] Inbound has media attachments — processing text only');
+            console.log('[Twilio] Inbound has media attachments — text-only recorded');
         }
-        if (from && body) {
-            await processWhatsAppBooking(from, body);
-        } else {
+        if (!from || !body) {
             console.log('[Twilio] Inbound: missing From or empty Body, ignoring');
+            return;
+        }
+        const row = await logInboundMessage({
+            provider: 'twilio', channel, from, to, body, sid,
+        });
+        if (row && socketService) {
+            socketService.broadcastToAll('message:inbound', row);
         }
     } catch (error) {
         console.error('[Twilio] Error processing inbound:', error);
@@ -7696,6 +7719,47 @@ async function logOutboundMessage(params: {
         );
     } catch (err: any) {
         console.warn('[outbound-log] insert failed:', err?.message || err);
+    }
+}
+
+// Inbound SMS/WhatsApp persistence. Symmetric to logOutboundMessage but
+// with from_phone(_digits) carrying the sender and to_phone(_digits) carrying
+// our own number. Returns the inserted row so the caller can broadcast it via
+// socket for the inbox UI. `to` is the account number the customer wrote to
+// (e.g. our whatsapp:+39389…). Errors are logged but never thrown — a logging
+// failure must not swallow the message.
+async function logInboundMessage(params: {
+    provider: 'twilio' | 'vonage' | 'meta';
+    channel: 'sms' | 'whatsapp';
+    from: string;
+    to: string;
+    body: string;
+    sid?: string | null;
+}): Promise<any | null> {
+    try {
+        const fromDigits = String(params.from).replace(/\D/g, '');
+        const toDigits = String(params.to).replace(/\D/g, '');
+        const result = await queryWithRetry(
+            `INSERT INTO outbound_messages
+             (provider, channel, direction, from_phone, from_phone_digits,
+              to_phone, to_phone_digits, body, status, provider_sid)
+             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8)
+             RETURNING *`,
+            [
+                params.provider,
+                params.channel,
+                params.from,
+                fromDigits,
+                params.to,
+                toDigits,
+                params.body,
+                params.sid ?? null,
+            ]
+        );
+        return result.rows[0] ?? null;
+    } catch (err: any) {
+        console.warn('[inbound-log] insert failed:', err?.message || err);
+        return null;
     }
 }
 
