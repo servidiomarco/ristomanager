@@ -209,50 +209,32 @@ const App: React.FC = () => {
     if (!isAuthenticated || !canSeeMessages) return;
     let cancelled = false;
     const refresh = () => {
-      console.log('[badge] fetching /messages/unread-count');
       messagesApiService.unreadCount()
-        .then(({ count }) => {
-          console.log('[badge] /messages/unread-count =', count);
-          if (!cancelled) setMessagesUnreadCount(count);
-        })
-        .catch((err) => { console.warn('[badge] unread-count failed:', err); });
+        .then(({ count }) => { if (!cancelled) setMessagesUnreadCount(count); })
+        .catch(() => {});
     };
     refresh();
+    const onEvent = () => refresh();
 
-    // Increment optimistically on inbound (server COUNT DISTINCT would only
-    // bump when the *first* unread message for a thread arrives, so we
-    // reconcile with a fetch on any subsequent event too). Outbound doesn't
-    // change unread, but we refresh on 'read' to sync down.
-    const onInbound = () => {
-      console.log('[badge] socket message:inbound received');
-      refresh();
-    };
-    const onRead = () => {
-      console.log('[badge] socket message:read received');
-      refresh();
-    };
-
+    // Re-attach on socket reconnect: if this effect runs before Socket.IO
+    // finishes connecting, `getSocket()` returns null and a plain socket.on
+    // would silently no-op. Subscribing via onSocketChange also handles the
+    // reconnect case (mobile background wake, network flap).
     let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attachedSocket === s) return;
       if (attachedSocket) {
-        attachedSocket.off('message:inbound', onInbound);
-        attachedSocket.off('message:read', onRead);
+        attachedSocket.off('message:inbound', onEvent);
+        attachedSocket.off('message:read', onEvent);
       }
       attachedSocket = s;
       if (attachedSocket) {
-        console.log('[badge] attaching socket listeners, socket id =', attachedSocket.id);
-        attachedSocket.on('message:inbound', onInbound);
-        attachedSocket.on('message:read', onRead);
-      } else {
-        console.log('[badge] no socket to attach yet');
+        attachedSocket.on('message:inbound', onEvent);
+        attachedSocket.on('message:read', onEvent);
       }
     };
     attach(socketClient.getSocket());
-    const unsubSocket = socketClient.onSocketChange((s) => {
-      console.log('[badge] socket change, connected:', s?.connected);
-      attach(s);
-    });
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
 
     const onFocus = () => refresh();
     window.addEventListener('focus', onFocus);

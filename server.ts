@@ -2526,13 +2526,12 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
     }
 });
 
-// Distinct threads with at least one unread inbound. Powers the sidebar badge
-// on the "Messaggi" nav item — cheap enough to poll and to refresh on every
-// message:inbound socket event.
+// Total unread inbound messages. Same number the InboxPage's header shows
+// (sum of unread_count across all conversations) so both badges agree.
 app.get('/messages/unread-count', authenticate, requirePermission('reservations:view'), async (_req, res) => {
     try {
         const result = await queryWithRetry(`
-            SELECT COUNT(DISTINCT right(from_phone_digits, 10))::int AS count
+            SELECT COUNT(*)::int AS count
             FROM outbound_messages
             WHERE direction = 'inbound'
               AND channel IN ('sms','whatsapp')
@@ -2574,16 +2573,25 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
     try {
         const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
-        await queryWithRetry(
+        const updated = await queryWithRetry(
             `UPDATE outbound_messages
              SET read_at = CURRENT_TIMESTAMP
              WHERE direction = 'inbound'
                AND read_at IS NULL
                AND channel IN ('sms','whatsapp')
-               AND right(from_phone_digits, 10) = $1::text`,
+               AND right(from_phone_digits, 10) = $1::text
+             RETURNING id`,
             [key]
         );
-        res.json({ ok: true });
+        // Broadcast so every open CRM tab (this operator and any other) can
+        // decrement its nav badge without a re-fetch.
+        if (updated.rows.length > 0 && socketService) {
+            socketService.broadcastToAll('message:read', {
+                phone_digits: key,
+                count: updated.rows.length,
+            });
+        }
+        res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /messages/conversations/:phoneDigits/read error:', err);
         res.status(500).json({ error: 'Internal server error' });
