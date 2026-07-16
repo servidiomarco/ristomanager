@@ -35,6 +35,7 @@ import {
     invalidateSmtpConfigCache,
     sendMail,
     verifySmtpConnection,
+    getResendInboundContext,
 } from './services/smtpService.js';
 import {
     verifyElevenLabsSignature,
@@ -311,6 +312,263 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
 });
 
 // ============================================
+// RESEND INBOUND EMAIL WEBHOOK
+// ============================================
+// Resend delivers each reply from a customer as an `email.received` event to
+// this endpoint. Payload only carries metadata (from, to, subject, message_id,
+// in_reply_to via headers) — the body must be fetched separately via the
+// Received Emails API. We match the reply to a reservation using, in order:
+//   1) In-Reply-To → the outbound message_id we saved when we sent
+//   2) any Message-ID in References that we recognise (deep threads)
+//   3) sender email → most recent reservation with that email
+// Signature is verified with the Svix headers Resend attaches (svix-id,
+// svix-timestamp, svix-signature). Secret is stored in integration_settings
+// (resend_inbound_secret) so the operator can rotate it from Impostazioni.
+
+function verifySvixSignature(
+    rawBody: Buffer | string,
+    headers: Record<string, string | string[] | undefined>,
+    secret: string
+): boolean {
+    if (!secret) return false;
+    const idHeader = String(headers['svix-id'] ?? '');
+    const tsHeader = String(headers['svix-timestamp'] ?? '');
+    const sigHeader = String(headers['svix-signature'] ?? '');
+    if (!idHeader || !tsHeader || !sigHeader) return false;
+
+    // Timestamp tolerance: 5 minutes on either side, same window as Svix's
+    // reference implementation. Rejects replayed requests older than that.
+    const tsNum = Number(tsHeader);
+    if (!Number.isFinite(tsNum)) return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - tsNum) > 5 * 60) return false;
+
+    // Secrets come as `whsec_<base64>`; strip prefix and base64-decode to raw
+    // bytes for the HMAC key. Missing prefix is tolerated for defensive coding.
+    const keyPart = secret.startsWith('whsec_') ? secret.slice('whsec_'.length) : secret;
+    let keyBytes: Buffer;
+    try { keyBytes = Buffer.from(keyPart, 'base64'); } catch { return false; }
+    if (keyBytes.length === 0) return false;
+
+    const bodyStr = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
+    const signedPayload = `${idHeader}.${tsHeader}.${bodyStr}`;
+    const expectedB64 = crypto.createHmac('sha256', keyBytes).update(signedPayload).digest('base64');
+    const expectedBuf = Buffer.from(expectedB64, 'utf8');
+
+    // sigHeader is a space-separated list of `v1,<sig>` entries; accept if any matches.
+    for (const entry of sigHeader.split(' ')) {
+        const [ver, sig] = entry.split(',');
+        if (ver !== 'v1' || !sig) continue;
+        const sigBuf = Buffer.from(sig, 'utf8');
+        if (sigBuf.length !== expectedBuf.length) continue;
+        if (crypto.timingSafeEqual(sigBuf, expectedBuf)) return true;
+    }
+    return false;
+}
+
+interface ResendReceivedEmail {
+    id: string;
+    from: string;
+    to: string[] | null;
+    cc: string[] | null;
+    bcc: string[] | null;
+    reply_to: string[] | null;
+    subject: string | null;
+    text: string | null;
+    html: string | null;
+    headers: Record<string, string | string[]> | null;
+    message_id: string | null;
+    created_at: string | null;
+}
+
+// Fetches the full email (body + headers) that a webhook only referenced by id.
+async function fetchResendReceivedEmail(id: string, apiKey: string): Promise<ResendReceivedEmail | null> {
+    try {
+        const r = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(id)}`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        if (!r.ok) {
+            const t = await r.text();
+            console.warn(`[Resend-inbound] fetch ${id} failed: ${r.status} ${t.slice(0, 200)}`);
+            return null;
+        }
+        return (await r.json()) as ResendReceivedEmail;
+    } catch (err: any) {
+        console.warn('[Resend-inbound] fetch error:', err?.message || err);
+        return null;
+    }
+}
+
+// Pull a single header value in a case-insensitive way from Resend's headers
+// object. Values can be strings or arrays; we return the first non-empty.
+function pickHeader(headers: Record<string, string | string[]> | null | undefined, name: string): string | null {
+    if (!headers) return null;
+    const target = name.toLowerCase();
+    for (const [k, v] of Object.entries(headers)) {
+        if (k.toLowerCase() !== target) continue;
+        if (Array.isArray(v)) {
+            const first = v.find(x => typeof x === 'string' && x.trim().length > 0);
+            return first ? String(first).trim() : null;
+        }
+        return typeof v === 'string' ? v.trim() : null;
+    }
+    return null;
+}
+
+// The `From:` header is often `Name <addr@domain>` — extract the bare address.
+function parseFromAddress(from: string | null | undefined): string | null {
+    if (!from) return null;
+    const m = String(from).match(/<([^>]+)>/);
+    return (m ? m[1] : String(from)).trim().toLowerCase();
+}
+
+// Split the References header (space-separated Message-IDs) into individual ids.
+function splitReferences(refs: string | null): string[] {
+    if (!refs) return [];
+    return refs
+        .split(/\s+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+// Given the Message-IDs from a reply's In-Reply-To / References headers, find
+// the reservation those Message-IDs belong to. Returns null when no match.
+async function resolveReservationByMessageIds(candidateIds: string[]): Promise<number | null> {
+    const ids = candidateIds.filter(Boolean);
+    if (ids.length === 0) return null;
+    try {
+        const r = await queryWithRetry(
+            `SELECT reservation_id
+             FROM outbound_messages
+             WHERE message_id = ANY($1::text[]) AND reservation_id IS NOT NULL
+             ORDER BY sent_at DESC
+             LIMIT 1`,
+            [ids]
+        );
+        return r.rows[0]?.reservation_id ?? null;
+    } catch (err: any) {
+        console.warn('[Resend-inbound] resolve-by-message-id failed:', err?.message || err);
+        return null;
+    }
+}
+
+// Fallback resolver: match sender's email against a recent reservation.
+async function resolveReservationByFromEmail(fromEmail: string | null): Promise<number | null> {
+    if (!fromEmail) return null;
+    try {
+        const r = await queryWithRetry(
+            `SELECT id
+             FROM reservations
+             WHERE lower(email) = lower($1)
+             ORDER BY reservation_time DESC
+             LIMIT 1`,
+            [fromEmail]
+        );
+        return r.rows[0]?.id ?? null;
+    } catch (err: any) {
+        console.warn('[Resend-inbound] resolve-by-from failed:', err?.message || err);
+        return null;
+    }
+}
+
+app.post('/webhook/resend-inbound', async (req, res) => {
+    const context = await getResendInboundContext();
+    if (!context) {
+        console.warn('[Resend-inbound] not configured (missing api key or webhook secret)');
+        return res.status(503).json({ error: 'inbound_not_configured' });
+    }
+
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+    if (!rawBody) {
+        console.warn('[Resend-inbound] missing raw body');
+        return res.status(400).json({ error: 'missing_body' });
+    }
+
+    if (!verifySvixSignature(rawBody, req.headers as any, context.signingSecret)) {
+        console.warn('[Resend-inbound] invalid signature, rejecting');
+        return res.status(401).json({ error: 'invalid_signature' });
+    }
+
+    // Ack fast so Resend does not retry the webhook while we're still working.
+    res.status(200).json({ ok: true });
+
+    try {
+        const payload = req.body ?? {};
+        if (payload?.type !== 'email.received' || !payload?.data?.email_id) {
+            console.log('[Resend-inbound] ignoring event:', payload?.type);
+            return;
+        }
+        const emailId = String(payload.data.email_id);
+
+        const full = await fetchResendReceivedEmail(emailId, context.apiKey);
+        if (!full) {
+            console.warn('[Resend-inbound] could not retrieve full email', emailId);
+            return;
+        }
+
+        const fromEmail = parseFromAddress(full.from);
+        const inReplyTo = pickHeader(full.headers, 'In-Reply-To');
+        const referenceIds = splitReferences(pickHeader(full.headers, 'References'));
+        const messageId = full.message_id || pickHeader(full.headers, 'Message-ID');
+
+        // Try In-Reply-To first (most reliable), then walk References (older
+        // clients quote the entire thread), then fall back to sender lookup.
+        const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
+        let reservationId = await resolveReservationByMessageIds(candidateIds);
+        if (!reservationId) {
+            reservationId = await resolveReservationByFromEmail(fromEmail);
+        }
+        if (!reservationId) {
+            console.warn('[Resend-inbound] unmatched reply from', fromEmail, 'subject:', full.subject);
+        }
+
+        // Body: prefer plain text so the timeline renders cleanly; fall back to
+        // the HTML with tags stripped when the sender only sent HTML.
+        const body = full.text?.trim()
+            || (full.html ? String(full.html).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '')
+            || '(email vuota)';
+        const subject = full.subject?.trim() || '(senza oggetto)';
+        const toEmail = Array.isArray(full.to) && full.to.length > 0 ? String(full.to[0]) : null;
+
+        let insertedRow: any = null;
+        try {
+            const insert = await queryWithRetry(
+                `INSERT INTO outbound_messages
+                    (provider, channel, direction, from_email, to_email, subject, body, status,
+                     provider_sid, message_id, in_reply_to, reservation_id, sent_at)
+                 VALUES ('resend', 'email', 'inbound', $1, $2, $3, $4, 'received',
+                         $5, $6, $7, $8, COALESCE($9::timestamptz, CURRENT_TIMESTAMP))
+                 RETURNING id, provider, channel, direction, from_email, to_email, subject, body, status,
+                           provider_sid, message_id, in_reply_to, reservation_id, sent_at,
+                           delivered_at, failed_at, error_code, error_message, to_phone`,
+                [
+                    fromEmail,
+                    toEmail,
+                    subject,
+                    body,
+                    emailId,
+                    messageId,
+                    inReplyTo,
+                    reservationId,
+                    full.created_at,
+                ]
+            );
+            insertedRow = insert.rows[0] ?? null;
+        } catch (err: any) {
+            console.error('[Resend-inbound] insert failed:', err?.message || err);
+            return;
+        }
+
+        if (insertedRow && socketService) {
+            try { socketService.broadcastToAll('inboundEmail:received', insertedRow); }
+            catch (err) { console.warn('[Resend-inbound] broadcast failed:', err); }
+        }
+    } catch (err: any) {
+        console.error('[Resend-inbound] handler error:', err?.message || err);
+    }
+});
+
+// ============================================
 // ELEVENLABS VOICE-AGENT WEBHOOKS
 // ============================================
 // Tools the Restaurant Host agent can call mid-conversation. Each request
@@ -359,6 +617,28 @@ function authorizeElevenLabs(req: express.Request, res: express.Response): boole
         body_bytes: bodyLen,
     });
     res.status(401).json({ error: 'invalid_credentials' });
+    return false;
+}
+
+// Scans an ElevenLabs post-call transcript for the pattern
+// "agent verbally confirmed a booking": an agent turn that contains a
+// confirmation verb ("confermato/confermata/confermo") alongside a booking
+// noun ("tavolo", "prenotazione", "persone", "invieremo conferma").
+// Filtering on turns that start with "agent:" avoids matching customer
+// lines like "sì, confermo io".
+export function detectPhantomConfirmation(transcript: string): boolean {
+    if (!transcript) return false;
+    const confirm = /\bconfermat[ao]\b|\bconfermo\b/;
+    const bookingWord = /\b(?:tavolo|prenotazione|persone|invieremo\s+conferma)\b/;
+    for (const rawLine of transcript.split('\n')) {
+        const line = rawLine.trim();
+        if (!/^agent:/i.test(line)) continue;
+        const text = line.slice(6).toLowerCase();
+        if (!confirm.test(text)) continue;
+        // "posso confermarle" alone is ambiguous — we require a booking
+        // noun in the same turn so we don't false-positive on politeness.
+        if (bookingWord.test(text)) return true;
+    }
     return false;
 }
 
@@ -1133,6 +1413,44 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         });
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
+    }
+
+    // Safety net for LLM hallucinations: the agent sometimes says
+    // "prenotazione confermata" to the caller without ever invoking
+    // create-reservation. We detect this by scanning the transcript for
+    // confirmation language in an agent turn while no reservation is linked,
+    // then flag the row and page the managers with a distinct URGENT push
+    // so they can call the customer back before they show up expecting a
+    // table that doesn't exist.
+    try {
+        if (transcript && detectPhantomConfirmation(transcript)) {
+            const phantomRow = await queryWithRetry(
+                `UPDATE voice_calls
+                 SET phantom_confirmation = TRUE
+                 WHERE conversation_id = $1
+                   AND reservation_id IS NULL
+                   AND phantom_confirmation = FALSE
+                 RETURNING id, phone`,
+                [conversationId]
+            );
+            if (phantomRow.rowCount && phantomRow.rowCount > 0) {
+                const row = phantomRow.rows[0];
+                const displayPhone = row.phone || phoneRaw || 'numero sconosciuto';
+                pushSendToRoles(
+                    ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+                    {
+                        title: '⚠️ Prenotazione da recuperare',
+                        body: `L'agent ha detto "confermata" ma NON c'è prenotazione. Chiama ${displayPhone}.`,
+                        url: '/?view=CONVERSAZIONI',
+                        tag: `voice-phantom-${conversationId}`,
+                    },
+                    { excludeUserId: null }
+                ).catch(err => console.error('Push (phantom confirmation) failed:', err));
+                console.warn('[ElevenLabs] PHANTOM CONFIRMATION detected on', conversationId, 'phone=', displayPhone);
+            }
+        }
+    } catch (err: any) {
+        console.warn('[ElevenLabs] post-call phantom detection failed:', err?.message || err);
     }
 
     // Look up any reservation linked to this conversation (set during create_reservation).
@@ -2083,7 +2401,8 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
         }
 
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, to_phone, to_email, subject, body, status, provider_sid,
+            `SELECT id, provider, channel, direction, to_phone, to_email, from_email,
+                    subject, body, status, provider_sid, message_id, in_reply_to,
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message
              FROM outbound_messages
@@ -7295,14 +7614,15 @@ async function logOutboundEmail(params: {
         const status = params.errorMessage ? 'failed' : 'sent';
         await queryWithRetry(
             `INSERT INTO outbound_messages
-             (provider, channel, to_email, subject, body, status, provider_sid, reservation_id, error_message, failed_at)
-             VALUES ($1, 'email', $2, $3, $4, $5, $6, $7, $8, $9)`,
+             (provider, channel, to_email, subject, body, status, provider_sid, message_id, direction, reservation_id, error_message, failed_at)
+             VALUES ($1, 'email', $2, $3, $4, $5, $6, $7, 'outbound', $8, $9, $10)`,
             [
                 params.provider,
                 params.to,
                 params.subject,
                 params.body,
                 status,
+                params.messageId ?? null,
                 params.messageId ?? null,
                 params.reservationId ?? null,
                 params.errorMessage ?? null,
@@ -8212,7 +8532,7 @@ const voiceCallsAuthorize = authorize(...VOICE_CALLS_ROLES);
 // List with optional filters. Default newest-first, capped to 200 rows.
 app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {
-        const { from, to, q, linked, follow_up } = req.query as Record<string, string | undefined>;
+        const { from, to, q, linked, follow_up, phantom } = req.query as Record<string, string | undefined>;
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
@@ -8258,6 +8578,9 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
         // reservation_id IS NULL here so the UI can combine filters freely.
         if (follow_up === 'contacted') where.push("vc.follow_up_status = 'CONTACTED'");
         else if (follow_up === 'pending') where.push("(vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')");
+        // "Da recuperare" filter — calls where the agent verbally confirmed
+        // but never invoked the create-reservation tool.
+        if (phantom === 'true') where.push('vc.phantom_confirmation = TRUE');
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -8278,6 +8601,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.phantom_confirmation,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -8440,6 +8764,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.phantom_confirmation,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -8929,6 +9254,16 @@ app.put('/settings/integrations/smtp', authenticate, requirePermission('settings
                 updates.resend_api_key = body.resend_api_key.trim();
             }
         }
+        // Resend inbound webhook signing secret (whsec_...). Same clear-on-empty semantics.
+        if (body.resend_inbound_secret !== undefined) {
+            if (body.resend_inbound_secret === null || (typeof body.resend_inbound_secret === 'string' && body.resend_inbound_secret.trim() === '')) {
+                updates.resend_inbound_secret = null;
+            } else if (typeof body.resend_inbound_secret === 'string') {
+                updates.resend_inbound_secret = body.resend_inbound_secret.trim();
+            }
+        }
+        const replyTo = nullableString(body.reply_to);
+        if (replyTo !== undefined) updates.smtp_reply_to = replyTo;
 
         const host = nullableString(body.host);
         if (host !== undefined) updates.smtp_host = host;

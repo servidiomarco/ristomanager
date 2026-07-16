@@ -23,6 +23,10 @@ export interface VoiceCallSummary {
   reservation_status: string | null;
   customer_id: number | null;
   customer_name: string | null;
+  // True when the agent verbally confirmed a booking in the transcript but
+  // never invoked the create-reservation tool (LLM hallucination). Flagged
+  // by the post-call webhook, powers the "Da recuperare" filter.
+  phantom_confirmation: boolean;
 }
 
 export interface VoiceCallFollowUpUpdate {
@@ -47,6 +51,7 @@ export interface VoiceCallsListParams {
   q?: string;
   linked?: 'true' | 'false';
   follow_up?: 'pending' | 'contacted';
+  phantom?: 'true';
   limit?: number;
   offset?: number;
 }
@@ -124,6 +129,7 @@ class VoiceCallsApiService {
       q: params.q,
       linked: params.linked,
       follow_up: params.follow_up,
+      phantom: params.phantom,
       limit: params.limit,
       offset: params.offset,
     });

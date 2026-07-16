@@ -363,6 +363,20 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                 </div>
               )}
 
+              {detail.phantom_confirmation && (
+                <div className="rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/40 p-3">
+                  <div className="flex items-start gap-2 text-[13px] text-rose-800 dark:text-rose-200">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Prenotazione da recuperare</div>
+                      <div className="text-[12px] mt-0.5 opacity-90">
+                        L'agent ha detto al cliente che la prenotazione è confermata, ma non è mai stata invocata la creazione nel CRM. Richiama il cliente per confermare o annullare, poi crea manualmente la prenotazione.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
@@ -580,7 +594,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   // Single-select status filter that mirrors the badges shown on each call
   // row. "to-contact" and "contacted" imply the call has no reservation —
   // the backend translates this into linked=false + follow_up=<state>.
-  const [statusFilter, setStatusFilter] = useState<'all' | 'linked' | 'to-contact' | 'contacted'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'phantom' | 'linked' | 'to-contact' | 'contacted'>('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
@@ -608,6 +622,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
       } else if (statusFilter === 'contacted') {
         params.linked = 'false';
         params.follow_up = 'contacted';
+      } else if (statusFilter === 'phantom') {
+        params.phantom = 'true';
       }
       if (from) params.from = from;
       if (to) params.to = to;
@@ -638,6 +654,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     }
     if (statusFilter === 'contacted') {
       return items.filter(i => i.reservation_id == null && i.follow_up_status === 'CONTACTED');
+    }
+    if (statusFilter === 'phantom') {
+      return items.filter(i => i.phantom_confirmation === true);
     }
     return items;
   }, [items, statusFilter]);
@@ -690,6 +709,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         {(() => {
           const statusChips = [
             { v: 'all', l: 'Tutte', dot: null },
+            { v: 'phantom', l: '⚠︎ Da recuperare', dot: 'bg-rose-500' },
             { v: 'linked', l: 'Con prenotazione', dot: 'bg-emerald-500' },
             { v: 'to-contact', l: 'Da ricontattare', dot: 'bg-amber-500' },
             { v: 'contacted', l: 'Ricontattati', dot: 'bg-emerald-500' },
@@ -825,11 +845,15 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 <button
                   key={item.id}
                   onClick={() => setSelectedId(item.id)}
-                  className="w-full text-left bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 hover:border-[var(--color-line-strong)] hover:shadow-sm transition-all"
+                  className={`w-full text-left bg-[var(--color-surface)] rounded-xl border p-3 md:p-4 hover:shadow-sm transition-all ${
+                    item.phantom_confirmation
+                      ? 'border-rose-300 ring-1 ring-rose-200 hover:border-rose-400'
+                      : 'border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
-                      <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
+                      <Phone className={`h-4 w-4 shrink-0 ${item.phantom_confirmation ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
                           {item.customer_name || formatPhone(item.phone)}
@@ -840,17 +864,25 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                           </span>
                         )}
                       </div>
+                      {item.phantom_confirmation && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ring-1 ring-inset shrink-0 bg-rose-50 text-rose-700 ring-rose-300"
+                          title="L'agent ha detto 'confermata' senza creare davvero la prenotazione — richiamare il cliente"
+                        >
+                          ⚠︎ Da recuperare
+                        </span>
+                      )}
                       {resBadge && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
                           {resBadge.label}
                         </span>
                       )}
-                      {item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
+                      {!item.phantom_confirmation && item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-emerald-50 text-emerald-700 ring-emerald-200">
                           Ricontattato
                         </span>
                       )}
-                      {item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
+                      {!item.phantom_confirmation && item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
                           Da ricontattare
                         </span>

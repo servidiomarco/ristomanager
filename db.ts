@@ -428,6 +428,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS notes TEXT;`);
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_at TIMESTAMPTZ;`);
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS follow_up_updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+        // Safety net for LLM hallucinations: flags calls where the agent
+        // verbally confirmed a booking but never invoked the create-reservation
+        // tool. Set by the post-call webhook. Powers the "Da recuperare" chip
+        // and the red badge on the Conversazioni page.
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS phantom_confirmation BOOLEAN NOT NULL DEFAULT FALSE;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_phantom ON voice_calls(phantom_confirmation) WHERE phantom_confirmation = TRUE;`);
 
         // Payment link requests (Revolut hosted checkout). Amounts are in
         // minor units (cents) — same convention as Revolut / Stripe so we
@@ -1396,6 +1402,15 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ADD COLUMN IF NOT EXISTS email_provider  VARCHAR(20),
                 ADD COLUMN IF NOT EXISTS resend_api_key  TEXT;
         `);
+        // Reply-To for outgoing email + Svix signing secret for the Resend
+        // inbound webhook. Reply-To routes customer replies to the inbound
+        // subdomain (typically reply@reply.<domain>) so /webhook/resend-inbound
+        // can capture them; the signing secret validates each inbound POST.
+        await client.query(`
+            ALTER TABLE integration_settings
+                ADD COLUMN IF NOT EXISTS smtp_reply_to           TEXT,
+                ADD COLUMN IF NOT EXISTS resend_inbound_secret   TEXT;
+        `);
 
         // ============================================
         // OUTBOUND MESSAGES LOG (SMS / WhatsApp)
@@ -1433,6 +1448,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS to_email TEXT;`);
         await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS subject TEXT;`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_to_email ON outbound_messages(lower(to_email));`);
+        // Inbound email support. `direction` distinguishes rows we sent from
+        // replies received via the Resend inbound webhook. `from_email` carries
+        // the sender on inbound rows (outbound rows leave it NULL). `message_id`
+        // is the RFC 5322 Message-ID we generated (outbound) or the one Resend
+        // reports (inbound). `in_reply_to` is the RFC 5322 In-Reply-To header
+        // used to thread a reply back to the outbound message that started it.
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS direction VARCHAR(10) NOT NULL DEFAULT 'outbound';`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS from_email TEXT;`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS message_id TEXT;`);
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS in_reply_to TEXT;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_message_id ON outbound_messages(message_id);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_in_reply_to ON outbound_messages(in_reply_to);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_messages_from_email ON outbound_messages(lower(from_email));`);
 
         // ============================================
         // RESERVATION NOTE PRESETS
