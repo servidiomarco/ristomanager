@@ -206,6 +206,18 @@ export interface Reservation {
   confirmation_sent_at?: string | null;
   confirmation_delivered_at?: string | null;
   confirmation_error?: string | null;
+  // Snapshot of the most recent payment_request for this reservation. Powers
+  // the color-coded card icon: PENDING/AUTHORISED=amber (link inviato, in
+  // attesa), COMPLETED=emerald (pagato online), FAILED/CANCELLED=rose,
+  // EXPIRED=slate.
+  latest_payment_id?: number | null;
+  latest_payment_status?: PaymentRequestStatus | null;
+  latest_payment_amount_cents?: number | null;
+  latest_payment_currency?: string | null;
+  latest_payment_provider?: string | null;
+  latest_payment_delivery_channel?: ConfirmationChannel | null;
+  latest_payment_created_at?: string | null;
+  latest_payment_completed_at?: string | null;
 }
 
 export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'undelivered';
