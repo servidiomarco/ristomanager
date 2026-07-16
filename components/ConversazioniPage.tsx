@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
-  BookUser, Send,
+  BookUser, Send, Check,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -136,6 +136,23 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
       .finally(() => { if (!cancelled) setMessagesLoading(false); });
     return () => { cancelled = true; };
   }, [callId]);
+
+  const markPhantomRecovered = useCallback(async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await voiceCallsApiService.markPhantomRecovered(callId);
+      setDetail(prev => prev ? {
+        ...prev,
+        phantom_recovered: updated.phantom_recovered,
+      } : prev);
+      onFollowUpChanged?.();
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }, [callId, onFollowUpChanged]);
 
   const applyFollowUpPatch = useCallback(async (patch: { status?: FollowUpStatus; notes?: string | null }) => {
     setSaving(true);
@@ -363,14 +380,38 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                 </div>
               )}
 
-              {detail.phantom_confirmation && (
+              {detail.phantom_confirmation && !detail.phantom_recovered && (
                 <div className="rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/40 p-3">
                   <div className="flex items-start gap-2 text-[13px] text-rose-800 dark:text-rose-200">
                     <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="font-semibold">Prenotazione da recuperare</div>
                       <div className="text-[12px] mt-0.5 opacity-90">
                         L'agent ha detto al cliente che la prenotazione è confermata, ma non è mai stata invocata la creazione nel CRM. Richiama il cliente per confermare o annullare, poi crea manualmente la prenotazione.
+                      </div>
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={markPhantomRecovered}
+                          disabled={saving}
+                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg font-medium border border-rose-300 bg-white text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:bg-transparent dark:text-rose-100 dark:border-rose-400/60 dark:hover:bg-rose-500/20"
+                        >
+                          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                          Segna come recuperata
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {detail.phantom_confirmation && detail.phantom_recovered && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/40 p-3">
+                  <div className="flex items-start gap-2 text-[13px] text-emerald-800 dark:text-emerald-200">
+                    <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Prenotazione recuperata</div>
+                      <div className="text-[12px] mt-0.5 opacity-90">
+                        La conferma fantasma dell'agent è stata gestita.
                       </div>
                     </div>
                   </div>
@@ -656,7 +697,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
       return items.filter(i => i.reservation_id == null && i.follow_up_status === 'CONTACTED');
     }
     if (statusFilter === 'phantom') {
-      return items.filter(i => i.phantom_confirmation === true);
+      return items.filter(i => i.phantom_confirmation === true && i.phantom_recovered !== true);
     }
     return items;
   }, [items, statusFilter]);
@@ -841,19 +882,20 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           <div className="space-y-2">
             {visibleItems.map(item => {
               const resBadge = reservationStatusBadge(item.reservation_status);
+              const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
               return (
                 <button
                   key={item.id}
                   onClick={() => setSelectedId(item.id)}
                   className={`w-full text-left bg-[var(--color-surface)] rounded-xl border p-3 md:p-4 hover:shadow-sm transition-all ${
-                    item.phantom_confirmation
+                    phantomOpen
                       ? 'border-rose-300 ring-1 ring-rose-200 hover:border-rose-400'
                       : 'border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
-                      <Phone className={`h-4 w-4 shrink-0 ${item.phantom_confirmation ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
+                      <Phone className={`h-4 w-4 shrink-0 ${phantomOpen ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
                           {item.customer_name || formatPhone(item.phone)}
@@ -864,7 +906,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                           </span>
                         )}
                       </div>
-                      {item.phantom_confirmation && (
+                      {phantomOpen && (
                         <span
                           className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ring-1 ring-inset shrink-0 bg-rose-50 text-rose-700 ring-rose-300"
                           title="L'agent ha detto 'confermata' senza creare davvero la prenotazione — richiamare il cliente"
@@ -877,12 +919,12 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                           {resBadge.label}
                         </span>
                       )}
-                      {!item.phantom_confirmation && item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
+                      {!phantomOpen && item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-emerald-50 text-emerald-700 ring-emerald-200">
                           Ricontattato
                         </span>
                       )}
-                      {!item.phantom_confirmation && item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
+                      {!phantomOpen && item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
                           Da ricontattare
                         </span>

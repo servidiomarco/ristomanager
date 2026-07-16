@@ -434,6 +434,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // and the red badge on the Conversazioni page.
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS phantom_confirmation BOOLEAN NOT NULL DEFAULT FALSE;`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_voice_calls_phantom ON voice_calls(phantom_confirmation) WHERE phantom_confirmation = TRUE;`);
+        // Set to TRUE once the phantom booking has been dealt with — either
+        // by linking a manually-created reservation or by an explicit mark
+        // from staff. Lets the UI collapse the red banner while keeping the
+        // original phantom_confirmation flag intact for reporting.
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS phantom_recovered BOOLEAN NOT NULL DEFAULT FALSE;`);
 
         // Payment link requests (Revolut hosted checkout). Amounts are in
         // minor units (cents) — same convention as Revolut / Stripe so we

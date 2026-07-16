@@ -27,6 +27,10 @@ export interface VoiceCallSummary {
   // never invoked the create-reservation tool (LLM hallucination). Flagged
   // by the post-call webhook, powers the "Da recuperare" filter.
   phantom_confirmation: boolean;
+  // Flipped once staff has dealt with the phantom booking — either by
+  // linking a manually-created reservation (auto) or by clicking the
+  // "Segna come recuperata" button (manual). Collapses the red banner.
+  phantom_recovered: boolean;
 }
 
 export interface VoiceCallFollowUpUpdate {
@@ -189,11 +193,23 @@ class VoiceCallsApiService {
     reservation_id: number;
     follow_up_status: FollowUpStatus;
     follow_up_updated_at: string;
+    phantom_recovered: boolean;
   }> {
     return apiRequest(`${API_URL}/voice-calls/${id}/link`, {
       method: 'PATCH',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ reservation_id: reservationId }),
+    });
+  }
+
+  async markPhantomRecovered(id: number): Promise<{
+    id: number;
+    phantom_confirmation: boolean;
+    phantom_recovered: boolean;
+  }> {
+    return apiRequest(`${API_URL}/voice-calls/${id}/recover`, {
+      method: 'PATCH',
+      headers: getHeaders(),
     });
   }
 

@@ -8670,8 +8670,9 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
         if (follow_up === 'contacted') where.push("vc.follow_up_status = 'CONTACTED'");
         else if (follow_up === 'pending') where.push("(vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')");
         // "Da recuperare" filter — calls where the agent verbally confirmed
-        // but never invoked the create-reservation tool.
-        if (phantom === 'true') where.push('vc.phantom_confirmation = TRUE');
+        // but never invoked the create-reservation tool. Excludes calls
+        // already marked as recovered so the chip only surfaces open cases.
+        if (phantom === 'true') where.push('vc.phantom_confirmation = TRUE AND vc.phantom_recovered = FALSE');
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -8693,6 +8694,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     vc.notes,
                     vc.follow_up_updated_at,
                     vc.phantom_confirmation,
+                    vc.phantom_recovered,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -8819,20 +8821,48 @@ app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req
             : parseInt(reservationIdRaw, 10);
         if (!Number.isFinite(reservationId)) return res.status(400).json({ error: 'Invalid reservation_id' });
 
+        // Also clears the phantom-recovery banner: if this call was flagged
+        // as a phantom confirmation, linking a real reservation is exactly
+        // the recovery we were asking staff to perform.
         const result = await queryWithRetry(
             `UPDATE voice_calls
              SET reservation_id = $1,
                  follow_up_status = 'CONTACTED',
                  follow_up_updated_at = NOW(),
-                 follow_up_updated_by = $2
+                 follow_up_updated_by = $2,
+                 phantom_recovered = CASE WHEN phantom_confirmation THEN TRUE ELSE phantom_recovered END
              WHERE id = $3
-             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at`,
+             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered`,
             [reservationId, req.user?.userId ?? null, id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.json(result.rows[0]);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/link error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Manual recovery: staff has verified the phantom confirmation (called back
+// the customer, decided to leave it as cancelled, etc.) without necessarily
+// linking a new reservation. Just flips phantom_recovered so the banner
+// disappears from the detail modal.
+app.patch('/voice-calls/:id/recover', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const result = await queryWithRetry(
+            `UPDATE voice_calls
+             SET phantom_recovered = TRUE
+             WHERE id = $1
+             RETURNING id, phantom_confirmation, phantom_recovered`,
+            [id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('PATCH /voice-calls/:id/recover error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -8856,6 +8886,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     vc.notes,
                     vc.follow_up_updated_at,
                     vc.phantom_confirmation,
+                    vc.phantom_recovered,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
