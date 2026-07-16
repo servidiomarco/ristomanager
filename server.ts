@@ -1667,7 +1667,15 @@ app.get('/reservations', authenticate, async (req, res) => {
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
-                   c.preferences_notes AS customer_preferences_notes
+                   c.preferences_notes AS customer_preferences_notes,
+                   lp.id AS latest_payment_id,
+                   lp.status AS latest_payment_status,
+                   lp.amount_cents AS latest_payment_amount_cents,
+                   lp.currency AS latest_payment_currency,
+                   lp.provider AS latest_payment_provider,
+                   lp.delivery_channel AS latest_payment_delivery_channel,
+                   lp.created_at AS latest_payment_created_at,
+                   lp.completed_at AS latest_payment_completed_at
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
             LEFT JOIN LATERAL (
@@ -1680,6 +1688,14 @@ app.get('/reservations', authenticate, async (req, res) => {
                 LIMIT 1
             ) c ON true
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+            LEFT JOIN LATERAL (
+                SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
+                       pr.delivery_channel, pr.created_at, pr.completed_at
+                FROM payment_requests pr
+                WHERE pr.reservation_id = r.id
+                ORDER BY pr.created_at DESC
+                LIMIT 1
+            ) lp ON true
             ORDER BY r.reservation_time DESC
         `);
         res.json(result.rows);
