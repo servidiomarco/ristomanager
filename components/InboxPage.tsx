@@ -154,9 +154,6 @@ const InboxPage: React.FC = () => {
   // Real-time updates: append inbound/outbound messages to the open thread
   // when they match, and refresh the conversation list preview counts.
   useEffect(() => {
-    const socket = socketClient.getSocket();
-    if (!socket) return;
-
     const digitsMatch = (msg: InboxMessage): string | null => {
       const raw = msg.direction === 'inbound' ? msg.from_phone_digits : msg.to_phone_digits;
       if (!raw) return null;
@@ -227,11 +224,26 @@ const InboxPage: React.FC = () => {
       }
     };
 
-    socket.on('message:inbound', onInbound);
-    socket.on('message:outbound', onOutbound);
+    // Re-attach on reconnect: if the socket isn't ready when this effect runs
+    // (or drops mid-session), listeners registered directly on it are lost.
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('message:inbound', onInbound);
+        attached.off('message:outbound', onOutbound);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('message:inbound', onInbound);
+        attached.on('message:outbound', onOutbound);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
     return () => {
-      socket.off('message:inbound', onInbound);
-      socket.off('message:outbound', onOutbound);
+      unsub();
+      attach(null);
     };
   }, [selectedKey, loadConversations]);
 

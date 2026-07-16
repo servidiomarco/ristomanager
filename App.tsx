@@ -214,21 +214,34 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
-    const socket = socketClient.getSocket();
     const onEvent = () => refresh();
-    if (socket) {
-      socket.on('message:inbound', onEvent);
-      socket.on('message:outbound', onEvent);
-    }
+
+    // Re-attach listeners whenever the socket reconnects. Otherwise, if this
+    // effect runs before Socket.IO finishes connecting, `getSocket()` returns
+    // null and the badge never updates in real time — only on refresh/focus.
+    let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attachedSocket === s) return;
+      if (attachedSocket) {
+        attachedSocket.off('message:inbound', onEvent);
+        attachedSocket.off('message:outbound', onEvent);
+      }
+      attachedSocket = s;
+      if (attachedSocket) {
+        attachedSocket.on('message:inbound', onEvent);
+        attachedSocket.on('message:outbound', onEvent);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
+
     const onFocus = () => refresh();
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener('focus', onFocus);
-      if (socket) {
-        socket.off('message:inbound', onEvent);
-        socket.off('message:outbound', onEvent);
-      }
+      unsubSocket();
+      attach(null);
     };
   }, [isAuthenticated, canSeeMessages]);
   useEffect(() => {
