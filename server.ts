@@ -2460,6 +2460,171 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
 
 
 // ============================================
+// INBOX (SMS / WhatsApp conversations)
+// ============================================
+// Conversations are grouped by the last 10 digits of the customer phone so
+// that +39 / 39 / 0 prefix variants collapse into a single thread. We union
+// outbound.to_phone_digits with inbound.from_phone_digits, pick the most
+// recent message per group, and left-join reservations to surface the most
+// recent customer_name for that number.
+
+app.get('/messages/conversations', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(`
+            WITH pairs AS (
+                SELECT id, provider, channel, direction, body, sent_at, read_at,
+                       reservation_id,
+                       COALESCE(from_phone_digits, to_phone_digits) AS digits,
+                       COALESCE(from_phone, to_phone) AS phone
+                FROM outbound_messages
+                WHERE channel IN ('sms','whatsapp')
+                  AND COALESCE(from_phone_digits, to_phone_digits) IS NOT NULL
+            ),
+            keyed AS (
+                SELECT *, right(digits, 10) AS phone_key
+                FROM pairs
+                WHERE length(digits) >= 8
+            ),
+            latest AS (
+                SELECT DISTINCT ON (phone_key)
+                    phone_key, phone, channel, direction, body, sent_at, reservation_id
+                FROM keyed
+                ORDER BY phone_key, sent_at DESC
+            ),
+            counts AS (
+                SELECT phone_key,
+                       COUNT(*) FILTER (WHERE direction = 'inbound' AND read_at IS NULL) AS unread_count,
+                       MAX(sent_at) FILTER (WHERE direction = 'inbound') AS last_inbound_at
+                FROM keyed
+                GROUP BY phone_key
+            )
+            SELECT l.phone_key AS phone_digits,
+                   l.phone,
+                   l.channel      AS last_channel,
+                   l.direction    AS last_direction,
+                   l.body         AS last_body,
+                   l.sent_at      AS last_sent_at,
+                   l.reservation_id AS last_reservation_id,
+                   COALESCE(c.unread_count, 0) AS unread_count,
+                   c.last_inbound_at,
+                   r.customer_name
+            FROM latest l
+            LEFT JOIN counts c ON c.phone_key = l.phone_key
+            LEFT JOIN LATERAL (
+                SELECT customer_name FROM reservations
+                WHERE right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 10) = l.phone_key
+                ORDER BY reservation_time DESC
+                LIMIT 1
+            ) r ON true
+            ORDER BY l.sent_at DESC
+            LIMIT 200
+        `);
+        res.json({ conversations: result.rows });
+    } catch (err) {
+        console.error('GET /messages/conversations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
+        const result = await queryWithRetry(
+            `SELECT id, provider, channel, direction, from_phone, to_phone, body,
+                    status, provider_sid, reservation_id, sent_at, delivered_at,
+                    failed_at, read_at, error_code, error_message
+             FROM outbound_messages
+             WHERE channel IN ('sms','whatsapp')
+               AND (right(to_phone_digits, 10) = $1::text
+                    OR right(from_phone_digits, 10) = $1::text)
+             ORDER BY sent_at ASC
+             LIMIT 500`,
+            [key]
+        );
+        res.json({ messages: result.rows });
+    } catch (err) {
+        console.error('GET /messages/conversations/:phoneDigits error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
+        await queryWithRetry(
+            `UPDATE outbound_messages
+             SET read_at = CURRENT_TIMESTAMP
+             WHERE direction = 'inbound'
+               AND read_at IS NULL
+               AND channel IN ('sms','whatsapp')
+               AND right(from_phone_digits, 10) = $1::text`,
+            [key]
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /messages/conversations/:phoneDigits/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Send an outbound reply from the inbox composer. Enforces Meta's 24h window
+// for WhatsApp freeform (needs an inbound < 24h ago); SMS has no constraint.
+// The customer-service window check is deliberately done server-side so the
+// UI can render a "window closed" banner without duplicating the rule.
+app.post('/messages/send', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const { phone, text, channel } = req.body || {};
+        if (!phone || !text || typeof text !== 'string' || !text.trim()) {
+            return res.status(400).json({ error: 'phone and non-empty text required' });
+        }
+        const desiredChannel: 'whatsapp' | 'sms' = channel === 'sms' ? 'sms' : 'whatsapp';
+        const key = String(phone).replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'invalid phone' });
+
+        if (desiredChannel === 'whatsapp') {
+            const win = await queryWithRetry(
+                `SELECT MAX(sent_at) AS last_inbound_at
+                 FROM outbound_messages
+                 WHERE direction = 'inbound' AND channel = 'whatsapp'
+                   AND right(from_phone_digits, 10) = $1::text`,
+                [key]
+            );
+            const lastInbound = win.rows[0]?.last_inbound_at as Date | null;
+            const withinWindow = !!lastInbound
+                && (Date.now() - new Date(lastInbound).getTime()) < 24 * 3600 * 1000;
+            if (!withinWindow) {
+                return res.status(409).json({
+                    error: 'window_closed',
+                    message: 'Fuori dalla finestra 24h WhatsApp: serve un template approvato.',
+                });
+            }
+        }
+
+        const send = desiredChannel === 'whatsapp' ? sendWhatsAppText : sendTwilioSms;
+        const result = await send(phone, text.trim());
+
+        let row: any = null;
+        if (result.sid) {
+            const r = await queryWithRetry(
+                `SELECT * FROM outbound_messages WHERE provider_sid = $1 LIMIT 1`,
+                [result.sid]
+            );
+            row = r.rows[0] ?? null;
+        }
+        if (row && socketService) {
+            socketService.broadcastToAll('message:outbound', row);
+        }
+        res.json({ ok: true, message: row, channel: result.channel, sid: result.sid ?? null });
+    } catch (err: any) {
+        console.error('POST /messages/send error:', err);
+        res.status(500).json({ error: err?.message || 'Internal server error' });
+    }
+});
+
+
+// ============================================
 // PAYMENT LINK REQUESTS (Revolut hosted checkout)
 // ============================================
 

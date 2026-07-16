@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -16,6 +16,7 @@ import { Inventory } from './components/Inventory';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
+import InboxPage from './components/InboxPage';
 import PagamentiPage from './components/PagamentiPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
@@ -102,6 +103,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
   { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'servizio', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
   { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'servizio', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
 
   // Operazioni
@@ -1728,6 +1730,10 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.MESSAGGI && (
+          <InboxPage />
+        )}
+
         {view === ViewState.PAGAMENTI && (
           <PagamentiPage />
         )}
@@ -1792,6 +1798,7 @@ const App: React.FC = () => {
                       [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
                       [ViewState.HACCP]: 'HACCP',
                       [ViewState.CONVERSAZIONI]: 'Conversazioni',
+                      [ViewState.MESSAGGI]: 'Messaggi',
                       [ViewState.PAGAMENTI]: 'Pagamenti',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',

@@ -18,6 +18,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.LISTA_DELLA_SPESA]: 'dashboard:view',
   [ViewState.HACCP]: 'dashboard:view',
   [ViewState.CONVERSAZIONI]: 'voice_calls:view',
+  [ViewState.MESSAGGI]: 'reservations:view',
   [ViewState.STAFF]: 'staff:view',
   [ViewState.CLIENTI]: 'customers:view',
   [ViewState.INVENTARIO]: 'inventory:view',
