@@ -26,6 +26,14 @@ export interface EmailConfig {
     // From address — shared by both transports
     fromEmail: string;
     fromName: string;
+    // Optional Reply-To. Routes replies to a mailbox that can capture them
+    // (e.g. reply@reply.<domain>) instead of the From address, which is often
+    // a subdomain that doesn't accept mail.
+    replyTo: string;
+    // Svix signing secret for the Resend inbound webhook (email.received).
+    // Read here so /webhook/resend-inbound can verify without duplicating
+    // the config plumbing. Not used by outbound sends.
+    resendInboundSecret: string;
 }
 
 const CACHE_TTL_MS = 30_000;
@@ -43,6 +51,8 @@ function envDefaults(): EmailConfig {
         resendApiKey: process.env.RESEND_API_KEY || '',
         fromEmail: process.env.SMTP_FROM_EMAIL || process.env.EMAIL_FROM || '',
         fromName: process.env.SMTP_FROM_NAME || process.env.EMAIL_FROM_NAME || '',
+        replyTo: process.env.SMTP_REPLY_TO || '',
+        resendInboundSecret: process.env.RESEND_INBOUND_SECRET || '',
     };
 }
 
@@ -50,9 +60,9 @@ async function loadFromDb(): Promise<EmailConfig> {
     const defaults = envDefaults();
     try {
         const result = await queryWithRetry(
-            `SELECT email_provider, resend_api_key,
+            `SELECT email_provider, resend_api_key, resend_inbound_secret,
                     smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password,
-                    smtp_from_email, smtp_from_name
+                    smtp_from_email, smtp_from_name, smtp_reply_to
              FROM integration_settings WHERE provider = 'smtp' LIMIT 1`
         );
         const row = result.rows[0];
@@ -69,7 +79,9 @@ async function loadFromDb(): Promise<EmailConfig> {
         const resendApiKey = (row.resend_api_key && String(row.resend_api_key).trim()) || defaults.resendApiKey;
         const fromEmail = (row.smtp_from_email && String(row.smtp_from_email).trim()) || defaults.fromEmail;
         const fromName = (row.smtp_from_name && String(row.smtp_from_name).trim()) || defaults.fromName;
-        return { provider, host, port, secure, user, password, resendApiKey, fromEmail, fromName };
+        const replyTo = (row.smtp_reply_to && String(row.smtp_reply_to).trim()) || defaults.replyTo;
+        const resendInboundSecret = (row.resend_inbound_secret && String(row.resend_inbound_secret).trim()) || defaults.resendInboundSecret;
+        return { provider, host, port, secure, user, password, resendApiKey, fromEmail, fromName, replyTo, resendInboundSecret };
     } catch (err) {
         console.warn('[Email] loadFromDb failed, using env fallbacks:', (err as any)?.message || err);
         return defaults;
@@ -107,10 +119,13 @@ export interface SmtpStatus {
     user: string;
     from_email: string;
     from_name: string;
+    reply_to: string;
     has_password: boolean;
     password_last4: string | null;
     has_resend_api_key: boolean;
     resend_api_key_last4: string | null;
+    has_resend_inbound_secret: boolean;
+    resend_inbound_secret_last4: string | null;
     configured: boolean;
 }
 
@@ -124,12 +139,24 @@ export async function getSmtpConfigStatus(): Promise<SmtpStatus> {
         user: c.user,
         from_email: c.fromEmail,
         from_name: c.fromName,
+        reply_to: c.replyTo,
         has_password: !!c.password,
         password_last4: c.password ? c.password.slice(-4) : null,
         has_resend_api_key: !!c.resendApiKey,
         resend_api_key_last4: c.resendApiKey ? c.resendApiKey.slice(-4) : null,
+        has_resend_inbound_secret: !!c.resendInboundSecret,
+        resend_inbound_secret_last4: c.resendInboundSecret ? c.resendInboundSecret.slice(-4) : null,
         configured: isProviderConfigured(c),
     };
+}
+
+// Exposed for the inbound webhook: it needs the Resend API key to fetch the
+// full email body (webhooks only carry metadata) and the Svix secret to
+// verify each POST. Returns null when the corresponding value is missing.
+export async function getResendInboundContext(): Promise<{ apiKey: string; signingSecret: string } | null> {
+    const c = await getConfig();
+    if (!c.resendApiKey || !c.resendInboundSecret) return null;
+    return { apiKey: c.resendApiKey, signingSecret: c.resendInboundSecret };
 }
 
 function buildTransporter(config: EmailConfig): Transporter {
@@ -167,6 +194,7 @@ async function sendViaSmtp(config: EmailConfig, input: SendMailInput): Promise<S
     const transporter = buildTransporter(config);
     const info = await transporter.sendMail({
         from: buildFromHeader(config),
+        replyTo: config.replyTo || undefined,
         to: input.to,
         subject: input.subject,
         text: input.text,
@@ -189,6 +217,7 @@ async function sendViaResend(config: EmailConfig, input: SendMailInput): Promise
         },
         body: JSON.stringify({
             from: buildFromHeader(config),
+            reply_to: config.replyTo || undefined,
             to: [input.to],
             subject: input.subject,
             text: input.text,

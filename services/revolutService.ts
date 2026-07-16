@@ -190,6 +190,42 @@ export async function createOrder(input: RevolutCreateOrderInput): Promise<Revol
     return parsed as RevolutOrder;
 }
 
+// GET /api/orders/{id} — retrieves the authoritative state of an order. Used
+// by the manual reconciliation endpoint when a webhook was missed (e.g. an
+// order created before the webhook endpoint existed, or a delivery Revolut
+// gave up on). Returns the raw response as-is: callers care about `state`.
+export async function getOrder(orderId: string): Promise<RevolutOrder> {
+    const config = await getConfig();
+    if (!config.apiKey) {
+        throw new Error('Revolut is not configured (API key missing)');
+    }
+
+    const response = await fetch(`${config.apiBase}/api/orders/${encodeURIComponent(orderId)}`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${config.apiKey}`,
+            'Revolut-Api-Version': config.apiVersion,
+            'Accept': 'application/json',
+        },
+    });
+
+    const text = await response.text();
+    let parsed: any;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+
+    if (!response.ok) {
+        console.error('[Revolut] getOrder failed', response.status, parsed);
+        throw new Error(`Revolut getOrder ${response.status}: ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
+    }
+
+    if (!parsed || typeof parsed !== 'object' || !parsed.id) {
+        console.error('[Revolut] Unexpected order response shape:', parsed);
+        throw new Error('Revolut getOrder: response missing id');
+    }
+
+    return parsed as RevolutOrder;
+}
+
 // Constant-time string compare — prevents timing-oracle attacks against the
 // webhook signature check.
 function timingSafeEqualHex(a: string, b: string): boolean {
