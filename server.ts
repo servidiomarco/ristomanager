@@ -44,9 +44,11 @@ import {
     findCustomerByPhone,
     createVoiceReservation,
     cancelVoiceReservation,
+    modifyVoiceReservation,
     recordVoiceCall,
     formatItalianConfirmation,
     formatItalianCancellation,
+    formatItalianModification,
     normalizeItalianPhone,
     parseFlexibleDate,
     parseFlexibleTime,
@@ -1350,6 +1352,274 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Si è verificato un errore tecnico, posso richiamarla per cancellare la prenotazione?'
+        });
+    }
+});
+
+// Modify an existing reservation (change date/time/shift/guests/location/notes).
+// Same identify-by-phone-and-date pattern as cancel-reservation. Only the
+// `new_*` fields that are actually being changed need to be present in the
+// request body; anything omitted keeps its current value.
+app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
+
+    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
+        ? req.body.parameters
+        : req.body || {};
+    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
+
+    const callerIdRaw = String(p.caller_id ?? '').trim();
+    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
+    if (!phoneRaw) {
+        return res.json({
+            success: false,
+            error: 'invalid_phone',
+            message: 'Non ho un numero di telefono a cui associare la prenotazione. Può dettarmelo?'
+        });
+    }
+    const normalizedDate = parseFlexibleDate(p.date);
+    if (!normalizedDate) {
+        return res.json({
+            success: false,
+            error: 'invalid_date',
+            message: 'Formato data della prenotazione da modificare non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".'
+        });
+    }
+    let normalizedTime: string | undefined;
+    if (p.time !== undefined && p.time !== null && String(p.time).trim() !== '') {
+        const t = parseFlexibleTime(p.time);
+        if (!t) {
+            return res.json({
+                success: false,
+                error: 'invalid_time',
+                message: 'Formato orario della prenotazione non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".'
+            });
+        }
+        normalizedTime = t;
+    }
+
+    // Parse the "new_*" overrides — each field is optional.
+    let newDate: string | undefined;
+    if (p.new_date !== undefined && p.new_date !== null && String(p.new_date).trim() !== '') {
+        newDate = parseFlexibleDate(p.new_date) || undefined;
+        if (!newDate) {
+            return res.json({
+                success: false,
+                error: 'invalid_new_date',
+                message: 'Formato nuova data non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".'
+            });
+        }
+    }
+    let newTime: string | undefined;
+    if (p.new_time !== undefined && p.new_time !== null && String(p.new_time).trim() !== '') {
+        newTime = parseFlexibleTime(p.new_time) || undefined;
+        if (!newTime) {
+            return res.json({
+                success: false,
+                error: 'invalid_new_time',
+                message: 'Formato nuovo orario non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".'
+            });
+        }
+    }
+    let newShift: Shift | undefined;
+    if (p.new_shift !== undefined && p.new_shift !== null && String(p.new_shift).trim() !== '') {
+        const s = String(p.new_shift).trim().toUpperCase();
+        if (s !== Shift.LUNCH && s !== Shift.DINNER) {
+            return res.json({
+                success: false,
+                error: 'invalid_new_shift',
+                message: 'Il nuovo turno non è valido. Può indicare se si tratta di pranzo o cena?'
+            });
+        }
+        newShift = s as Shift;
+    }
+    let newGuests: number | undefined;
+    if (p.new_guests !== undefined && p.new_guests !== null && String(p.new_guests).trim() !== '') {
+        const g = Number(p.new_guests);
+        if (!Number.isFinite(g) || g < 1 || g > 50) {
+            return res.json({
+                success: false,
+                error: 'invalid_new_guests',
+                message: 'Il nuovo numero di ospiti non è valido. Può ripetermi per quante persone?'
+            });
+        }
+        newGuests = Math.trunc(g);
+    }
+    let newLocation: 'INDOOR' | 'OUTDOOR' | undefined;
+    if (p.new_location_preference !== undefined && p.new_location_preference !== null) {
+        const l = String(p.new_location_preference).trim().toUpperCase();
+        if (l === 'INDOOR' || l === 'OUTDOOR') newLocation = l as 'INDOOR' | 'OUTDOOR';
+    }
+    const newNotes = typeof p.new_notes === 'string' && p.new_notes.trim() !== ''
+        ? p.new_notes.trim()
+        : undefined;
+
+    if (!newDate && !newTime && !newShift && newGuests === undefined && !newLocation && !newNotes) {
+        return res.json({
+            success: false,
+            error: 'no_changes_provided',
+            message: 'Cosa vuole modificare della prenotazione? Data, orario, numero di persone, zona (interno o esterno) o note?'
+        });
+    }
+
+    // If the new time crosses shift boundaries and the shift wasn't specified,
+    // derive it so the agent doesn't have to worry about it.
+    if (newTime && !newShift) {
+        const hh = parseInt(newTime.split(':')[0], 10);
+        if (Number.isFinite(hh)) {
+            newShift = (hh >= 11 && hh < 17) ? Shift.LUNCH : Shift.DINNER;
+        }
+    }
+
+    try {
+        console.log('[ElevenLabs] modify-reservation start', {
+            phone_raw: phoneRaw, normalized_date: normalizedDate, normalized_time: normalizedTime,
+            new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
+            new_location: newLocation, has_new_notes: !!newNotes, conversation_id: conversationId,
+        });
+        const outcome = await modifyVoiceReservation({
+            phone: phoneRaw,
+            date: normalizedDate,
+            time: normalizedTime,
+            conversation_id: conversationId,
+            new_date: newDate,
+            new_time: newTime,
+            new_shift: newShift,
+            new_guests: newGuests,
+            new_location_preference: newLocation,
+            new_notes: newNotes,
+        });
+
+        if (outcome.status === 'not_found') {
+            return res.json({
+                success: false,
+                status: 'not_found',
+                message: 'Non trovo una prenotazione a questo numero per la data indicata. Può confermarmi la data esatta?'
+            });
+        }
+        if (outcome.status === 'already_cancelled') {
+            return res.json({
+                success: false,
+                status: 'already_cancelled',
+                reservation_id: outcome.reservation.id,
+                message: `La prenotazione di ${outcome.reservation.customer_name} risulta annullata: non posso modificarla. Vuole fare una nuova prenotazione?`
+            });
+        }
+        if (outcome.status === 'ambiguous') {
+            const list = outcome.candidates.map(c => {
+                const t = new Date(c.reservation_time);
+                const hh = String(t.getHours()).padStart(2, '0');
+                const mm = String(t.getMinutes()).padStart(2, '0');
+                return `${hh}:${mm} per ${c.guests}`;
+            }).join(', ');
+            return res.json({
+                success: false,
+                status: 'ambiguous',
+                candidates: outcome.candidates,
+                message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da modificare?`
+            });
+        }
+        if (outcome.status === 'no_change') {
+            return res.json({
+                success: false,
+                status: 'no_change',
+                message: 'I dati che mi ha indicato coincidono con quelli già registrati. Non c\'è nulla da modificare.'
+            });
+        }
+        if (outcome.status === 'unavailable') {
+            return res.json({
+                success: false,
+                status: 'unavailable',
+                message: 'Mi dispiace, non abbiamo disponibilità per la nuova configurazione richiesta. Vuole provare un altro orario o un\'altra data?'
+            });
+        }
+
+        // outcome.status === 'modified'
+        const { before, after } = outcome;
+
+        // Link the audit row so the modification is traceable.
+        if (conversationId) {
+            recordVoiceCall({
+                conversation_id: conversationId,
+                phone: normalizeItalianPhone(phoneRaw),
+                reservation_id: after.id,
+            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (modify) failed:', err?.message || err));
+        }
+
+        LogService.logActivity(
+            null,
+            'voice-agent@elevenlabs',
+            'Agent vocale',
+            ActivityAction.UPDATE,
+            ResourceType.RESERVATION,
+            after.id,
+            after.customer_name,
+            {
+                source: 'VOICE',
+                conversation_id: conversationId,
+                modified_via: 'voice_agent',
+                before: {
+                    reservation_time: before.reservation_time,
+                    shift: before.shift,
+                    guests: before.guests,
+                },
+                after: {
+                    reservation_time: after.reservation_time,
+                    shift: after.shift,
+                    guests: after.guests,
+                    table_id: after.table_id,
+                },
+            }
+        );
+
+        if (socketService) {
+            try {
+                socketService.broadcastReservationUpdated(after as any);
+            } catch (err) {
+                console.warn('[ElevenLabs] broadcastReservationUpdated (modify) failed:', err);
+            }
+        }
+
+        const reservationLabel = (() => {
+            try {
+                const dt = new Date(after.reservation_time);
+                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+                return `${date} ${time}`;
+            } catch {
+                return after.reservation_time;
+            }
+        })();
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                title: 'Prenotazione modificata (voce)',
+                body: `${toTitleCase(after.customer_name)} · ${after.guests} ospiti · ${reservationLabel}`,
+                url: `/?view=RESERVATIONS&reservationId=${after.id}`,
+                tag: `reservation-${after.id}`,
+            },
+            { excludeUserId: null }
+        ).catch(err => console.error('Push (voice modification) failed:', err));
+
+        const confirmationPhrase = formatItalianModification(after);
+        console.log('[ElevenLabs] modify-reservation OK', {
+            id: after.id, conversation_id: conversationId, customer: after.customer_name,
+        });
+        return res.json({
+            success: true,
+            status: 'modified',
+            reservation_id: after.id,
+            confirmation_phrase: confirmationPhrase,
+            date_readback: formatItalianDateReadback(String(after.reservation_time).slice(0, 10)),
+        });
+    } catch (err: any) {
+        console.error('[ElevenLabs] modify-reservation error', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Si è verificato un errore tecnico nel modificare la prenotazione, posso richiamarla?'
         });
     }
 });

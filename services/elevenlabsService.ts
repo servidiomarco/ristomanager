@@ -774,6 +774,194 @@ export function formatItalianCancellation(r: CancelCandidate): string {
 }
 
 // ============================================
+// VOICE RESERVATION MODIFICATION
+// ============================================
+
+export interface ModifyVoiceReservationInput {
+    phone: string;              // caller's phone — identifies the reservation
+    date: string;               // YYYY-MM-DD — original date of the booking
+    time?: string;              // HH:MM — used to disambiguate when caller has >1 booking that day
+    conversation_id?: string;
+
+    // Only fields that are actually being changed should be non-null. Anything
+    // omitted keeps the current value.
+    new_date?: string;                          // YYYY-MM-DD
+    new_time?: string;                          // HH:MM
+    new_shift?: Shift;                          // LUNCH | DINNER
+    new_guests?: number;
+    new_location_preference?: 'INDOOR' | 'OUTDOOR';
+    new_notes?: string;                         // free text — appended after the "[Voce]" prefix
+}
+
+export interface ModifiedReservation {
+    id: number;
+    customer_name: string;
+    reservation_time: string;
+    shift: Shift;
+    guests: number;
+    phone: string | null;
+    table_id: number | null;
+    table_name: string | null;
+    room_name: string | null;
+    room_location: string | null;
+}
+
+export type ModifyVoiceReservationOutput =
+    | { status: 'not_found' }
+    | { status: 'already_cancelled'; reservation: CancelCandidate }
+    | { status: 'ambiguous'; candidates: CancelCandidate[] }
+    | { status: 'no_change' }
+    | { status: 'unavailable'; alternatives?: any }
+    | { status: 'modified'; before: CancelCandidate; after: ModifiedReservation };
+
+/**
+ * Update a reservation booked by `phone` on `date` with the fields present
+ * in the input. Uses the same match rules as cancelVoiceReservation.
+ *
+ * If date/time/shift/guests/location change we re-run findAvailability and
+ * reassign a table. If only notes change we skip the availability check.
+ * Kept idempotent: if the caller asks for the same values already stored,
+ * returns 'no_change' instead of a spurious success.
+ */
+export async function modifyVoiceReservation(
+    input: ModifyVoiceReservationInput
+): Promise<ModifyVoiceReservationOutput> {
+    const phone = normalizeItalianPhone(input.phone);
+
+    // 1) Locate the reservation. Same rules as cancel.
+    const params: any[] = [phone, input.date];
+    let sql = `
+        SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
+               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
+               notes, children
+        FROM reservations
+        WHERE phone = $1
+          AND DATE(reservation_time) = $2::date
+    `;
+    if (input.time) {
+        sql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+        params.push(input.time);
+    }
+    sql += ' ORDER BY reservation_time ASC';
+    const matches = await queryWithRetry(sql, params);
+    const rows = matches.rows;
+
+    const active = rows.filter((r: any) => r.reservation_status !== 'CANCELLED');
+    if (active.length === 0) {
+        if (rows.length > 0) {
+            return { status: 'already_cancelled', reservation: rows[0] };
+        }
+        return { status: 'not_found' };
+    }
+    if (active.length > 1) {
+        return { status: 'ambiguous', candidates: active };
+    }
+
+    const current = active[0];
+
+    // 2) Compute the new state (merge current with overrides).
+    const curDate = String(current.reservation_time).slice(0, 10); // YYYY-MM-DD
+    const curTime = (() => {
+        const d = new Date(current.reservation_time);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    })();
+
+    const newDate = input.new_date ?? curDate;
+    const newTime = input.new_time ?? curTime;
+    const newShift: Shift = input.new_shift ?? current.shift;
+    const newGuests: number = input.new_guests ?? current.guests;
+    const newLocation = input.new_location_preference; // undefined = keep existing table if still valid
+
+    const scheduleChanged =
+        newDate !== curDate ||
+        newTime !== curTime ||
+        newShift !== current.shift ||
+        newGuests !== current.guests ||
+        !!newLocation;
+    const notesChanged = input.new_notes !== undefined && input.new_notes.trim() !== '';
+
+    if (!scheduleChanged && !notesChanged) {
+        return { status: 'no_change' };
+    }
+
+    // 3) If schedule changed we need a new table. Reuse pickAutoAssignTable.
+    let assigned: { id: number; name: string; room_name: string | null; location: 'INDOOR' | 'OUTDOOR' | null } | null | undefined;
+    if (scheduleChanged) {
+        assigned = await pickAutoAssignTable(
+            newDate,
+            newShift,
+            newGuests,
+            newLocation
+        );
+        if (!assigned) {
+            return { status: 'unavailable' };
+        }
+    }
+
+    // 4) UPDATE. Reconstruct the reservation_time in local wall-clock form so
+    // downstream code (which slices the ISO string) sees the intended values.
+    const newReservationTime = `${newDate}T${newTime}:00`;
+    const notesToStore = input.new_notes !== undefined
+        ? `[Voce] ${input.new_notes.trim()}`
+        : current.notes;
+
+    const updateSql = scheduleChanged
+        ? `UPDATE reservations
+           SET reservation_time = $1,
+               shift = $2,
+               guests = $3,
+               table_id = $4,
+               notes = $5,
+               reservation_status = 'CONFIRMED'
+           WHERE id = $6
+           RETURNING id, customer_name, reservation_time, shift, guests, table_id, phone`
+        : `UPDATE reservations
+           SET notes = $5,
+               reservation_status = 'CONFIRMED'
+           WHERE id = $6
+           RETURNING id, customer_name, reservation_time, shift, guests, table_id, phone`;
+    const updated = await queryWithRetry(updateSql, [
+        newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
+        notesToStore, current.id
+    ]);
+
+    const after: ModifiedReservation = {
+        ...updated.rows[0],
+        table_name: assigned?.name ?? null,
+        room_name: assigned?.room_name ?? null,
+        room_location: assigned?.location ?? null,
+    };
+
+    return {
+        status: 'modified',
+        before: {
+            id: current.id,
+            customer_name: current.customer_name,
+            reservation_time: current.reservation_time,
+            shift: current.shift,
+            guests: current.guests,
+        },
+        after,
+    };
+}
+
+/**
+ * Italian phrase read by the agent after a successful modification. Mirrors
+ * formatItalianConfirmation but says "aggiornata" so the caller understands
+ * this is a change, not a new booking.
+ */
+export function formatItalianModification(r: ModifiedReservation): string {
+    const d = new Date(r.reservation_time);
+    const weekday = ITALIAN_WEEKDAYS[d.getDay()];
+    const day = d.getDate();
+    const month = ITALIAN_MONTHS[d.getMonth()];
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const firstName = r.customer_name.split(' ')[0];
+    return `Prenotazione aggiornata ${firstName}: ${weekday} ${day} ${month} alle ${hh}:${mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
+}
+
+// ============================================
 // VOICE CALL AUDIT
 // ============================================
 
