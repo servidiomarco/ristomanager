@@ -31,6 +31,7 @@ import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
+import { CommandPalette } from './components/CommandPalette';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -154,6 +155,20 @@ const App: React.FC = () => {
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const createMenuRef = useRef<HTMLDivElement>(null);
 
+  // Global Cmd/Ctrl+K → open the command palette. Fires even while typing
+  // in a form field so the operator can switch to global search mid-flow;
+  // preventDefault stops the browser from grabbing it (Firefox → address bar).
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isPaletteHotkey = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K');
+      if (!isPaletteHotkey) return;
+      e.preventDefault();
+      setPaletteOpen(true);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Close the global create menu on outside click (pointer down outside the +/panel)
   useEffect(() => {
     if (!showCreateMenu) return;
@@ -170,6 +185,10 @@ const App: React.FC = () => {
   // Set when a notification deep-links to a specific booking (?reservationId=…);
   // handed to ReservationList so it opens that booking's detail drawer.
   const [pendingReservationId, setPendingReservationId] = useState<number | null>(null);
+
+  // Global command palette (Cmd/Ctrl+K). Lets the operator find a
+  // reservation without knowing its date — the daily list stays intact.
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Count of voice calls in the last 7 days without a linked reservation —
   // drives the follow-up badge on the Conversazioni sidebar icon.
@@ -1545,6 +1564,18 @@ const App: React.FC = () => {
 
 
 
+               {/* Global search — opens the command palette. Same button
+                   surface as the bell so it's reachable on mobile where the
+                   Cmd/Ctrl+K hotkey doesn't apply. */}
+               <button
+                  onClick={() => setPaletteOpen(true)}
+                  className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
+                  aria-label="Cerca (⌘K)"
+                  title="Cerca prenotazioni o clienti (⌘K)"
+                >
+                  <Search className="h-4 w-4" />
+               </button>
+
                <div className="relative">
                    <button
                       onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
@@ -2271,6 +2302,31 @@ const App: React.FC = () => {
         {/* ElevenLabs voice-agent widget — temporarily hidden, will be
             re-enabled in the future. Component and import preserved. */}
         {false && user?.role === UserRole.OWNER && <VoiceAgentWidget />}
+
+        {/* Global command palette — Cmd/Ctrl+K anywhere in the app. On
+            selecting a reservation we jump to the Prenotazioni view for that
+            date and open its detail drawer; on selecting a customer we
+            open the Clienti view with their edit modal (matched by phone). */}
+        <CommandPalette
+          isOpen={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          reservations={reservations}
+          onSelectReservation={(res) => {
+            const dateOnly = res.reservation_time.split('T')[0];
+            const [y, m, d] = dateOnly.split('-').map(Number);
+            if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+            setPendingReservationId(res.id);
+            setView(ViewState.RESERVATIONS);
+            setPaletteOpen(false);
+          }}
+          onSelectCustomer={(customer) => {
+            if (customer.phone) {
+              setAutoEditCustomerByPhone(customer.phone);
+            }
+            setView(ViewState.CLIENTI);
+            setPaletteOpen(false);
+          }}
+        />
 
         {/* Global Toasts */}
         <div
