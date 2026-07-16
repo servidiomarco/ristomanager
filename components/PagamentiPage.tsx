@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CreditCard, Search, X, Loader2, Calendar, Clock, AlertCircle, Filter,
   ExternalLink, MessageSquare, MessageCircle, Mail, Users as UsersIcon,
-  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check,
+  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -11,6 +11,7 @@ import {
   PaymentsListParams,
   PaymentMessage,
 } from '../services/paymentsApiService';
+import { useAuth } from '../contexts/AuthContext';
 
 const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
@@ -86,14 +87,19 @@ const reservationStatusBadge = (status: string | null | undefined): { label: str
 interface DetailModalProps {
   payment: PaymentRequest;
   onClose: () => void;
+  onReconciled?: (updated: PaymentRequest) => void;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ payment, onClose }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onClose, onReconciled }) => {
+  const { hasPermission } = useAuth();
+  const [payment, setPayment] = useState<PaymentRequest>(initialPayment);
   const [messages, setMessages] = useState<PaymentMessage[]>([]);
-  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(payment.checkout_url);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(initialPayment.checkout_url);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileFeedback, setReconcileFeedback] = useState<{ kind: 'ok' | 'info' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +126,38 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment, onClose }) => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => {});
+  };
+
+  // Ask the server to poll Revolut for the authoritative order state and
+  // apply the transition — used when a webhook was missed (e.g. this order
+  // was created before the webhook endpoint existed).
+  const canReconcile =
+    hasPermission('payments:full') &&
+    payment.provider === 'revolut' &&
+    !!payment.provider_order_id;
+
+  const reconcile = async () => {
+    if (reconciling) return;
+    setReconciling(true);
+    setReconcileFeedback(null);
+    try {
+      const result = await paymentsApiService.reconcile(payment.id);
+      if (result.payment_request) {
+        setPayment(result.payment_request);
+        onReconciled?.(result.payment_request);
+      }
+      if (result.changed) {
+        setReconcileFeedback({ kind: 'ok', text: `Stato aggiornato da Revolut: ${result.revolut_state ?? '—'}` });
+      } else if (result.message) {
+        setReconcileFeedback({ kind: 'info', text: result.message });
+      } else {
+        setReconcileFeedback({ kind: 'info', text: 'Nessun aggiornamento necessario' });
+      }
+    } catch (err) {
+      setReconcileFeedback({ kind: 'err', text: (err as Error).message });
+    } finally {
+      setReconciling(false);
+    }
   };
 
   return (
@@ -156,12 +194,34 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment, onClose }) => {
           <div className="grid grid-cols-2 gap-3 text-[13px]">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Stato</div>
-              <div className="mt-1">
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
                 <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset ${status.cls}`}>
                   <StatusIcon className="h-3 w-3" />
                   {status.label}
                 </span>
+                {canReconcile && (
+                  <button
+                    onClick={reconcile}
+                    disabled={reconciling}
+                    className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Interroga Revolut e aggiorna lo stato"
+                  >
+                    {reconciling
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <RefreshCw className="h-3 w-3" />}
+                    {reconciling ? 'Riconcilio…' : 'Riconcilia'}
+                  </button>
+                )}
               </div>
+              {reconcileFeedback && (
+                <div className={`mt-1.5 text-[11px] ${
+                  reconcileFeedback.kind === 'ok' ? 'text-emerald-700'
+                  : reconcileFeedback.kind === 'err' ? 'text-rose-700'
+                  : 'text-[var(--color-fg-muted)]'
+                }`}>
+                  {reconcileFeedback.text}
+                </div>
+              )}
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Creato</div>
@@ -608,6 +668,10 @@ const PagamentiPage: React.FC = () => {
         <DetailModal
           payment={selected}
           onClose={() => setSelected(null)}
+          onReconciled={(updated) => {
+            setItems(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
+            setSelected(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+          }}
         />
       )}
     </div>

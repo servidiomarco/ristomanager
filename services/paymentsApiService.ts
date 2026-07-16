@@ -81,6 +81,16 @@ export interface PaymentMessagesResponse {
   checkout_url: string | null;
 }
 
+export interface PaymentReconcileResponse {
+  ok: boolean;
+  changed: boolean;
+  revolut_state?: string;
+  first_completion?: boolean;
+  ignored?: string;
+  message?: string;
+  payment_request?: PaymentRequest;
+}
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
   const socketId = socketClient.getSocket()?.id;
@@ -139,6 +149,13 @@ class PaymentsApiService {
 
   async listMessages(id: number): Promise<PaymentMessagesResponse> {
     return apiRequest<PaymentMessagesResponse>(`${API_URL}/payments/${id}/messages`, {
+      headers: getHeaders(),
+    });
+  }
+
+  async reconcile(id: number): Promise<PaymentReconcileResponse> {
+    return apiRequest<PaymentReconcileResponse>(`${API_URL}/payments/${id}/reconcile`, {
+      method: 'POST',
       headers: getHeaders(),
     });
   }

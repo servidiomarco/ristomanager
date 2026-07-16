@@ -24,6 +24,7 @@ import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, send
 import {
     isRevolutConfigured,
     createOrder as revolutCreateOrder,
+    getOrder as revolutGetOrder,
     verifyWebhookSignature as verifyRevolutWebhook,
     getRevolutConfigStatus,
     invalidateRevolutConfigCache,
@@ -2769,6 +2770,151 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
     }
 });
 
+// Shared side-effect pipeline for a Revolut order state change. Called by
+// both the webhook receiver (real-time push from Revolut) and the manual
+// reconcile endpoint (poll GET /api/orders/{id} when a webhook was missed).
+// Idempotent: gated on `completed_at` under a row-level lock so replaying an
+// already-processed transition is a no-op — customer confirmation fires only
+// on the FIRST ORDER_COMPLETED, no matter how many times we're called.
+type RevolutTransitionResult =
+    | { status: 'applied'; row: any; isFirstCompletion: boolean }
+    | { status: 'ignored'; reason: string };
+async function applyRevolutOrderTransition(orderId: string, event: string): Promise<RevolutTransitionResult> {
+    let nextStatus: string | null = null;
+    let markCompleted = false;
+    switch (event) {
+        case 'ORDER_COMPLETED':
+            nextStatus = 'COMPLETED';
+            markCompleted = true;
+            break;
+        case 'ORDER_AUTHORISED':
+            nextStatus = 'AUTHORISED';
+            break;
+        case 'ORDER_CANCELLED':
+            nextStatus = 'CANCELLED';
+            break;
+        case 'ORDER_PAYMENT_DECLINED':
+        case 'ORDER_PAYMENT_FAILED':
+            nextStatus = 'FAILED';
+            break;
+        default:
+            console.log('[Revolut] unhandled event:', event);
+            return { status: 'ignored', reason: event };
+    }
+
+    const client = await pool.connect();
+    let row: any;
+    let wasCompleted = false;
+    try {
+        await client.query('BEGIN');
+        const before = await client.query(
+            `SELECT id, status, completed_at, reservation_id
+             FROM payment_requests WHERE provider_order_id = $1 FOR UPDATE`,
+            [orderId]
+        );
+        if (before.rowCount === 0) {
+            await client.query('ROLLBACK');
+            console.warn('[Revolut] transition: no payment_request found for order_id', orderId);
+            return { status: 'ignored', reason: 'unknown order' };
+        }
+        wasCompleted = before.rows[0].completed_at !== null;
+        const updated = await client.query(
+            `UPDATE payment_requests
+             SET status = $1,
+                 completed_at = CASE WHEN $2 AND completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+             RETURNING *`,
+            [nextStatus, markCompleted, before.rows[0].id]
+        );
+        row = updated.rows[0];
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+
+    try { socketService?.broadcastToAll('paymentRequest:updated', row); }
+    catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
+
+    const isFirstCompletion = markCompleted && !wasCompleted;
+
+    if (isFirstCompletion) {
+        const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
+        pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+            title: 'Pagamento ricevuto',
+            body: bodyLine,
+            url: row.reservation_id ? `/?view=RESERVATIONS&reservationId=${row.reservation_id}` : `/?view=RESERVATIONS`,
+            tag: `payment-${row.id}`,
+        }, { excludeUserId: null }).catch(err => {
+            console.warn('[Revolut] push send failed:', err?.message || err);
+        });
+    }
+
+    if (isFirstCompletion && row.reservation_id) {
+        (async () => {
+            try {
+                const resvRes = await queryWithRetry(
+                    `SELECT id, customer_name, phone, reservation_time, guests,
+                            reservation_status, table_id, notes
+                     FROM reservations WHERE id = $1`,
+                    [row.reservation_id]
+                );
+                if (resvRes.rowCount === 0) return;
+                const reservation = resvRes.rows[0];
+
+                if (reservation.reservation_status === 'PENDING') {
+                    const upd = await queryWithRetry(
+                        `UPDATE reservations
+                         SET reservation_status = 'CONFIRMED',
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $1
+                         RETURNING *`,
+                        [reservation.id]
+                    );
+                    if (upd.rows[0] && socketService) {
+                        try { socketService.broadcastReservationUpdated(upd.rows[0]); }
+                        catch (err) { console.warn('[Revolut] reservation broadcast failed:', err); }
+                    }
+                }
+
+                if (reservation.phone &&
+                    (reservation.reservation_status === 'PENDING' ||
+                     reservation.reservation_status === 'CONFIRMED')) {
+                    const roomName = await resolveReservationRoomName(reservation);
+                    const message = buildDepositConfirmationMessage(
+                        reservation.customer_name,
+                        reservation.reservation_time,
+                        reservation.guests,
+                        row.amount_cents,
+                        roomName
+                    );
+                    await sendBookingConfirmation(reservation.phone, message, reservation.id);
+                }
+            } catch (err: any) {
+                console.error('[Revolut] deposit confirmation flow failed:', err?.message || err);
+            }
+        })();
+    }
+
+    return { status: 'applied', row, isFirstCompletion };
+}
+
+// Map a Revolut order `state` (returned by GET /api/orders/{id}) to the
+// webhook-style event vocabulary consumed by applyRevolutOrderTransition.
+function revolutStateToEvent(state: string): string | null {
+    switch ((state || '').toUpperCase()) {
+        case 'COMPLETED': return 'ORDER_COMPLETED';
+        case 'AUTHORISED': return 'ORDER_AUTHORISED';
+        case 'CANCELLED': return 'ORDER_CANCELLED';
+        case 'FAILED': return 'ORDER_PAYMENT_FAILED';
+        case 'DECLINED': return 'ORDER_PAYMENT_DECLINED';
+        default: return null;
+    }
+}
+
 // Revolut webhook receiver. HMAC signature is validated against the raw
 // request body captured by the global express.json verify hook. Idempotent:
 // duplicate events (Revolut retries until 2xx) update the same row without
@@ -2791,146 +2937,75 @@ app.post('/webhook/revolut', async (req, res) => {
             return res.status(200).json({ ok: true, ignored: 'missing order_id' });
         }
 
-        // Map Revolut event → our internal status. Everything else is logged
-        // and acknowledged so Revolut stops retrying, but doesn't mutate the row.
-        let nextStatus: string | null = null;
-        let markCompleted = false;
-        switch (event) {
-            case 'ORDER_COMPLETED':
-                nextStatus = 'COMPLETED';
-                markCompleted = true;
-                break;
-            case 'ORDER_AUTHORISED':
-                nextStatus = 'AUTHORISED';
-                break;
-            case 'ORDER_CANCELLED':
-                nextStatus = 'CANCELLED';
-                break;
-            case 'ORDER_PAYMENT_DECLINED':
-            case 'ORDER_PAYMENT_FAILED':
-                nextStatus = 'FAILED';
-                break;
-            default:
-                console.log('[Revolut] unhandled event:', event);
-                return res.status(200).json({ ok: true, ignored: event });
+        const result = await applyRevolutOrderTransition(orderId, event);
+        if (result.status === 'ignored') return res.status(200).json({ ok: true, ignored: result.reason });
+        return res.status(200).json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /webhook/revolut error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Manual reconciliation: poll Revolut for the current state of the order
+// associated with a payment_request and apply the corresponding transition.
+// Used when a webhook was missed — e.g. an order created before the webhook
+// endpoint existed, or a delivery Revolut permanently gave up on. Same
+// side-effects as the real webhook (broadcast + push + deposit confirmation)
+// so the UI reflects reality after one click.
+app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const paymentRes = await queryWithRetry(
+            `SELECT id, provider, provider_order_id FROM payment_requests WHERE id = $1`,
+            [id]
+        );
+        if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Payment not found' });
+        const payment = paymentRes.rows[0];
+
+        if (payment.provider !== 'revolut') {
+            return res.status(400).json({ error: `Reconcile non supportato per provider ${payment.provider}` });
+        }
+        if (!payment.provider_order_id) {
+            return res.status(400).json({ error: 'Nessun order ID associato al pagamento' });
+        }
+        if (!(await isRevolutConfigured())) {
+            return res.status(503).json({ error: 'Revolut non è configurato (API key mancante)' });
         }
 
-        // Atomic transition: lock the row, capture its pre-update state, then
-        // update. `wasCompleted` lets us detect the FIRST ORDER_COMPLETED and
-        // fire the customer confirmation exactly once — even if Revolut
-        // retries the webhook concurrently.
-        const client = await pool.connect();
-        let row: any;
-        let wasCompleted = false;
+        let order;
         try {
-            await client.query('BEGIN');
-            const before = await client.query(
-                `SELECT id, status, completed_at, reservation_id
-                 FROM payment_requests WHERE provider_order_id = $1 FOR UPDATE`,
-                [orderId]
-            );
-            if (before.rowCount === 0) {
-                await client.query('ROLLBACK');
-                console.warn('[Revolut] webhook: no payment_request found for order_id', orderId);
-                return res.status(200).json({ ok: true, ignored: 'unknown order' });
-            }
-            wasCompleted = before.rows[0].completed_at !== null;
-            const updated = await client.query(
-                `UPDATE payment_requests
-                 SET status = $1,
-                     completed_at = CASE WHEN $2 AND completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END,
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $3
-                 RETURNING *`,
-                [nextStatus, markCompleted, before.rows[0].id]
-            );
-            row = updated.rows[0];
-            await client.query('COMMIT');
-        } catch (err) {
-            await client.query('ROLLBACK').catch(() => {});
-            throw err;
-        } finally {
-            client.release();
+            order = await revolutGetOrder(payment.provider_order_id);
+        } catch (err: any) {
+            console.error('[payments] reconcile getOrder failed:', err?.message || err);
+            return res.status(502).json({ error: 'Revolut getOrder fallita', detail: err?.message || String(err) });
         }
 
-        try { socketService?.broadcastToAll('paymentRequest:updated', row); }
-        catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
-
-        const isFirstCompletion = markCompleted && !wasCompleted;
-
-        // Push notification to managers on the FIRST completed transition so
-        // they can act in real time. Skip retries so they don't get spammed.
-        if (isFirstCompletion) {
-            const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
-            pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
-                title: 'Pagamento ricevuto',
-                body: bodyLine,
-                url: row.reservation_id ? `/?view=RESERVATIONS&reservationId=${row.reservation_id}` : `/?view=RESERVATIONS`,
-                tag: `payment-${row.id}`,
-            }, { excludeUserId: null }).catch(err => {
-                console.warn('[Revolut] push send failed:', err?.message || err);
+        const event = revolutStateToEvent(String(order.state || ''));
+        if (!event) {
+            return res.status(200).json({
+                ok: true,
+                changed: false,
+                revolut_state: order.state,
+                message: `Stato Revolut "${order.state}" non richiede aggiornamenti`,
             });
         }
 
-        // On the first ORDER_COMPLETED for a reservation-linked payment:
-        // 1) auto-flip the reservation from PENDING → CONFIRMED (this happens
-        //    for web bookings above the deposit threshold, which land as PENDING)
-        // 2) notify the customer that the deposit was received and their table
-        //    is now confirmed. Fire and forget — never fail the webhook.
-        if (isFirstCompletion && row.reservation_id) {
-            (async () => {
-                try {
-                    const resvRes = await queryWithRetry(
-                        `SELECT id, customer_name, phone, reservation_time, guests,
-                                reservation_status, table_id, notes
-                         FROM reservations WHERE id = $1`,
-                        [row.reservation_id]
-                    );
-                    if (resvRes.rowCount === 0) return;
-                    const reservation = resvRes.rows[0];
-
-                    // Only auto-confirm if the reservation is still PENDING.
-                    // If staff already CONFIRMED it, DECLINED, or CANCELLED,
-                    // we don't touch the status — but we still send a message
-                    // if PENDING/CONFIRMED so the customer is not left in
-                    // silence after paying.
-                    if (reservation.reservation_status === 'PENDING') {
-                        const upd = await queryWithRetry(
-                            `UPDATE reservations
-                             SET reservation_status = 'CONFIRMED',
-                                 updated_at = CURRENT_TIMESTAMP
-                             WHERE id = $1
-                             RETURNING *`,
-                            [reservation.id]
-                        );
-                        if (upd.rows[0] && socketService) {
-                            try { socketService.broadcastReservationUpdated(upd.rows[0]); }
-                            catch (err) { console.warn('[Revolut] reservation broadcast failed:', err); }
-                        }
-                    }
-
-                    if (reservation.phone &&
-                        (reservation.reservation_status === 'PENDING' ||
-                         reservation.reservation_status === 'CONFIRMED')) {
-                        const roomName = await resolveReservationRoomName(reservation);
-                        const message = buildDepositConfirmationMessage(
-                            reservation.customer_name,
-                            reservation.reservation_time,
-                            reservation.guests,
-                            row.amount_cents,
-                            roomName
-                        );
-                        await sendBookingConfirmation(reservation.phone, message, reservation.id);
-                    }
-                } catch (err: any) {
-                    console.error('[Revolut] deposit confirmation flow failed:', err?.message || err);
-                }
-            })();
+        const result = await applyRevolutOrderTransition(payment.provider_order_id, event);
+        if (result.status === 'ignored') {
+            return res.status(200).json({ ok: true, changed: false, ignored: result.reason, revolut_state: order.state });
         }
 
-        res.status(200).json({ ok: true });
+        return res.status(200).json({
+            ok: true,
+            changed: true,
+            revolut_state: order.state,
+            first_completion: result.isFirstCompletion,
+            payment_request: result.row,
+        });
     } catch (err: any) {
-        console.error('POST /webhook/revolut error:', err);
+        console.error('POST /payments/:id/reconcile error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
