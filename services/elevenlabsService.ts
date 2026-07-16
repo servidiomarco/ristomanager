@@ -860,11 +860,17 @@ export async function modifyVoiceReservation(
     const current = active[0];
 
     // 2) Compute the new state (merge current with overrides).
-    const curDate = String(current.reservation_time).slice(0, 10); // YYYY-MM-DD
-    const curTime = (() => {
-        const d = new Date(current.reservation_time);
-        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    })();
+    // reservation_time comes back from pg as a Date object; `String(Date)`
+    // formats it as "Fri Jan 15 2027 ..." (Date.prototype.toString), which
+    // is not ISO. Use toISOString() to get YYYY-MM-DDTHH:MM:SS.SSSZ then
+    // slice — Railway runs in UTC, so wall-clock and UTC coincide for the
+    // way we store reservation_time (see createVoiceReservation).
+    const iso = current.reservation_time instanceof Date
+        ? current.reservation_time.toISOString()
+        : String(current.reservation_time);
+    const curDate = iso.slice(0, 10);
+    const timeMatch = iso.match(/T(\d{2}):(\d{2})/);
+    const curTime = timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : '00:00';
 
     const newDate = input.new_date ?? curDate;
     const newTime = input.new_time ?? curTime;
@@ -905,25 +911,27 @@ export async function modifyVoiceReservation(
         ? `[Voce] ${input.new_notes.trim()}`
         : current.notes;
 
-    const updateSql = scheduleChanged
-        ? `UPDATE reservations
-           SET reservation_time = $1,
-               shift = $2,
-               guests = $3,
-               table_id = $4,
-               notes = $5,
-               reservation_status = 'CONFIRMED'
-           WHERE id = $6
-           RETURNING id, customer_name, reservation_time, shift, guests, table_id, phone`
-        : `UPDATE reservations
-           SET notes = $5,
-               reservation_status = 'CONFIRMED'
-           WHERE id = $6
-           RETURNING id, customer_name, reservation_time, shift, guests, table_id, phone`;
-    const updated = await queryWithRetry(updateSql, [
-        newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
-        notesToStore, current.id
-    ]);
+    // The two branches use different SQL parameter counts. Postgres refuses
+    // to bind excess parameters ("could not determine data type of parameter
+    // $1"), so we split into two calls with their own params array.
+    const returning = 'id, customer_name, reservation_time, shift, guests, table_id, phone';
+    const updated = scheduleChanged
+        ? await queryWithRetry(
+            `UPDATE reservations
+             SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
+                 notes = $5, reservation_status = 'CONFIRMED'
+             WHERE id = $6
+             RETURNING ${returning}`,
+            [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
+             notesToStore, current.id]
+          )
+        : await queryWithRetry(
+            `UPDATE reservations
+             SET notes = $1, reservation_status = 'CONFIRMED'
+             WHERE id = $2
+             RETURNING ${returning}`,
+            [notesToStore, current.id]
+          );
 
     const after: ModifiedReservation = {
         ...updated.rows[0],

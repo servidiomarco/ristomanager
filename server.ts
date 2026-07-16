@@ -1608,12 +1608,16 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
         console.log('[ElevenLabs] modify-reservation OK', {
             id: after.id, conversation_id: conversationId, customer: after.customer_name,
         });
+        // after.reservation_time is a Date object; String(Date) gives
+        // "Fri Jan 15 2027 ..." which is not ISO. Use toISOString().
+        const rt: any = after.reservation_time;
+        const afterIso: string = rt instanceof Date ? rt.toISOString() : String(rt);
         return res.json({
             success: true,
             status: 'modified',
             reservation_id: after.id,
             confirmation_phrase: confirmationPhrase,
-            date_readback: formatItalianDateReadback(String(after.reservation_time).slice(0, 10)),
+            date_readback: formatItalianDateReadback(afterIso.slice(0, 10)),
         });
     } catch (err: any) {
         console.error('[ElevenLabs] modify-reservation error', err);
