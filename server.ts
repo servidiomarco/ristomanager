@@ -2493,7 +2493,7 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
             ),
             counts AS (
                 SELECT phone_key,
-                       COUNT(*) FILTER (WHERE direction = 'inbound' AND read_at IS NULL) AS unread_count,
+                       COUNT(*) FILTER (WHERE direction = 'inbound' AND read_at IS NULL)::int AS unread_count,
                        MAX(sent_at) FILTER (WHERE direction = 'inbound') AS last_inbound_at
                 FROM keyed
                 GROUP BY phone_key
@@ -2505,7 +2505,7 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                    l.body         AS last_body,
                    l.sent_at      AS last_sent_at,
                    l.reservation_id AS last_reservation_id,
-                   COALESCE(c.unread_count, 0) AS unread_count,
+                   COALESCE(c.unread_count, 0)::int AS unread_count,
                    c.last_inbound_at,
                    r.customer_name
             FROM latest l
@@ -2522,6 +2522,27 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
         res.json({ conversations: result.rows });
     } catch (err) {
         console.error('GET /messages/conversations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Distinct threads with at least one unread inbound. Powers the sidebar badge
+// on the "Messaggi" nav item — cheap enough to poll and to refresh on every
+// message:inbound socket event.
+app.get('/messages/unread-count', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(`
+            SELECT COUNT(DISTINCT right(from_phone_digits, 10))::int AS count
+            FROM outbound_messages
+            WHERE direction = 'inbound'
+              AND channel IN ('sms','whatsapp')
+              AND read_at IS NULL
+              AND from_phone_digits IS NOT NULL
+              AND length(from_phone_digits) >= 8
+        `);
+        res.json({ count: result.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /messages/unread-count error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

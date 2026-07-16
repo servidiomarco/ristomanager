@@ -81,6 +81,10 @@ class MessagesApiService {
     return apiRequest(`${API_URL}/messages/conversations`, { headers: getHeaders() });
   }
 
+  async unreadCount(): Promise<{ count: number }> {
+    return apiRequest(`${API_URL}/messages/unread-count`, { headers: getHeaders() });
+  }
+
   async getTimeline(phoneDigits: string): Promise<{ messages: InboxMessage[] }> {
     return apiRequest(`${API_URL}/messages/conversations/${encodeURIComponent(phoneDigits)}`, {
       headers: getHeaders(),

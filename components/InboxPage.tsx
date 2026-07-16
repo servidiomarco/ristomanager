@@ -285,7 +285,7 @@ const InboxPage: React.FC = () => {
     return groups;
   }, [messages]);
 
-  const totalUnread = conversations.reduce((s, c) => s + (c.unread_count || 0), 0);
+  const totalUnread = conversations.reduce((s, c) => s + Number(c.unread_count || 0), 0);
 
   return (
     <div className="flex h-[calc(100vh-64px)] bg-[var(--color-bg)]">
@@ -453,62 +453,82 @@ const InboxPage: React.FC = () => {
             </div>
 
             <div className="border-t border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3">
-              {!waWindowOpen && preferredChannel === 'whatsapp' && (
-                <div className="mb-2 flex items-center justify-between gap-2 px-3 py-2 rounded bg-amber-50 text-amber-800 ring-1 ring-amber-200 text-[12px]">
-                  <span className="flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
-                  </span>
+              <div className="max-w-3xl mx-auto space-y-2">
+                {!waWindowOpen && preferredChannel === 'whatsapp' && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-amber-50 text-amber-800 ring-1 ring-amber-200 text-[12.5px]">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
+                    </span>
+                    <button
+                      onClick={() => setPreferredChannel('sms')}
+                      className="font-semibold underline hover:no-underline whitespace-nowrap"
+                    >
+                      Passa a SMS
+                    </button>
+                  </div>
+                )}
+                {sendError && (
+                  <div className="px-3 py-2 rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200 text-[12.5px]">
+                    {sendError}
+                  </div>
+                )}
+
+                {/* Segmented channel toggle above the composer, iOS-style. */}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-full bg-[var(--color-surface-2)] p-0.5 text-[11px] font-semibold">
+                    <button
+                      onClick={() => setPreferredChannel('whatsapp')}
+                      className={`px-3 py-1 rounded-full transition-colors ${preferredChannel === 'whatsapp' ? 'bg-emerald-500 text-white shadow-sm' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                    >
+                      WhatsApp
+                    </button>
+                    <button
+                      onClick={() => setPreferredChannel('sms')}
+                      className={`px-3 py-1 rounded-full transition-colors ${preferredChannel === 'sms' ? 'bg-sky-500 text-white shadow-sm' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
+                    >
+                      SMS
+                    </button>
+                  </div>
+                  {preferredChannel === 'whatsapp' && waWindowOpen && (
+                    <span className="text-[11px] text-[var(--color-fg-subtle)] flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> {windowRemaining} rimanenti
+                    </span>
+                  )}
+                </div>
+
+                {/* Composer: pill-shaped textarea with a floating send button. */}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 flex items-end rounded-2xl bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] focus-within:ring-2 focus-within:ring-emerald-500 transition-shadow px-4 py-2.5">
+                    <textarea
+                      ref={composerRef}
+                      value={composerText}
+                      onChange={e => setComposerText(e.target.value)}
+                      onKeyDown={handleComposerKeyDown}
+                      placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
+                        ? 'Finestra chiusa — passa a SMS'
+                        : 'Scrivi un messaggio…'}
+                      rows={1}
+                      disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
+                      className="flex-1 resize-none max-h-40 bg-transparent border-0 text-[14px] leading-snug text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none disabled:opacity-60"
+                    />
+                  </div>
                   <button
-                    onClick={() => setPreferredChannel('sms')}
-                    className="font-semibold underline hover:no-underline"
+                    onClick={handleSend}
+                    disabled={!composerText.trim() || sending || (preferredChannel === 'whatsapp' && !waWindowOpen)}
+                    aria-label="Invia messaggio"
+                    className={`flex-shrink-0 h-11 w-11 rounded-full flex items-center justify-center text-white transition-all shadow-sm disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-fg-subtle)] disabled:cursor-not-allowed disabled:shadow-none ${
+                      preferredChannel === 'whatsapp'
+                        ? 'bg-emerald-500 hover:bg-emerald-600 active:scale-95'
+                        : 'bg-sky-500 hover:bg-sky-600 active:scale-95'
+                    }`}
                   >
-                    Invia via SMS
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </button>
                 </div>
-              )}
-              {sendError && (
-                <div className="mb-2 px-3 py-2 rounded bg-rose-50 text-rose-700 ring-1 ring-rose-200 text-[12px]">
-                  {sendError}
-                </div>
-              )}
-              <div className="flex items-end gap-2 max-w-3xl mx-auto">
-                <div className="flex-shrink-0 flex items-center gap-1 text-[11px] text-[var(--color-fg-muted)]">
-                  <button
-                    onClick={() => setPreferredChannel('whatsapp')}
-                    className={`px-2 py-1 rounded ${preferredChannel === 'whatsapp' ? channelBadgeCls('whatsapp') : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-2)]'}`}
-                    title="Invia via WhatsApp"
-                  >
-                    WA
-                  </button>
-                  <button
-                    onClick={() => setPreferredChannel('sms')}
-                    className={`px-2 py-1 rounded ${preferredChannel === 'sms' ? channelBadgeCls('sms') : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-2)]'}`}
-                    title="Invia via SMS"
-                  >
-                    SMS
-                  </button>
-                </div>
-                <textarea
-                  ref={composerRef}
-                  value={composerText}
-                  onChange={e => setComposerText(e.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
-                    ? 'Finestra chiusa — passa a SMS'
-                    : 'Scrivi un messaggio…'}
-                  rows={1}
-                  disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
-                  className="flex-1 resize-none max-h-32 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-[14px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={!composerText.trim() || sending || (preferredChannel === 'whatsapp' && !waWindowOpen)}
-                  className="flex-shrink-0 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[14px] font-medium flex items-center gap-1"
-                >
-                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  <span className="hidden sm:inline">Invia</span>
-                </button>
+                <p className="text-[11px] text-[var(--color-fg-subtle)] px-1">
+                  Invio con <kbd className="px-1 py-0.5 rounded bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] font-mono text-[10px]">Enter</kbd>, a capo con <kbd className="px-1 py-0.5 rounded bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] font-mono text-[10px]">Shift+Enter</kbd>
+                </p>
               </div>
             </div>
           </>

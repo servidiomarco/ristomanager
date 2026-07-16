@@ -36,6 +36,7 @@ import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
+import { messagesApiService } from './services/messagesApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
@@ -198,6 +199,45 @@ const App: React.FC = () => {
       .then(({ count }) => setVoiceCallsPendingCount(count))
       .catch(() => {});
   }, [view, isAuthenticated, canSeeVoiceCalls]);
+
+  // Unread count for the "Messaggi" nav badge. Fetched on mount and refreshed
+  // on every inbound socket event so the sidebar reflects new chats live. When
+  // the user leaves the inbox we also refresh, in case they read some threads.
+  const [messagesUnreadCount, setMessagesUnreadCount] = useState(0);
+  const canSeeMessages = canAccessView(ViewState.MESSAGGI);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeMessages) return;
+    let cancelled = false;
+    const refresh = () => {
+      messagesApiService.unreadCount()
+        .then(({ count }) => { if (!cancelled) setMessagesUnreadCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const socket = socketClient.getSocket();
+    const onEvent = () => refresh();
+    if (socket) {
+      socket.on('message:inbound', onEvent);
+      socket.on('message:outbound', onEvent);
+    }
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      if (socket) {
+        socket.off('message:inbound', onEvent);
+        socket.off('message:outbound', onEvent);
+      }
+    };
+  }, [isAuthenticated, canSeeMessages]);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeMessages) return;
+    if (view === ViewState.MESSAGGI) return;
+    messagesApiService.unreadCount()
+      .then(({ count }) => setMessagesUnreadCount(count))
+      .catch(() => {});
+  }, [view, isAuthenticated, canSeeMessages]);
 
   // Global date/shift state — drives the header control group on desktop
   const [globalDate, setGlobalDate] = useState<Date>(new Date());
@@ -1298,7 +1338,11 @@ const App: React.FC = () => {
                       active={item.view !== undefined && view === item.view}
                       onClick={() => selectNavItem(item)}
                       collapsed={sidebarCollapsed}
-                      badge={item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount : undefined}
+                      badge={
+                        item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
+                        : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                        : undefined
+                      }
                     />
                   )
                 ))}
@@ -2143,7 +2187,10 @@ const App: React.FC = () => {
                         {group.label}
                       </div>
                       {items.map(item => {
-                        const badge = item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount : 0;
+                        const badge =
+                          item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
+                          : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                          : 0;
                         return (
                         <button
                           key={item.label}
