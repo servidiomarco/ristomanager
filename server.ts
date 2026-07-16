@@ -7650,6 +7650,16 @@ interface OutboundConfirmationResult {
     channel: 'sms' | 'whatsapp';
 }
 
+// Pre-approved WhatsApp template — required by Meta for business-initiated
+// messages (no customer inbound within 24h). Freeform WA sends outside that
+// window return errCode 63016 asynchronously, so we don't even attempt WA
+// unless the caller provides a template. `contentVariables` is a numeric-keyed
+// map matching the {{1}} {{2}} ... placeholders in the approved body.
+interface WhatsAppTemplateOpts {
+    contentSid: string;
+    contentVariables: Record<string, string>;
+}
+
 // Persist a row in outbound_messages so the operator can see the full
 // SMS/WhatsApp history per customer without opening the Twilio console.
 // Never lets a logging error break the actual send — errors are just warned.
@@ -7734,7 +7744,12 @@ function twilioStatusCallbackUrl(): string | null {
     return `${base.replace(/\/+$/, '')}/webhook/twilio-whatsapp-status`;
 }
 
-async function sendTwilioWhatsApp(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
+async function sendTwilioWhatsApp(
+    to: string,
+    text: string,
+    reservationId?: number | null,
+    template?: WhatsAppTemplateOpts
+): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const FROM = process.env.TWILIO_WHATSAPP_FROM;
@@ -7750,14 +7765,21 @@ async function sendTwilioWhatsApp(to: string, text: string, reservationId?: numb
     const formattedTo = `whatsapp:${normalizeItalianPhone(String(to))}`;
     const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
 
-    console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}`);
+    console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}${template ? ` (template ${template.contentSid})` : ''}`);
 
     const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
     const body = new URLSearchParams({
         From: formattedFrom,
         To: formattedTo,
-        Body: text,
     });
+    if (template) {
+        // Meta business-initiated messages must use an approved template.
+        // Body is ignored by Twilio when ContentSid is set.
+        body.set('ContentSid', template.contentSid);
+        body.set('ContentVariables', JSON.stringify(template.contentVariables));
+    } else {
+        body.set('Body', text);
+    }
     const callback = twilioStatusCallbackUrl();
     if (callback) body.set('StatusCallback', callback);
 
@@ -7799,10 +7821,19 @@ async function sendTwilioWhatsApp(to: string, text: string, reservationId?: numb
 
 // Plain-text WhatsApp dispatcher. Prefers Twilio when configured, falls back
 // to Vonage. Meta is template-only (separate path) so it isn't in this chain.
-async function sendWhatsAppText(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
+// When `template` is provided, uses Twilio's ContentSid/ContentVariables API
+// (required for business-initiated messages outside the 24h window); Vonage
+// doesn't support templates so it's skipped in that case.
+async function sendWhatsAppText(
+    to: string,
+    text: string,
+    reservationId?: number | null,
+    template?: WhatsAppTemplateOpts
+): Promise<OutboundConfirmationResult> {
     if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(to, text, reservationId);
+        return sendTwilioWhatsApp(to, text, reservationId, template);
     }
+    if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
     try {
         await sendVonageWhatsApp(to, text);
         await logOutboundMessage({ provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
@@ -7902,27 +7933,26 @@ async function sendTwilioSms(to: string, text: string, reservationId?: number | 
     }
 }
 
-// Booking-confirmation dispatcher. WhatsApp is the primary channel (cheaper,
-// richer, higher open rate); Twilio SMS acts as fallback when the WA send
-// fails synchronously — e.g. recipient not on WhatsApp, Twilio WA sender not
-// yet registered, template not approved. Delivery-time failures (Twilio
-// queues the message but Meta drops it later) are handled by the
-// StatusCallback path, not here. When `reservationId` is passed we persist
-// the Twilio SID so the StatusCallback can update the delivery status.
+// Booking-confirmation dispatcher. WhatsApp is preferred (cheaper, richer,
+// higher open rate) BUT only when the caller supplies an approved template:
+// Meta rejects freeform business-initiated messages outside the 24h window
+// with errCode 63016 async — Twilio still returns 200, so the sync fallback
+// wouldn't fire and the customer would silently get nothing. When no template
+// is provided we go straight to SMS. Delivery-time failures for template
+// sends are still handled by the StatusCallback path. When `reservationId`
+// is passed we persist the Twilio SID so the StatusCallback can update it.
 async function sendBookingConfirmation(
     to: string,
     text: string,
-    reservationId?: number | null
+    reservationId?: number | null,
+    opts?: { whatsappTemplate?: WhatsAppTemplateOpts }
 ): Promise<OutboundConfirmationResult> {
-    // Try WA first only when Twilio WA is properly configured. Vonage is a
-    // deprecated sandbox that would generate noisy failed sends per booking,
-    // so skip it entirely — if TWILIO_WHATSAPP_FROM is unset we go straight
-    // to SMS.
-    const tryWhatsApp = isTwilioWhatsAppConfigured();
+    const template = opts?.whatsappTemplate;
+    const tryWhatsApp = !!template && isTwilioWhatsAppConfigured();
     let result: OutboundConfirmationResult;
     try {
         result = tryWhatsApp
-            ? await sendWhatsAppText(to, text, reservationId)
+            ? await sendWhatsAppText(to, text, reservationId, template)
             : await sendTwilioSms(to, text, reservationId);
     } catch (err: any) {
         if (tryWhatsApp && isTwilioSmsConfigured()) {
@@ -10082,9 +10112,26 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
               )
             : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
+        // Attach the booking_received WA template only in the no-deposit branch:
+        // booking_deposit_request is not yet Meta-approved, so the deposit ack
+        // must go via SMS to avoid an async 63016 rejection. When the env var
+        // is unset (rollout not enabled) the dispatcher falls back to SMS too.
+        const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
+        const waTemplate = (!depositCheckoutUrl && bookingReceivedSid)
+            ? {
+                contentSid: bookingReceivedSid,
+                contentVariables: {
+                    '1': toTitleCase(customer_name),
+                    '2': guestsLabel,
+                    '3': dateLabel,
+                    '4': time,
+                },
+              }
+            : undefined;
+
         // SMS/WhatsApp ack — only if the guest gave us a phone number.
         if (phoneE164) {
-            sendBookingConfirmation(phoneE164, ackText, created.id).catch(err =>
+            sendBookingConfirmation(phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
                 console.error('[public-booking] confirmation send failed:', err?.message || err)
             );
         }
