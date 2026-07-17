@@ -910,6 +910,22 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
             message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
         });
     }
+    // Large-group handoff. Case in point: on 2026-07-17 the agent told a
+    // caller that no tables were free for 11 people at lunch on 2026-07-24,
+    // when in fact every room was empty — findAvailability filters by
+    // `tables.seats >= guests`, so groups larger than the biggest single
+    // table always come back empty even when total capacity is fine. Rather
+    // than teach the agent to reason about merging tables, we cap the
+    // self-serve flow at 8 covers and hand anything larger to a human.
+    if (guests > 8) {
+        console.log('[ElevenLabs] check-availability handoff (large group)', { date: normalizedDate, shift: rawShift, guests });
+        return res.json({
+            available: false,
+            free_tables_count: 0,
+            error: 'large_group',
+            message: 'Per gruppi da 9 persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.'
+        });
+    }
 
     try {
         const result = await findAvailability({
@@ -1040,6 +1056,18 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             success: false,
             error: 'invalid_guests',
             message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
+        });
+    }
+    // Defense-in-depth for the ≤8 self-serve cap enforced in check-availability
+    // (see comment there for the underlying reason). Prevents an LLM
+    // hallucination from bypassing the handoff by calling create-reservation
+    // directly without a prior availability check.
+    if (guests > 8) {
+        console.log('[ElevenLabs] create-reservation blocked (large group)', { guests, conversation_id: conversationId });
+        return res.json({
+            success: false,
+            error: 'large_group',
+            message: 'Per gruppi da 9 persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.'
         });
     }
     const childrenNum = Number(childrenRaw);
