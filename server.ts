@@ -5002,42 +5002,90 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             }
         }
 
-        const result = await queryWithRetry(
-            `UPDATE customers SET
-                name = $1,
-                phone = $2,
-                email = $3,
-                address = $4,
-                city = $5,
-                postal_code = $6,
-                notes = $7,
-                preferred_table_id = $8,
-                preferences_notes = $9,
-                dietary_notes = $10,
-                is_vip = $11,
-                updated_at = CURRENT_TIMESTAMP
-             WHERE id = $12
-             RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
-            [
-                normalizeCustomerName(String(name).trim()),
-                phone ? String(phone).trim() : null,
-                email ? String(email).trim() : null,
-                address ?? null,
-                city ?? null,
-                postal_code ?? null,
-                notes ?? null,
-                normalizedPreferredTableId,
-                preferences_notes ?? null,
-                dietary_notes ?? null,
-                normalizedIsVip,
-                id,
-            ]
-        );
-        if (result.rowCount === 0) {
-            return res.status(404).json({ error: 'Customer not found' });
+        // Transaction: update the customer row AND cascade the changed
+        // name/phone into the reservations that were tagged with the old
+        // phone. Reservations don't hold a FK to customers — the join is
+        // by phone digits — so a name typo fix here wouldn't otherwise
+        // propagate to the customer's booking history.
+        const client = await pool.connect();
+        let updated: any;
+        try {
+            await client.query('BEGIN');
+            const prev = await client.query(
+                'SELECT name, phone FROM customers WHERE id = $1 FOR UPDATE',
+                [id]
+            );
+            if (prev.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Customer not found' });
+            }
+            const oldName = prev.rows[0].name || '';
+            const oldPhone = prev.rows[0].phone || '';
+            const oldPhoneDigits = oldPhone.replace(/\D/g, '');
+            const newName = normalizeCustomerName(String(name).trim());
+            const newPhone = phone ? String(phone).trim() : null;
+
+            const result = await client.query(
+                `UPDATE customers SET
+                    name = $1,
+                    phone = $2,
+                    email = $3,
+                    address = $4,
+                    city = $5,
+                    postal_code = $6,
+                    notes = $7,
+                    preferred_table_id = $8,
+                    preferences_notes = $9,
+                    dietary_notes = $10,
+                    is_vip = $11,
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $12
+                 RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                [
+                    newName,
+                    newPhone,
+                    email ? String(email).trim() : null,
+                    address ?? null,
+                    city ?? null,
+                    postal_code ?? null,
+                    notes ?? null,
+                    normalizedPreferredTableId,
+                    preferences_notes ?? null,
+                    dietary_notes ?? null,
+                    normalizedIsVip,
+                    id,
+                ]
+            );
+            updated = result.rows[0];
+
+            // Propagate name/phone corrections to the reservations previously
+            // filed under this customer. Match by phone digits (not exact
+            // string) so historical rows with different formatting (e.g. old
+            // "+39 " prefix) still get updated. Only touch reservations if
+            // either field actually changed — avoid needless writes.
+            const nameChanged = newName !== oldName;
+            const phoneChanged = (newPhone || '') !== oldPhone;
+            if (oldPhoneDigits.length >= 6 && (nameChanged || phoneChanged)) {
+                const cascade = await client.query(
+                    `UPDATE reservations
+                     SET customer_name = $1,
+                         phone = $2
+                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3`,
+                    [newName, newPhone, oldPhoneDigits]
+                );
+                if (cascade.rowCount && cascade.rowCount > 0) {
+                    console.log(`[customers] cascade updated ${cascade.rowCount} reservations for customer #${id} (name: "${oldName}" → "${newName}", phone: "${oldPhone}" → "${newPhone || ''}")`);
+                }
+            }
+
+            await client.query('COMMIT');
+        } catch (txErr) {
+            try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+            throw txErr;
+        } finally {
+            client.release();
         }
-        const updated = result.rows[0];
 
         if (req.user) {
             LogService.logActivity(
