@@ -2336,7 +2336,12 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             (updatedReservation?.phone || updatedReservation?.email)
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
-            if (updatedReservation.phone) {
+            // Web bookings (source=GOOGLE) with an email prefer the email
+            // channel and skip SMS entirely — same policy as the initial ack
+            // in POST /public/reservations.
+            const isWebBooking = updatedReservation?.source === 'GOOGLE';
+            const preferEmailOnly = isWebBooking && !!updatedReservation.email;
+            if (updatedReservation.phone && !preferEmailOnly) {
                 sendBookingConfirmation(
                     updatedReservation.phone,
                     buildConfirmationMessage(
@@ -2391,24 +2396,65 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             }
         }
 
-        // Auto-send the decline notice on any → DECLINED. The guest is told the
-        // request could not be accepted and invited to call for an alternative
-        // date/time. Same dispatcher as the confirmation path (SMS while Meta
-        // WhatsApp is pending). Fire and forget.
+        // Auto-send the decline notice on any → DECLINED. The guest is told
+        // the request could not be accepted and invited to call for an
+        // alternative date/time. Web bookings with an email prefer the email
+        // channel and skip SMS — same policy as the confirmation branch.
         if (
             previousStatus !== 'DECLINED' &&
             reservation_status === 'DECLINED' &&
-            updatedReservation?.phone
+            (updatedReservation?.phone || updatedReservation?.email)
         ) {
-            sendBookingConfirmation(
-                updatedReservation.phone,
-                buildDeclineMessage(
-                    updatedReservation.customer_name,
-                    updatedReservation.reservation_time,
-                    updatedReservation.guests
-                ),
-                updatedReservation.id
-            ).catch(err => console.error('Auto-decline send failed:', err));
+            const isWebBooking = updatedReservation?.source === 'GOOGLE';
+            const preferEmailOnly = isWebBooking && !!updatedReservation.email;
+            if (updatedReservation.phone && !preferEmailOnly) {
+                sendBookingConfirmation(
+                    updatedReservation.phone,
+                    buildDeclineMessage(
+                        updatedReservation.customer_name,
+                        updatedReservation.reservation_time,
+                        updatedReservation.guests
+                    ),
+                    updatedReservation.id
+                ).catch(err => console.error('Auto-decline send failed:', err));
+            }
+            if (updatedReservation.email && isWebBooking) {
+                (async () => {
+                    try {
+                        if (!(await isSmtpConfigured())) return;
+                        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+                        const { subject, text, html } = buildBookingDeclineEmail({
+                            customerName: updatedReservation.customer_name,
+                            reservationTime: updatedReservation.reservation_time,
+                            guests: updatedReservation.guests,
+                        });
+                        try {
+                            const sent = await sendMail({ to: String(updatedReservation.email), subject, text, html });
+                            await logOutboundEmail({
+                                provider: emailProvider,
+                                to: String(updatedReservation.email),
+                                subject,
+                                body: text,
+                                messageId: sent.messageId || null,
+                                reservationId: updatedReservation.id,
+                            });
+                        } catch (sendErr: any) {
+                            await logOutboundEmail({
+                                provider: emailProvider,
+                                to: String(updatedReservation.email),
+                                subject,
+                                body: text,
+                                reservationId: updatedReservation.id,
+                                errorMessage: sendErr?.message || String(sendErr),
+                            });
+                            throw sendErr;
+                        }
+                    } catch (err: any) {
+                        console.error('Auto-decline email failed:', err?.message || err);
+                    }
+                })();
+            }
         }
 
         res.json(updatedReservation);
@@ -8008,6 +8054,8 @@ function buildBookingRequestEmail(params: {
     guests: number;
     roomName?: string | null;
     notes?: string | null;
+    depositAmountCents?: number | null;
+    depositCheckoutUrl?: string | null;
 }): { subject: string; text: string; html: string } {
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
     const name = (params.customerName || '').trim();
@@ -8017,18 +8065,39 @@ function buildBookingRequestEmail(params: {
     const roomPart = room ? ` (${room})` : '';
     const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
     const greetingText = name ? `Ciao ${name},` : 'Ciao,';
+
+    const depositUrl = (params.depositCheckoutUrl || '').trim();
+    const depositCents = Number(params.depositAmountCents || 0);
+    const hasDeposit = depositUrl.length > 0 && depositCents > 0;
+    const depositAmount = hasDeposit ? formatEuroMinor(depositCents) : '';
+
+    const depositTextBlock = hasDeposit
+        ? `\n\nPer confermare il tavolo serve una caparra di ${depositAmount} (€ 10 a persona).\nPaga in sicurezza qui: ${depositUrl}\n\nAppena riceviamo il pagamento ti confermeremo la prenotazione.`
+        : '\n\nTi ricontatteremo a breve per confermarla via email.';
+
     const text = `${greetingText}
 
 abbiamo ricevuto la tua richiesta di prenotazione:
 
 • Data: ${dateLabel}
 • Ora: ${timeLabel}
-• Ospiti: ${guestsNum} ${persone}${room ? `\n• Sala richiesta: ${room}` : ''}
-
-Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.
+• Ospiti: ${guestsNum} ${persone}${room ? `\n• Sala richiesta: ${room}` : ''}${depositTextBlock}
 
 Grazie e a presto!
 Il Vecchio Frantoio`;
+
+    const depositHtmlBlock = hasDeposit
+        ? `
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">Per confermare il tavolo serve una caparra di <strong>${escapeHtml(depositAmount)}</strong> (€ 10 a persona).</p>
+      <p style="margin:0 0 16px;text-align:center;">
+        <a href="${escapeHtml(depositUrl)}" style="display:inline-block;padding:12px 24px;background:#059669;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">Paga la caparra</a>
+      </p>
+      <p class="muted" style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#57534e;">Appena riceviamo il pagamento ti confermeremo la prenotazione.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#78716c;word-break:break-all;">Se il pulsante non funziona, copia questo link: ${escapeHtml(depositUrl)}</p>
+    `
+        : `
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email.</p>
+    `;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
@@ -8037,7 +8106,7 @@ Il Vecchio Frantoio`;
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
       </table>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
+      ${depositHtmlBlock}
       <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Richiesta prenotazione ricevuta per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -8073,6 +8142,35 @@ function buildBookingConfirmationEmail(params: {
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
+    return { subject, text, html };
+}
+
+// Booking-decline email — mirrors buildDeclineMessage (the SMS text) but with
+// the HTML wrapper. Fires on any → DECLINED for a web booking with an email;
+// SMS is skipped in that case (see PUT /reservations/:id).
+function buildBookingDeclineEmail(params: {
+    customerName: string;
+    reservationTime: string | Date;
+    guests: number;
+}): { subject: string; text: string; html: string } {
+    const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
+    const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const name = (params.customerName || '').trim();
+    const subject = `Prenotazione non disponibile — ${dateLabel} ${timeLabel}`;
+    const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests);
+
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>purtroppo non ci è stato possibile confermare la tua richiesta.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Ospiti:</strong> ${guestsNum} ${persone}</td></tr>
+      </table>
+      <p class="muted" style="margin:0;font-size:14px;line-height:1.6;color:#57534e;">Per verificare un'altra data o orario, rispondi a questa email o chiamaci allo <strong>0985 876578</strong>.</p>
+      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
+    `;
+    const html = wrapEmailHtml(`Richiesta prenotazione non disponibile per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
     return { subject, text, html };
 }
 
@@ -10676,8 +10774,12 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
               }
             : undefined;
 
-        // SMS/WhatsApp ack — only if the guest gave us a phone number.
-        if (phoneE164) {
+        // Channel priority for the ack: when the guest gave us an email we
+        // prefer that channel and skip SMS/WhatsApp entirely. Email is
+        // instant, free, and (when there's a deposit) carries the checkout
+        // link inline via buildBookingRequestEmail. SMS remains the fallback
+        // for phone-only bookings.
+        if (phoneE164 && !emailNormalized) {
             sendBookingConfirmation(phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
                 console.error('[public-booking] confirmation send failed:', err?.message || err)
             );
@@ -10699,6 +10801,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                         guests: guestsNum,
                         roomName: requestedRoomName,
                         notes: userNote,
+                        depositAmountCents: depositAmountCents || null,
+                        depositCheckoutUrl,
                     });
                     try {
                         const sent = await sendMail({ to: emailNormalized, subject, text, html });
