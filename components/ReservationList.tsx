@@ -3042,6 +3042,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const reservationCountForDayShift = reservationsForDayShift.length;
     const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED).length;
 
+    // Coperti per sala per il turno corrente — usato come badge accanto al
+    // nome della sala nei tab del map view. Solo prenotazioni con tavolo
+    // assegnato e non cancellate/rifiutate; le altre non pesano sulla
+    // capienza fisica della sala.
+    const guestsByRoomId = new Map<string | number, number>();
+    for (const r of reservationsForDayShift) {
+      if (!r.table_id) continue;
+      if (r.reservation_status === ReservationStatus.CANCELLED) continue;
+      if (r.reservation_status === ReservationStatus.DECLINED) continue;
+      const table = displayTables.find(t => t.id === r.table_id);
+      if (!table) continue;
+      const rid = table.room_id;
+      guestsByRoomId.set(rid, (guestsByRoomId.get(rid) || 0) + (Number(r.guests) || 0));
+    }
+
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
     //  - auto: tidy flowing rows via computeAutoLayout, shaped to the canvas
@@ -3131,16 +3146,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {/* Room tabs + stats */}
         <div className="flex items-center gap-3 px-3 py-2 border-b border-[var(--color-line)]">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
-            {rooms.filter(r => !r.is_closed).map(room => (
-              <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
-                className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
-                  activeMapRoomId === room.id
-                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                }`}>
-                {room.name}
-              </button>
-            ))}
+            {rooms.filter(r => !r.is_closed).map(room => {
+              const roomGuests = guestsByRoomId.get(room.id) || 0;
+              const isActive = activeMapRoomId === room.id;
+              return (
+                <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
+                  className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
+                    isActive
+                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                  }`}>
+                  <span>{room.name}</span>
+                  {roomGuests > 0 && (
+                    <span
+                      className={`inline-flex items-center justify-center min-w-[22px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold tabular ${
+                        isActive
+                          ? 'bg-white/20 text-[var(--color-fg-on-brand)]'
+                          : 'bg-[var(--color-surface-3)] text-[var(--color-fg)]'
+                      }`}
+                      title={`${roomGuests} coperti in sala`}
+                    >
+                      {roomGuests}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {hiddenTableIds.size > 0 && (
             <>

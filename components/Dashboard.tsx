@@ -4,7 +4,7 @@ import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus
 import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -561,10 +561,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     const LUNCH_SLOTS = ['13:00', '13:30', '14:00'];
     const DINNER_SLOTS = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
 
-    const getTimeFromReservation = (r: Reservation) => {
-      const match = r.reservation_time.match(/T(\d{2}:\d{2})/);
-      return match ? match[1] : '';
-    };
+    // Read wall-clock time in Europe/Rome. The naive regex used previously
+    // extracted the raw UTC hour from the ISO string, so after the timezone
+    // refactor a booking at 20:00 Rome (18:00 UTC in CEST) resolved to
+    // "18:00" and never matched a DINNER_SLOT — deflating every room's
+    // affluenza count.
+    const getTimeFromReservation = (r: Reservation) => getRomeTimePart(r.reservation_time);
 
     // Get room for a reservation based on table_id
     const getRoomForReservation = (r: Reservation) => {
