@@ -568,6 +568,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     // affluenza count.
     const getTimeFromReservation = (r: Reservation) => getRomeTimePart(r.reservation_time);
 
+    // Bucket a HH:MM string to the nearest earlier canonical slot. Anything
+    // before the first slot bunches into the first slot; anything after the
+    // last stays on the last. Without this, off-slot bookings (e.g. 21:15,
+    // typically imported / imported from ElevenLabs) would silently drop off
+    // the grid — leaving the room total lower than the true guest count.
+    const slotMinutes = (hhmm: string): number => {
+        const m = hhmm.match(/^(\d{2}):(\d{2})$/);
+        if (!m) return -1;
+        return Number(m[1]) * 60 + Number(m[2]);
+    };
+    const bucketToSlot = (hhmm: string, slots: string[]): string | null => {
+        const t = slotMinutes(hhmm);
+        if (t < 0) return null;
+        let chosen: string | null = null;
+        for (const s of slots) {
+            const sm = slotMinutes(s);
+            if (sm <= t) chosen = s;
+            else break;
+        }
+        // Time falls before the first slot → clip into the first slot so we
+        // don't lose the reservation on the row entirely.
+        return chosen ?? slots[0] ?? null;
+    };
+
     // Get room for a reservation based on table_id
     const getRoomForReservation = (r: Reservation) => {
       if (!r.table_id) return null;
@@ -580,10 +604,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       const roomTables = tables.filter(t => t.room_id === room.id);
       const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
 
-      // Lunch slots for this room
+      // Lunch slots for this room — off-slot bookings get bucketed to the
+      // nearest earlier canonical slot so nobody vanishes from the row.
       const lunchSlots = LUNCH_SLOTS.map(slot => {
         const reservationsAtSlot = lunchReservations.filter(r =>
-          getRoomForReservation(r) === room.id && getTimeFromReservation(r) === slot
+          getRoomForReservation(r) === room.id
+          && bucketToSlot(getTimeFromReservation(r), LUNCH_SLOTS) === slot
         );
         const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
         return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
@@ -592,7 +618,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       // Dinner slots for this room
       const dinnerSlots = DINNER_SLOTS.map(slot => {
         const reservationsAtSlot = dinnerReservations.filter(r =>
-          getRoomForReservation(r) === room.id && getTimeFromReservation(r) === slot
+          getRoomForReservation(r) === room.id
+          && bucketToSlot(getTimeFromReservation(r), DINNER_SLOTS) === slot
         );
         const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
         return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
