@@ -31,6 +31,11 @@ export interface VoiceCallSummary {
   // linking a manually-created reservation (auto) or by clicking the
   // "Segna come recuperata" button (manual). Collapses the red banner.
   phantom_recovered: boolean;
+  // True when the call ended in the large-group handoff branch (guests
+  // above the configurable threshold). The agent has already told the
+  // caller they'll be called back — the badge on the card reminds staff
+  // this is a callback request, not a plain follow-up.
+  large_group_handoff: boolean;
 }
 
 export interface VoiceCallFollowUpUpdate {

@@ -456,6 +456,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // from staff. Lets the UI collapse the red banner while keeping the
         // original phantom_confirmation flag intact for reporting.
         await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS phantom_recovered BOOLEAN NOT NULL DEFAULT FALSE;`);
+        // Marks calls where the agent hit the "gruppi grandi" handoff branch
+        // (guests > voice_large_group_threshold): the tool refused, agent
+        // read the callback phrase. Set by the post-call webhook via
+        // transcript scan. Powers a dedicated badge on the Conversazioni card
+        // so staff know it's a callback request, not a plain follow-up.
+        await client.query(`ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS large_group_handoff BOOLEAN NOT NULL DEFAULT FALSE;`);
 
         // Payment link requests (Revolut hosted checkout). Amounts are in
         // minor units (cents) — same convention as Revolut / Stripe so we

@@ -668,6 +668,23 @@ export function detectPhantomConfirmation(transcript: string): boolean {
     return false;
 }
 
+// "agent triggered the large-group handoff": either the backend refused a
+// check-availability/create-reservation for guests > threshold, or the
+// agent read the handoff phrase directly (per the prompt). Both paths
+// converge on the same sentence, so we scan for its stable signature:
+// "gestire la prenotazione al telefono". Very specific — virtually no
+// false positives outside this flow.
+export function detectLargeGroupHandoff(transcript: string): boolean {
+    if (!transcript) return false;
+    const signature = /gestire\s+la\s+prenotazione\s+al\s+telefono/i;
+    for (const rawLine of transcript.split('\n')) {
+        const line = rawLine.trim();
+        if (!/^agent:/i.test(line)) continue;
+        if (signature.test(line)) return true;
+    }
+    return false;
+}
+
 // Static first message used both by the ElevenLabs agent (configured on the
 // dashboard) and as the fallback we return from the init-conversation
 // webhook when the caller is anonymous, unknown, or lookup fails. Keeping
@@ -1775,6 +1792,27 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         }
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call phantom detection failed:', err?.message || err);
+    }
+
+    // Large-group handoff detection. If the agent read the callback phrase
+    // ("gestire la prenotazione al telefono") we flag the row so the
+    // Conversazioni card displays a dedicated "gruppo grande" badge — this
+    // is a callback request, not a plain missed booking. No push here: the
+    // caller has already been told they'll be called back and it's not
+    // time-critical the same way phantom confirmations are.
+    try {
+        if (transcript && detectLargeGroupHandoff(transcript)) {
+            await queryWithRetry(
+                `UPDATE voice_calls
+                 SET large_group_handoff = TRUE
+                 WHERE conversation_id = $1
+                   AND large_group_handoff = FALSE`,
+                [conversationId]
+            );
+            console.log('[ElevenLabs] large-group handoff detected on', conversationId);
+        }
+    } catch (err: any) {
+        console.warn('[ElevenLabs] post-call large-group detection failed:', err?.message || err);
     }
 
     // Look up any reservation linked to this conversation (set during create_reservation).
@@ -9386,6 +9424,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     vc.follow_up_updated_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
+                    vc.large_group_handoff,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -9578,6 +9617,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     vc.follow_up_updated_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
+                    vc.large_group_handoff,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,

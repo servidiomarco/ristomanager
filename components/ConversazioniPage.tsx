@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
   CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
-  BookUser, Send, Check,
+  BookUser, Send, Check, Users,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -416,6 +416,23 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                       <div className="font-semibold">Prenotazione recuperata</div>
                       <div className="text-[12px] mt-0.5 opacity-90">
                         La conferma fantasma dell'agent è stata gestita.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Large-group handoff: agent redirected the caller to a human
+                  because the party was above the configurable threshold.
+                  Distinct from phantom (which is an agent hallucination);
+                  this one is expected behavior and just needs a callback. */}
+              {detail.large_group_handoff && !detail.reservation_id && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-500/10 dark:border-indigo-500/40 p-3">
+                  <div className="flex items-start gap-2 text-[13px] text-indigo-800 dark:text-indigo-200">
+                    <Users className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Gruppo grande — richiamare</div>
+                      <div className="text-[12px] mt-0.5 opacity-90">
+                        Il cliente voleva prenotare per un gruppo oltre la soglia dell'agent. Sofia ha detto che avremmo richiamato: concorda con lui data, orario e mise en place.
                       </div>
                     </div>
                   </div>
@@ -931,6 +948,17 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                       {!phantomOpen && item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
                           Da ricontattare
+                        </span>
+                      )}
+                      {/* Handoff reason badge: shown alongside the follow-up
+                          status so the operator knows *why* this call needs
+                          a callback (agent redirected a large group). */}
+                      {!phantomOpen && item.reservation_id == null && item.large_group_handoff && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ring-1 ring-inset shrink-0 bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30"
+                          title="Il cliente voleva prenotare per un gruppo grande — l'agent ha promesso una richiamata"
+                        >
+                          Gruppo grande
                         </span>
                       )}
                     </div>
