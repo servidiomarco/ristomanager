@@ -714,14 +714,14 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
 
     // "Prenotazioni sospese" mode: Sofia is still on the phone but she
-    // announces the pause instead of running the booking flow. Only the
-    // first_message can be overridden from a webhook (agent.prompt.prompt
-    // override is disabled in the Studio "Security & Overrides" panel), so
-    // the message must stand on its own. The dynamic variable is a hint for
-    // a future prompt update ({{booking_status_message}}) — safe to send
-    // even when unused. Read once and reuse across every branch below.
-    const suspended = await getFeatureFlag('voice_bookings_suspended', false);
-    const suspensionCallback = suspended ? await getVoiceSuspensionCallbackTime() : '';
+    // announces the pause instead of running the booking flow. Suspension
+    // can come from the manual toggle OR a scheduled window that covers
+    // "now" — the shared helper resolves both and picks the right callback
+    // time (schedule entry's end_time, or the manual default). The
+    // first_message override + the {{booking_status_message}} dynamic
+    // variable are the only two knobs available (agent.prompt.prompt is
+    // read from Studio, but we still push it so the prompt guard fires).
+    const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState();
     const suspensionMessage = suspended
         ? `Buongiorno, sono Sofia del Vecchio Frantoio. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
         : '';
@@ -906,9 +906,11 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
     }
-    if (await getFeatureFlag('voice_bookings_suspended', false)) {
-        const cb = await getVoiceSuspensionCallbackTime();
-        return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(cb) });
+    {
+        const state = await computeVoiceSuspensionState();
+        if (state.suspended) {
+            return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
+        }
     }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
@@ -1005,9 +1007,11 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
     }
-    if (await getFeatureFlag('voice_bookings_suspended', false)) {
-        const cb = await getVoiceSuspensionCallbackTime();
-        return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(cb) });
+    {
+        const state = await computeVoiceSuspensionState();
+        if (state.suspended) {
+            return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
+        }
     }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
@@ -9953,15 +9957,78 @@ async function getVoiceSuspensionCallbackTime(): Promise<string> {
     }
 }
 
+const VOICE_SUSPENSION_SCHEDULE_KEY = 'voice_bookings_suspension_schedule';
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+type ScheduledSuspension = { date: string; start_time: string; end_time: string };
+
+function isValidScheduleEntry(e: any): e is ScheduledSuspension {
+    if (!e || typeof e !== 'object') return false;
+    if (typeof e.date !== 'string' || !ISO_DATE_RE.test(e.date)) return false;
+    if (typeof e.start_time !== 'string' || !HHMM_RE.test(e.start_time)) return false;
+    if (typeof e.end_time !== 'string' || !HHMM_RE.test(e.end_time)) return false;
+    return e.start_time < e.end_time;
+}
+
+async function getVoiceSuspensionSchedule(): Promise<ScheduledSuspension[]> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [VOICE_SUSPENSION_SCHEDULE_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw !== 'string' || !raw.trim()) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(isValidScheduleEntry);
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${VOICE_SUSPENSION_SCHEDULE_KEY}:`, err);
+        return [];
+    }
+}
+
+// Rome-anchored "YYYY-MM-DD" and "HH:MM" for the current instant. Used to
+// decide whether a scheduled entry covers now. String comparison works
+// because ISO date + zero-padded time are lexicographically ordered.
+function getRomeNowParts(now: Date = new Date()): { date: string; time: string } {
+    const d = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const t = now.toLocaleTimeString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+    return { date: d, time: t };
+}
+
+function pickActiveScheduleEntry(entries: ScheduledSuspension[], now: Date = new Date()): ScheduledSuspension | null {
+    const { date, time } = getRomeNowParts(now);
+    for (const e of entries) {
+        if (e.date === date && time >= e.start_time && time < e.end_time) return e;
+    }
+    return null;
+}
+
+// Single source of truth for "is Sofia in suspension mode right now, and if
+// so which callback time should she announce?". Combines the manual toggle
+// (uses the default callback) with the scheduled entries (each entry's own
+// end_time becomes the callback time). Manual toggle wins if both hit.
+async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; callbackTime: string }> {
+    if (await getFeatureFlag('voice_bookings_suspended', false)) {
+        const callbackTime = await getVoiceSuspensionCallbackTime();
+        return { suspended: true, callbackTime };
+    }
+    const schedule = await getVoiceSuspensionSchedule();
+    const active = pickActiveScheduleEntry(schedule);
+    if (active) return { suspended: true, callbackTime: active.end_time };
+    return { suspended: false, callbackTime: '' };
+}
+
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
+            getVoiceSuspensionSchedule(),
         ]);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
+            voice_bookings_suspension_schedule: suspensionSchedule,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -9995,6 +10062,37 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
         updates.push({ key: VOICE_SUSPENSION_CALLBACK_KEY, column: 'text_value', value: raw });
     }
 
+    if (body.voice_bookings_suspension_schedule !== undefined) {
+        if (!Array.isArray(body.voice_bookings_suspension_schedule)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'voice_bookings_suspension_schedule must be an array',
+            });
+        }
+        const normalized: ScheduledSuspension[] = [];
+        for (const entry of body.voice_bookings_suspension_schedule) {
+            if (!entry || typeof entry !== 'object') {
+                return res.status(400).json({ error: 'invalid_value', message: 'Each schedule entry must be an object' });
+            }
+            const date = String(entry.date ?? '').trim();
+            const start = String(entry.start_time ?? '').trim();
+            const end = String(entry.end_time ?? '').trim();
+            if (!ISO_DATE_RE.test(date)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Schedule entry date must be YYYY-MM-DD (got "${date}")` });
+            }
+            if (!HHMM_RE.test(start) || !HHMM_RE.test(end)) {
+                return res.status(400).json({ error: 'invalid_value', message: 'Schedule entry start_time and end_time must be HH:MM' });
+            }
+            if (start >= end) {
+                return res.status(400).json({ error: 'invalid_value', message: `Schedule entry start_time must be before end_time (${date} ${start}-${end})` });
+            }
+            normalized.push({ date, start_time: start, end_time: end });
+        }
+        // Sort chronologically so downstream reads/UI get a stable order.
+        normalized.sort((a, b) => (a.date === b.date ? a.start_time.localeCompare(b.start_time) : a.date.localeCompare(b.date)));
+        updates.push({ key: VOICE_SUSPENSION_SCHEDULE_KEY, column: 'text_value', value: JSON.stringify(normalized) });
+    }
+
     if (updates.length === 0) {
         return res.status(400).json({ error: 'no_updates', message: 'No channel settings supplied' });
     }
@@ -10007,13 +10105,15 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
+            getVoiceSuspensionSchedule(),
         ]);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
+            voice_bookings_suspension_schedule: suspensionSchedule,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);

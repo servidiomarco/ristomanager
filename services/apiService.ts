@@ -735,9 +735,15 @@ export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promis
 // Per-channel settings — numeric or free-text (HH:MM). Kept separate from
 // FeatureFlags so the booleans stay boolean; add new fields here when a
 // channel gains editable knobs beyond enabled/disabled.
+export interface ScheduledSuspension {
+  date: string;       // YYYY-MM-DD (Europe/Rome)
+  start_time: string; // HH:MM
+  end_time: string;   // HH:MM (> start_time, same day)
+}
 export interface ChannelSettings {
   voice_large_group_threshold: number;
   voice_bookings_suspension_callback_time: string;
+  voice_bookings_suspension_schedule: ScheduledSuspension[];
 }
 
 export const getChannelSettings = async (): Promise<ChannelSettings> => {

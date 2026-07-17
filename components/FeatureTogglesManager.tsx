@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
     getFeatureFlags,
@@ -8,8 +8,21 @@ import {
     getChannelSettings,
     updateChannelSettings,
     ChannelSettings,
+    ScheduledSuspension,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function todayISO(): string {
+    // Local date, not UTC, so the picker default matches the user's calendar day.
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -65,6 +78,12 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [suspensionCallbackDraft, setSuspensionCallbackDraft] = useState<string>('');
     const [savingSuspensionCallback, setSavingSuspensionCallback] = useState(false);
 
+    // Scheduled suspensions — one row per {date, start, end}. Draft is edited
+    // in place; on Save we ship the whole array to the backend (simpler than
+    // per-row PATCH and the list stays small).
+    const [scheduleDraft, setScheduleDraft] = useState<ScheduledSuspension[]>([]);
+    const [savingSchedule, setSavingSchedule] = useState(false);
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -78,6 +97,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setChannels(channelsData);
                 setVoiceThresholdDraft(String(channelsData.voice_large_group_threshold));
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
+                setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
             } catch (err: any) {
                 if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
@@ -138,7 +158,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const saveSuspensionCallback = async () => {
         if (!channels || !canEdit || savingSuspensionCallback) return;
         const raw = suspensionCallbackDraft.trim();
-        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(raw)) {
+        if (!HHMM_RE.test(raw)) {
             showToast("L'orario deve essere in formato HH:MM (00-23:00-59)", 'error');
             return;
         }
@@ -155,6 +175,41 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    const addScheduleRow = () => {
+        setScheduleDraft(prev => [...prev, { date: todayISO(), start_time: '12:00', end_time: '15:00' }]);
+    };
+    const removeScheduleRow = (idx: number) => {
+        setScheduleDraft(prev => prev.filter((_, i) => i !== idx));
+    };
+    const updateScheduleRow = (idx: number, patch: Partial<ScheduledSuspension>) => {
+        setScheduleDraft(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+    };
+    const saveSchedule = async () => {
+        if (!channels || !canEdit || savingSchedule) return;
+        for (const [i, row] of scheduleDraft.entries()) {
+            if (!ISO_DATE_RE.test(row.date)) {
+                showToast(`Riga ${i + 1}: data non valida`, 'error'); return;
+            }
+            if (!HHMM_RE.test(row.start_time) || !HHMM_RE.test(row.end_time)) {
+                showToast(`Riga ${i + 1}: orari non validi`, 'error'); return;
+            }
+            if (row.start_time >= row.end_time) {
+                showToast(`Riga ${i + 1}: l'orario di inizio deve essere prima della fine`, 'error'); return;
+            }
+        }
+        setSavingSchedule(true);
+        try {
+            const updated = await updateChannelSettings({ voice_bookings_suspension_schedule: scheduleDraft });
+            setChannels(updated);
+            setScheduleDraft(updated.voice_bookings_suspension_schedule ?? []);
+            showToast('Sospensioni programmate aggiornate', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento programma', 'error');
+        } finally {
+            setSavingSchedule(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
@@ -168,6 +223,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const suspensionCallbackDirty = channels.voice_bookings_suspension_callback_time !== suspensionCallbackDraft.trim();
     const suspended = flags.voice_bookings_suspended;
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
+    const scheduleDirty = useMemo(() => (
+        JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft)
+    ), [channels.voice_bookings_suspension_schedule, scheduleDraft]);
+    const todayKey = todayISO();
 
     return (
         <div className="space-y-3">
@@ -306,6 +365,84 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             >
                                                 {savingSuspensionCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                        <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
+                                            <CalendarClock className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                            <span>Sospensioni programmate</span>
+                                        </label>
+                                        <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-3 leading-relaxed">
+                                            Attiva la sospensione automaticamente in una o più finestre programmate (data + fascia oraria). Quando l'orario corrente entra in una finestra, Sofia annuncia la sospensione e invita il cliente a richiamare dopo l'orario di fine di quella finestra. Il toggle immediato qui sopra ha comunque la precedenza se acceso.
+                                        </p>
+                                        {scheduleDraft.length === 0 ? (
+                                            <p className="text-[12px] text-[var(--color-fg-subtle)] italic mb-3">Nessuna sospensione programmata.</p>
+                                        ) : (
+                                            <div className="space-y-2 mb-3">
+                                                {scheduleDraft.map((row, idx) => {
+                                                    const isPast = row.date < todayKey;
+                                                    return (
+                                                        <div key={idx} className={`flex items-center gap-2 rounded-md border p-2 ${isPast ? 'border-[var(--color-line)] bg-[var(--color-surface)] opacity-60' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                            <input
+                                                                type="date"
+                                                                value={row.date}
+                                                                onChange={(e) => updateScheduleRow(idx, { date: e.target.value })}
+                                                                disabled={!canEdit || savingSchedule}
+                                                                className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            />
+                                                            <span className="text-[12px] text-[var(--color-fg-muted)]">dalle</span>
+                                                            <input
+                                                                type="time"
+                                                                value={row.start_time}
+                                                                onChange={(e) => updateScheduleRow(idx, { start_time: e.target.value })}
+                                                                disabled={!canEdit || savingSchedule}
+                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            />
+                                                            <span className="text-[12px] text-[var(--color-fg-muted)]">alle</span>
+                                                            <input
+                                                                type="time"
+                                                                value={row.end_time}
+                                                                onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
+                                                                disabled={!canEdit || savingSchedule}
+                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            />
+                                                            {isPast && (
+                                                                <span className="text-[11px] text-[var(--color-fg-subtle)] italic">passata</span>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeScheduleRow(idx)}
+                                                                disabled={!canEdit || savingSchedule}
+                                                                aria-label="Rimuovi sospensione programmata"
+                                                                className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-md text-[var(--color-fg-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={addScheduleRow}
+                                                disabled={!canEdit || savingSchedule}
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                <Plus className="h-3.5 w-3.5" />
+                                                Aggiungi
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={saveSchedule}
+                                                disabled={!canEdit || savingSchedule || !scheduleDirty}
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            >
+                                                {savingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                                Salva programma
                                             </button>
                                         </div>
                                     </div>

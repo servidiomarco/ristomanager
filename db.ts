@@ -1414,6 +1414,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ('voice_bookings_suspension_callback_time', '19:00')
             ON CONFLICT (key) DO NOTHING;
         `);
+        await client.query(`
+            INSERT INTO app_settings (key, text_value) VALUES
+                ('voice_bookings_suspension_schedule', '[]')
+            ON CONFLICT (key) DO NOTHING;
+        `);
 
         // ============================================
         // INTEGRATION SETTINGS (per-provider secrets + environment)
