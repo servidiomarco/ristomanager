@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -223,9 +223,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const suspensionCallbackDirty = channels.voice_bookings_suspension_callback_time !== suspensionCallbackDraft.trim();
     const suspended = flags.voice_bookings_suspended;
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
-    const scheduleDirty = useMemo(() => (
-        JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft)
-    ), [channels.voice_bookings_suspension_schedule, scheduleDraft]);
+    const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
     const todayKey = todayISO();
 
     return (
