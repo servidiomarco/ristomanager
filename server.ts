@@ -916,14 +916,16 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
     // `tables.seats >= guests`, so groups larger than the biggest single
     // table always come back empty even when total capacity is fine. Rather
     // than teach the agent to reason about merging tables, we cap the
-    // self-serve flow at 8 covers and hand anything larger to a human.
-    if (guests > 8) {
-        console.log('[ElevenLabs] check-availability handoff (large group)', { date: normalizedDate, shift: rawShift, guests });
+    // self-serve flow at a configurable threshold (default 8) and hand
+    // anything larger to a human. Editable from Settings → Canali.
+    const voiceThreshold = await getVoiceLargeGroupThreshold();
+    if (guests > voiceThreshold) {
+        console.log('[ElevenLabs] check-availability handoff (large group)', { date: normalizedDate, shift: rawShift, guests, threshold: voiceThreshold });
         return res.json({
             available: false,
             free_tables_count: 0,
             error: 'large_group',
-            message: 'Per gruppi da 9 persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.'
+            message: `Per gruppi da ${voiceThreshold + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`
         });
     }
 
@@ -1058,16 +1060,18 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
         });
     }
-    // Defense-in-depth for the ≤8 self-serve cap enforced in check-availability
+    // Defense-in-depth for the self-serve cap enforced in check-availability
     // (see comment there for the underlying reason). Prevents an LLM
     // hallucination from bypassing the handoff by calling create-reservation
-    // directly without a prior availability check.
-    if (guests > 8) {
-        console.log('[ElevenLabs] create-reservation blocked (large group)', { guests, conversation_id: conversationId });
+    // directly without a prior availability check. Threshold is dynamic —
+    // editable from Settings → Canali.
+    const voiceThresholdCreate = await getVoiceLargeGroupThreshold();
+    if (guests > voiceThresholdCreate) {
+        console.log('[ElevenLabs] create-reservation blocked (large group)', { guests, threshold: voiceThresholdCreate, conversation_id: conversationId });
         return res.json({
             success: false,
             error: 'large_group',
-            message: 'Per gruppi da 9 persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.'
+            message: `Per gruppi da ${voiceThresholdCreate + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`
         });
     }
     const childrenNum = Number(childrenRaw);
@@ -1789,7 +1793,8 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         const row = linked.rows[0];
         if (row && row.phone) {
             const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
-            sendBookingConfirmation(row.phone, message, row.id).catch(err =>
+            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests);
+            sendBookingConfirmation(row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
         }
@@ -2345,7 +2350,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                         updatedReservation.guests,
                         roomName
                     ),
-                    updatedReservation.id
+                    updatedReservation.id,
+                    {
+                        whatsappTemplate: buildBookingConfirmedTemplate(
+                            updatedReservation.customer_name,
+                            updatedReservation.reservation_time,
+                            updatedReservation.guests
+                        ),
+                    }
                 ).catch(err => console.error('Auto-confirmation send failed:', err));
             }
             // Fire the email confirmation in parallel if the guest gave us an
@@ -2407,7 +2419,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.reservation_time,
                     updatedReservation.guests
                 ),
-                updatedReservation.id
+                updatedReservation.id,
+                {
+                    whatsappTemplate: buildBookingDeclinedTemplate(
+                        updatedReservation.customer_name,
+                        updatedReservation.reservation_time,
+                        updatedReservation.guests
+                    ),
+                }
             ).catch(err => console.error('Auto-decline send failed:', err));
         }
 
@@ -2609,7 +2628,13 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else {
-            outcome = await sendBookingConfirmation(reservation.phone, message, reservation.id);
+            outcome = await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+                whatsappTemplate: buildBookingConfirmedTemplate(
+                    reservation.customer_name,
+                    reservation.reservation_time,
+                    reservation.guests
+                ),
+            });
         }
 
         const label = outcome.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
@@ -3415,7 +3440,14 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
                         row.amount_cents,
                         roomName
                     );
-                    await sendBookingConfirmation(reservation.phone, message, reservation.id);
+                    await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+                        whatsappTemplate: buildBookingDepositConfirmedTemplate(
+                            reservation.customer_name,
+                            reservation.reservation_time,
+                            reservation.guests,
+                            row.amount_cents
+                        ),
+                    });
                 }
             } catch (err: any) {
                 console.error('[Revolut] deposit confirmation flow failed:', err?.message || err);
@@ -7903,6 +7935,77 @@ function buildDeclineMessage(
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
+// Template builders for the approved Twilio WA content templates. Each returns
+// undefined when the corresponding TWILIO_WA_CONTENT_SID_* env var is not set —
+// sendBookingConfirmation then falls back to SMS. Room name is intentionally
+// excluded from all templates (Meta rejects empty variables); the SMS body still
+// includes it when known. Empty-name guard sends '—' so a missing customer_name
+// can't blow up the template with an empty var.
+function templateGuestsLabel(guests: number | null | undefined): string {
+    const n = Math.max(1, Math.trunc(Number(guests) || 1));
+    return `${n} ${n === 1 ? 'persona' : 'persone'}`;
+}
+function templateName(customerName: string | null | undefined): string {
+    const t = (customerName ?? '').trim();
+    return t || '—';
+}
+function buildBookingConfirmedTemplate(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED;
+    if (!contentSid) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateGuestsLabel(guests),
+            '3': dateLabel,
+            '4': timeLabel,
+        },
+    };
+}
+function buildBookingDeclinedTemplate(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DECLINED;
+    if (!contentSid) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateGuestsLabel(guests),
+            '3': dateLabel,
+            '4': timeLabel,
+        },
+    };
+}
+function buildBookingDepositConfirmedTemplate(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined,
+    amountCents: number
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED;
+    if (!contentSid) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': formatEuroMinor(amountCents),
+            '3': templateGuestsLabel(guests),
+            '4': dateLabel,
+            '5': timeLabel,
+        },
+    };
+}
+
 // Absolute base URL for the running app — needed by email templates because
 // mail clients don't resolve relative paths. Priority order matches the rest
 // of the codebase (webhook > frontend). Returns null when nothing is set (dev
@@ -9724,6 +9827,69 @@ app.get('/settings/features', authenticate, async (_req, res) => {
     } catch (err) {
         console.error('Error fetching feature flags:', err);
         res.status(500).json({ error: 'Failed to fetch feature flags' });
+    }
+});
+
+// Channel-specific numeric settings. Booleans stay in /settings/features so
+// existing FeatureFlags typing isn't polluted. Currently only the voice
+// agent large-group handoff threshold; new numeric settings just add rows
+// with an int_value here and extend the type on both sides.
+const VOICE_LARGE_GROUP_KEY = 'voice_large_group_threshold';
+const VOICE_LARGE_GROUP_DEFAULT = 8;
+
+async function getVoiceLargeGroupThreshold(): Promise<number> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT int_value FROM app_settings WHERE key = $1',
+            [VOICE_LARGE_GROUP_KEY]
+        );
+        const raw = result.rows[0]?.int_value;
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 1 && n <= 50) return n;
+        return VOICE_LARGE_GROUP_DEFAULT;
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${VOICE_LARGE_GROUP_KEY}, falling back to ${VOICE_LARGE_GROUP_DEFAULT}:`, err);
+        return VOICE_LARGE_GROUP_DEFAULT;
+    }
+}
+
+app.get('/settings/channels', authenticate, async (_req, res) => {
+    try {
+        const voiceThreshold = await getVoiceLargeGroupThreshold();
+        res.json({ voice_large_group_threshold: voiceThreshold });
+    } catch (err) {
+        console.error('Error fetching channel settings:', err);
+        res.status(500).json({ error: 'Failed to fetch channel settings' });
+    }
+});
+
+app.put('/settings/channels', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const rawThreshold = body.voice_large_group_threshold;
+    // At least one supported field must be present. Add branches here as new
+    // per-channel numeric settings show up.
+    if (rawThreshold === undefined) {
+        return res.status(400).json({ error: 'no_updates', message: 'No channel settings supplied' });
+    }
+    const n = Number(rawThreshold);
+    if (!Number.isInteger(n) || n < 1 || n > 50) {
+        return res.status(400).json({
+            error: 'invalid_value',
+            message: 'voice_large_group_threshold must be an integer between 1 and 50',
+        });
+    }
+    try {
+        await queryWithRetry(
+            `INSERT INTO app_settings (key, int_value, updated_at)
+             VALUES ($1, $2, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE
+               SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+            [VOICE_LARGE_GROUP_KEY, n]
+        );
+        res.json({ voice_large_group_threshold: n });
+    } catch (err) {
+        console.error('Error updating channel settings:', err);
+        res.status(500).json({ error: 'Failed to update channel settings' });
     }
 });
 
