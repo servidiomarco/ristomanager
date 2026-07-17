@@ -9999,14 +9999,16 @@ async function getVoiceSuspensionCallbackTime(): Promise<string> {
 
 const VOICE_SUSPENSION_SCHEDULE_KEY = 'voice_bookings_suspension_schedule';
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-type ScheduledSuspension = { date: string; start_time: string; end_time: string };
+type ScheduledSuspension = { date: string; start_time: string; end_time: string; callback_time?: string };
 
 function isValidScheduleEntry(e: any): e is ScheduledSuspension {
     if (!e || typeof e !== 'object') return false;
     if (typeof e.date !== 'string' || !ISO_DATE_RE.test(e.date)) return false;
     if (typeof e.start_time !== 'string' || !HHMM_RE.test(e.start_time)) return false;
     if (typeof e.end_time !== 'string' || !HHMM_RE.test(e.end_time)) return false;
-    return e.start_time < e.end_time;
+    if (e.start_time >= e.end_time) return false;
+    if (e.callback_time !== undefined && (typeof e.callback_time !== 'string' || !HHMM_RE.test(e.callback_time))) return false;
+    return true;
 }
 
 async function getVoiceSuspensionSchedule(): Promise<ScheduledSuspension[]> {
@@ -10045,8 +10047,9 @@ function pickActiveScheduleEntry(entries: ScheduledSuspension[], now: Date = new
 
 // Single source of truth for "is Sofia in suspension mode right now, and if
 // so which callback time should she announce?". Combines the manual toggle
-// (uses the default callback) with the scheduled entries (each entry's own
-// end_time becomes the callback time). Manual toggle wins if both hit.
+// (uses the default callback) with the scheduled entries (each entry can
+// carry its own callback_time; falls back to end_time when absent). Manual
+// toggle wins if both hit.
 async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; callbackTime: string }> {
     if (await getFeatureFlag('voice_bookings_suspended', false)) {
         const callbackTime = await getVoiceSuspensionCallbackTime();
@@ -10054,7 +10057,7 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
     }
     const schedule = await getVoiceSuspensionSchedule();
     const active = pickActiveScheduleEntry(schedule);
-    if (active) return { suspended: true, callbackTime: active.end_time };
+    if (active) return { suspended: true, callbackTime: active.callback_time || active.end_time };
     return { suspended: false, callbackTime: '' };
 }
 
@@ -10117,6 +10120,9 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             const date = String(entry.date ?? '').trim();
             const start = String(entry.start_time ?? '').trim();
             const end = String(entry.end_time ?? '').trim();
+            const callbackRaw = entry.callback_time === undefined || entry.callback_time === null
+                ? ''
+                : String(entry.callback_time).trim();
             if (!ISO_DATE_RE.test(date)) {
                 return res.status(400).json({ error: 'invalid_value', message: `Schedule entry date must be YYYY-MM-DD (got "${date}")` });
             }
@@ -10126,7 +10132,12 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             if (start >= end) {
                 return res.status(400).json({ error: 'invalid_value', message: `Schedule entry start_time must be before end_time (${date} ${start}-${end})` });
             }
-            normalized.push({ date, start_time: start, end_time: end });
+            if (callbackRaw && !HHMM_RE.test(callbackRaw)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Schedule entry callback_time must be HH:MM (got "${callbackRaw}")` });
+            }
+            const normalizedEntry: ScheduledSuspension = { date, start_time: start, end_time: end };
+            if (callbackRaw) normalizedEntry.callback_time = callbackRaw;
+            normalized.push(normalizedEntry);
         }
         // Sort chronologically so downstream reads/UI get a stable order.
         normalized.sort((a, b) => (a.date === b.date ? a.start_time.localeCompare(b.start_time) : a.date.localeCompare(b.date)));

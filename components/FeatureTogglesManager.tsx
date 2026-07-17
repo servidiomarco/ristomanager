@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
@@ -84,6 +84,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [scheduleDraft, setScheduleDraft] = useState<ScheduledSuspension[]>([]);
     const [savingSchedule, setSavingSchedule] = useState(false);
 
+    // Keep showToast in a ref so the mount-fetch effect below has empty deps.
+    // Parent (App.tsx) recreates addToast on every render, so listing showToast
+    // as a dep would refetch on every parent re-render — which resets
+    // scheduleDraft mid-edit and makes newly-added rows vanish.
+    const showToastRef = useRef(showToast);
+    useEffect(() => { showToastRef.current = showToast; });
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -99,13 +106,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
                 setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
         })();
         return () => { cancelled = true; };
-    }, [showToast]);
+    }, []);
 
     // Labels used by the toast when a flag is flipped. CHANNELS covers the
     // accordion entries; sub-toggles nested inside a channel body (like the
@@ -176,7 +183,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     };
 
     const addScheduleRow = () => {
-        setScheduleDraft(prev => [...prev, { date: todayISO(), start_time: '12:00', end_time: '15:00' }]);
+        setScheduleDraft(prev => [
+            ...prev,
+            { date: todayISO(), start_time: '12:00', end_time: '15:00', callback_time: '15:00' },
+        ]);
     };
     const removeScheduleRow = (idx: number) => {
         setScheduleDraft(prev => prev.filter((_, i) => i !== idx));
@@ -195,6 +205,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
             }
             if (row.start_time >= row.end_time) {
                 showToast(`Riga ${i + 1}: l'orario di inizio deve essere prima della fine`, 'error'); return;
+            }
+            if (row.callback_time && !HHMM_RE.test(row.callback_time)) {
+                showToast(`Riga ${i + 1}: orario di richiamo non valido`, 'error'); return;
             }
         }
         setSavingSchedule(true);
@@ -382,7 +395,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 {scheduleDraft.map((row, idx) => {
                                                     const isPast = row.date < todayKey;
                                                     return (
-                                                        <div key={idx} className={`flex items-center gap-2 rounded-md border p-2 ${isPast ? 'border-[var(--color-line)] bg-[var(--color-surface)] opacity-60' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
                                                             <input
                                                                 type="date"
                                                                 value={row.date}
@@ -403,6 +416,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                                 type="time"
                                                                 value={row.end_time}
                                                                 onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
+                                                                disabled={!canEdit || savingSchedule}
+                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            />
+                                                            <span className="text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap" title="Orario che Sofia comunica al cliente per richiamare">richiamare dopo le</span>
+                                                            <input
+                                                                type="time"
+                                                                value={row.callback_time ?? row.end_time}
+                                                                onChange={(e) => updateScheduleRow(idx, { callback_time: e.target.value })}
                                                                 disabled={!canEdit || savingSchedule}
                                                                 className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
                                                             />

@@ -739,6 +739,10 @@ export interface ScheduledSuspension {
   date: string;       // YYYY-MM-DD (Europe/Rome)
   start_time: string; // HH:MM
   end_time: string;   // HH:MM (> start_time, same day)
+  // Time Sofia announces to the caller ("richiamare dopo le HH:MM"). Optional
+  // for back-compat with rows saved before the field existed; when missing the
+  // backend falls back to end_time.
+  callback_time?: string; // HH:MM
 }
 export interface ChannelSettings {
   voice_large_group_threshold: number;
