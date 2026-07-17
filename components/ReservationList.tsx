@@ -4093,7 +4093,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 weight to the block. Light grey fill + soft border
                                 separates it from the datetime / table pickers above
                                 without adding another card shadow. */}
-                            <fieldset className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-4 pt-2 pb-4 space-y-4">
+                            <fieldset className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-3)] px-4 pt-2 pb-4 space-y-4">
                                 <legend className="px-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">
                                     Dettagli cliente
                                 </legend>
