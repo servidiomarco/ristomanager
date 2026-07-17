@@ -808,8 +808,13 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 )}
               </div>
 
-              {/* Quick filter chips — scrolls horizontally on narrow screens */}
-              <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {/* Quick filter chips — horizontal carousel on narrow screens.
+                  The right-edge mask fades the last chip so users can tell
+                  more chips exist beyond the viewport (mobile browsers don't
+                  render a scrollbar for horizontal scroll containers). */}
+              <div
+                className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]"
+              >
                 {statusChips.map(({ v, l, dot }) => {
                   const active = statusFilter === v;
                   return (
@@ -833,26 +838,29 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
 
               {/* Period + count + reset */}
               <div className="flex items-center gap-2 flex-wrap text-[12px] text-[var(--color-fg-muted)] pt-1 border-t border-[var(--color-line)]">
-                <div className="flex items-center gap-2 flex-wrap pt-2">
-                  <Filter className="h-3.5 w-3.5" />
-                  <span>Periodo:</span>
+                {/* Period row: single line even on mobile. Inputs shrink to
+                    share the row (flex-1 min-w-0); the label is icon-only on
+                    xs so nothing wraps under ~340px. */}
+                <div className="flex items-center gap-2 pt-2 w-full sm:w-auto">
+                  <Filter className="h-3.5 w-3.5 shrink-0" />
+                  <span className="shrink-0 hidden sm:inline">Periodo:</span>
                   <input
                     type="date"
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
-                    className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
+                    className="flex-1 sm:flex-none min-w-0 px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular sm:min-w-[120px]"
                   />
-                  <span>→</span>
+                  <span className="shrink-0">→</span>
                   <input
                     type="date"
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
-                    className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
+                    className="flex-1 sm:flex-none min-w-0 px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular sm:min-w-[120px]"
                   />
                   {(from || to) && (
                     <button
                       onClick={() => { setFrom(''); setTo(''); }}
-                      className="text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                      className="shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
                       aria-label="Svuota periodo"
                     >
                       <X className="h-3.5 w-3.5" />
