@@ -1654,6 +1654,12 @@ const App: React.FC = () => {
             globalShiftFilter={globalShiftFilter}
             onDateChange={setGlobalDate}
             onShiftFilterChange={setGlobalShiftFilter}
+            onUpdateReservation={handleUpdateReservation}
+            onOpenReservationInList={(id) => {
+              setPendingReservationId(id);
+              setSidebarCollapsed(true);
+              setView(ViewState.RESERVATIONS);
+            }}
           />
         )}
 

@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
+import { createPortal } from 'react-dom';
+import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
@@ -49,6 +50,12 @@ interface DashboardProps {
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
   onDateChange?: (date: Date) => void;
   onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
+  // Persist a status/notes change for a reservation. Used by the pending
+  // quick-action modal to Conferma/Rifiuta without leaving the Dashboard.
+  onUpdateReservation?: (res: Reservation) => Promise<void>;
+  // Deep-link a specific reservation in the Prenotazioni page (full editor).
+  // Called from the pending modal's "Modifica completa" secondary link.
+  onOpenReservationInList?: (id: number) => void;
 }
 
 // Shopping List Labels and Colors
@@ -114,7 +121,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange, onUpdateReservation, onOpenReservationInList }) => {
   const { user } = useAuth();
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
@@ -183,6 +190,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Reservation notes expand/collapse state
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<number>>(new Set());
+
+  // Pending-reservation quick-action modal (Conferma / Rifiuta). Holds the
+  // reservation being reviewed; null when the modal is closed.
+  const [pendingModalRes, setPendingModalRes] = useState<Reservation | null>(null);
+  const [pendingActionBusy, setPendingActionBusy] = useState<null | 'confirm' | 'decline'>(null);
 
   // Low-stock inventory state
   const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
@@ -391,6 +403,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   };
 
+  // Confirm/decline handlers for the pending quick-action modal. Uses the
+  // App-level onUpdateReservation so state + toasts stay centralized.
+  const handlePendingDecision = useCallback(async (action: 'confirm' | 'decline') => {
+    if (!pendingModalRes || !onUpdateReservation) return;
+    setPendingActionBusy(action);
+    try {
+      await onUpdateReservation({
+        ...pendingModalRes,
+        reservation_status: action === 'confirm' ? ReservationStatus.CONFIRMED : ReservationStatus.DECLINED,
+      });
+      setPendingModalRes(null);
+    } catch {
+      // Toast already shown by handleUpdateReservation in App.
+    } finally {
+      setPendingActionBusy(null);
+    }
+  }, [pendingModalRes, onUpdateReservation]);
+
   const todayStr = new Date().toISOString().split('T')[0];
 
   const todaysTodos = todos.filter(t => t.dueDate === todayStr && !t.completed);
@@ -430,6 +460,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         )
       : [];
   }, [reservations, selectedDateStr]);
+
+  // All PENDING reservations across the DB — the "Da confermare" card lists
+  // them regardless of selectedDate because pending bookings need action
+  // whether they're for today or next week. Sorted by reservation time
+  // ascending so imminent ones surface first; past pending get pushed to
+  // the bottom (usually empty since past PENDING is a data anomaly).
+  const pendingReservations = useMemo((): Reservation[] => {
+    if (!Array.isArray(reservations)) return [];
+    return reservations
+      .filter(r => r.reservation_status === ReservationStatus.PENDING)
+      .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+  }, [reservations]);
 
   // Bread estimate for the selected day. Mirrors the server's daily bread
   // reminder formula (1 kg every 10 covers, min 1 kg) so the shopping list and
@@ -828,8 +870,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
       })()}
 
-      {/* Row 1: Stato Tavoli + Note & Allergeni */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+      {/* Row 1: Stato Tavoli + Note & Allergeni + Da confermare */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
       {/* Stato Tavoli — Pranzo / Cena side by side */}
       <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
@@ -1032,6 +1074,77 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
           )}
         </div>
+
+      {/* Da confermare — pending reservations across the whole DB (not just
+          today), ordered by reservation time ascending. Click opens a quick
+          confirm/decline modal; full editing lives in Prenotazioni.
+          When non-empty the card wears an amber accent (background + border
+          + ring) so it reads as "needs attention" at a glance; empty stays
+          neutral so an idle Dashboard doesn't scream. */}
+      <div className={`lg:col-span-1 p-4 lg:p-5 rounded-xl border shadow-[var(--shadow-sm)] flex flex-col ${
+        pendingReservations.length > 0
+          ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 dark:bg-amber-500/[0.08] dark:border-amber-500/40 dark:ring-amber-500/20'
+          : 'bg-[var(--color-surface)] border-[var(--color-line)]'
+      }`}>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Da confermare</h2>
+          {pendingReservations.length > 0 && (
+            <span className="text-sm font-bold min-w-[28px] h-7 inline-flex items-center justify-center px-2 rounded-full bg-amber-500 text-white shadow-sm dark:bg-amber-500 dark:text-white tabular">
+              {pendingReservations.length}
+            </span>
+          )}
+        </div>
+        {pendingReservations.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-center py-8">
+            <div>
+              <CheckCircle2 className="h-8 w-8 text-emerald-500/70 mx-auto mb-2" />
+              <p className="text-xs text-[var(--color-fg-subtle)]">Nessuna prenotazione da confermare</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+            {pendingReservations.map(res => {
+              const source = res.source || ReservationSource.MANUAL;
+              const channel = source === ReservationSource.WHATSAPP
+                ? { Icon: MessageCircle, label: 'WhatsApp', cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' }
+                : source === ReservationSource.GOOGLE
+                ? { Icon: Globe, label: 'Web', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' }
+                : source === ReservationSource.VOICE
+                ? { Icon: Mic, label: 'Agente vocale', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' }
+                : { Icon: PhoneIcon, label: 'Telefono', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' };
+              const resDate = new Date(res.reservation_time);
+              const dateLabel = !Number.isNaN(resDate.getTime())
+                ? resDate.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
+                : '';
+              const timeLabel = res.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] || '';
+              return (
+                <button
+                  key={res.id}
+                  type="button"
+                  onClick={() => setPendingModalRes(res)}
+                  className="w-full text-left border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${channel.cls}`} title={`Canale: ${channel.label}`}>
+                      <channel.Icon className="h-4 w-4" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-fg)] truncate">{res.customer_name || '—'}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--color-fg-muted)] tabular">
+                        <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                        <span>{dateLabel} · {timeLabel}</span>
+                        <span className="text-[var(--color-fg-subtle)] mx-0.5">·</span>
+                        <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       </div>
 
       {/* Row 2: Affluenza — merged Orario + Settimana with shared shift filter */}
@@ -1661,6 +1774,130 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         </div>
+      )}
+
+      {/* Pending reservation quick-action modal. Rendered via Portal so it
+          escapes the Dashboard's stacking context. Handles the two common
+          actions inline (Conferma / Rifiuta); for anything more we hand off
+          to the full editor in Prenotazioni via onOpenReservationInList. */}
+      {pendingModalRes && createPortal(
+        (() => {
+          const res = pendingModalRes;
+          const source = res.source || ReservationSource.MANUAL;
+          const channel = source === ReservationSource.WHATSAPP
+            ? { Icon: MessageCircle, label: 'WhatsApp' }
+            : source === ReservationSource.GOOGLE
+            ? { Icon: Globe, label: 'Web' }
+            : source === ReservationSource.VOICE
+            ? { Icon: Mic, label: 'Agente vocale' }
+            : { Icon: PhoneIcon, label: 'Telefono' };
+          const resDate = new Date(res.reservation_time);
+          const dateLabel = !Number.isNaN(resDate.getTime())
+            ? resDate.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+            : '';
+          const timeLabel = res.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] || '';
+          const closeDisabled = pendingActionBusy !== null;
+          return (
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center px-4"
+              onClick={() => { if (!closeDisabled) setPendingModalRes(null); }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Prenotazione da confermare"
+            >
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+              <div
+                className="relative w-full max-w-md bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-line)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                    <h3 className="text-sm font-semibold text-[var(--color-fg)] truncate">Prenotazione da confermare</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingModalRes(null)}
+                    disabled={closeDisabled}
+                    className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50"
+                    aria-label="Chiudi"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="px-5 py-4 space-y-3">
+                  <div>
+                    <p className="text-base font-semibold text-[var(--color-fg)]">{res.customer_name || '—'}</p>
+                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-[13px]">
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                      <UsersIcon className="h-4 w-4 flex-shrink-0" />
+                      <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                      <channel.Icon className="h-4 w-4 flex-shrink-0" />
+                      <span>{channel.label}</span>
+                    </div>
+                    {res.phone && (
+                      <div className="flex items-center gap-2 text-[var(--color-fg-muted)] col-span-2">
+                        <PhoneIcon className="h-4 w-4 flex-shrink-0" />
+                        <a href={`tel:${res.phone}`} className="hover:underline tabular truncate">{res.phone}</a>
+                      </div>
+                    )}
+                  </div>
+
+                  {res.notes && (
+                    <div className="border-t border-[var(--color-line)] pt-3">
+                      <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold mb-1">Note</div>
+                      <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap break-words">{res.notes}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-between gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => handlePendingDecision('decline')}
+                    disabled={closeDisabled || !onUpdateReservation}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10 transition-colors"
+                  >
+                    {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                    Rifiuta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePendingDecision('confirm')}
+                    disabled={closeDisabled || !onUpdateReservation}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  >
+                    {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    Conferma
+                  </button>
+                </div>
+
+                {onOpenReservationInList && (
+                  <div className="px-5 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenReservationInList(res.id);
+                        setPendingModalRes(null);
+                      }}
+                      disabled={closeDisabled}
+                      className="inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50 transition-colors"
+                    >
+                      Modifica completa in Prenotazioni <ArrowRight className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })(),
+        document.body
       )}
     </div>
   );
