@@ -4844,7 +4844,11 @@ const syncCustomerFromReservation = async (
 app.get('/customers', authenticate, requirePermission('customers:view'), async (req, res) => {
     try {
         const { q, limit } = req.query as { q?: string; limit?: string };
-        const cap = Math.min(Math.max(parseInt(limit || '500', 10) || 500, 1), 1000);
+        // Bumped from 500/1000 to 5000/10000 after 245 customers (alphabetically
+        // past the old cap) went invisible on the frontend list — data was in
+        // the DB, just paginated out. Rubrica is a private endpoint on a
+        // relatively small table, no need to be stingy.
+        const cap = Math.min(Math.max(parseInt(limit || '5000', 10) || 5000, 1), 10000);
         // Sub-select counts past NO_SHOW reservations matching this customer's phone.
         // Phone is required on rubrica records, so this is the reliable identifier.
         const noShowSubquery = `(
