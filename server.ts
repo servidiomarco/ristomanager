@@ -8089,6 +8089,46 @@ function buildBookingDepositConfirmedTemplate(
     };
 }
 
+// The booking_deposit_request template on Twilio is a Call-to-Action card:
+// body has {{1}}..{{5}} (name, guests, date, time, amount), and the button
+// URL is hardcoded as https://checkout.revolut.com/pay/{{6}} — so {{6}} must
+// carry ONLY the trailing token, not the full URL. Returns undefined when
+// the token can't be parsed (e.g. sandbox / unrecognised host) so the
+// dispatcher can fall back to SMS instead of shipping a broken WA link.
+function extractRevolutCheckoutToken(checkoutUrl: string): string | null {
+    try {
+        const u = new URL(checkoutUrl);
+        const match = u.pathname.match(/\/pay\/([^\/?#]+)/);
+        return match ? match[1] : null;
+    } catch {
+        return null;
+    }
+}
+function buildBookingDepositRequestTemplate(
+    customerName: string | null | undefined,
+    guestsLabel: string,
+    dateLabel: string,
+    timeLabel: string,
+    amountCents: number,
+    checkoutUrl: string
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST;
+    if (!contentSid) return undefined;
+    const token = extractRevolutCheckoutToken(checkoutUrl);
+    if (!token) return undefined;
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': guestsLabel,
+            '3': dateLabel,
+            '4': timeLabel,
+            '5': formatEuroMinor(amountCents),
+            '6': token,
+        },
+    };
+}
+
 // Absolute base URL for the running app — needed by email templates because
 // mail clients don't resolve relative paths. Priority order matches the rest
 // of the codebase (webhook > frontend). Returns null when nothing is set (dev
@@ -11059,22 +11099,33 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
               )
             : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
-        // Attach the booking_received WA template only in the no-deposit branch:
-        // booking_deposit_request is not yet Meta-approved, so the deposit ack
-        // must go via SMS to avoid an async 63016 rejection. When the env var
-        // is unset (rollout not enabled) the dispatcher falls back to SMS too.
-        const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
-        const waTemplate = (!depositCheckoutUrl && bookingReceivedSid)
-            ? {
-                contentSid: bookingReceivedSid,
-                contentVariables: {
-                    '1': toTitleCase(customer_name),
-                    '2': guestsLabel,
-                    '3': dateLabel,
-                    '4': time,
-                },
-              }
-            : undefined;
+        // Pick the right WA template for the branch. When either env var is
+        // unset, or the deposit token can't be parsed, waTemplate stays
+        // undefined and sendBookingConfirmation falls back to plain SMS.
+        let waTemplate: WhatsAppTemplateOpts | undefined;
+        if (depositCheckoutUrl) {
+            waTemplate = buildBookingDepositRequestTemplate(
+                toTitleCase(customer_name),
+                guestsLabel,
+                dateLabel,
+                time,
+                depositAmountCents,
+                depositCheckoutUrl
+            );
+        } else {
+            const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
+            if (bookingReceivedSid) {
+                waTemplate = {
+                    contentSid: bookingReceivedSid,
+                    contentVariables: {
+                        '1': toTitleCase(customer_name),
+                        '2': guestsLabel,
+                        '3': dateLabel,
+                        '4': time,
+                    },
+                };
+            }
+        }
 
         // SMS/WhatsApp ack — only if the guest gave us a phone number.
         if (phoneE164) {
