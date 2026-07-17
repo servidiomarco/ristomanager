@@ -2623,7 +2623,18 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             if (!isTwilioWhatsAppConfigured() && !isMetaWhatsAppConfigured()) {
                 return res.status(400).json({ error: 'WhatsApp non configurato' });
             }
-            outcome = await sendWhatsAppText(reservation.phone, message, reservation.id);
+            // Manual "Invia WhatsApp" from the CRM: freeform sends fail
+            // asynchronously with errCode 63016 outside the 24h window, so
+            // always attach the approved template (identical to the auto
+            // branch below). When the env var is unset the template helper
+            // returns undefined and Twilio would reject with 63016 again —
+            // but that only happens during a broken rollout.
+            const whatsappTemplate = buildBookingConfirmedTemplate(
+                reservation.customer_name,
+                reservation.reservation_time,
+                reservation.guests
+            );
+            outcome = await sendWhatsAppText(reservation.phone, message, reservation.id, whatsappTemplate);
             recordConfirmationSent(reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
