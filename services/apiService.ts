@@ -731,6 +731,27 @@ export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promis
   });
 };
 
+// Per-channel numeric settings. Kept separate from FeatureFlags so the
+// booleans stay boolean; add new fields here when a channel gains editable
+// knobs beyond enabled/disabled.
+export interface ChannelSettings {
+  voice_large_group_threshold: number;
+}
+
+export const getChannelSettings = async (): Promise<ChannelSettings> => {
+  return apiRequest<ChannelSettings>(`${API_URL}/settings/channels`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateChannelSettings = async (updates: Partial<ChannelSettings>): Promise<ChannelSettings> => {
+  return apiRequest<ChannelSettings>(`${API_URL}/settings/channels`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 // ============================================
 // INTEGRATION SETTINGS (Revolut)
 // ============================================

@@ -1952,12 +1952,11 @@ const App: React.FC = () => {
               </details>
             </div>
 
-            {/* Canali di prenotazione — toggles for the public form and the voice agent */}
+            {/* Canali di prenotazione — collapsible per-channel cards: enable/disable
+                toggle in the header, channel-specific settings inside the body. */}
             <div className="mb-8">
               <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Canali di prenotazione</h3>
-              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
-                <FeatureTogglesManager showToast={addToast} />
-              </div>
+              <FeatureTogglesManager showToast={addToast} />
             </div>
 
             {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}

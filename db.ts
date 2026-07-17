@@ -1377,6 +1377,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ('voice_agent_enabled',      true)
             ON CONFLICT (key) DO NOTHING;
         `);
+        // Some settings are numeric (e.g. thresholds), so `value` needs to be
+        // nullable and we grow a companion `int_value` column. Rows use one
+        // or the other depending on their type — never both. Keeps a single
+        // KV table without introducing JSONB just for a handful of values.
+        await client.query(`ALTER TABLE app_settings ALTER COLUMN value DROP NOT NULL;`);
+        await client.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS int_value INTEGER;`);
+        // Handoff threshold for the voice agent: bookings > this go to a
+        // human callback instead of hitting the tools. Seeded at 8 to match
+        // the value hardcoded in the webhook before this became configurable.
+        await client.query(`
+            INSERT INTO app_settings (key, int_value) VALUES
+                ('voice_large_group_threshold', 8)
+            ON CONFLICT (key) DO NOTHING;
+        `);
 
         // ============================================
         // INTEGRATION SETTINGS (per-provider secrets + environment)
