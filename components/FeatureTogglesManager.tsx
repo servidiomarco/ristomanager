@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Globe, Phone, Loader2, ChevronDown, Users } from 'lucide-react';
+import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
     getFeatureFlags,
@@ -59,6 +59,12 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [voiceThresholdDraft, setVoiceThresholdDraft] = useState<string>('');
     const [savingVoiceThreshold, setSavingVoiceThreshold] = useState(false);
 
+    // Same pattern for the suspension callback time (HH:MM). The toggle
+    // itself lives in FeatureFlags, but the callback hour is a ChannelSettings
+    // string field so it can be edited without flipping the toggle.
+    const [suspensionCallbackDraft, setSuspensionCallbackDraft] = useState<string>('');
+    const [savingSuspensionCallback, setSavingSuspensionCallback] = useState(false);
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -71,6 +77,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setFlags(flagsData);
                 setChannels(channelsData);
                 setVoiceThresholdDraft(String(channelsData.voice_large_group_threshold));
+                setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
             } catch (err: any) {
                 if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
@@ -79,6 +86,15 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         })();
         return () => { cancelled = true; };
     }, [showToast]);
+
+    // Labels used by the toast when a flag is flipped. CHANNELS covers the
+    // accordion entries; sub-toggles nested inside a channel body (like the
+    // suspension flag) need their own label here so the toast reads naturally.
+    const FLAG_LABELS: Record<FlagKey, { title: string; on: string; off: string }> = {
+        voice_agent_enabled: { title: 'Agente vocale', on: 'attivo', off: 'sospeso' },
+        public_bookings_enabled: { title: 'Prenotazioni web', on: 'attive', off: 'sospese' },
+        voice_bookings_suspended: { title: 'Prenotazioni telefoniche', on: 'sospese', off: 'riattivate' },
+    };
 
     const toggle = async (key: FlagKey) => {
         if (!flags || !canEdit || savingKey) return;
@@ -89,13 +105,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         try {
             const updated = await updateFeatureFlags({ [key]: nextValue } as Partial<FeatureFlags>);
             setFlags(updated);
-            const meta = CHANNELS.find(c => c.key === key)!;
-            showToast(
-                nextValue
-                    ? `${meta.title}: ${meta.onLabel.toLowerCase()}`
-                    : `${meta.title}: ${meta.offLabel.toLowerCase()}`,
-                'success'
-            );
+            const label = FLAG_LABELS[key];
+            showToast(`${label.title}: ${nextValue ? label.on : label.off}`, 'success');
         } catch (err: any) {
             setFlags(previous);
             showToast(err?.message || 'Errore aggiornamento impostazione', 'error');
@@ -124,6 +135,26 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    const saveSuspensionCallback = async () => {
+        if (!channels || !canEdit || savingSuspensionCallback) return;
+        const raw = suspensionCallbackDraft.trim();
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(raw)) {
+            showToast("L'orario deve essere in formato HH:MM (00-23:00-59)", 'error');
+            return;
+        }
+        setSavingSuspensionCallback(true);
+        try {
+            const updated = await updateChannelSettings({ voice_bookings_suspension_callback_time: raw });
+            setChannels(updated);
+            setSuspensionCallbackDraft(updated.voice_bookings_suspension_callback_time);
+            showToast('Orario di richiamo aggiornato', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento orario', 'error');
+        } finally {
+            setSavingSuspensionCallback(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
@@ -134,6 +165,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     if (!flags || !channels) return null;
 
     const voiceThresholdDirty = String(channels.voice_large_group_threshold) !== voiceThresholdDraft.trim();
+    const suspensionCallbackDirty = channels.voice_bookings_suspension_callback_time !== suspensionCallbackDraft.trim();
+    const suspended = flags.voice_bookings_suspended;
+    const suspensionSaving = savingKey === 'voice_bookings_suspended';
 
     return (
         <div className="space-y-3">
@@ -186,38 +220,96 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                             <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">{meta.description}</p>
 
                             {isVoice && (
-                                <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
-                                    <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                        <Users className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                                        <span>Soglia handoff gruppi grandi</span>
-                                    </label>
-                                    <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-2 leading-relaxed">
-                                        Fino a questo numero di ospiti Sofia prenota da sola; oltre passa la richiamata a un operatore. Il calcolo di disponibilità del backend non è affidabile per gruppi grandi (verifica per tavoli singoli), quindi la soglia esiste per evitare risposte sbagliate al cliente.
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            max={50}
-                                            value={voiceThresholdDraft}
-                                            onChange={(e) => setVoiceThresholdDraft(e.target.value)}
-                                            disabled={!canEdit || savingVoiceThreshold}
-                                            className="w-20 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
-                                        />
-                                        <span className="text-[12px] text-[var(--color-fg-muted)]">
-                                            Attualmente: prenotazioni fino a <strong className="text-[var(--color-fg)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={saveVoiceThreshold}
-                                            disabled={!canEdit || savingVoiceThreshold || !voiceThresholdDirty}
-                                            className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-                                        >
-                                            {savingVoiceThreshold && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                                            Salva
-                                        </button>
+                                <>
+                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                        <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
+                                            <Users className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                            <span>Soglia handoff gruppi grandi</span>
+                                        </label>
+                                        <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-2 leading-relaxed">
+                                            Fino a questo numero di ospiti Sofia prenota da sola; oltre passa la richiamata a un operatore. Il calcolo di disponibilità del backend non è affidabile per gruppi grandi (verifica per tavoli singoli), quindi la soglia esiste per evitare risposte sbagliate al cliente.
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                max={50}
+                                                value={voiceThresholdDraft}
+                                                onChange={(e) => setVoiceThresholdDraft(e.target.value)}
+                                                disabled={!canEdit || savingVoiceThreshold}
+                                                className="w-20 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                            />
+                                            <span className="text-[12px] text-[var(--color-fg-muted)]">
+                                                Attualmente: prenotazioni fino a <strong className="text-[var(--color-fg)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={saveVoiceThreshold}
+                                                disabled={!canEdit || savingVoiceThreshold || !voiceThresholdDirty}
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            >
+                                                {savingVoiceThreshold && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                                Salva
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
+
+                                    <div className={`rounded-md border p-3 transition-colors ${
+                                        suspended
+                                            ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-800'
+                                            : 'bg-[var(--color-surface-2)] border-[var(--color-line)]'
+                                    }`}>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
+                                                    <PauseCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${suspended ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}`} />
+                                                    <span>Prenotazioni momentaneamente sospese</span>
+                                                </label>
+                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                                    Quando attivo, Sofia risponde alla chiamata dicendo che le prenotazioni sono sospese e invita a richiamare dopo l'orario configurato. I tool <em>check-availability</em> e <em>create-reservation</em> vengono anche disabilitati come rete di sicurezza.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={suspended}
+                                                aria-label={suspended ? 'Riattiva prenotazioni' : 'Sospendi prenotazioni'}
+                                                onClick={() => toggle('voice_bookings_suspended')}
+                                                disabled={!canEdit || suspensionSaving}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                    suspended ? 'bg-amber-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                                                }`}
+                                            >
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                                        suspended ? 'translate-x-5' : 'translate-x-0.5'
+                                                    } translate-y-0.5`}
+                                                />
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-3">
+                                            <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                            <span className="text-[12px] text-[var(--color-fg-muted)]">Richiamare dopo le</span>
+                                            <input
+                                                type="time"
+                                                value={suspensionCallbackDraft}
+                                                onChange={(e) => setSuspensionCallbackDraft(e.target.value)}
+                                                disabled={!canEdit || savingSuspensionCallback}
+                                                className="w-28 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={saveSuspensionCallback}
+                                                disabled={!canEdit || savingSuspensionCallback || !suspensionCallbackDirty}
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            >
+                                                {savingSuspensionCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                                Salva
+                                            </button>
+                                        </div>
+                                    </div>
+                                </>
                             )}
 
                             {!isVoice && (

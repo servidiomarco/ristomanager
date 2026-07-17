@@ -715,6 +715,7 @@ export const deleteClosure = async (id: number): Promise<void> => {
 export interface FeatureFlags {
   public_bookings_enabled: boolean;
   voice_agent_enabled: boolean;
+  voice_bookings_suspended: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
@@ -731,11 +732,12 @@ export const updateFeatureFlags = async (updates: Partial<FeatureFlags>): Promis
   });
 };
 
-// Per-channel numeric settings. Kept separate from FeatureFlags so the
-// booleans stay boolean; add new fields here when a channel gains editable
-// knobs beyond enabled/disabled.
+// Per-channel settings — numeric or free-text (HH:MM). Kept separate from
+// FeatureFlags so the booleans stay boolean; add new fields here when a
+// channel gains editable knobs beyond enabled/disabled.
 export interface ChannelSettings {
   voice_large_group_threshold: number;
+  voice_bookings_suspension_callback_time: string;
 }
 
 export const getChannelSettings = async (): Promise<ChannelSettings> => {

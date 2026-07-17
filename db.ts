@@ -1397,6 +1397,23 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ('voice_large_group_threshold', 8)
             ON CONFLICT (key) DO NOTHING;
         `);
+        // Some settings carry text values (HH:MM, labels, …). Same rule as
+        // int_value: rows use text_value XOR the others depending on type.
+        await client.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS text_value TEXT;`);
+        // Voice-agent "prenotazioni sospese" mode: when the toggle is on,
+        // the init-conversation webhook overrides Sofia's first_message with
+        // a suspension notice pointing the caller at a fallback callback
+        // time. Seed OFF + default 19:00 so a fresh install is safe.
+        await client.query(`
+            INSERT INTO app_settings (key, value) VALUES
+                ('voice_bookings_suspended', false)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+        await client.query(`
+            INSERT INTO app_settings (key, text_value) VALUES
+                ('voice_bookings_suspension_callback_time', '19:00')
+            ON CONFLICT (key) DO NOTHING;
+        `);
 
         // ============================================
         // INTEGRATION SETTINGS (per-provider secrets + environment)

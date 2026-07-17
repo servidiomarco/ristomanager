@@ -713,20 +713,41 @@ const VOICE_FIRST_MESSAGE_FALLBACK =
 app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
 
+    // "Prenotazioni sospese" mode: Sofia is still on the phone but she
+    // announces the pause instead of running the booking flow. Only the
+    // first_message can be overridden from a webhook (agent.prompt.prompt
+    // override is disabled in the Studio "Security & Overrides" panel), so
+    // the message must stand on its own. The dynamic variable is a hint for
+    // a future prompt update ({{booking_status_message}}) — safe to send
+    // even when unused. Read once and reuse across every branch below.
+    const suspended = await getFeatureFlag('voice_bookings_suspended', false);
+    const suspensionCallback = suspended ? await getVoiceSuspensionCallbackTime() : '';
+    const suspensionMessage = suspended
+        ? `Buongiorno, sono Sofia del Vecchio Frantoio. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
+        : '';
+
     const baseDynamicVars = {
         customer_first_name: '',
         customer_full_name: '',
         customer_id: '',
         caller_id_spelled: '',
         customer_known: 'false',
+        booking_status_message: suspensionMessage,
     };
+    const effectiveFirstMessage = suspended ? suspensionMessage : VOICE_FIRST_MESSAGE_FALLBACK;
     const fallbackResponse = {
         type: 'conversation_initiation_client_data',
         dynamic_variables: baseDynamicVars,
         conversation_config_override: {
-            agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+            agent: { first_message: effectiveFirstMessage },
         },
     };
+
+    // When suspended we short-circuit even for known callers: no personalised
+    // greeting, no customer lookup. The suspension message is what matters.
+    if (suspended) {
+        return res.json(fallbackResponse);
+    }
 
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
         return res.json(fallbackResponse);
@@ -786,6 +807,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
                 customer_id: String(lookup.customer_id || ''),
                 caller_id_spelled: callerIdSpelled,
                 customer_known: 'true',
+                booking_status_message: '',
             },
             conversation_config_override: {
                 agent: { first_message: personalisedFirstMessage },
@@ -884,6 +906,10 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
     }
+    if (await getFeatureFlag('voice_bookings_suspended', false)) {
+        const cb = await getVoiceSuspensionCallbackTime();
+        return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(cb) });
+    }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
         ? req.body.parameters
@@ -978,6 +1004,10 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
+    if (await getFeatureFlag('voice_bookings_suspended', false)) {
+        const cb = await getVoiceSuspensionCallbackTime();
+        return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(cb) });
     }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
@@ -9847,8 +9877,8 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended'];
 
 async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -9861,16 +9891,19 @@ async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<b
     }
 }
 
+const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
+    public_bookings_enabled: false,
+    voice_agent_enabled: true,
+    voice_bookings_suspended: false,
+};
+
 app.get('/settings/features', authenticate, async (_req, res) => {
     try {
         const result = await queryWithRetry(
             'SELECT key, value FROM app_settings WHERE key = ANY($1)',
             [FEATURE_FLAG_KEYS]
         );
-        const flags: Record<string, boolean> = {
-            public_bookings_enabled: false,
-            voice_agent_enabled: true,
-        };
+        const flags: Record<string, boolean> = { ...FEATURE_FLAG_DEFAULTS };
         for (const row of result.rows) {
             flags[row.key] = Boolean(row.value);
         }
@@ -9881,12 +9914,13 @@ app.get('/settings/features', authenticate, async (_req, res) => {
     }
 });
 
-// Channel-specific numeric settings. Booleans stay in /settings/features so
-// existing FeatureFlags typing isn't polluted. Currently only the voice
-// agent large-group handoff threshold; new numeric settings just add rows
-// with an int_value here and extend the type on both sides.
+// Channel-specific settings — numeric or free-text. Booleans stay in
+// /settings/features so existing FeatureFlags typing isn't polluted. Add new
+// fields by extending the key/default map and the PUT validator below.
 const VOICE_LARGE_GROUP_KEY = 'voice_large_group_threshold';
 const VOICE_LARGE_GROUP_DEFAULT = 8;
+const VOICE_SUSPENSION_CALLBACK_KEY = 'voice_bookings_suspension_callback_time';
+const VOICE_SUSPENSION_CALLBACK_DEFAULT = '19:00';
 
 async function getVoiceLargeGroupThreshold(): Promise<number> {
     try {
@@ -9904,10 +9938,31 @@ async function getVoiceLargeGroupThreshold(): Promise<number> {
     }
 }
 
+async function getVoiceSuspensionCallbackTime(): Promise<string> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [VOICE_SUSPENSION_CALLBACK_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw === 'string' && HHMM_RE.test(raw)) return raw;
+        return VOICE_SUSPENSION_CALLBACK_DEFAULT;
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${VOICE_SUSPENSION_CALLBACK_KEY}, falling back to ${VOICE_SUSPENSION_CALLBACK_DEFAULT}:`, err);
+        return VOICE_SUSPENSION_CALLBACK_DEFAULT;
+    }
+}
+
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const voiceThreshold = await getVoiceLargeGroupThreshold();
-        res.json({ voice_large_group_threshold: voiceThreshold });
+        const [voiceThreshold, suspensionCallback] = await Promise.all([
+            getVoiceLargeGroupThreshold(),
+            getVoiceSuspensionCallbackTime(),
+        ]);
+        res.json({
+            voice_large_group_threshold: voiceThreshold,
+            voice_bookings_suspension_callback_time: suspensionCallback,
+        });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
         res.status(500).json({ error: 'Failed to fetch channel settings' });
@@ -9916,28 +9971,50 @@ app.get('/settings/channels', authenticate, async (_req, res) => {
 
 app.put('/settings/channels', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
-    const rawThreshold = body.voice_large_group_threshold;
-    // At least one supported field must be present. Add branches here as new
-    // per-channel numeric settings show up.
-    if (rawThreshold === undefined) {
+    const updates: Array<{ key: string; column: 'int_value' | 'text_value'; value: number | string }> = [];
+
+    if (body.voice_large_group_threshold !== undefined) {
+        const n = Number(body.voice_large_group_threshold);
+        if (!Number.isInteger(n) || n < 1 || n > 50) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'voice_large_group_threshold must be an integer between 1 and 50',
+            });
+        }
+        updates.push({ key: VOICE_LARGE_GROUP_KEY, column: 'int_value', value: n });
+    }
+
+    if (body.voice_bookings_suspension_callback_time !== undefined) {
+        const raw = String(body.voice_bookings_suspension_callback_time).trim();
+        if (!HHMM_RE.test(raw)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'voice_bookings_suspension_callback_time must be HH:MM (00-23:00-59)',
+            });
+        }
+        updates.push({ key: VOICE_SUSPENSION_CALLBACK_KEY, column: 'text_value', value: raw });
+    }
+
+    if (updates.length === 0) {
         return res.status(400).json({ error: 'no_updates', message: 'No channel settings supplied' });
     }
-    const n = Number(rawThreshold);
-    if (!Number.isInteger(n) || n < 1 || n > 50) {
-        return res.status(400).json({
-            error: 'invalid_value',
-            message: 'voice_large_group_threshold must be an integer between 1 and 50',
-        });
-    }
+
     try {
-        await queryWithRetry(
-            `INSERT INTO app_settings (key, int_value, updated_at)
-             VALUES ($1, $2, CURRENT_TIMESTAMP)
-             ON CONFLICT (key) DO UPDATE
-               SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
-            [VOICE_LARGE_GROUP_KEY, n]
-        );
-        res.json({ voice_large_group_threshold: n });
+        for (const u of updates) {
+            const sql = `INSERT INTO app_settings (key, ${u.column}, updated_at)
+                         VALUES ($1, $2, CURRENT_TIMESTAMP)
+                         ON CONFLICT (key) DO UPDATE
+                           SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
+            await queryWithRetry(sql, [u.key, u.value]);
+        }
+        const [voiceThreshold, suspensionCallback] = await Promise.all([
+            getVoiceLargeGroupThreshold(),
+            getVoiceSuspensionCallbackTime(),
+        ]);
+        res.json({
+            voice_large_group_threshold: voiceThreshold,
+            voice_bookings_suspension_callback_time: suspensionCallback,
+        });
     } catch (err) {
         console.error('Error updating channel settings:', err);
         res.status(500).json({ error: 'Failed to update channel settings' });
@@ -10671,6 +10748,12 @@ app.get('/public/contact', async (_req, res) => {
 // Maintenance message used by both the public form and the API safety net.
 const PUBLIC_BOOKINGS_DISABLED_MESSAGE = 'Le prenotazioni web non sono disponibili al momento.';
 const VOICE_AGENT_DISABLED_MESSAGE = 'Le prenotazioni telefoniche non sono disponibili al momento.';
+// Tool-side safety net when voice_bookings_suspended is on: if Sofia calls a
+// booking tool anyway, we refuse and hand back a message the agent can read
+// aloud verbatim. The callback time is looked up at call time so the message
+// stays in sync with the /settings/channels config without a redeploy.
+const buildVoiceSuspensionMessage = (callbackTime: string) =>
+    `Le prenotazioni sono momentaneamente sospese. Richiami dopo le ${callbackTime} per verificare eventuali tavoli disponibili.`;
 
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
     if (!(await getFeatureFlag('public_bookings_enabled', false))) {
