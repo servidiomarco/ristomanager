@@ -5019,10 +5019,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">
+                    {/* Mobile: taller targets (py-3.5 ≈ 48px total) to hit
+                        Apple/Material minimum tap size; desktop keeps py-2. */}
                     <button
                         type="button"
                         onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}
-                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                        className="w-full sm:w-auto px-4 py-3.5 sm:py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
                     >
                         Annulla
                     </button>
@@ -5034,7 +5036,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button
                         onClick={handleSubmit}
                         disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
-                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
+                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3.5 sm:py-2 rounded-full text-sm font-medium ${
                             (mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation
                                 ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] cursor-not-allowed border border-[var(--color-line)]'
                                 : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
