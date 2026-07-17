@@ -11,6 +11,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
@@ -37,13 +38,12 @@ const formatLocalDateTime = (date: Date): string => {
 
 // Helper to format datetime without timezone conversion
 const formatDateTime = (isoString: string): string => {
-  // Parse the ISO string directly without timezone conversion
-  const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (match) {
-    const [, year, month, day, hour, minute] = match;
-    return `${day}/${month}/${year}, ${hour}:${minute}`;
+  const dateStr = getRomeDatePart(isoString);
+  const timeStr = getRomeTimePart(isoString);
+  if (dateStr) {
+    const [year, month, day] = dateStr.split('-');
+    return `${day}/${month}/${year}, ${timeStr || '00:00'}`;
   }
-  // Fallback to original behavior
   return new Date(isoString).toLocaleString();
 };
 
@@ -110,14 +110,8 @@ const renderChannelIcon = (res: Reservation): React.ReactNode => {
   );
 };
 
-// Helper to format only time
-const formatTime = (isoString: string): string => {
-  const match = isoString.match(/T(\d{2}):(\d{2})/);
-  if (match) {
-    return `${match[1]}:${match[2]}`;
-  }
-  return '';
-};
+// Helper to format only time (Europe/Rome wall clock)
+const formatTime = (isoString: string): string => getRomeTimePart(isoString);
 
 // Human-readable "dd/mm alle HH:MM" for a Twilio callback timestamp (may be
 // null/invalid on legacy rows). Returns '—' when unparseable.
@@ -280,14 +274,18 @@ const getMinutesLate = (reservationTime: string): number => {
   return Math.floor((now.getTime() - resDate.getTime()) / 60000);
 };
 
-// Local-date helpers for the preflight check below — `new Date(isoString)`
-// drifts under UTC, which would flag a 09:30 booking as "tomorrow" for the
-// wrong timezone. We parse the local components by hand instead.
+// Returns a Date whose wall-clock components (year, month, day, hour, minute)
+// match the reservation's Europe/Rome wall clock. Used for day-diff math
+// (e.g. "is this booking today or tomorrow?") without letting the viewer's
+// browser timezone drift the answer.
 const parseLocalDate = (iso: string): Date | null => {
-  const m = iso.match(/(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
-  if (!m) return null;
-  const [, y, mo, d, h, mi] = m;
-  return new Date(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(mi || 0));
+  if (!iso) return null;
+  const dateStr = getRomeDatePart(iso);
+  if (!dateStr) return null;
+  const timeStr = getRomeTimePart(iso);
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, mi] = (timeStr || '00:00').split(':').map(Number);
+  return new Date(y, mo - 1, d, h, mi);
 };
 
 const startOfDay = (d: Date): Date => {
@@ -710,9 +708,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
     } catch { /* ignore */ }
     // Make sure the group containing the target is expanded so the row renders.
+    // Grouping mirrors groupedReservations: DECLINED goes into 'cancelled'
+    // (rejected requests share the annullate bucket), everything else keeps its
+    // own state key.
     const targetGroupKey = (() => {
       const state = getReservationState(target);
-      if (state === 'declined' || state === 'pending') return 'waiting';
+      if (state === 'declined') return 'cancelled';
       return state;
     })();
     setExpandedGroups(prev => prev.has(targetGroupKey) ? prev : new Set(prev).add(targetGroupKey));
@@ -729,7 +730,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onOpenReservationHandled?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openReservationId, reservations]);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['waiting', 'arrived', 'noshow']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'waiting', 'arrived', 'noshow']));
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
@@ -1023,8 +1024,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (r.reservation_status === ReservationStatus.DECLINED) continue;
       if (r.reservation_status === ReservationStatus.NO_SHOW) continue;
       if (r.shift !== formData.shift) continue;
-      if (!r.reservation_time?.startsWith(date)) continue;
-      const hhmm = r.reservation_time.split('T')[1]?.substring(0, 5);
+      if (getRomeDatePart(r.reservation_time) !== date) continue;
+      const hhmm = getRomeTimePart(r.reservation_time);
       if (hhmm && totals.has(hhmm)) {
         totals.set(hhmm, (totals.get(hhmm) || 0) + ((r.guests || 0) + (r.children || 0)));
       }
@@ -1188,7 +1189,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (r.table_id == null) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
       if (r.reservation_status === ReservationStatus.DECLINED) continue;
-      const date = r.reservation_time.split('T')[0];
+      const date = getRomeDatePart(r.reservation_time);
       const key = `${r.table_id}|${date}|${r.shift}`;
       const arr = groups.get(key);
       if (arr) arr.push(r); else groups.set(key, [r]);
@@ -1239,7 +1240,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
   const groupedReservations = useMemo((): ReservationGroup[] => {
     const dateFiltered = reservations.filter(r => {
-      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesDate = getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0];
       const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
       const matchesRoom = filterRoomId === 'ALL'
         ? true
@@ -1551,9 +1552,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   const handleEditClick = (res: Reservation) => {
+      // Populate the form with the Europe/Rome wall-clock (naive local string
+      // "YYYY-MM-DDTHH:MM"). The <input type="datetime-local"> and the shift
+      // slot grid both expect this format. Using toISOString() here would
+      // return UTC and shift the hour by the local offset.
+      const romeDate = getRomeDatePart(res.reservation_time);
+      const romeTime = getRomeTimePart(res.reservation_time);
       const formattedReservation = {
         ...res,
-        reservation_time: new Date(res.reservation_time).toISOString().substring(0, 16)
+        reservation_time: romeDate && romeTime ? `${romeDate}T${romeTime}` : res.reservation_time,
       };
       setFormData(formattedReservation);
 
@@ -1825,7 +1832,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
       if (r.reservation_status === ReservationStatus.CANCELLED) return false;
       if (r.reservation_status === ReservationStatus.DECLINED) return false;
-      if (r.reservation_time.split('T')[0] !== checkDate) return false;
+      if (getRomeDatePart(r.reservation_time) !== checkDate) return false;
       return reservationsOverlap(myStart, myDuration, r.reservation_time, resolveDurationMinutes(r));
     }) : false;
     if (occupiedByReservation) return true;
@@ -1835,7 +1842,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const getReservationForTable = (table_id: number) => {
       return reservations.find(r =>
           r.table_id === table_id &&
-          r.reservation_time.split('T')[0] === selectedDate.split('T')[0] &&
+          getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0] &&
           (selectedShift === 'ALL' || r.shift === selectedShift) &&
           r.arrival_status !== ArrivalStatus.DEPARTED &&
           r.reservation_status !== ReservationStatus.CANCELLED &&
@@ -1851,7 +1858,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return reservations
           .filter(r =>
               r.table_id === table_id &&
-              r.reservation_time.split('T')[0] === dateOnly &&
+              getRomeDatePart(r.reservation_time) === dateOnly &&
               (selectedShift === 'ALL' || r.shift === selectedShift) &&
               r.arrival_status !== ArrivalStatus.DEPARTED &&
               r.reservation_status !== ReservationStatus.CANCELLED &&
@@ -1888,7 +1895,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const myDuration = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
       const res = reservations.find(r =>
           r.table_id === table_id &&
-          r.reservation_time.split('T')[0] === date &&
+          getRomeDatePart(r.reservation_time) === date &&
           r.id !== formData.id &&
           r.arrival_status !== ArrivalStatus.DEPARTED &&
           r.reservation_status !== ReservationStatus.CANCELLED &&
@@ -2218,7 +2225,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           displayStatus = 'attesa';
       }
       const reservationTime = reservation
-          ? reservation.reservation_time.split('T')[1]?.slice(0, 5) || null
+          ? (getRomeTimePart(reservation.reservation_time) || null)
           : null;
 
       const dims = getGlyphDimensions(table.shape, table.seats);
@@ -2249,7 +2256,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
           : hasMultipleReservations
               ? `Doppio turno · ${allReservations.map(r => {
-                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                    const t = getRomeTimePart(r.reservation_time);
                     return `${toTitleCase(r.customer_name)}${t ? ` (${t})` : ''}`;
                 }).join(' · ')}`
               : reservation
@@ -2339,7 +2346,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     style={{ top: captionTopPx + 30 }}
                 >
                     {allReservations.map((r, i) => {
-                        const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                        const t = getRomeTimePart(r.reservation_time);
                         return (
                             <span
                                 key={r.id}
@@ -2374,7 +2381,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         {isMulti ? (
                             <div className="flex flex-col items-center leading-tight gap-0.5">
                                 {allReservations.map((r, i) => {
-                                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                                    const t = getRomeTimePart(r.reservation_time);
                                     return (
                                         <span key={r.id} className="text-[11px]">
                                             <span className="opacity-70 tabular mr-1">{i + 1}°</span>
@@ -3027,7 +3034,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
     const reservationsForDayShift = reservations.filter(r => {
-      const matchesDate = r.reservation_time.split('T')[0] === selectedDate.split('T')[0];
+      const matchesDate = getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0];
       const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
       return matchesDate && matchesShift;
     });
@@ -4665,7 +4672,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 const isOccupied = !!reservation;
                                                 const occLabel = reservation ? formatShortName(reservation.customer_name) : '';
                                                 const occGuests = reservation?.guests;
-                                                const occTime = reservation ? reservation.reservation_time.split('T')[1]?.slice(0, 5) ?? '' : '';
+                                                const occTime = reservation ? getRomeTimePart(reservation.reservation_time) : '';
                                                 const isSelected = formData.table_id === table.id;
                                                 const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
                                                 const isMerged = table.merged_with && table.merged_with.length > 0;
@@ -5474,7 +5481,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             ? selectedShift
             : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
           const unassigned = reservations
-            .filter(r => r.reservation_time.split('T')[0] === dateOnly)
+            .filter(r => getRomeDatePart(r.reservation_time) === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
             .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
@@ -5583,7 +5590,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                 <ul className="flex-1 overflow-y-auto divide-y divide-[var(--color-line)]">
                   {rows.map((r, i) => {
-                    const t = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                    const t = getRomeTimePart(r.reservation_time);
                     const duration = resolveDurationMinutes(r);
                     const start = parseLocalDate(r.reservation_time);
                     const endLabel = start ? (() => {
@@ -5645,7 +5652,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             ? selectedShift
             : (new Date().getHours() >= 11 && new Date().getHours() < 17 ? Shift.LUNCH : Shift.DINNER);
           const unassigned = reservations
-            .filter(r => r.reservation_time.split('T')[0] === dateOnly)
+            .filter(r => getRomeDatePart(r.reservation_time) === dateOnly)
             .filter(r => r.shift === effectiveShift)
             .filter(r => !r.table_id)
             .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)

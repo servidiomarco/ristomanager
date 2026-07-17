@@ -25,7 +25,11 @@ const formatDuration = (secs: number | null | undefined): string => {
 const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   try {
+    // Explicit Europe/Rome so the timestamp reads the same for staff opening
+    // the app from a different timezone (e.g. on holiday) — otherwise the
+    // reservation and call times would drift by the offset.
     return new Date(iso).toLocaleString('it-IT', {
+      timeZone: 'Europe/Rome',
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch {

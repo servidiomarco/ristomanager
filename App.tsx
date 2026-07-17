@@ -41,6 +41,7 @@ import { messagesApiService } from './services/messagesApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
+import { getRomeDatePart } from './utils/reservationTime';
 
 import {
   getReservations,
@@ -2318,7 +2319,7 @@ const App: React.FC = () => {
           onClose={() => setPaletteOpen(false)}
           reservations={reservations}
           onSelectReservation={(res) => {
-            const dateOnly = res.reservation_time.split('T')[0];
+            const dateOnly = getRomeDatePart(res.reservation_time);
             const [y, m, d] = dateOnly.split('-').map(Number);
             if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
             setPendingReservationId(res.id);

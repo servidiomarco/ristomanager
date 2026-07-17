@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 
 interface Props {
   isOpen: boolean;
@@ -61,7 +62,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
 
   const filteredReservations = useMemo(() => {
     return reservations
-      .filter(r => r.reservation_time.split('T')[0] === printDate)
+      .filter(r => getRomeDatePart(r.reservation_time) === printDate)
       .filter(r => printShift === 'ALL' || r.shift === printShift)
       .filter(r => {
         if (printRoomId === 'ALL') return true;
@@ -239,7 +240,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 <tbody>
                   {filteredReservations.map(r => {
                     const table = r.table_id ? tableById.get(r.table_id) : null;
-                    const time = r.reservation_time.split('T')[1]?.slice(0, 5) || '';
+                    const time = getRomeTimePart(r.reservation_time);
                     const arrived = r.arrival_status === ArrivalStatus.ARRIVED;
                     return (
                       <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>

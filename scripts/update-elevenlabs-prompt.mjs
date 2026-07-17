@@ -6,12 +6,15 @@
 //
 // Usage (from repo root):
 //   ELEVENLABS_API_KEY=xxx ELEVENLABS_AGENT_ID=yyy \
-//     node scripts/update-elevenlabs-prompt.mjs [--apply]
+//     node scripts/update-elevenlabs-prompt.mjs [--apply | --pull]
 //
-// Without --apply it runs dry: fetches the current prompt, computes a diff
-// summary, but does NOT write. Pass --apply to actually update.
+// Modes:
+//   default   Dry run: fetch live, compare with local, print summary.
+//   --apply   Push local → live (overwrites the agent's system prompt).
+//   --pull    Fetch live → write to docs/elevenlabs-agent-prompt.live.md
+//             so you can diff/merge before pushing.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -22,10 +25,35 @@ const API_BASE = 'https://api.elevenlabs.io/v1';
 const apiKey = process.env.ELEVENLABS_API_KEY;
 const agentId = process.env.ELEVENLABS_AGENT_ID;
 const apply = process.argv.includes('--apply');
+const pull = process.argv.includes('--pull');
 
 if (!apiKey || !agentId) {
   console.error('Missing ELEVENLABS_API_KEY and/or ELEVENLABS_AGENT_ID env vars.');
   process.exit(2);
+}
+
+if (apply && pull) {
+  console.error('Pick either --apply or --pull, not both.');
+  process.exit(2);
+}
+
+// --pull short-circuits everything: fetch live prompt, dump verbatim.
+if (pull) {
+  const getRes = await fetch(`${API_BASE}/convai/agents/${encodeURIComponent(agentId)}`, {
+    headers: { 'xi-api-key': apiKey },
+  });
+  if (!getRes.ok) {
+    console.error(`GET agent failed: ${getRes.status} ${getRes.statusText}`);
+    console.error(await getRes.text());
+    process.exit(1);
+  }
+  const agent = await getRes.json();
+  const livePrompt = agent?.conversation_config?.agent?.prompt?.prompt ?? '';
+  const outPath = resolve(__dirname, '..', 'docs', 'elevenlabs-agent-prompt.live.md');
+  writeFileSync(outPath, livePrompt);
+  console.log(`Saved live prompt to ${outPath}`);
+  console.log(`  ${livePrompt.length} chars, ${livePrompt.split('\n').length} lines`);
+  process.exit(0);
 }
 
 const raw = readFileSync(PROMPT_FILE, 'utf8');

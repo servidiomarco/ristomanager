@@ -17,6 +17,7 @@ const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   try {
     return new Date(iso).toLocaleString('it-IT', {
+      timeZone: 'Europe/Rome',
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch {

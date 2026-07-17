@@ -31,6 +31,7 @@ import {
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation, swapReservationTables } from '../services/apiService';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions } from './TableGlyph';
 
 // Local-date helper (avoid UTC drift)
@@ -41,19 +42,9 @@ const formatLocalDate = (d: Date): string => {
   return `${y}-${m}-${day}`;
 };
 
-const parseReservationTime = (iso: string): Date => {
-  const m = iso.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (m) {
-    const [, y, mo, d, h, mi] = m;
-    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
-  }
-  return new Date(iso);
-};
+const parseReservationTime = (iso: string): Date => new Date(iso);
 
-const formatHHMM = (iso: string): string => {
-  const m = iso.match(/T(\d{2}):(\d{2})/);
-  return m ? `${m[1]}:${m[2]}` : '—';
-};
+const formatHHMM = (iso: string): string => getRomeTimePart(iso) || '—';
 
 const formatPhone = (phone?: string): string => {
   if (!phone) return '';
@@ -124,7 +115,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const todayReservations = useMemo(() => {
     const dateStr = formatLocalDate(globalDate);
     return reservations
-      .filter(r => r.reservation_time?.startsWith(dateStr))
+      .filter(r => getRomeDatePart(r.reservation_time) === dateStr)
       .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
       .filter(r => globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));

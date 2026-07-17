@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, X, Calendar, User, Phone, Mail, Loader2, ArrowRight } from 'lucide-react';
 import { Reservation, Customer, ReservationStatus } from '../types';
 import { getCustomers } from '../services/apiService';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -21,13 +22,15 @@ const MAX_PER_GROUP = 25;
 const formatResDate = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('it-IT', {
+    timeZone: 'Europe/Rome',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 };
 
-const formatResTime = (iso: string): string => {
-  const m = iso.match(/T(\d{2}):(\d{2})/);
-  return m ? `${m[1]}:${m[2]}` : '';
-};
+const formatResTime = (iso: string): string => getRomeTimePart(iso);
 
 const statusChip = (r: Reservation): { label: string; cls: string } | null => {
   const s = r.reservation_status;

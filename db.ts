@@ -60,6 +60,23 @@ pool.on('error', (err) => {
     console.error('Postgres pool idle client error:', err?.message || err);
 });
 
+// Anchor every new pool connection to Europe/Rome so timestamptz columns are
+// interpreted consistently on both writes and reads:
+//   - Naive datetime strings (e.g. "2026-07-16T22:30") passed to INSERT/UPDATE
+//     are interpreted as Europe/Rome wall-clock (previously Postgres treated
+//     them as UTC because Railway's default session TZ is UTC, shifting every
+//     reservation by 1h in winter / 2h in summer).
+//   - DATE(reservation_time), to_char(reservation_time, ...) and other
+//     naive-timestamp extractions return Rome wall-clock values without an
+//     explicit `AT TIME ZONE 'Europe/Rome'` at every call site.
+// The existing `AT TIME ZONE 'Europe/Rome'` casts scattered through the
+// codebase remain correct — they're now redundant but harmless.
+pool.on('connect', (client) => {
+    client.query("SET TIME ZONE 'Europe/Rome'").catch(err => {
+        console.error('Failed to set session TIMEZONE on pool client:', err?.message || err);
+    });
+});
+
 // Retry transient connection errors once. Most ETIMEDOUT / ECONNRESET /
 // "Connection terminated unexpectedly" failures we've seen recover on the
 // next attempt because the pool evicts the dead client and reconnects.

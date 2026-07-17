@@ -4,6 +4,7 @@ import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus
 import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
+import { getRomeDatePart } from '../utils/reservationTime';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -454,7 +455,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const selectedDayReservations = useMemo(() => {
     return Array.isArray(reservations)
       ? reservations.filter(r =>
-          r.reservation_time.startsWith(selectedDateStr) &&
+          getRomeDatePart(r.reservation_time) === selectedDateStr &&
           r.reservation_status !== ReservationStatus.CANCELLED &&
           r.reservation_status !== ReservationStatus.DECLINED
         )
@@ -638,7 +639,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       const dateStr = formatLocalDate(date);
 
       let dayReservations = Array.isArray(reservations)
-        ? reservations.filter(r => r.reservation_time.startsWith(dateStr))
+        ? reservations.filter(r => getRomeDatePart(r.reservation_time) === dateStr)
         : [];
 
       // Filter by shift if not ALL

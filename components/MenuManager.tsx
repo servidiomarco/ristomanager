@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
+import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
@@ -575,8 +576,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if ((r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.DEPARTED) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
       if (r.reservation_status === ReservationStatus.DECLINED) continue;
-      const resDate = (r.reservation_time || '').slice(0, 10);
-      if (resDate !== date) continue;
+      if (getRomeDatePart(r.reservation_time) !== date) continue;
       if (!map.has(r.table_id)) {
         map.set(r.table_id, { source: 'reservation', label: r.customer_name });
       }

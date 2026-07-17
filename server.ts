@@ -1272,9 +1272,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         }
 
         if (outcome.status === 'already_cancelled') {
-            const dt = new Date(outcome.reservation.reservation_time);
-            const hh = String(dt.getHours()).padStart(2, '0');
-            const mm = String(dt.getMinutes()).padStart(2, '0');
+            const { timeLabel } = formatBookingDateTime(outcome.reservation.reservation_time);
             console.log('[ElevenLabs] cancel-reservation: already cancelled', {
                 id: outcome.reservation.id, conversation_id: conversationId,
             });
@@ -1282,16 +1280,14 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
                 success: false,
                 status: 'already_cancelled',
                 reservation_id: outcome.reservation.id,
-                message: `La prenotazione di ${outcome.reservation.customer_name} delle ${hh}:${mm} risulta già annullata. C'è altro che posso fare?`
+                message: `La prenotazione di ${outcome.reservation.customer_name} delle ${timeLabel} risulta già annullata. C'è altro che posso fare?`
             });
         }
 
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map(c => {
-                const t = new Date(c.reservation_time);
-                const hh = String(t.getHours()).padStart(2, '0');
-                const mm = String(t.getMinutes()).padStart(2, '0');
-                return `${hh}:${mm} per ${c.guests}`;
+                const { timeLabel } = formatBookingDateTime(c.reservation_time);
+                return `${timeLabel} per ${c.guests}`;
             }).join(', ');
             console.log('[ElevenLabs] cancel-reservation: ambiguous', {
                 count: outcome.candidates.length, candidates: outcome.candidates.map(c => c.id),
@@ -1538,10 +1534,8 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
         }
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map(c => {
-                const t = new Date(c.reservation_time);
-                const hh = String(t.getHours()).padStart(2, '0');
-                const mm = String(t.getMinutes()).padStart(2, '0');
-                return `${hh}:${mm} per ${c.guests}`;
+                const { timeLabel } = formatBookingDateTime(c.reservation_time);
+                return `${timeLabel} per ${c.guests}`;
             }).join(', ');
             return res.json({
                 success: false,
@@ -3001,12 +2995,7 @@ function buildDepositConfirmationMessage(
     amountCents: number,
     roomName?: string | null
 ): string {
-    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
-    const day = String(dt.getDate()).padStart(2, '0');
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const year = dt.getFullYear();
-    const hours = String(dt.getHours()).padStart(2, '0');
-    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
@@ -3014,7 +3003,7 @@ function buildDepositConfirmationMessage(
     const room = (roomName ?? '').trim();
     const roomPart = room ? ` in ${room}` : '';
     const amount = formatEuroMinor(amountCents);
-    return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}${roomPart} e' confermata. A presto!`;
+    return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
 // Global list of payment requests across all reservations, powering the
@@ -7865,19 +7854,14 @@ function buildConfirmationMessage(
     guests: number | null | undefined,
     roomName?: string | null
 ): string {
-    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
-    const day = String(dt.getDate()).padStart(2, '0');
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const year = dt.getFullYear();
-    const hours = String(dt.getHours()).padStart(2, '0');
-    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
     const roomPart = room ? ` in ${room}` : '';
-    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}${roomPart} e' confermata. A presto!`;
+    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
 // Resolve the room name for a reservation, preferring the actually assigned
@@ -7911,17 +7895,12 @@ function buildDeclineMessage(
     reservationTime: string | Date,
     guests: number | null | undefined
 ): string {
-    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
-    const day = String(dt.getDate()).padStart(2, '0');
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const year = dt.getFullYear();
-    const hours = String(dt.getHours()).padStart(2, '0');
-    const minutes = String(dt.getMinutes()).padStart(2, '0');
+    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
-    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${day}/${month}/${year} alle ${hours}:${minutes}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
+    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
 // Absolute base URL for the running app — needed by email templates because
@@ -8002,14 +7981,22 @@ function escapeHtml(s: string): string {
 
 // Small helper that formats reservation date/time in Italian for the customer
 // emails. Returns { dateLabel: '15/07/2026', timeLabel: '20:30' }.
+//
+// Anchored to Europe/Rome regardless of the Node process TZ (Railway runs
+// UTC). Without the explicit timezone the labels would read UTC hours after
+// the write-path fix and each confirmation email would announce a time 1‑2h
+// earlier than the reservation.
 function formatBookingDateTime(reservationTime: string | Date): { dateLabel: string; timeLabel: string } {
     const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
-    const day = String(dt.getDate()).padStart(2, '0');
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const year = dt.getFullYear();
-    const hours = String(dt.getHours()).padStart(2, '0');
-    const minutes = String(dt.getMinutes()).padStart(2, '0');
-    return { dateLabel: `${day}/${month}/${year}`, timeLabel: `${hours}:${minutes}` };
+    const dateLabel = dt.toLocaleDateString('it-IT', {
+        timeZone: 'Europe/Rome',
+        day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+    const timeLabel = dt.toLocaleTimeString('it-IT', {
+        timeZone: 'Europe/Rome',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    return { dateLabel, timeLabel };
 }
 
 // Booking-request acknowledgement email — sent immediately when a customer

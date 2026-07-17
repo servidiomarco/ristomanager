@@ -3,6 +3,7 @@ import { useShopping } from '../contexts/ShoppingContext';
 import { ShoppingItem, ShoppingCategory, ShoppingUnit, SHOPPING_UNITS } from '../services/shoppingApiService';
 import { Reservation, BanquetMenu, ReservationStatus } from '../types';
 import { printShoppingList, shareShoppingList } from '../utils/printShoppingList';
+import { getRomeDatePart } from '../utils/reservationTime';
 import { SupplierManagementModal } from './SupplierManagementModal';
 import {
   ShoppingCart, ChefHat, Coffee, Package, Plus, Check, Trash2, Edit2,
@@ -210,7 +211,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const breadEstimate = useMemo(() => {
     const reservationGuests = (reservations || [])
       .filter(r =>
-        r.reservation_time.startsWith(todayStr) &&
+        getRomeDatePart(r.reservation_time) === todayStr &&
         r.reservation_status !== ReservationStatus.CANCELLED &&
         r.reservation_status !== ReservationStatus.DECLINED,
       )

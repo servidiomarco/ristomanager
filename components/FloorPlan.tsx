@@ -5,6 +5,7 @@ import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, C
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { CookingPotLoader } from './CookingPotLoader';
 import { computeAutoLayout } from '../utils/tableLayout';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
@@ -558,24 +559,24 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Helper to get Active Reservation details
   const getActiveReservation = (table: Table): Reservation | undefined => {
       const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const currentHour = now.getHours();
-      const currentMin = now.getMinutes();
-      const currentTimeValue = currentHour * 60 + currentMin;
+      const todayStr = getRomeDatePart(now);
+      const romeNow = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+      const [nowH, nowM] = romeNow.split(':').map(Number);
+      const currentTimeValue = nowH * 60 + nowM;
 
       let currentActiveShift: Shift | null = null;
-      if (currentHour >= 11 && currentHour < 17) currentActiveShift = Shift.LUNCH;
-      else if (currentHour >= 18 || currentHour < 4) currentActiveShift = Shift.DINNER;
+      if (nowH >= 11 && nowH < 17) currentActiveShift = Shift.LUNCH;
+      else if (nowH >= 18 || nowH < 4) currentActiveShift = Shift.DINNER;
 
       return reservations.find(r => {
           if (r.table_id !== table.id) return false;
-          if (r.reservation_time.split('T')[0] !== todayStr) return false;
+          if (getRomeDatePart(r.reservation_time) !== todayStr) return false;
           if (currentActiveShift && r.shift !== currentActiveShift) return false;
           if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
           if (r.reservation_status === ReservationStatus.CANCELLED) return false;
           if (r.reservation_status === ReservationStatus.DECLINED) return false;
 
-          const [h, m] = r.reservation_time.split('T')[1].substring(0, 5).split(':').map(Number);
+          const [h, m] = getRomeTimePart(r.reservation_time).split(':').map(Number);
           const resTimeValue = h * 60 + m;
           
           // Broad check to display name if reservation is roughly now
@@ -639,10 +640,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Check Reservations
     const reservation = getActiveReservation(table);
     if (reservation) {
-        const [h, m] = reservation.reservation_time.split('T')[1].substring(0, 5).split(':').map(Number);
+        const [h, m] = getRomeTimePart(reservation.reservation_time).split(':').map(Number);
         const resTimeValue = h * 60 + m;
         const nowDate = new Date();
-        const currentTimeValue = nowDate.getHours() * 60 + nowDate.getMinutes();
+        const [nowH, nowM] = nowDate.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);
+        const currentTimeValue = nowH * 60 + nowM;
 
         if (currentTimeValue >= (resTimeValue - 15) && currentTimeValue <= (resTimeValue + 90)) {
             return TableStatus.OCCUPIED;

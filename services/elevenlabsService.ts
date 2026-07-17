@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -763,14 +764,31 @@ export async function cancelVoiceReservation(
  * alle 20:30 annullata. Le invieremo conferma su WhatsApp."
  */
 export function formatItalianCancellation(r: CancelCandidate): string {
-    const d = new Date(r.reservation_time);
-    const weekday = ITALIAN_WEEKDAYS[d.getDay()];
-    const day = d.getDate();
-    const month = ITALIAN_MONTHS[d.getMonth()];
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
+    const rome = romeWallClock(r.reservation_time);
     const firstName = r.customer_name.split(' ')[0];
-    return `Cancellazione confermata ${firstName}, la prenotazione di ${weekday} ${day} ${month} alle ${hh}:${mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
+    return `Cancellazione confermata ${firstName}, la prenotazione di ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
+}
+
+// Reads the wall-clock components of a reservation_time in Europe/Rome so that
+// voice-agent responses read the hour the caller actually booked — not the
+// UTC hour of the timestamptz value.
+function romeWallClock(iso: string | Date): {
+    weekday: string; day: number; month: string; hh: string; mm: string;
+} {
+    const d = iso instanceof Date ? iso : new Date(iso);
+    const [datePart, timePart] = [getRomeDatePart(d), getRomeTimePart(d)];
+    const [y, mo, dd] = datePart.split('-').map(Number);
+    const [hh, mm] = (timePart || '00:00').split(':');
+    // Build a naive Date with Rome components-as-local so .getDay() gives the
+    // Italian weekday for the reservation date without a second timezone hop.
+    const naive = new Date(y, mo - 1, dd);
+    return {
+        weekday: ITALIAN_WEEKDAYS[naive.getDay()],
+        day: dd,
+        month: ITALIAN_MONTHS[mo - 1],
+        hh,
+        mm,
+    };
 }
 
 // ============================================
@@ -959,14 +977,9 @@ export async function modifyVoiceReservation(
  * this is a change, not a new booking.
  */
 export function formatItalianModification(r: ModifiedReservation): string {
-    const d = new Date(r.reservation_time);
-    const weekday = ITALIAN_WEEKDAYS[d.getDay()];
-    const day = d.getDate();
-    const month = ITALIAN_MONTHS[d.getMonth()];
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
+    const rome = romeWallClock(r.reservation_time);
     const firstName = r.customer_name.split(' ')[0];
-    return `Prenotazione aggiornata ${firstName}: ${weekday} ${day} ${month} alle ${hh}:${mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
+    return `Prenotazione aggiornata ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
 }
 
 // ============================================
@@ -1015,16 +1028,11 @@ const ITALIAN_MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giu
  * Example: "Confermato Mario, tavolo per 4 persone giovedì 7 maggio alle 20:30."
  */
 export function formatItalianConfirmation(r: VoiceReservationOutput): string {
-    const d = new Date(r.reservation_time);
-    const weekday = ITALIAN_WEEKDAYS[d.getDay()];
-    const day = d.getDate();
-    const month = ITALIAN_MONTHS[d.getMonth()];
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
+    const rome = romeWallClock(r.reservation_time);
     const persone = r.guests === 1 ? 'persona' : 'persone';
     const firstName = r.customer_name.split(' ')[0];
     const childrenSuffix = r.children && r.children > 0
         ? ` di cui ${r.children} ${r.children === 1 ? 'bambino' : 'bambini'}`
         : '';
-    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone}${childrenSuffix} ${weekday} ${day} ${month} alle ${hh}:${mm}. Le invieremo conferma su WhatsApp.`;
+    return `Confermato ${firstName}, tavolo per ${r.guests} ${persone}${childrenSuffix} ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm}. Le invieremo conferma su WhatsApp.`;
 }
