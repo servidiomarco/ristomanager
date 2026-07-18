@@ -18,51 +18,38 @@ self.addEventListener('push', (event) => {
     data = { title: 'Notifica', body: event.data ? event.data.text() : '' };
   }
 
-  // ==== BADGE UPDATE (Web App Badging API) — con debug in-line ==================
-  // Debug hack: iniettiamo il risultato dell'operazione badge NEL titolo della
-  // notifica così l'utente lo vede senza aprire DevTools. Rimuovere dopo la
-  // verifica.
-  let debugTag = '';
-  const badgeVal = typeof data.badge === 'number' ? Math.max(0, Math.floor(data.badge)) : null;
-  const hasSet = typeof navigator.setAppBadge === 'function';
-  const hasClear = typeof navigator.clearAppBadge === 'function';
-  debugTag = `[dbg b=${data.badge} set=${hasSet ? 'y' : 'n'} clr=${hasClear ? 'y' : 'n'}]`;
+  const title = data.title || 'RistoCRM';
+  const options = {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag,
+    data: { url: data.url || '/' },
+    renotify: !!data.tag,
+  };
 
-  const badgePromise = (async () => {
-    if (badgeVal === null) { debugTag += ' skip:no-badge'; return; }
-    if (badgeVal > 0) {
-      if (!hasSet) { debugTag += ' skip:no-set'; return; }
-      try {
-        await navigator.setAppBadge(badgeVal);
-        debugTag += ' setOK';
-      } catch (err) {
-        debugTag += ` setERR:${(err && err.message) || 'unknown'}`;
-      }
+  // App-icon badge (Web App Badging API). Se il payload include un `badge`
+  // numerico lo applichiamo sull'icona PWA — il server la include con la
+  // conta corrente di "cose da attenzionare" così l'utente vede il numero
+  // aggiornato anche a app chiusa. Feature-detect + best-effort: se
+  // l'ambiente non supporta l'API (Safari macOS, Firefox) o rifiuta, la
+  // notifica viene comunque mostrata normalmente.
+  const badgeUpdate = (async () => {
+    if (typeof data.badge !== 'number') return;
+    const n = Math.max(0, Math.floor(data.badge));
+    if (n > 0) {
+      if (typeof navigator.setAppBadge !== 'function') return;
+      try { await navigator.setAppBadge(n); } catch (_e) { /* ignore */ }
     } else {
-      if (!hasClear) { debugTag += ' skip:no-clear'; return; }
-      try {
-        await navigator.clearAppBadge();
-        debugTag += ' clrOK';
-      } catch (err) {
-        debugTag += ` clrERR:${(err && err.message) || 'unknown'}`;
-      }
+      if (typeof navigator.clearAppBadge !== 'function') return;
+      try { await navigator.clearAppBadge(); } catch (_e) { /* ignore */ }
     }
   })();
 
-  // Await the badge write PRIMA di showNotification così debugTag è già valorizzato
-  event.waitUntil((async () => {
-    await badgePromise;
-    const title = data.title || 'RistoCRM';
-    const options = {
-      body: `${debugTag}\n${data.body || ''}`,
-      icon: data.icon || '/icon-192.png',
-      badge: '/icon-192.png',
-      tag: data.tag,
-      data: { url: data.url || '/' },
-      renotify: !!data.tag,
-    };
-    await self.registration.showNotification(title, options);
-  })());
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    badgeUpdate,
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
