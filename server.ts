@@ -11362,10 +11362,14 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 });
 
 app.get('/prenota', (_req, res) => {
-    // Force browsers to revalidate the HTML on every visit — otherwise a form
-    // change (e.g. adding a new field) can stay invisible for days behind the
-    // default sendFile caching.
-    res.set('Cache-Control', 'no-cache, must-revalidate');
+    // Force browsers to fetch a fresh copy on every visit. `no-cache` was
+    // theoretically enough (requires revalidation) but in practice Safari
+    // and iOS webviews still served stale HTML after a deploy — customer
+    // sees a form/label that no longer exists on the backend. `no-store`
+    // forbids caching entirely and closes the loophole.
+    res.set('Cache-Control', 'no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
