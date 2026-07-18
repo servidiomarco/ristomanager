@@ -52,9 +52,9 @@ self.addEventListener('push', (event) => {
   // Await the badge write PRIMA di showNotification così debugTag è già valorizzato
   event.waitUntil((async () => {
     await badgePromise;
-    const title = `${data.title || 'RistoCRM'} ${debugTag}`;
+    const title = data.title || 'RistoCRM';
     const options = {
-      body: data.body || '',
+      body: `${debugTag}\n${data.body || ''}`,
       icon: data.icon || '/icon-192.png',
       badge: '/icon-192.png',
       tag: data.tag,
