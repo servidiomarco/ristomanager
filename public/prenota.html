@@ -474,6 +474,19 @@
             slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questo turno non ci sono orari disponibili.</p>';
             return;
         }
+        // Past-slot check (Rome timezone). Client-side as extra safety on top
+        // of the backend filter — copre il caso in cui la pagina resta aperta
+        // e scavalca un orario mentre l'utente stava scegliendo. All-past
+        // fallback message coincide con "backend non ha filtrato ma il canale
+        // orario è comunque tutto scaduto".
+        const romeToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+        const romeNow = new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+        const isToday = state.date === romeToday;
+        const anyFuture = !isToday || slots.some(t => t > romeNow);
+        if (!anyFuture) {
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Tutti gli orari di questo turno sono già passati.</p>';
+            return;
+        }
         slotsContainer.innerHTML = '<div class="grid grid-cols-4 gap-2"></div>';
         const grid = slotsContainer.firstElementChild;
         slots.forEach(time => {
@@ -482,10 +495,18 @@
             b.textContent = time;
             b.dataset.time = time;
             const active = state.time === time;
+            const isPast = isToday && time <= romeNow;
+            b.disabled = isPast;
             b.className = `slot-chip py-2.5 rounded-lg text-sm font-semibold border-2 transition ${
-                active ? 'border-amber-800 bg-amber-800 text-white' : 'border-stone-200 bg-white text-stone-700'
+                isPast
+                    ? 'border-stone-100 bg-stone-50 text-stone-300 cursor-not-allowed line-through'
+                    : active
+                        ? 'border-amber-800 bg-amber-800 text-white'
+                        : 'border-stone-200 bg-white text-stone-700'
             }`;
+            if (isPast) b.title = 'Orario già passato';
             b.addEventListener('click', () => {
+                if (b.disabled) return;
                 state.time = time;
                 renderSlots();
                 roomSection.classList.remove('hidden');
