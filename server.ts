@@ -8260,11 +8260,29 @@ function escapeHtml(s: string): string {
 // Small helper that formats reservation date/time in Italian for the customer
 // emails. Returns { dateLabel: '15/07/2026', timeLabel: '20:30' }.
 //
-// Anchored to Europe/Rome regardless of the Node process TZ (Railway runs
-// UTC). Without the explicit timezone the labels would read UTC hours after
-// the write-path fix and each confirmation email would announce a time 1‑2h
-// earlier than the reservation.
+// Two input shapes need to work correctly:
+//   1) DB-sourced timestamptz value (already a proper UTC instant, e.g.
+//      "2026-07-24T19:00:00.000Z" for 21:00 CEST). We render it in
+//      Europe/Rome and get "21:00" back.
+//   2) Client-sourced naive datetime string (e.g. "2026-07-24T21:00:00",
+//      no `Z`, no offset). Node runs with TZ=UTC on Railway, so passing this
+//      to `new Date(...)` interprets it as UTC and `toLocaleTimeString` then
+//      shifts it to Rome (+1h in CET, +2h in CEST) — that's the bug that
+//      showed 23:00 in a request-ack email for a 21:00 booking. For naive
+//      strings we extract the wall-clock parts directly, no Date detour.
 function formatBookingDateTime(reservationTime: string | Date): { dateLabel: string; timeLabel: string } {
+    if (typeof reservationTime === 'string') {
+        const isNaive = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(reservationTime)
+            && !/Z$/.test(reservationTime)
+            && !/[+-]\d{2}:?\d{2}$/.test(reservationTime);
+        if (isNaive) {
+            const m = reservationTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+            if (m) {
+                const [, year, month, day, hh, mm] = m;
+                return { dateLabel: `${day}/${month}/${year}`, timeLabel: `${hh}:${mm}` };
+            }
+        }
+    }
     const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
     const dateLabel = dt.toLocaleDateString('it-IT', {
         timeZone: 'Europe/Rome',
