@@ -131,7 +131,7 @@
             <!-- Section 3: Shift + Slots -->
             <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
                 <label class="block text-sm font-semibold text-stone-900 mb-3">A che ora?</label>
-                <div class="grid grid-cols-2 gap-2 mb-4">
+                <div class="grid grid-cols-2 gap-2 mb-2">
                     <button type="button" data-shift="LUNCH" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-700">
                         ☀ Pranzo
                     </button>
@@ -139,6 +139,7 @@
                         🌙 Cena
                     </button>
                 </div>
+                <p id="shiftClosedNotice" class="text-xs text-stone-500 italic text-center mb-3 hidden"></p>
                 <div id="slotsContainer" class="min-h-[44px]">
                     <p class="text-sm text-stone-400 text-center py-3" id="slotsHint">Seleziona prima data e turno.</p>
                 </div>
@@ -408,11 +409,24 @@
     }
 
     // Enable/disable each shift button based on whether the corresponding
-    // slot list is non-empty. Also resets state.shift if the user had picked
-    // a shift that just became unavailable (date change, real-time block).
+    // slot list is non-empty. Also:
+    // - Resets state.shift if the user had picked a shift that just became
+    //   unavailable (date change, real-time block).
+    // - Auto-selects the only open shift when its sibling is closed and the
+    //   user hasn't picked yet — saves an extra click when the operator has
+    //   blocked half the day.
     function updateShiftButtonStates() {
         const lunchOpen = ((state.availability?.lunch?.slots) || []).length > 0;
         const dinnerOpen = ((state.availability?.dinner?.slots) || []).length > 0;
+        // Resolve state.shift BEFORE styling so the auto-selected button gets
+        // the active outline in the same pass. Otherwise it'd stay unhighlighted
+        // until the next render.
+        if (state.shift === 'LUNCH' && !lunchOpen) state.shift = null;
+        if (state.shift === 'DINNER' && !dinnerOpen) state.shift = null;
+        if (!state.shift) {
+            if (lunchOpen && !dinnerOpen) state.shift = 'LUNCH';
+            else if (dinnerOpen && !lunchOpen) state.shift = 'DINNER';
+        }
         shiftBtns.forEach(b => {
             const isLunch = b.dataset.shift === 'LUNCH';
             const open = isLunch ? lunchOpen : dinnerOpen;
@@ -423,10 +437,22 @@
             } ${!open ? 'opacity-50 cursor-not-allowed' : ''}`;
             b.title = open ? '' : 'Non disponibile per questa data';
         });
-        // If the user had picked a shift that just closed, unpick it so the
-        // slots section shows a coherent state instead of "no slots".
-        if (state.shift === 'LUNCH' && !lunchOpen) state.shift = null;
-        if (state.shift === 'DINNER' && !dinnerOpen) state.shift = null;
+        // Small caption under the buttons calling out the closed shift by
+        // name. Rendered by mutating an existing sibling <p> so we don't
+        // pollute the shift-btn container with extra nodes on each pass.
+        const notice = document.getElementById('shiftClosedNotice');
+        if (notice) {
+            if (lunchOpen && !dinnerOpen) {
+                notice.textContent = 'Cena non disponibile per questa data.';
+                notice.classList.remove('hidden');
+            } else if (dinnerOpen && !lunchOpen) {
+                notice.textContent = 'Pranzo non disponibile per questa data.';
+                notice.classList.remove('hidden');
+            } else {
+                notice.textContent = '';
+                notice.classList.add('hidden');
+            }
+        }
     }
 
     function renderSlots() {
