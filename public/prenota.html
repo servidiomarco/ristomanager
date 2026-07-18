@@ -401,6 +401,10 @@
         // Reflect the fresh availability on the shift buttons so the operator
         // can't pick a shift the backend won't accept.
         updateShiftButtonStates();
+        // Always render the slots block at the end — otherwise the interim
+        // "Caricamento orari…" placeholder set above would stick around when
+        // this function is called fire-and-forget (page init at the bottom).
+        renderSlots();
     }
 
     // Enable/disable each shift button based on whether the corresponding
