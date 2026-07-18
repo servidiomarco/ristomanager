@@ -8517,7 +8517,30 @@ async function logInboundMessage(params: {
                 params.sid ?? null,
             ]
         );
-        return result.rows[0] ?? null;
+        const row = result.rows[0] ?? null;
+
+        // Wake up the PWA even a app chiusa: senza una push non arriva mai
+        // il segnale al service worker, e il badge Inbox non si aggiorna.
+        // Best-effort — se la push fallisce la logica del messaggio resta
+        // corretta, solo il badge non si aggiorna finché l'utente non apre
+        // l'app.
+        if (row) {
+            const channelLabel = params.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
+            const preview = String(params.body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            const fromDisplay = params.from || 'sconosciuto';
+            pushSendToRoles(
+                ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+                {
+                    title: `Nuovo messaggio ${channelLabel}`,
+                    body: preview ? `${fromDisplay}: ${preview}` : `Da ${fromDisplay}`,
+                    url: '/?view=MESSAGGI',
+                    tag: `msg-inbound-${row.id}`,
+                },
+                { excludeUserId: null }
+            ).catch(err => console.warn('[inbound-log] push failed:', err?.message || err));
+        }
+
+        return row;
     } catch (err: any) {
         console.warn('[inbound-log] insert failed:', err?.message || err);
         return null;
