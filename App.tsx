@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -35,6 +35,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
+import { useAppBadge } from './hooks/useAppBadge';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
@@ -705,6 +706,18 @@ const App: React.FC = () => {
   };
 
   useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
+
+  // PWA icon badge — somma le "cose da attenzionare" in un unico numero
+  // che appare sopra l'icona dell'app installata. Segnali scelti:
+  //   • prenotazioni PENDING ("Da confermare" nella Dashboard)
+  //   • chiamate voice da ricontattare (già tracciate)
+  // Silenzioso su Safari macOS / Firefox (API non supportata) o quando
+  // la pagina non è aperta come PWA installata.
+  const pendingReservationsCount = useMemo(
+    () => reservations.filter(r => r.reservation_status === ReservationStatus.PENDING).length,
+    [reservations]
+  );
+  useAppBadge(pendingReservationsCount + voiceCallsPendingCount);
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {

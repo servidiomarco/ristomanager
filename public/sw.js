@@ -28,7 +28,28 @@ self.addEventListener('push', (event) => {
     renotify: !!data.tag,
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // App-icon badge (Web App Badging API). Se il payload include un `badge`
+  // numerico lo applichiamo sull'icona PWA — il server può inviarlo con la
+  // conta corrente di "cose da attenzionare" così l'utente vede il numero
+  // aggiornato anche a app chiusa. Feature-detect + best-effort: se
+  // l'ambiente non supporta l'API (Safari macOS, Firefox) o rifiuta, la
+  // notifica viene comunque mostrata normalmente.
+  const badgeUpdate = (async () => {
+    if (typeof data.badge !== 'number') return;
+    const n = Math.max(0, Math.floor(data.badge));
+    try {
+      if (n > 0 && typeof navigator.setAppBadge === 'function') {
+        await navigator.setAppBadge(n);
+      } else if (typeof navigator.clearAppBadge === 'function') {
+        await navigator.clearAppBadge();
+      }
+    } catch (_e) { /* ignore */ }
+  })();
+
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    badgeUpdate,
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
