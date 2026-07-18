@@ -109,6 +109,7 @@ const sendToSubscriptions = async (subs: SubscriptionRow[], payload: PushPayload
         if (badge !== null) effectivePayload = { ...payload, badge };
     }
     const body = JSON.stringify(effectivePayload);
+    console.log('[push] sending', { subs: subs.length, badge: effectivePayload.badge, tag: effectivePayload.tag, title: effectivePayload.title });
     let sent = 0;
     let removed = 0;
     await Promise.all(subs.map(async (sub) => {
