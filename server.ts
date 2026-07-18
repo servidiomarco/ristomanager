@@ -10050,8 +10050,57 @@ async function getVoiceSuspensionCallbackTime(): Promise<string> {
 }
 
 const VOICE_SUSPENSION_SCHEDULE_KEY = 'voice_bookings_suspension_schedule';
+const PUBLIC_BOOKINGS_BLOCKS_KEY = 'public_bookings_blocks';
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 type ScheduledSuspension = { date: string; start_time: string; end_time: string; callback_time?: string };
+// Web-booking block: a specific date, optionally scoped to a single shift.
+// `shift = 'ALL'` blocks the whole day. Keeps the operator's mental model
+// aligned with how they think about the service (turno, non timestamp).
+type PublicBookingBlock = { date: string; shift: 'LUNCH' | 'DINNER' | 'ALL' };
+const PUBLIC_BLOCK_SHIFTS = new Set(['LUNCH', 'DINNER', 'ALL']);
+
+function isValidPublicBookingBlock(e: any): e is PublicBookingBlock {
+    if (!e || typeof e !== 'object') return false;
+    if (typeof e.date !== 'string' || !ISO_DATE_RE.test(e.date)) return false;
+    if (typeof e.shift !== 'string' || !PUBLIC_BLOCK_SHIFTS.has(e.shift)) return false;
+    return true;
+}
+
+async function getPublicBookingBlocks(): Promise<PublicBookingBlock[]> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [PUBLIC_BOOKINGS_BLOCKS_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw !== 'string' || !raw.trim()) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(isValidPublicBookingBlock);
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${PUBLIC_BOOKINGS_BLOCKS_KEY}:`, err);
+        return [];
+    }
+}
+
+// Purge blocks whose date is already in the past so the settings screen
+// doesn't accumulate stale rows over time. Runs opportunistically at read
+// time — cheap since the array is small.
+function pruneExpiredBlocks(blocks: PublicBookingBlock[]): PublicBookingBlock[] {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+    return blocks.filter(b => b.date >= today);
+}
+
+// Truthy when a booking for {date, shift} is refused by the operator via
+// Settings → Prenotazioni web. A day-wide block (`shift = 'ALL'`) matches
+// any shift on that date.
+function isPublicBookingBlocked(date: string, shift: 'LUNCH' | 'DINNER', blocks: PublicBookingBlock[]): boolean {
+    for (const b of blocks) {
+        if (b.date !== date) continue;
+        if (b.shift === 'ALL' || b.shift === shift) return true;
+    }
+    return false;
+}
 
 function isValidScheduleEntry(e: any): e is ScheduledSuspension {
     if (!e || typeof e !== 'object') return false;
@@ -10115,15 +10164,19 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
 
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback, suspensionSchedule] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
+            getPublicBookingBlocks(),
         ]);
+        // Filter past blocks at read time; UI never has to worry about them.
+        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
+            public_bookings_blocks: publicBlocks,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -10155,6 +10208,43 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             });
         }
         updates.push({ key: VOICE_SUSPENSION_CALLBACK_KEY, column: 'text_value', value: raw });
+    }
+
+    if (body.public_bookings_blocks !== undefined) {
+        if (!Array.isArray(body.public_bookings_blocks)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'public_bookings_blocks must be an array',
+            });
+        }
+        const normalizedBlocks: PublicBookingBlock[] = [];
+        const seen = new Set<string>();
+        for (const entry of body.public_bookings_blocks) {
+            if (!entry || typeof entry !== 'object') {
+                return res.status(400).json({ error: 'invalid_value', message: 'Each block entry must be an object' });
+            }
+            const date = String(entry.date ?? '').trim();
+            const shift = String(entry.shift ?? '').trim().toUpperCase();
+            if (!ISO_DATE_RE.test(date)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Block date must be YYYY-MM-DD (got "${date}")` });
+            }
+            if (!PUBLIC_BLOCK_SHIFTS.has(shift)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Block shift must be LUNCH, DINNER or ALL (got "${shift}")` });
+            }
+            // Dedupe on (date, shift). A day-wide ALL block subsumes LUNCH/
+            // DINNER entries on the same date — drop the redundant ones.
+            const key = `${date}|${shift}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            normalizedBlocks.push({ date, shift: shift as PublicBookingBlock['shift'] });
+        }
+        // Second pass: if an ALL entry exists for a date, remove any LUNCH/
+        // DINNER entries for the same date.
+        const daysWithAll = new Set(normalizedBlocks.filter(b => b.shift === 'ALL').map(b => b.date));
+        const deduped = normalizedBlocks.filter(b => !(daysWithAll.has(b.date) && b.shift !== 'ALL'));
+        // Chronological order for stable UI display.
+        deduped.sort((a, b) => (a.date === b.date ? a.shift.localeCompare(b.shift) : a.date.localeCompare(b.date)));
+        updates.push({ key: PUBLIC_BOOKINGS_BLOCKS_KEY, column: 'text_value', value: JSON.stringify(deduped) });
     }
 
     if (body.voice_bookings_suspension_schedule !== undefined) {
@@ -10208,15 +10298,18 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
+            getPublicBookingBlocks(),
         ]);
+        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
+            public_bookings_blocks: publicBlocks,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);
@@ -10849,10 +10942,16 @@ app.get('/public/availability', async (req, res) => {
     }
 
     try {
-        const [lunchSlots, dinnerSlots] = await Promise.all([
+        const [lunchSlotsRaw, dinnerSlotsRaw, blocks] = await Promise.all([
             getAvailableSlots(date, Shift.LUNCH),
             getAvailableSlots(date, Shift.DINNER),
+            getPublicBookingBlocks(),
         ]);
+        // Empty a shift's slot list if the operator has blocked it — the
+        // public form treats "no slots" as "not bookable", so nothing else
+        // needs to know about blocks.
+        const lunchSlots = isPublicBookingBlocked(date, Shift.LUNCH as any, blocks) ? [] : lunchSlotsRaw;
+        const dinnerSlots = isPublicBookingBlocked(date, Shift.DINNER as any, blocks) ? [] : dinnerSlotsRaw;
 
         // Drop past slots when the requested date is today (Europe/Rome).
         const now = new Date();
@@ -11007,6 +11106,20 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         }
         if (!Number.isFinite(guestsNum) || guestsNum < 1 || guestsNum > 20) {
             return res.status(400).json({ error: 'invalid_guests', message: 'Numero ospiti non valido' });
+        }
+
+        // Operator-defined blocks for (date, shift) — takes precedence over
+        // the availability grid so we refuse even if a slot happens to be
+        // free. Prevents a race between the /public/availability call and
+        // this create when the operator adds the block in between.
+        const blocks = await getPublicBookingBlocks();
+        if (isPublicBookingBlocked(date, shift as any, blocks)) {
+            const isFullDay = blocks.some(b => b.date === date && b.shift === 'ALL');
+            const scope = isFullDay ? 'per questa data' : (shift === Shift.LUNCH ? 'per il pranzo di questa data' : 'per la cena di questa data');
+            return res.status(503).json({
+                error: 'date_blocked',
+                message: `Le prenotazioni web sono chiuse ${scope}. La preghiamo di chiamarci al telefono.`,
+            });
         }
 
         // Confirm the requested slot is on the current grid for that date+shift.

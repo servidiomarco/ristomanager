@@ -744,10 +744,19 @@ export interface ScheduledSuspension {
   // backend falls back to end_time.
   callback_time?: string; // HH:MM
 }
+// Blocca le prenotazioni web per uno specifico turno o per l'intera giornata.
+// L'operatore edita da Impostazioni → Prenotazioni web; il backend rifiuta
+// le POST /public/reservations che ricadono in un blocco e nasconde gli
+// slot corrispondenti dalla GET /public/availability.
+export interface PublicBookingBlock {
+  date: string;                             // YYYY-MM-DD (Europe/Rome)
+  shift: 'LUNCH' | 'DINNER' | 'ALL';        // ALL = intera giornata
+}
 export interface ChannelSettings {
   voice_large_group_threshold: number;
   voice_bookings_suspension_callback_time: string;
   voice_bookings_suspension_schedule: ScheduledSuspension[];
+  public_bookings_blocks: PublicBookingBlock[];
 }
 
 export const getChannelSettings = async (): Promise<ChannelSettings> => {

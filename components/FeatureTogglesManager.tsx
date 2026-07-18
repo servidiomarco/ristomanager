@@ -9,6 +9,7 @@ import {
     updateChannelSettings,
     ChannelSettings,
     ScheduledSuspension,
+    PublicBookingBlock,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -84,6 +85,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [scheduleDraft, setScheduleDraft] = useState<ScheduledSuspension[]>([]);
     const [savingSchedule, setSavingSchedule] = useState(false);
 
+    // Public-booking blocks: per-day / per-shift chiusure del canale web.
+    // Draft-based edit come le suspension: aggiungi/rimuovi righe e salva
+    // tutto l'array in un colpo solo. Il default per una nuova riga è
+    // "domani, intera giornata" — l'operatore scegli il giorno più giusto.
+    const [blocksDraft, setBlocksDraft] = useState<PublicBookingBlock[]>([]);
+    const [savingBlocks, setSavingBlocks] = useState(false);
+
     // Keep showToast in a ref so the mount-fetch effect below has empty deps.
     // Parent (App.tsx) recreates addToast on every render, so listing showToast
     // as a dep would refetch on every parent re-render — which resets
@@ -105,6 +113,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setVoiceThresholdDraft(String(channelsData.voice_large_group_threshold));
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
                 setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
+                setBlocksDraft(channelsData.public_bookings_blocks ?? []);
             } catch (err: any) {
                 if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
@@ -223,6 +232,46 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    // Public-booking blocks: draft ops mirror the voice-suspension pattern.
+    const addBlockRow = () => {
+        // Default to tomorrow so l'operatore non blocca oggi per errore
+        // durante un servizio in corso.
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        setBlocksDraft(prev => [...prev, { date: `${y}-${m}-${day}`, shift: 'ALL' }]);
+    };
+    const removeBlockRow = (idx: number) => {
+        setBlocksDraft(prev => prev.filter((_, i) => i !== idx));
+    };
+    const updateBlockRow = (idx: number, patch: Partial<PublicBookingBlock>) => {
+        setBlocksDraft(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+    };
+    const saveBlocks = async () => {
+        if (!channels || !canEdit || savingBlocks) return;
+        for (const [i, row] of blocksDraft.entries()) {
+            if (!ISO_DATE_RE.test(row.date)) {
+                showToast(`Blocco #${i + 1}: data non valida`, 'error'); return;
+            }
+            if (row.shift !== 'LUNCH' && row.shift !== 'DINNER' && row.shift !== 'ALL') {
+                showToast(`Blocco #${i + 1}: turno non valido`, 'error'); return;
+            }
+        }
+        setSavingBlocks(true);
+        try {
+            const updated = await updateChannelSettings({ public_bookings_blocks: blocksDraft });
+            setChannels(updated);
+            setBlocksDraft(updated.public_bookings_blocks ?? []);
+            showToast('Blocchi prenotazioni web aggiornati', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento blocchi', 'error');
+        } finally {
+            setSavingBlocks(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
@@ -237,6 +286,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const suspended = flags.voice_bookings_suspended;
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
+    const blocksDirty = JSON.stringify(channels.public_bookings_blocks ?? []) !== JSON.stringify(blocksDraft);
     const todayKey = todayISO();
 
     return (
@@ -245,6 +295,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 const enabled = flags[meta.key];
                 const isSaving = savingKey === meta.key;
                 const isVoice = meta.key === 'voice_agent_enabled';
+                const isWeb = meta.key === 'public_bookings_enabled';
                 return (
                     <details
                         key={meta.key}
@@ -468,7 +519,91 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                 </>
                             )}
 
-                            {!isVoice && (
+                            {isWeb && (
+                                <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div>
+                                            <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] font-medium">
+                                                <CalendarClock className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                                                <span>Blocca prenotazioni web per giorni specifici</span>
+                                            </div>
+                                            <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                                Chiudi il canale web per un turno (pranzo o cena) o per l'intera giornata. Il modulo /prenota nasconde gli slot bloccati e rifiuta eventuali tentativi POST diretti. I blocchi già scaduti vengono rimossi automaticamente al prossimo caricamento.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={addBlockRow}
+                                            disabled={!canEdit || savingBlocks}
+                                            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            Aggiungi
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-3 space-y-2">
+                                        {blocksDraft.length === 0 ? (
+                                            <p className="text-[12px] text-[var(--color-fg-subtle)] italic py-1">
+                                                Nessun blocco programmato. Il canale web è aperto tutti i giorni.
+                                            </p>
+                                        ) : (
+                                            blocksDraft.map((row, idx) => {
+                                                const inPast = row.date && row.date < todayKey;
+                                                return (
+                                                    <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-500/[0.08]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                        <input
+                                                            type="date"
+                                                            value={row.date}
+                                                            min={todayKey}
+                                                            onChange={(e) => updateBlockRow(idx, { date: e.target.value })}
+                                                            disabled={!canEdit || savingBlocks}
+                                                            className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                        />
+                                                        <select
+                                                            value={row.shift}
+                                                            onChange={(e) => updateBlockRow(idx, { shift: e.target.value as PublicBookingBlock['shift'] })}
+                                                            disabled={!canEdit || savingBlocks}
+                                                            className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                        >
+                                                            <option value="ALL">Intera giornata</option>
+                                                            <option value="LUNCH">Solo pranzo</option>
+                                                            <option value="DINNER">Solo cena</option>
+                                                        </select>
+                                                        {inPast && (
+                                                            <span className="text-[11px] text-amber-700 dark:text-amber-300">Data già passata</span>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeBlockRow(idx)}
+                                                            disabled={!canEdit || savingBlocks}
+                                                            className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15 disabled:opacity-50 transition-colors"
+                                                            aria-label="Rimuovi blocco"
+                                                            title="Rimuovi"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+
+                                    <div className="mt-3 flex items-center justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={saveBlocks}
+                                            disabled={!canEdit || savingBlocks || !blocksDirty}
+                                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                        >
+                                            {savingBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                            Salva blocchi
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isVoice && !isWeb && (
                                 <p className="text-[12px] text-[var(--color-fg-subtle)] italic">
                                     Nessuna impostazione specifica al momento oltre a Attivo / Sospeso.
                                 </p>
