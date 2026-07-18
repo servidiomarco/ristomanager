@@ -711,13 +711,14 @@ const App: React.FC = () => {
   // che appare sopra l'icona dell'app installata. Segnali scelti:
   //   • prenotazioni PENDING ("Da confermare" nella Dashboard)
   //   • chiamate voice da ricontattare (già tracciate)
+  //   • messaggi non letti in Inbox (SMS/WhatsApp/email in ingresso)
   // Silenzioso su Safari macOS / Firefox (API non supportata) o quando
   // la pagina non è aperta come PWA installata.
   const pendingReservationsCount = useMemo(
     () => reservations.filter(r => r.reservation_status === ReservationStatus.PENDING).length,
     [reservations]
   );
-  useAppBadge(pendingReservationsCount + voiceCallsPendingCount);
+  useAppBadge(pendingReservationsCount + voiceCallsPendingCount + messagesUnreadCount);
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {
