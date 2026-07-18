@@ -5,6 +5,7 @@ import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { PaymentBadge, hasUnpaidDeposit } from './PaymentBadge';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -196,6 +197,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // reservation being reviewed; null when the modal is closed.
   const [pendingModalRes, setPendingModalRes] = useState<Reservation | null>(null);
   const [pendingActionBusy, setPendingActionBusy] = useState<null | 'confirm' | 'decline'>(null);
+  // Guard flag for the "the deposit hasn't been paid yet, confirm anyway?"
+  // dialog. Flipped by handlePendingDecision when the first confirm click
+  // hits a booking with an active-but-unpaid payment link; the second click
+  // from the guard's Conferma comunque button bypasses it.
+  const [unpaidDepositWarn, setUnpaidDepositWarn] = useState(false);
 
   // Low-stock inventory state
   const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
@@ -406,8 +412,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   // Confirm/decline handlers for the pending quick-action modal. Uses the
   // App-level onUpdateReservation so state + toasts stay centralized.
-  const handlePendingDecision = useCallback(async (action: 'confirm' | 'decline') => {
+  //
+  // `forceConfirm` is set by the "Conferma comunque" button in the unpaid-
+  // deposit guard so it bypasses the guard the second time around; the
+  // first click routes into `setUnpaidDepositWarn(true)` instead of hitting
+  // the API. Bookings without an active payment link (no deposit was ever
+  // requested) or with a COMPLETED link skip the guard entirely.
+  const handlePendingDecision = useCallback(async (
+    action: 'confirm' | 'decline',
+    opts?: { forceConfirm?: boolean },
+  ) => {
     if (!pendingModalRes || !onUpdateReservation) return;
+    if (action === 'confirm' && !opts?.forceConfirm && hasUnpaidDeposit(pendingModalRes)) {
+      setUnpaidDepositWarn(true);
+      return;
+    }
     setPendingActionBusy(action);
     try {
       await onUpdateReservation({
@@ -415,6 +434,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         reservation_status: action === 'confirm' ? ReservationStatus.CONFIRMED : ReservationStatus.DECLINED,
       });
       setPendingModalRes(null);
+      setUnpaidDepositWarn(false);
     } catch {
       // Toast already shown by handleUpdateReservation in App.
     } finally {
@@ -1167,6 +1187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
                       </div>
                     </div>
+                    <PaymentBadge reservation={res} />
                     <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
                   </div>
                 </button>
@@ -1827,10 +1848,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             : '';
           const timeLabel = res.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] || '';
           const closeDisabled = pendingActionBusy !== null;
+          const closeModal = () => {
+            if (closeDisabled) return;
+            setPendingModalRes(null);
+            setUnpaidDepositWarn(false);
+          };
           return (
             <div
               className="fixed inset-0 z-[100] flex items-center justify-center px-4"
-              onClick={() => { if (!closeDisabled) setPendingModalRes(null); }}
+              onClick={closeModal}
               role="dialog"
               aria-modal="true"
               aria-label="Prenotazione da confermare"
@@ -1844,10 +1870,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <div className="flex items-center gap-2 min-w-0">
                     <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
                     <h3 className="text-sm font-semibold text-[var(--color-fg)] truncate">Prenotazione da confermare</h3>
+                    <PaymentBadge reservation={res} />
                   </div>
                   <button
                     type="button"
-                    onClick={() => setPendingModalRes(null)}
+                    onClick={closeModal}
                     disabled={closeDisabled}
                     className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50"
                     aria-label="Chiudi"
@@ -1887,26 +1914,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   )}
                 </div>
 
-                <div className="px-5 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-between gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handlePendingDecision('decline')}
-                    disabled={closeDisabled || !onUpdateReservation}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10 transition-colors"
-                  >
-                    {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
-                    Rifiuta
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePendingDecision('confirm')}
-                    disabled={closeDisabled || !onUpdateReservation}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                  >
-                    {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                    Conferma
-                  </button>
-                </div>
+                {unpaidDepositWarn ? (
+                  // Guard step: staff clicked Conferma but the deposit link
+                  // is still unpaid. Force an explicit "Conferma comunque"
+                  // to avoid the classic "confirmed by mistake without
+                  // getting paid" mishap on large groups.
+                  <div className="px-5 py-3 border-t border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10">
+                    <div className="flex items-start gap-2 mb-3">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-[13px] text-amber-900 dark:text-amber-100 leading-snug">
+                        Il pagamento della caparra ancora non è avvenuto. Vuoi confermare la prenotazione lo stesso?
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setUnpaidDepositWarn(false)}
+                        disabled={closeDisabled}
+                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
+                      >
+                        Annulla
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePendingDecision('confirm', { forceConfirm: true })}
+                        disabled={closeDisabled || !onUpdateReservation}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      >
+                        {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        Conferma comunque
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-5 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handlePendingDecision('decline')}
+                      disabled={closeDisabled || !onUpdateReservation}
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10 transition-colors"
+                    >
+                      {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                      Rifiuta
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePendingDecision('confirm')}
+                      disabled={closeDisabled || !onUpdateReservation}
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                    >
+                      {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                      Conferma
+                    </button>
+                  </div>
+                )}
 
                 {onOpenReservationInList && (
                   <div className="px-5 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-center">
@@ -1915,6 +1976,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       onClick={() => {
                         onOpenReservationInList(res.id);
                         setPendingModalRes(null);
+                        setUnpaidDepositWarn(false);
                       }}
                       disabled={closeDisabled}
                       className="inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50 transition-colors"
