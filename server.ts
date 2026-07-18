@@ -2814,6 +2814,85 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
     }
 });
 
+// Free-form email — staff writes subject + body, we wrap in the branded
+// template and send to reservation.email. Used for corrections (e.g. an
+// automated email announced the wrong time), one-off updates, or any reply
+// that doesn't fit the templated flows. Logged into outbound_messages the
+// same way as confirmation/decline so it shows up in the customer timeline.
+app.post('/reservations/:id/send-custom-email', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const subject = typeof req.body?.subject === 'string' ? req.body.subject.trim() : '';
+        const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+
+        if (subject.length === 0 || subject.length > 200) {
+            return res.status(400).json({ error: 'Oggetto non valido (1‑200 caratteri).' });
+        }
+        if (body.length === 0 || body.length > 5000) {
+            return res.status(400).json({ error: 'Corpo email non valido (1‑5000 caratteri).' });
+        }
+
+        const result = await queryWithRetry(
+            'SELECT id, customer_name, email FROM reservations WHERE id = $1',
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Reservation not found' });
+        }
+        const reservation = result.rows[0];
+        if (!reservation.email) {
+            return res.status(400).json({ error: 'Nessuna email per questa prenotazione' });
+        }
+        if (!(await isSmtpConfigured())) {
+            return res.status(400).json({ error: 'SMTP non è configurato. Configura il server email in Impostazioni.' });
+        }
+
+        const { subject: finalSubject, text, html } = buildCustomEmail({
+            customerName: reservation.customer_name,
+            subject,
+            body,
+        });
+
+        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+
+        let sent;
+        try {
+            sent = await sendMail({
+                to: String(reservation.email),
+                subject: finalSubject,
+                text,
+                html,
+            });
+        } catch (sendErr: any) {
+            await logOutboundEmail({
+                provider: emailProvider,
+                to: String(reservation.email),
+                subject: finalSubject,
+                body: text,
+                reservationId: reservation.id,
+                errorMessage: sendErr?.message || String(sendErr),
+            });
+            throw sendErr;
+        }
+
+        await logOutboundEmail({
+            provider: emailProvider,
+            to: String(reservation.email),
+            subject: finalSubject,
+            body: text,
+            messageId: sent.messageId || null,
+            reservationId: reservation.id,
+        });
+
+        console.log(`[Email] ✅ Custom email sent for reservation ${id} to ${reservation.email}`);
+        res.json({ success: true, message: 'Custom email sent', channel: 'email' });
+    } catch (err: any) {
+        console.error('Error sending custom email:', err);
+        res.status(500).json({ error: err?.message || 'Failed to send custom email' });
+    }
+});
+
 // Outbound SMS/WhatsApp/email history for a reservation. Matches messages
 // tagged with this reservation_id OR sent to the same phone (last 10 digits)
 // OR sent to the same email address, so historical messages sent before we
@@ -8369,6 +8448,39 @@ function buildBookingConfirmationEmail(params: {
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
+    return { subject, text, html };
+}
+
+// Free-form email — staff-composed subject + body, wrapped in the shared
+// branded template so the tone matches the automatic transactional mails.
+// Line breaks in the body are preserved (each newline becomes a <br>). Used
+// by POST /reservations/:id/send-custom-email for corrections, one-off
+// updates, and manual replies that don't fit any of the templated flows.
+function buildCustomEmail(params: {
+    customerName?: string | null;
+    subject: string;
+    body: string;
+}): { subject: string; text: string; html: string } {
+    const name = (params.customerName || '').trim();
+    const subject = params.subject.trim();
+    const rawBody = params.body.trim();
+    const greeting = name ? `Ciao ${name},` : 'Ciao,';
+    const text = `${greeting}\n\n${rawBody}\n\nGrazie e a presto!\nIl Vecchio Frantoio`;
+
+    // Preserve author-intended line breaks. Consecutive newlines become
+    // paragraph splits (blank <p>), single newlines become <br>. Every chunk
+    // is escaped first so a body containing "<" doesn't inject markup.
+    const paragraphs = rawBody.split(/\n{2,}/).map(block => {
+        const inner = block.split('\n').map(escapeHtml).join('<br>');
+        return `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;">${inner}</p>`;
+    }).join('');
+
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
+      ${paragraphs}
+      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
+    `;
+    const html = wrapEmailHtml(subject, detailsHtml);
     return { subject, text, html };
 }
 

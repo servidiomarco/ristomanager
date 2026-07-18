@@ -653,6 +653,24 @@ export const sendEmailConfirmation = async (
   );
 };
 
+// Free-form email to the reservation's email address. Subject + body are
+// staff-composed; the server wraps them in the branded template and logs the
+// send into outbound_messages so it shows up in the customer timeline.
+export const sendCustomEmail = async (
+  reservationId: number,
+  subject: string,
+  body: string,
+): Promise<{ success: boolean; message: string; channel?: string }> => {
+  return apiRequest<{ success: boolean; message: string; channel?: string }>(
+    `${API_URL}/reservations/${reservationId}/send-custom-email`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ subject, body }),
+    },
+  );
+};
+
 // ============================================
 // OPENING HOURS & SPECIAL CLOSURES
 // ============================================

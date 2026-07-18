@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal } from 'lucide-react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -632,6 +632,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [outboundMessages, setOutboundMessages] = useState<OutboundMessage[]>([]);
   const [outboundMessagesLoading, setOutboundMessagesLoading] = useState(false);
   const [showCommsSection, setShowCommsSection] = useState(false);
+  // Free-form email composer: opened from the "Nuova email" button in the
+  // Comunicazione con il cliente section. State stays hoisted so the compose
+  // draft survives accidental clicks outside the modal (we close only on
+  // explicit Annulla / Invia).
+  const [customEmailOpen, setCustomEmailOpen] = useState(false);
+  const [customEmailSubject, setCustomEmailSubject] = useState('');
+  const [customEmailBody, setCustomEmailBody] = useState('');
+  const [customEmailSending, setCustomEmailSending] = useState(false);
   const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -2074,6 +2082,48 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           showToast(err?.message || `Errore invio conferma ${channel}`, 'error');
       } finally {
           setSendingConfirmation(null);
+      }
+  };
+
+  // Send the free-form email composed in the custom-email modal. Refreshes
+  // the outbound_messages list on success so the new row shows up in the
+  // timeline immediately without waiting for the next open.
+  const handleSendCustomEmail = async () => {
+      if (!formData.id) {
+          showToast('Prenotazione non ancora salvata.', 'error');
+          return;
+      }
+      if (!formData.email) {
+          showToast('Email cliente mancante.', 'error');
+          return;
+      }
+      const subject = customEmailSubject.trim();
+      const body = customEmailBody.trim();
+      if (!subject) {
+          showToast('Inserisci un oggetto per la mail.', 'error');
+          return;
+      }
+      if (!body) {
+          showToast('Il corpo della mail non può essere vuoto.', 'error');
+          return;
+      }
+      try {
+          setCustomEmailSending(true);
+          await sendCustomEmail(formData.id as number, subject, body);
+          showToast(`Email inviata a ${formData.email}`, 'success');
+          setCustomEmailOpen(false);
+          setCustomEmailSubject('');
+          setCustomEmailBody('');
+          // Refresh the timeline so the new email surfaces immediately.
+          try {
+              const rows = await getReservationMessages(formData.id as number);
+              setOutboundMessages(rows);
+          } catch { /* non-fatal — timeline will refresh on next open */ }
+      } catch (err: any) {
+          console.error('Errore invio email libera:', err);
+          showToast(err?.message || 'Errore invio email', 'error');
+      } finally {
+          setCustomEmailSending(false);
       }
   };
 
@@ -4966,7 +5016,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           {showCommsSection && (
                             <div className="px-4 pb-4 pt-0 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
                               {(formData.phone || formData.email) && (
-                                <div className="pt-3 pb-2 flex justify-end">
+                                <div className="pt-3 pb-2 flex justify-end gap-2 flex-wrap">
+                                  {formData.email && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCustomEmailSubject('');
+                                        setCustomEmailBody('');
+                                        setCustomEmailOpen(true);
+                                      }}
+                                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-[11px] font-medium hover:bg-[var(--color-surface-hover)]"
+                                      title="Componi un'email libera al cliente"
+                                    >
+                                      <Mail className="h-3 w-3" />
+                                      Nuova email
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => setConfirmationPicker({
@@ -5402,6 +5467,101 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
                 >
                   Non ora
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Free-form email composer — opened from the "Nuova email" button in
+          the Comunicazione con il cliente section. Kept intentionally simple:
+          subject + textarea, live char counters, no rich formatting (the
+          server wraps the body in the shared branded HTML template). */}
+      {customEmailOpen && formData.email && (() => {
+        const closeComposer = () => {
+          if (customEmailSending) return;
+          setCustomEmailOpen(false);
+        };
+        const subjectLimit = 200;
+        const bodyLimit = 5000;
+        const canSend = customEmailSubject.trim().length > 0
+          && customEmailBody.trim().length > 0
+          && !customEmailSending;
+        return (
+          <div
+            className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4"
+            onClick={closeComposer}
+          >
+            <div
+              className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-[var(--color-line)]">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-indigo-600" />
+                  <h3 className="text-lg font-semibold text-[var(--color-fg)]">Nuova email</h3>
+                </div>
+                <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
+                  Invia un'email libera a <strong className="text-[var(--color-fg)]">{formData.email}</strong>.
+                </p>
+              </div>
+              <div className="p-5 space-y-3 overflow-y-auto">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-medium text-[var(--color-fg-muted)]">Oggetto</label>
+                    <span className={`text-[10px] tabular ${customEmailSubject.length > subjectLimit ? 'text-rose-600' : 'text-[var(--color-fg-subtle)]'}`}>
+                      {customEmailSubject.length}/{subjectLimit}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={customEmailSubject}
+                    onChange={e => setCustomEmailSubject(e.target.value.slice(0, subjectLimit))}
+                    disabled={customEmailSending}
+                    placeholder="Es. Correzione orario prenotazione"
+                    className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-medium text-[var(--color-fg-muted)]">Messaggio</label>
+                    <span className={`text-[10px] tabular ${customEmailBody.length > bodyLimit ? 'text-rose-600' : 'text-[var(--color-fg-subtle)]'}`}>
+                      {customEmailBody.length}/{bodyLimit}
+                    </span>
+                  </div>
+                  <textarea
+                    value={customEmailBody}
+                    onChange={e => setCustomEmailBody(e.target.value.slice(0, bodyLimit))}
+                    disabled={customEmailSending}
+                    rows={8}
+                    placeholder="Ciao Francesca, ci scusiamo: l'email precedente riportava un orario errato. La prenotazione è confermata per le 21:00, non le 23:00. Grazie!"
+                    className="w-full px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y"
+                  />
+                  <p className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+                    L'email userà il template grafico standard con logo e footer. Il saluto iniziale ("Ciao {toTitleCase((formData.customer_name || '').split(' ')[0] || 'cliente')}") e la firma finale vengono aggiunti automaticamente.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+                <button
+                  type="button"
+                  onClick={closeComposer}
+                  disabled={customEmailSending}
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendCustomEmail}
+                  disabled={!canSend}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {customEmailSending
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
+                    : <><Send className="h-4 w-4" /> Invia</>}
                 </button>
               </div>
             </div>
