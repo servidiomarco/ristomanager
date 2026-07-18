@@ -22,6 +22,40 @@ export interface PushPayload {
     url?: string;
     tag?: string;
     icon?: string;
+    // App-icon badge (Web App Badging API). When omitted, sendToSubscriptions
+    // auto-computes the "cose da attenzionare" total from the DB so the badge
+    // updates anche a PWA chiusa. Callers che vogliono un valore fisso
+    // (es. 0 per pulire il badge) possono passarlo esplicitamente.
+    badge?: number;
+}
+
+// Somma degli indicatori mostrati nel badge PWA — combacia esattamente con
+// il calcolo lato client in App.tsx (useAppBadge). Una singola query con
+// tre subquery per evitare roundtrip multipli. Errori restituiscono null così
+// il payload push omette il campo badge (SW non tocca il valore corrente).
+async function computeAttentionBadge(): Promise<number | null> {
+    try {
+        const result = await queryWithRetry(`
+            SELECT (
+                (SELECT COUNT(*) FROM reservations WHERE reservation_status = 'PENDING')
+                + (SELECT COUNT(*) FROM voice_calls
+                   WHERE reservation_id IS NULL
+                     AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
+                     AND created_at >= NOW() - INTERVAL '7 days')
+                + (SELECT COUNT(*) FROM outbound_messages
+                   WHERE direction = 'inbound'
+                     AND channel IN ('sms','whatsapp')
+                     AND read_at IS NULL
+                     AND from_phone_digits IS NOT NULL
+                     AND length(from_phone_digits) >= 8)
+            )::int AS badge
+        `);
+        const n = Number(result.rows[0]?.badge ?? 0);
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+    } catch (err) {
+        console.warn('[push] failed to compute attention badge', (err as any)?.message || err);
+        return null;
+    }
 }
 
 interface SubscriptionRow {
@@ -67,7 +101,14 @@ const deleteSubscriptionById = async (id: number) => {
 
 const sendToSubscriptions = async (subs: SubscriptionRow[], payload: PushPayload) => {
     if (!configured || subs.length === 0) return { sent: 0, removed: 0 };
-    const body = JSON.stringify(payload);
+    // Auto-attach the badge count so the PWA icon stays in sync even quando
+    // l'app è chiusa. Skipped se il caller ha già passato un valore esplicito.
+    let effectivePayload = payload;
+    if (payload.badge === undefined) {
+        const badge = await computeAttentionBadge();
+        if (badge !== null) effectivePayload = { ...payload, badge };
+    }
+    const body = JSON.stringify(effectivePayload);
     let sent = 0;
     let removed = 0;
     await Promise.all(subs.map(async (sub) => {
