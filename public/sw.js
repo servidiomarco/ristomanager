@@ -35,15 +35,29 @@ self.addEventListener('push', (event) => {
   // l'ambiente non supporta l'API (Safari macOS, Firefox) o rifiuta, la
   // notifica viene comunque mostrata normalmente.
   const badgeUpdate = (async () => {
+    console.log('[sw:push] payload badge=', data.badge, 'setAppBadge type=', typeof navigator.setAppBadge, 'clearAppBadge type=', typeof navigator.clearAppBadge);
     if (typeof data.badge !== 'number') return;
     const n = Math.max(0, Math.floor(data.badge));
-    try {
-      if (n > 0 && typeof navigator.setAppBadge === 'function') {
-        await navigator.setAppBadge(n);
-      } else if (typeof navigator.clearAppBadge === 'function') {
-        await navigator.clearAppBadge();
+    if (n > 0) {
+      if (typeof navigator.setAppBadge !== 'function') {
+        console.warn('[sw:push] navigator.setAppBadge non disponibile in questo SW');
+        return;
       }
-    } catch (_e) { /* ignore */ }
+      try {
+        await navigator.setAppBadge(n);
+        console.log('[sw:push] setAppBadge OK, n=', n);
+      } catch (err) {
+        console.error('[sw:push] setAppBadge failed:', err && err.message ? err.message : err);
+      }
+    } else {
+      if (typeof navigator.clearAppBadge !== 'function') return;
+      try {
+        await navigator.clearAppBadge();
+        console.log('[sw:push] clearAppBadge OK');
+      } catch (err) {
+        console.error('[sw:push] clearAppBadge failed:', err && err.message ? err.message : err);
+      }
+    }
   })();
 
   event.waitUntil(Promise.all([
