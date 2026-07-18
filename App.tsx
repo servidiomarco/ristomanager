@@ -32,6 +32,7 @@ import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
+import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { offlineQueue } from './services/offlineQueue';
@@ -1476,6 +1477,19 @@ const App: React.FC = () => {
                  </button>
                ))}
              </div>
+
+             {/* Channel status icons — visibile solo quando un turno specifico
+                 è selezionato (la combinazione di "Tutti" con blocco per-turno
+                 non ha una singola risposta). Legge lo stato effettivo per
+                 (globalDate, globalShift) e permette toggle inline con
+                 settings:full. */}
+             {(globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER') && (
+               <BookingChannelsBar
+                 date={globalDateStr}
+                 shift={globalShiftFilter}
+                 showToast={addToast}
+               />
+             )}
            </div>
 
            <div className="ml-auto flex items-center gap-2">
