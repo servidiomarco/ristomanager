@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal } from 'lucide-react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -18,6 +18,7 @@ import { BanquetLabel } from './ReservationCard';
 import { toTitleCase, getInitials, formatShortName } from '../utils/text';
 import { useSocket } from '../hooks/useSocket';
 import { PrintReservationsModal } from './PrintReservationsModal';
+import { BookingChannelsBar } from './BookingChannelsBar';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
@@ -636,6 +637,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  // Mobile-only: sheet with per-shift channel toggles (voice + web). The
+  // desktop header already carries these icons inline (BookingChannelsBar),
+  // but there's no room in the mobile header — so we tuck them behind an
+  // "Opzioni" button in the search+sort+filter row.
+  const [showChannelsSheet, setShowChannelsSheet] = useState(false);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
 
@@ -3520,6 +3526,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 aria-label="Stampa">
                 <Printer className="h-3.5 w-3.5" />
               </button>
+
+              {/* Opzioni canali — apre un bottom sheet con i toggle voice+web
+                  per il turno corrente. Mobile-only: sul desktop le stesse
+                  icone stanno inline nell'header (BookingChannelsBar). */}
+              <button type="button" onClick={() => setShowChannelsSheet(true)}
+                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
+                aria-label="Opzioni canali di prenotazione">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+              </button>
             </div>
 
             {totalGroupedCount === 0 ? (
@@ -5404,6 +5419,41 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         initialDate={selectedDate.split('T')[0]}
         initialShift={selectedShift}
       />
+
+      {/* Mobile bottom-sheet per i toggle canali. Su desktop la stessa UI vive
+          inline nell'header (BookingChannelsBar), quindi qui è mobile-only. */}
+      {showChannelsSheet && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-end" onClick={() => setShowChannelsSheet(false)} role="dialog" aria-modal="true" aria-label="Canali di prenotazione">
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+            </div>
+            <div className="px-5 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-[var(--color-fg)]">Canali di prenotazione</h3>
+                <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                  {selectedDate.split('T')[0]} · {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowChannelsSheet(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 flex items-center gap-3">
+              <BookingChannelsBar
+                date={selectedDate.split('T')[0]}
+                shift={selectedShift === Shift.LUNCH ? 'LUNCH' : 'DINNER'}
+                showToast={(msg, kind) => showToast(msg, kind ?? 'info')}
+              />
+              <p className="text-[12px] text-[var(--color-fg-muted)] leading-tight">
+                Tocca l'icona per bloccare o riattivare il canale per questo turno.
+              </p>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* State picker modal */}
       {stateChangeReservation && (() => {
