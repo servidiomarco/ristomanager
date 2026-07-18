@@ -368,6 +368,10 @@
     // Shift selection
     shiftBtns.forEach(btn => {
         btn.addEventListener('click', async () => {
+            // A shift button can be disabled server-side (turno bloccato o
+            // sold-out). Ignore clicks — belt-and-braces even though the
+            // `disabled` attribute already blocks pointer events.
+            if (btn.disabled) return;
             state.shift = btn.dataset.shift;
             state.time = null;
             state.roomId = null;
@@ -376,9 +380,8 @@
                 const active = b === btn;
                 b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
                     active ? 'border-amber-800 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-700'
-                }`;
+                } ${b.disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
             });
-            await loadAvailability();
             renderSlots();
             updateSubmitVisibility();
         });
@@ -395,16 +398,50 @@
             console.error(err);
             state.availability = { lunch: { slots: [] }, dinner: { slots: [] } };
         }
+        // Reflect the fresh availability on the shift buttons so the operator
+        // can't pick a shift the backend won't accept.
+        updateShiftButtonStates();
+    }
+
+    // Enable/disable each shift button based on whether the corresponding
+    // slot list is non-empty. Also resets state.shift if the user had picked
+    // a shift that just became unavailable (date change, real-time block).
+    function updateShiftButtonStates() {
+        const lunchOpen = ((state.availability?.lunch?.slots) || []).length > 0;
+        const dinnerOpen = ((state.availability?.dinner?.slots) || []).length > 0;
+        shiftBtns.forEach(b => {
+            const isLunch = b.dataset.shift === 'LUNCH';
+            const open = isLunch ? lunchOpen : dinnerOpen;
+            b.disabled = !open;
+            const active = state.shift === b.dataset.shift;
+            b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
+                active ? 'border-amber-800 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-700'
+            } ${!open ? 'opacity-50 cursor-not-allowed' : ''}`;
+            b.title = open ? '' : 'Non disponibile per questa data';
+        });
+        // If the user had picked a shift that just closed, unpick it so the
+        // slots section shows a coherent state instead of "no slots".
+        if (state.shift === 'LUNCH' && !lunchOpen) state.shift = null;
+        if (state.shift === 'DINNER' && !dinnerOpen) state.shift = null;
     }
 
     function renderSlots() {
+        const lunchOpen = ((state.availability?.lunch?.slots) || []).length > 0;
+        const dinnerOpen = ((state.availability?.dinner?.slots) || []).length > 0;
+        // Whole day is blocked (or fully booked) → dedicated message,
+        // separate from the "pick a shift" prompt so the customer knows
+        // it's not their action that's missing.
+        if (state.date && !lunchOpen && !dinnerOpen) {
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questa data le prenotazioni web non sono disponibili.</p>';
+            return;
+        }
         if (!state.shift) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Seleziona il turno.</p>';
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Seleziona Pranzo o Cena per vedere gli orari disponibili.</p>';
             return;
         }
         const slots = (state.availability?.[state.shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
         if (slots.length === 0) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questa data non ci sono orari disponibili.</p>';
+            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questo turno non ci sono orari disponibili.</p>';
             return;
         }
         slotsContainer.innerHTML = '<div class="grid grid-cols-4 gap-2"></div>';
