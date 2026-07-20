@@ -332,10 +332,86 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
         } catch (err: any) {
             console.warn('[Twilio] outbound_messages update failed:', err?.message || err);
         }
+
+        // Auto-fallback WA → SMS on terminal WhatsApp errors that the sync
+        // send path can't see (Twilio returns 200 to the initial POST and
+        // then Meta rejects async). Without this the reservation confirmation
+        // sits as 'undelivered' and staff has to notice + resend manually.
+        // Fires only for OUTBOUND WhatsApp attempts tied to a reservation
+        // with a phone; keeps idempotency by skipping when we've already
+        // logged any outbound SMS for the same reservation after the failed
+        // WA send (covers both auto-retries and manual staff SMS sends).
+        if (ErrorCode && WA_FALLBACK_ERROR_CODES.has(String(ErrorCode))) {
+            maybeFallbackWhatsAppToSms(String(MessageSid), String(ErrorCode))
+                .catch(err => console.warn('[Twilio] WA→SMS fallback failed:', err?.message || err));
+        }
     } catch (err: any) {
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
 });
+
+// Twilio WhatsApp error codes that mean "this specific recipient can't be
+// reached over WhatsApp right now" and are worth retrying over SMS. Kept as
+// a Set so lookup is O(1) inside the hot webhook path.
+//
+//   63003 — Channel could not find a valid To
+//   63005 — Channel handset not found / unreachable
+//   63007 — Failed to find a valid channel address
+//   63016 — Freeform message outside the 24h Customer Service Window
+//   63018 — Rate limit exceeded
+//   63024 — Business Initiated message rejected by Meta (opt-out, blocked,
+//           handset unregistered, or a transient Meta-side reason)
+const WA_FALLBACK_ERROR_CODES = new Set(['63003', '63005', '63007', '63016', '63018', '63024']);
+
+async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string): Promise<void> {
+    // Look up the failed WA send in our log — we need the plain-text body,
+    // reservation link, and the moment it was sent (idempotency anchor).
+    const orig = await queryWithRetry(
+        `SELECT id, body, to_phone, reservation_id, sent_at, channel, direction
+         FROM outbound_messages
+         WHERE provider_sid = $1
+         LIMIT 1`,
+        [originalSid]
+    );
+    const row = orig.rows[0];
+    if (!row || row.direction !== 'outbound' || row.channel !== 'whatsapp') return;
+    if (!row.reservation_id) return;
+    if (!row.body || !String(row.body).trim()) return;
+    if (!isTwilioSmsConfigured()) return;
+
+    // Idempotency: skip if we (auto or manual) already sent an SMS for this
+    // reservation after the failed WA. Twilio can deliver the terminal state
+    // callback multiple times, and staff might have jumped in manually.
+    const already = await queryWithRetry(
+        `SELECT 1 FROM outbound_messages
+         WHERE reservation_id = $1
+           AND channel = 'sms'
+           AND direction = 'outbound'
+           AND sent_at > $2
+         LIMIT 1`,
+        [row.reservation_id, row.sent_at]
+    );
+    if (already.rowCount && already.rowCount > 0) return;
+
+    const resr = await queryWithRetry(
+        `SELECT phone FROM reservations WHERE id = $1`,
+        [row.reservation_id]
+    );
+    const phone = resr.rows[0]?.phone;
+    if (!phone || !String(phone).trim()) return;
+
+    console.log(`[Twilio] Auto-fallback SMS after WA ${originalSid} → ${errCode} (reservation ${row.reservation_id})`);
+    try {
+        const smsResult = await sendTwilioSms(String(phone), String(row.body), row.reservation_id);
+        // Rewire the reservation's confirmation tracking to the new SMS sid
+        // so the delivery icon updates as the SMS gets delivered.
+        await recordConfirmationSent(row.reservation_id, smsResult).catch(err =>
+            console.warn('[Twilio] recordConfirmationSent (fallback) failed:', err?.message || err)
+        );
+    } catch (err: any) {
+        console.error(`[Twilio] Auto-fallback SMS send failed for reservation ${row.reservation_id}:`, err?.message || err);
+    }
+}
 
 // ============================================
 // RESEND INBOUND EMAIL WEBHOOK
