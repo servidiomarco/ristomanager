@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowLeft } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowLeft, Search, X } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
   messagesApiService,
@@ -75,6 +75,13 @@ const InboxPage: React.FC = () => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [convLoading, setConvLoading] = useState(true);
   const [convError, setConvError] = useState<string | null>(null);
+  // Search bar in the conversations sidebar header. Toggled by the icon; the
+  // input replaces the "Messaggi" title while open. Query matches name,
+  // phone (raw + digits), or the last message body — case-insensitive, no
+  // debounce (the list is client-side already).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
@@ -299,29 +306,98 @@ const InboxPage: React.FC = () => {
 
   const totalUnread = conversations.reduce((s, c) => s + Number(c.unread_count || 0), 0);
 
+  // Filter the sidebar list by search query. Empty query returns everything.
+  // Matches on customer name, phone (raw + digits), or last message body.
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return conversations;
+    const qDigits = q.replace(/\D/g, '');
+    return conversations.filter(c => {
+      const name = (c.customer_name || '').toLowerCase();
+      const phone = (c.phone || '').toLowerCase();
+      const body = (c.last_body || '').toLowerCase();
+      if (name.includes(q) || phone.includes(q) || body.includes(q)) return true;
+      if (qDigits.length >= 3 && c.phone_digits.includes(qDigits)) return true;
+      return false;
+    });
+  }, [conversations, searchQuery]);
+
+  // Autofocus the search input when it opens; also close it on Esc so the
+  // keyboard-first workflow feels right.
+  useEffect(() => {
+    if (searchOpen) {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 20);
+      return () => clearTimeout(t);
+    }
+  }, [searchOpen]);
+
   return (
     <div className="flex h-[calc(100vh-64px)] bg-[var(--color-bg)]">
       {/* Sidebar: conversations */}
       <aside
         className={`${selectedKey ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-[var(--color-line)] flex-col bg-[var(--color-surface)]`}
       >
-        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <MessageCircle className="w-5 h-5 text-[var(--color-fg-muted)]" />
-            <h2 className="font-semibold text-[15px] text-[var(--color-fg)]">Messaggi</h2>
-            {totalUnread > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-[11px] font-semibold rounded-full bg-rose-500 text-white">
-                {totalUnread}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={() => { setConvLoading(true); loadConversations(); }}
-            className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
-            title="Aggiorna"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
+          {searchOpen ? (
+            <>
+              <div className="flex-1 flex items-center gap-2 min-w-0">
+                <Search className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setSearchQuery('');
+                      setSearchOpen(false);
+                    }
+                  }}
+                  placeholder="Cerca per nome, telefono o testo…"
+                  className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)]"
+                />
+              </div>
+              <button
+                onClick={() => { setSearchQuery(''); setSearchOpen(false); }}
+                className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] flex-shrink-0"
+                title="Chiudi ricerca"
+                aria-label="Chiudi ricerca"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 min-w-0">
+                <MessageCircle className="w-5 h-5 text-[var(--color-fg-muted)]" />
+                <h2 className="font-semibold text-[15px] text-[var(--color-fg)]">Messaggi</h2>
+                {totalUnread > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 text-[11px] font-semibold rounded-full bg-rose-500 text-white">
+                    {totalUnread}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
+                  title="Cerca"
+                  aria-label="Cerca"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => { setConvLoading(true); loadConversations(); }}
+                  className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
+                  title="Aggiorna"
+                  aria-label="Aggiorna"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -334,9 +410,13 @@ const InboxPage: React.FC = () => {
               Nessuna conversazione.<br />
               I messaggi in arrivo appariranno qui.
             </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="p-6 text-center text-[13px] text-[var(--color-fg-muted)]">
+              Nessun risultato per <span className="font-medium text-[var(--color-fg)]">"{searchQuery.trim()}"</span>.
+            </div>
           ) : (
             <ul>
-              {conversations.map(c => {
+              {filteredConversations.map(c => {
                 const active = c.phone_digits === selectedKey;
                 const unread = c.unread_count || 0;
                 return (
