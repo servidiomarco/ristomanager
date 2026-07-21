@@ -221,17 +221,28 @@
                         />
                     </div>
 
-                    <!-- Allergie & Intolleranze -->
-                    <div>
-                        <label class="block text-xs font-medium text-stone-600 mb-2">Allergie e intolleranze (opzionale)</label>
-                        <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-stone-100 border border-stone-200 mb-3">
-                            <button type="button" data-diet-tab="allergie"
-                                class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Allergie</button>
-                            <button type="button" data-diet-tab="intolleranze"
-                                class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Intolleranze</button>
+                    <!-- Allergie & Intolleranze (collapsible) -->
+                    <div class="rounded-xl border border-stone-200 overflow-hidden">
+                        <button type="button" id="dietToggle" class="w-full flex items-center justify-between gap-3 p-3 bg-stone-50 hover:bg-white transition-colors">
+                            <span class="flex items-center gap-2 text-sm font-medium text-stone-700">
+                                <svg viewBox="0 0 24 24" class="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                Allergie e intolleranze <span class="text-stone-400 font-normal">(opzionale)</span>
+                            </span>
+                            <span class="flex items-center gap-2 flex-shrink-0">
+                                <span id="dietSummary" class="text-xs text-stone-500"></span>
+                                <svg id="dietChevron" viewBox="0 0 24 24" class="w-4 h-4 text-stone-400 transition-transform" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </span>
+                        </button>
+                        <div id="dietBody" class="hidden p-3 pt-3 border-t border-stone-200">
+                            <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-stone-100 border border-stone-200 mb-3">
+                                <button type="button" data-diet-tab="allergie"
+                                    class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Allergie</button>
+                                <button type="button" data-diet-tab="intolleranze"
+                                    class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Intolleranze</button>
+                            </div>
+                            <div id="dietGrid" class="grid grid-cols-2 gap-2"></div>
+                            <p class="text-[11px] text-stone-400 mt-2">Le allergie sono gravi; le intolleranze più lievi. Tocca un alimento per assegnarlo.</p>
                         </div>
-                        <div id="dietGrid" class="grid grid-cols-2 gap-2"></div>
-                        <p class="text-[11px] text-stone-400 mt-2">Le allergie sono gravi; le intolleranze più lievi. Tocca un alimento per assegnarlo.</p>
                     </div>
 
                     <div>
@@ -354,6 +365,22 @@
     let dietTab = 'allergie';
     const dietGrid = $('dietGrid');
     const dietTabBtns = document.querySelectorAll('.diet-tab');
+    const dietToggle = $('dietToggle');
+    const dietBody = $('dietBody');
+    const dietChevron = $('dietChevron');
+    const dietSummary = $('dietSummary');
+
+    function updateDietSummary() {
+        const parts = [];
+        if (diet.allergie.size) parts.push(`${diet.allergie.size} allergie`);
+        if (diet.intolleranze.size) parts.push(`${diet.intolleranze.size} intoll.`);
+        dietSummary.textContent = parts.join(' · ');
+    }
+
+    dietToggle.addEventListener('click', () => {
+        const open = dietBody.classList.toggle('hidden') === false;
+        dietChevron.style.transform = open ? 'rotate(180deg)' : '';
+    });
 
     function renderDietTabs() {
         dietTabBtns.forEach((btn) => {
@@ -364,6 +391,7 @@
             const count = diet[key].size;
             btn.textContent = (key === 'allergie' ? 'Allergie' : 'Intolleranze') + (count ? ` · ${count}` : '');
         });
+        updateDietSummary();
     }
 
     function renderDietGrid() {

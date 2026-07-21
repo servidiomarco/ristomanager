@@ -11717,15 +11717,24 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         noteParts.push(userNote || 'Richiesta prenotazione dal sito');
         const notes = noteParts.join(' ');
 
+        // A guest who lists an allergy/intolerance on the public form is
+        // volunteering their own health data — that submission IS the consent
+        // (art. 9.2.a). Record it so the CRM shows the booking as consented
+        // without staff having to tick a box the customer already implied.
+        const hasHealthData = /(Allergie|Intolleranze):/i.test(notes);
+        const consentHealth = hasHealthData ? true : null;
+        const consentUpdatedAt = hasHealthData ? new Date().toISOString() : null;
+
         const result = await queryWithRetry(
             `INSERT INTO reservations (
                 customer_name, reservation_time, shift, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
-                reservation_status, source, requires_review
+                reservation_status, source, requires_review,
+                consent_data_health, consent_updated_at
             )
-            VALUES ($1, $2, $3, $4, 0, NULL, $5, $6, $7, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true)
+            VALUES ($1, $2, $3, $4, 0, NULL, $5, $6, $7, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true, $8, $9)
             RETURNING *`,
-            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164]
+            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164, consentHealth, consentUpdatedAt]
         );
         const created = result.rows[0];
 
