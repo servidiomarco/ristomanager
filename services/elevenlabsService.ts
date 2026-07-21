@@ -80,6 +80,31 @@ const ITALIAN_WEEKDAY_LOOKUP: Record<string, number> = {
     sabato: 6,
 };
 
+// English lookups — the voice agent switches to English for non-Italian
+// callers and passes date words verbatim ("tomorrow", "this Friday",
+// "August 15"), so the parser must accept both languages. Abbreviations
+// that collide with Italian (mar/apr/nov) map to the same month anyway.
+const ENGLISH_MONTHS_LOOKUP: Record<string, number> = {
+    january: 1, jan: 1,
+    february: 2, feb: 2,
+    march: 3, mar: 3,
+    april: 4, apr: 4,
+    may: 5,
+    june: 6, jun: 6,
+    july: 7, jul: 7,
+    august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9,
+    october: 10, oct: 10,
+    november: 11, nov: 11,
+    december: 12, dec: 12,
+};
+const ENGLISH_MONTH_RE = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
+
+const ENGLISH_WEEKDAY_LOOKUP: Record<string, number> = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6,
+};
+
 const ITALIAN_WEEKDAY_NAMES = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
 const ITALIAN_MONTH_NAMES = [
     'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
@@ -158,6 +183,24 @@ export function parseFlexibleDate(input: unknown): string | null {
         return toIsoDate(year, month, day);
     }
 
+    // English day-first: "15 August", "15th of August 2026"
+    m = s.toLowerCase().match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+of)?\\s+(${ENGLISH_MONTH_RE})(?:\\s+(\\d{4}))?`));
+    if (m) {
+        const day = +m[1];
+        const month = ENGLISH_MONTHS_LOOKUP[m[2]];
+        const year = m[3] ? +m[3] : new Date().getFullYear();
+        return toIsoDate(year, month, day);
+    }
+
+    // English month-first: "August 15", "August 15th, 2026"
+    m = s.toLowerCase().match(new RegExp(`(${ENGLISH_MONTH_RE})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?`));
+    if (m) {
+        const month = ENGLISH_MONTHS_LOOKUP[m[1]];
+        const day = +m[2];
+        const year = m[3] ? +m[3] : new Date().getFullYear();
+        return toIsoDate(year, month, day);
+    }
+
     // Relative Italian phrases: "oggi" / "stasera" / "domani" / "dopodomani" /
     // "venerdì" / "venerdì prossimo" / "sabato che viene".
     // The agent is instructed to pass these verbatim instead of doing the
@@ -165,27 +208,35 @@ export function parseFlexibleDate(input: unknown): string | null {
     const lower = s.toLowerCase();
     const today = getRomeTodayUtc();
 
-    if (/\bdopodomani\b/.test(lower)) {
+    // "day after tomorrow" must be checked before "tomorrow".
+    if (/\bdopodomani\b/.test(lower) || /\bday\s+after\s+tomorrow\b/.test(lower)) {
         const d = new Date(today);
         d.setUTCDate(d.getUTCDate() + 2);
         return utcDateToIso(d);
     }
-    if (/\bdomani\b/.test(lower)) {
+    if (/\bdomani\b/.test(lower) || /\btomorrow\b/.test(lower)) {
         const d = new Date(today);
         d.setUTCDate(d.getUTCDate() + 1);
         return utcDateToIso(d);
     }
-    if (/\b(oggi|stasera|stanotte|questa\s+sera|questa\s+notte)\b/.test(lower)) {
+    if (/\b(oggi|stasera|stanotte|questa\s+sera|questa\s+notte|today|tonight|this\s+evening)\b/.test(lower)) {
         return utcDateToIso(today);
     }
 
-    // Bare weekday, optionally with "prossimo" / "che viene" to force the
-    // *following* week when today matches the requested weekday.
-    for (const word of Object.keys(ITALIAN_WEEKDAY_LOOKUP)) {
-        const wRe = new RegExp(`\\b${word}\\b`);
-        if (wRe.test(lower)) {
-            const target = ITALIAN_WEEKDAY_LOOKUP[word];
-            const forceNext = /\bprossim[oa]\b|\bche\s+viene\b/.test(lower);
+    // Bare weekday (Italian or English), optionally with "prossimo" /
+    // "che viene" / "next" to force the *following* week when today matches
+    // the requested weekday. "this Friday" = nearest upcoming, like bare.
+    // Match on the accent-folded string: JS \b is ASCII-only, so
+    // /\bvenerdì\b/ never matches (ì is not a word char) — folding both
+    // sides ("venerdì" → "venerdi") sidesteps the problem entirely.
+    const foldedLower = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const WEEKDAY_LOOKUPS = { ...ITALIAN_WEEKDAY_LOOKUP, ...ENGLISH_WEEKDAY_LOOKUP };
+    for (const word of Object.keys(WEEKDAY_LOOKUPS)) {
+        const folded = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const wRe = new RegExp(`\\b${folded}\\b`);
+        if (wRe.test(foldedLower)) {
+            const target = WEEKDAY_LOOKUPS[word];
+            const forceNext = /\bprossim[oa]\b|\bche\s+viene\b|\bnext\b/.test(lower);
             const currentDow = today.getUTCDay();
             let diff = (target - currentDow + 7) % 7;
             if (diff === 0 && forceNext) diff = 7;
@@ -203,8 +254,42 @@ export function parseFlexibleTime(input: unknown): string | null {
     const s = input.trim().toLowerCase();
     if (!s) return null;
 
+    // English am/pm: "8:30 pm", "8 pm", "8.30pm", "12 am". MUST run before
+    // the generic hour:minute regex, which would otherwise read "8:30 pm"
+    // as 08:30 and silently book a morning table.
+    let m = s.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/);
+    if (m) {
+        let h = +m[1];
+        const mm = m[2] ? +m[2] : 0;
+        const isPm = m[3].startsWith('p');
+        if (h >= 1 && h <= 12 && mm >= 0 && mm <= 59) {
+            if (isPm && h < 12) h += 12;
+            if (!isPm && h === 12) h = 0;
+            return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+        }
+    }
+
+    // "half past eight" / "quarter past 8" / "quarter to nine" — the hour
+    // can arrive as a digit or spelled out.
+    const HOUR_WORDS: Record<string, number> = {
+        one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+        seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+    };
+    m = s.match(/\b(half|quarter)\s+(past|to)\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/);
+    if (m) {
+        const mins = m[1] === 'half' ? 30 : 15;
+        let h = /^\d/.test(m[3]) ? +m[3] : HOUR_WORDS[m[3]];
+        if (h >= 0 && h <= 23) {
+            if (m[2] === 'to') {
+                h = (h - 1 + 24) % 24;
+                return `${String(h).padStart(2, '0')}:${String(60 - mins).padStart(2, '0')}`;
+            }
+            return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+        }
+    }
+
     // 20:30, 20.30, 20-30, 8:05 — explicit hour:minute
-    let m = s.match(/(\d{1,2})[:.\-](\d{2})/);
+    m = s.match(/(\d{1,2})[:.\-](\d{2})/);
     if (m) {
         const h = +m[1];
         const mm = +m[2];
