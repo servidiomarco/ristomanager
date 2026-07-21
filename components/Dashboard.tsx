@@ -1175,7 +1175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
               {reservationNotes.map(({ reservation, table, room, allergens }) => {
                 const isLunch = reservation.shift === Shift.LUNCH;
-                const time = reservation.reservation_time.match(/T(\d{2}:\d{2})/)?.[1];
+                const time = getRomeTimePart(reservation.reservation_time);
                 const circleBg = isLunch ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]';
                 const isExpanded = expandedNoteIds.has(reservation.id);
                 const noteText = reservation.notes || '';
@@ -1284,11 +1284,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 : source === ReservationSource.VOICE
                 ? { Icon: Mic, label: 'Agente vocale', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' }
                 : { Icon: PhoneIcon, label: 'Telefono', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' };
+              // The DB stores reservation_time as timestamptz (serialized with a
+              // Z suffix). Reading the raw ISO time shows the UTC hour (e.g. a
+              // 20:30 Rome web booking rendered as 18:30). Convert to Europe/Rome
+              // explicitly — same as every other card in the app.
               const resDate = new Date(res.reservation_time);
               const dateLabel = !Number.isNaN(resDate.getTime())
-                ? resDate.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
+                ? resDate.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', timeZone: 'Europe/Rome' })
                 : '';
-              const timeLabel = res.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] || '';
+              const timeLabel = getRomeTimePart(res.reservation_time);
               return (
                 <button
                   key={res.id}
@@ -1966,9 +1970,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             : { Icon: PhoneIcon, label: 'Telefono' };
           const resDate = new Date(res.reservation_time);
           const dateLabel = !Number.isNaN(resDate.getTime())
-            ? resDate.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+            ? resDate.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
             : '';
-          const timeLabel = res.reservation_time.match(/T(\d{2}:\d{2})/)?.[1] || '';
+          const timeLabel = getRomeTimePart(res.reservation_time);
           const closeDisabled = pendingActionBusy !== null;
           const closeModal = () => {
             if (closeDisabled) return;
