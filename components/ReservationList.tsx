@@ -5713,7 +5713,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const table = res.table_id ? displayTables.find(t => t.id === res.table_id) : undefined;
         const end = new Date(new Date(res.reservation_time).getTime() + getEffectiveDurationMin(res) * 60_000);
         const endLabel = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
-        return (
+        // Portaled to <body>: inside the list's stacking context the mobile
+        // bottom nav paints over the sheet and hides the action buttons.
+        return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => snoozeOverduePrompt(res)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
@@ -5755,7 +5757,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
@@ -5773,7 +5776,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           ? ['waiting', 'declined']
           : ['pending', 'waiting', 'arrived', 'departing', 'freed', 'noshow', 'cancelled', 'declined'];
         const title = isPending ? 'Rispondi al cliente' : 'Cambia stato';
-        return (
+        return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
               {/* Drag handle (mobile only) */}
@@ -5830,14 +5833,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 })}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
       {/* Decline confirmation modal: warns the operator that an SMS will be sent */}
       {declineReservation && (() => {
         const res = declineReservation;
-        return (
+        return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeclineReservation(null)}>
             <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
@@ -5871,7 +5875,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
