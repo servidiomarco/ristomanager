@@ -8,6 +8,7 @@ import {
   MessageChannel,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
+import { toTitleCase } from '../utils/text';
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return '';
@@ -69,7 +70,7 @@ const statusIcon = (m: InboxMessage) => {
 };
 
 const displayName = (c: ConversationSummary): string =>
-  (c.customer_name && c.customer_name.trim()) || c.phone || `+${c.phone_digits}`;
+  (c.customer_name && c.customer_name.trim() && toTitleCase(c.customer_name)) || c.phone || `+${c.phone_digits}`;
 
 const InboxPage: React.FC = () => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);

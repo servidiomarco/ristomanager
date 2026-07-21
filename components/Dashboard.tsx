@@ -1190,7 +1190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         {table ? table.name.replace(/[^0-9]/g, '') || table.name.charAt(0) : '–'}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[var(--color-fg)] truncate">{reservation.customer_name}</p>
+                        <p className="text-sm font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</p>
                         <div className="flex items-center gap-1 mt-0.5">
                           <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
                           <span className="text-xs text-[var(--color-fg-muted)]">{time || '—'}</span>
@@ -1299,7 +1299,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <channel.Icon className="h-4 w-4" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-fg)] truncate">{res.customer_name || '—'}</p>
+                      <p className="text-sm font-medium text-[var(--color-fg)] truncate">{toTitleCase(res.customer_name) || '—'}</p>
                       <div className="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--color-fg-muted)] tabular">
                         <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
                         <span>{dateLabel} · {timeLabel}</span>
@@ -1832,12 +1832,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <div
                   key={s.id}
                   className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
-                  title={s.role ? `${s.name} ${s.surname} · ${s.role}` : `${s.name} ${s.surname}`}
+                  title={s.role ? `${toTitleCase(s.name)} ${toTitleCase(s.surname)} · ${s.role}` : `${toTitleCase(s.name)} ${toTitleCase(s.surname)}`}
                 >
                   <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex items-center justify-center text-[10px] font-semibold">
                     {initials}
                   </span>
-                  <span className="truncate max-w-[8rem]">{s.name}</span>
+                  <span className="truncate max-w-[8rem]">{toTitleCase(s.name)}</span>
                 </div>
               );
             };
@@ -2005,7 +2005,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
                 <div className="px-5 py-4 space-y-3">
                   <div>
-                    <p className="text-base font-semibold text-[var(--color-fg)]">{res.customer_name || '—'}</p>
+                    <p className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name) || '—'}</p>
                     <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
                   </div>
 

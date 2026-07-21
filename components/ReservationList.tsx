@@ -5294,7 +5294,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <ConfirmDeleteModal
         isOpen={deleteConfirmModal.show}
         message="Stai per eliminare la prenotazione di:"
-        itemName={deleteConfirmModal.customerName}
+        itemName={toTitleCase(deleteConfirmModal.customerName)}
         onCancel={handleCancelDelete}
         onConfirm={handleConfirmDelete}
       />

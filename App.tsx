@@ -1134,7 +1134,7 @@ const App: React.FC = () => {
     const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
 
     const details = [
-      `${res.customer_name} · ${res.guests} ${res.guests === 1 ? 'ospite' : 'ospiti'}`,
+      `${toTitleCase(res.customer_name)} · ${res.guests} ${res.guests === 1 ? 'ospite' : 'ospiti'}`,
       `${dateLabel} · ${timeLabel} (${shiftLabel})`,
       tableName ? `Tavolo ${tableName}` : 'Tavolo non assegnato',
     ];

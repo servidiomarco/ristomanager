@@ -12,6 +12,7 @@ import {
   PaymentMessage,
 } from '../services/paymentsApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { toTitleCase } from '../utils/text';
 
 const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
@@ -174,7 +175,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
               <h2 className="text-[15px] font-semibold text-[var(--color-fg)] truncate">
                 {formatEuro(payment.amount_cents, payment.currency)}
                 {payment.reservation_customer_name && (
-                  <span className="text-[var(--color-fg-muted)] font-normal"> · {payment.reservation_customer_name}</span>
+                  <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(payment.reservation_customer_name)}</span>
                 )}
               </h2>
               <span className="text-[12px] text-[var(--color-fg-muted)] tabular truncate">
@@ -246,7 +247,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
                 <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0">
                   <Calendar className="h-4 w-4 text-emerald-600 shrink-0" />
                   <span className="font-medium truncate">
-                    {payment.reservation_customer_name || `Prenotazione #${payment.reservation_id}`}
+                    {toTitleCase(payment.reservation_customer_name) || `Prenotazione #${payment.reservation_id}`}
                   </span>
                   {resBadge && (
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
@@ -611,7 +612,7 @@ const PagamentiPage: React.FC = () => {
                         <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
                           {formatEuro(item.amount_cents, item.currency)}
                           {item.reservation_customer_name && (
-                            <span className="text-[var(--color-fg-muted)] font-normal"> · {item.reservation_customer_name}</span>
+                            <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.reservation_customer_name)}</span>
                           )}
                         </span>
                         {item.reservation_phone && (

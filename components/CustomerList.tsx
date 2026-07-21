@@ -3,6 +3,7 @@ import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download } from 'lucide-react';
+import { toTitleCase } from '../utils/text';
 
 interface Props {
   reservations: Reservation[];
@@ -665,7 +666,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                     <h3 className="font-bold text-slate-800 truncate flex items-center gap-1.5">
                       {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="VIP" />}
                       {marketingEnabled && c.consent_marketing === true && <Mail className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" aria-label="Consenso marketing" />}
-                      <span className="truncate">{c.name}</span>
+                      <span className="truncate">{toTitleCase(c.name)}</span>
                     </h3>
                     {c.city && <p className="text-xs text-slate-500 truncate">{c.city}</p>}
                   </button>
@@ -1066,7 +1067,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
               <div className="flex items-center gap-2 min-w-0">
                 <BookUser className="h-5 w-5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{detailCustomer.name}</h2>
+                <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{toTitleCase(detailCustomer.name)}</h2>
               </div>
               <button
                 type="button"
@@ -1270,7 +1271,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 font-semibold text-slate-800 truncate">
                                   {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />}
-                                  <span className="truncate">{c.name}</span>
+                                  <span className="truncate">{toTitleCase(c.name)}</span>
                                 </div>
                                 <div className="text-xs text-slate-500 mt-0.5">
                                   {c.phone && <span>{c.phone}</span>}
@@ -1290,7 +1291,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                                       onClick={() => runMerge(other.id, c.id)}
                                       disabled={isMerging}
                                       className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                      title={`Unisci "${other.name}" (#${other.id}) in questo`}
+                                      title={`Unisci "${toTitleCase(other.name)}" (#${other.id}) in questo`}
                                     >
                                       {isThisPair ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
                                       Unisci #{other.id} qui

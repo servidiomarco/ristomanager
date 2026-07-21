@@ -37,6 +37,7 @@ import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './Table
 import { StatusChip, PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
+import { toTitleCase } from '../utils/text';
 import { useNow } from '../hooks/useNow';
 
 // Local-date helper (avoid UTC drift)
@@ -388,7 +389,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           <StatusChip state={timedState} size="sm" />
         </div>
         <div className="text-base font-medium text-[var(--color-fg)] truncate mb-0.5">
-          {r.customer_name || 'Senza nome'}
+          {toTitleCase(r.customer_name) || 'Senza nome'}
         </div>
         <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
           <span className="inline-flex items-center gap-1">
@@ -523,7 +524,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-[var(--color-fg)] max-w-[180px]">
-                      <span className="font-medium truncate">{r.customer_name || 'Senza nome'}</span>
+                      <span className="font-medium truncate">{toTitleCase(r.customer_name) || 'Senza nome'}</span>
                       <span className="text-xs text-[var(--color-fg-muted)] flex items-center gap-0.5 flex-none">
                         <Users className="h-3 w-3" />{r.guests}
                       </span>
@@ -536,7 +537,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                     type="button"
                     disabled={busy}
                     onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
-                    aria-label={`Segna ${r.customer_name || 'prenotazione'} come arrivato`}
+                    aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
                     className="flex-none inline-flex items-center gap-1.5 h-11 px-3.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition disabled:opacity-50"
                   >
                     <CheckCircle2 className="h-4.5 w-4.5" />
@@ -902,7 +903,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 lg:gap-3 mb-1.5 lg:mb-2">
               <h2 className="text-2xl lg:text-3xl font-bold text-[var(--color-fg)] truncate">
-                {reservation.customer_name || 'Senza nome'}
+                {toTitleCase(reservation.customer_name) || 'Senza nome'}
               </h2>
               {reservation.customer_is_vip && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 text-xs font-semibold flex-shrink-0">
@@ -1207,7 +1208,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
             Tavolo per
           </div>
           <div className="text-xl font-bold text-[var(--color-fg)] truncate">
-            {reservation.customer_name || 'Senza nome'}
+            {toTitleCase(reservation.customer_name) || 'Senza nome'}
           </div>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-sm font-semibold text-[var(--color-fg)]">
             <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
@@ -1424,12 +1425,12 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
         </div>
         <div className="p-5 space-y-3">
           <SwapRow
-            name={source.customer_name || 'Senza nome'}
+            name={toTitleCase(source.customer_name) || 'Senza nome'}
             from={tableName(source.table_id)}
             to={tableName(target.table_id)}
           />
           <SwapRow
-            name={target.customer_name || 'Senza nome'}
+            name={toTitleCase(target.customer_name) || 'Senza nome'}
             from={tableName(target.table_id)}
             to={tableName(source.table_id)}
           />
@@ -1656,7 +1657,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
               let caption: string | null = null;
 
               if (res) {
-                const firstName = res.customer_name?.split(' ')[0] || 'Ospite';
+                const firstName = toTitleCase(res.customer_name)?.split(' ')[0] || 'Ospite';
                 switch (status) {
                   case 'arrivato':
                     haloClass = 'ring-2 ring-emerald-400/70';
@@ -1694,7 +1695,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     width: glyphW,
                     height: glyphH,
                   }}
-                  title={res ? `${t.name} · ${res.customer_name}` : `${t.name} · libero`}
+                  title={res ? `${t.name} · ${toTitleCase(res.customer_name)}` : `${t.name} · libero`}
                 >
                   <div
                     className={`relative ${haloClass}`}

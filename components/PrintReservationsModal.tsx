@@ -4,6 +4,7 @@ import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { toTitleCase } from '../utils/text';
 import { isSeated } from './reservationState';
 
 interface Props {
@@ -253,7 +254,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                       <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '0.5rem', whiteSpace: 'nowrap', fontWeight: 600 }}>{time}</td>
                         <td style={{ padding: '0.5rem' }}>
-                          {r.customer_name}
+                          {toTitleCase(r.customer_name)}
                           {arrived && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#059669' }}>✓ arrivato</span>}
                         </td>
                         <td style={{ padding: '0.5rem', textAlign: 'center' }}>

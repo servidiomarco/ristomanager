@@ -4,6 +4,7 @@ import { Search, X, Calendar, User, Phone, Mail, Loader2, ArrowRight } from 'luc
 import { Reservation, Customer, ReservationStatus } from '../types';
 import { getCustomers } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { toTitleCase } from '../utils/text';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -263,7 +264,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-[14px] font-medium text-[var(--color-fg)] truncate">
-                          {r.customer_name || '—'}
+                          {toTitleCase(r.customer_name) || '—'}
                         </span>
                         {chip && (
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${chip.cls}`}>
@@ -307,7 +308,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[14px] font-medium text-[var(--color-fg)] truncate">
-                        {c.name}
+                        {toTitleCase(c.name)}
                         {c.is_vip && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">VIP</span>}
                       </div>
                       <div className="text-[12px] text-[var(--color-fg-muted)] truncate flex items-center gap-2 tabular">

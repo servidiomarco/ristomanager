@@ -14,6 +14,7 @@ import {
   OutboundMessage,
 } from '../services/voiceCallsApiService';
 import { Reservation } from '../types';
+import { toTitleCase } from '../utils/text';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -233,7 +234,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
             <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
             <div className="flex flex-col min-w-0">
               <h2 className="text-[15px] font-semibold text-[var(--color-fg)] truncate">
-                {detail ? (detail.customer_name || formatPhone(detail.phone)) : 'Conversazione'}
+                {detail ? (toTitleCase(detail.customer_name) || formatPhone(detail.phone)) : 'Conversazione'}
               </h2>
               {detail?.customer_name && detail.phone && (
                 <span className="text-[12px] text-[var(--color-fg-muted)] tabular truncate">
@@ -317,7 +318,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0">
                             <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                            <span className="font-medium truncate">{res.customer_name || 'Prenotazione'}</span>
+                            <span className="font-medium truncate">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
                             {badge && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
                                 {badge.label}
@@ -354,7 +355,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      <span className="font-medium">{detail.reservation_customer_name || 'Prenotazione'}</span>
+                      <span className="font-medium">{toTitleCase(detail.reservation_customer_name) || 'Prenotazione'}</span>
                       {resBadge && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset ${resBadge.cls}`}>
                           {resBadge.label}
@@ -927,7 +928,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                       <Phone className={`h-4 w-4 shrink-0 ${phantomOpen ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
-                          {item.customer_name || formatPhone(item.phone)}
+                          {toTitleCase(item.customer_name) || formatPhone(item.phone)}
                         </span>
                         {item.customer_name && item.phone && (
                           <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
