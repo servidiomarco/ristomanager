@@ -1605,6 +1605,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
         notes: '',
         duration_minutes: defaultDurationForShift(newShift),
+        // GDPR "semplice": l'unico consenso mostrato (dati sanitari/allergie)
+        // parte già spuntato, così in cassa non va rispuntato ogni volta. In
+        // modalità avanzata resta opt-in (undefined = da spuntare a mano).
+        consent_data_health: marketingEnabled ? undefined : true,
       });
       setSelectedAllergens([]);
       setSelectedQuickNotes([]);
