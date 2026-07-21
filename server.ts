@@ -8537,6 +8537,12 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
         ? `<img class="logo-dark" src="${base}/prenota/logo-dark.png" alt="Il Vecchio Frantoio" width="160" style="display:none;margin:0 auto;max-width:160px;height:auto;">`
         : '';
     const preheaderText = escapeHtml(preheader);
+    // Mail clients can't resolve relative paths, so the privacy link needs the
+    // absolute base. When no base URL is configured (dev) we omit the link
+    // rather than emit a broken href.
+    const privacyLink = base
+        ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">Informativa privacy</a>`
+        : '';
     return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title>
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
@@ -8565,7 +8571,7 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
         ${logoDark}
       </td></tr>
       <tr><td style="padding:8px 32px 32px;">${bodyBlocks}</td></tr>
-      <tr><td class="footer muted" style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Cucina Tradizionale</td></tr>
+      <tr><td class="footer muted" style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Cucina Tradizionale${privacyLink}</td></tr>
     </table>
   </td></tr>
 </table>
