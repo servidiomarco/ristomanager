@@ -3,6 +3,8 @@ import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { deriveTableDisplayStatus, isSeated, TABLE_STATUS_LABEL } from './reservationState';
+import { useNow } from '../hooks/useNow';
 import { CookingPotLoader } from './CookingPotLoader';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
@@ -557,8 +559,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   }, [banquetMenus, selectedDate, selectedShift]);
 
   // Helper to get Active Reservation details
-  const getActiveReservation = (table: Table): Reservation | undefined => {
-      const now = new Date();
+  // Ticking clock (1/min) — re-derives the time-based table states
+  // (In arrivo / In uscita) so the map moves by itself as the service runs.
+  const nowTick = useNow(60_000);
+
+  // Rome-clock invariants, computed once per tick instead of once per table:
+  // toLocaleTimeString builds an Intl.DateTimeFormat each call, which is far
+  // too expensive to repeat ~50× per render.
+  const romeClock = useMemo(() => {
+      const now = new Date(nowTick);
       const todayStr = getRomeDatePart(now);
       const romeNow = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
       const [nowH, nowM] = romeNow.split(':').map(Number);
@@ -568,20 +577,36 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       if (nowH >= 11 && nowH < 17) currentActiveShift = Shift.LUNCH;
       else if (nowH >= 18 || nowH < 4) currentActiveShift = Shift.DINNER;
 
-      return reservations.find(r => {
+      return { todayStr, currentTimeValue, currentActiveShift };
+  }, [nowTick]);
+
+  const getActiveReservation = (table: Table): Reservation | undefined => {
+      const { todayStr, currentTimeValue, currentActiveShift } = romeClock;
+
+      const candidates = reservations.filter(r => {
           if (r.table_id !== table.id) return false;
           if (getRomeDatePart(r.reservation_time) !== todayStr) return false;
-          if (currentActiveShift && r.shift !== currentActiveShift) return false;
           if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
           if (r.reservation_status === ReservationStatus.CANCELLED) return false;
           if (r.reservation_status === ReservationStatus.DECLINED) return false;
 
+          // A seated party (ARRIVED/DEPARTING) holds its table until DEPARTED —
+          // checked BEFORE the shift filter, so a lunch table lingering into
+          // the dinner window still reads as occupied, not libera.
+          if (isSeated(r)) return true;
+
+          if (currentActiveShift && r.shift !== currentActiveShift) return false;
+
           const [h, m] = getRomeTimePart(r.reservation_time).split(':').map(Number);
           const resTimeValue = h * 60 + m;
-          
+
           // Broad check to display name if reservation is roughly now
           return (currentTimeValue >= (resTimeValue - 30) && currentTimeValue <= (resTimeValue + 120));
       });
+
+      // Double-seating: whoever is physically at the table wins over the
+      // upcoming booking, regardless of array order.
+      return candidates.find(isSeated) ?? candidates[0];
   };
 
   // Collision-aware reservation cards + banquet hulls/labels for the floor.
@@ -592,7 +617,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         : (autoLayout.positions.get(t.id) || { x: t.x, y: t.y });
       return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: pos.x, y: pos.y };
     });
-    const reservationByTableId = new Map<number, Reservation>();
     const banquetDataById = new Map<number, BanquetMenu>();
     const banquetTableIds = new Map<number, number[]>();
     for (const t of currentTables) {
@@ -602,13 +626,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         const arr = banquetTableIds.get(b.id) || [];
         arr.push(t.id);
         banquetTableIds.set(b.id, arr);
-      } else {
-        const r = getActiveReservation(t);
-        // No-show is still tracked so the glyph can render in its no-show tint;
-        // it just won't light up chairs (party=0 below) since nobody arrived.
-        if (r) {
-          reservationByTableId.set(t.id, r);
-        }
       }
     }
     const banquetGroups = [...banquetTableIds.entries()].map(([id, tableIds]) => ({ id, tableIds }));
@@ -1011,19 +1028,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       timerDisplay = `${mm}:${ss}`;
     }
 
-    // Map reservation state → display status
-    let displayStatus: TableDisplayStatus = 'libera';
-    if (banquet) {
-      displayStatus = 'attesa';
-    } else if (isTempLocked) {
-      displayStatus = 'attesa';
-    } else if (reservation) {
-      if (reservation.reservation_status === ReservationStatus.NO_SHOW) {
-        displayStatus = 'noshow';
-      } else {
-        displayStatus = reservation.arrival_status === ArrivalStatus.ARRIVED ? 'arrivato' : 'attesa';
-      }
-    }
+    // Map reservation state → display status (shared, time-aware derivation:
+    // WAITING near its slot pulses as 'inarrivo', a party seated past its
+    // expected duration reads as 'uscita').
+    const displayStatus: TableDisplayStatus = deriveTableDisplayStatus(reservation, {
+      banquet: !!banquet,
+      tempLocked: isTempLocked,
+      now: nowTick,
+    });
 
     const dims = getGlyphDimensions(table.shape, table.seats);
     const { width: svgW, height: svgH } = dims;
@@ -1119,7 +1131,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Portrait orientation gate — block floor plan on mobile portrait
   if (isPortrait) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-64px)] p-8 text-center bg-[var(--color-surface-2)]">
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-[var(--color-surface-2)]">
         <RotateCw className="h-16 w-16 text-[var(--color-fg-subtle)] mb-6" />
         <h2 className="text-lg font-semibold text-[var(--color-fg)] mb-2">Ruota il dispositivo</h2>
         <p className="text-sm text-[var(--color-fg-muted)] max-w-[280px]">
@@ -1131,7 +1143,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   return (
     <div
-      className="flex flex-col h-[calc(100vh-64px)] p-2 gap-2 sm:p-4 sm:gap-4"
+      className="flex flex-col h-full p-2 gap-2 sm:p-4 sm:gap-4"
       onMouseUp={handleMouseUp}
       onMouseMove={handleMouseMove}
       onTouchMove={handleTouchMove}
@@ -1703,16 +1715,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera
-                    </div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-                    </div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
-                        <div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato
-                    </div>
+                    {(['libera', 'attesa', 'inarrivo', 'arrivato', 'uscita', 'noshow'] as TableDisplayStatus[]).map(s => (
+                        <div key={s} className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                            <div
+                                className={`w-3 h-3 rounded-sm border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
+                                style={{ background: `var(--tg-${s}-bg)`, borderColor: `var(--tg-${s}-stroke)` }}
+                            ></div>
+                            {TABLE_STATUS_LABEL[s]}
+                        </div>
+                    ))}
                     <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
                         <Lock size={12} /> Tavolo Bloccato
                     </div>

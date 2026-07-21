@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup } from '../services/apiService';
+import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download } from 'lucide-react';
 
 interface Props {
   reservations: Reservation[];
@@ -194,6 +194,51 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     targetName: string;
   } | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  // When active, restrict the list to customers who consented to marketing —
+  // i.e. the contactable subset for promotional sends.
+  const [marketingOnly, setMarketingOnly] = useState(false);
+  // Marketing features are only surfaced when the legal layer is in "advanced"
+  // mode. Defaults to true so the UI isn't hidden while the setting loads.
+  const [marketingEnabled, setMarketingEnabled] = useState(true);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLegalSettings()
+      .then(l => { if (!cancelled) setMarketingEnabled(l.legal_mode !== 'simple'); })
+      .catch(() => { /* keep default */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Pull the sanctioned marketing audience (server excludes non-consenting) and
+  // download it as CSV — a concrete, consent-safe marketing flow.
+  const exportMarketingRecipients = async () => {
+    setExporting(true);
+    try {
+      const { recipients } = await getMarketingAudience();
+      if (!recipients.length) {
+        showToast('Nessun destinatario con consenso marketing', 'info');
+        return;
+      }
+      const esc = (v: string) => `"${(v || '').replace(/"/g, '""')}"`;
+      const rows = [
+        ['Nome', 'Telefono', 'Email', 'Consenso aggiornato'],
+        ...recipients.map(r => [r.name || '', r.phone || '', r.email || '', r.consent_marketing_updated_at || '']),
+      ];
+      const csv = rows.map(cols => cols.map(esc).join(',')).join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'destinatari-marketing.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast(`Esportati ${recipients.length} destinatari`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Marketing non disponibile in modalità semplice', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const reloadDuplicates = async () => {
     try {
@@ -329,11 +374,18 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const trimmedSearch = search.trim();
   const isSearching = trimmedSearch.length > 0;
 
+  const marketingCount = useMemo(
+    () => customers.filter(c => c.consent_marketing === true).length,
+    [customers]
+  );
+
   const filtered = useMemo(() => {
+    // Contactable subset first — applies to both the browse and search paths.
+    const pool = (marketingOnly && marketingEnabled) ? customers.filter(c => c.consent_marketing === true) : customers;
     if (!isSearching) {
       const base = letterFilter
-        ? customers.filter(c => bucketForCustomer(c) === letterFilter)
-        : customers;
+        ? pool.filter(c => bucketForCustomer(c) === letterFilter)
+        : pool;
       return [...base].sort((a, b) =>
         a.name.localeCompare(b.name, 'it', { sensitivity: 'base' })
       );
@@ -343,7 +395,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     // Name uses fuzzy scoring; phone/email/city fall back to substring so
     // typing a phone fragment still works as before.
     const scored: { c: Customer; score: number }[] = [];
-    for (const c of customers) {
+    for (const c of pool) {
       const nameFolded = foldText(c.name || '');
       let score = fuzzyNameScore(nameFolded, term);
       if (score === 0) {
@@ -357,7 +409,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       return a.c.name.localeCompare(b.c.name, 'it', { sensitivity: 'base' });
     });
     return scored.map(s => s.c);
-  }, [customers, trimmedSearch, isSearching, letterFilter]);
+  }, [customers, trimmedSearch, isSearching, letterFilter, marketingOnly, marketingEnabled]);
 
   // Set of initials that actually exist across the entire address book.
   // Based on `customers` (not `filtered`) so the strip stays stable while
@@ -496,6 +548,39 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             </span>
           </button>
         )}
+        {marketingEnabled && marketingCount > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setMarketingOnly(v => !v)}
+              aria-pressed={marketingOnly}
+              className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-full border text-sm font-medium transition-colors ${
+                marketingOnly
+                  ? 'border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+              }`}
+              title="Mostra solo i clienti con consenso marketing (contattabili)"
+            >
+              <Mail className="h-4 w-4" />
+              <span>Marketing</span>
+              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-semibold ${marketingOnly ? 'bg-white/25 text-white' : 'bg-emerald-600 text-white'}`}>
+                {marketingCount}
+              </span>
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={exportMarketingRecipients}
+                disabled={exporting}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                title="Esporta i destinatari con consenso marketing (CSV)"
+              >
+                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                <span className="hidden sm:inline">Esporta</span>
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Horizontal alphabet filter. Hidden during search since results are
@@ -579,6 +664,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                   >
                     <h3 className="font-bold text-slate-800 truncate flex items-center gap-1.5">
                       {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="VIP" />}
+                      {marketingEnabled && c.consent_marketing === true && <Mail className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" aria-label="Consenso marketing" />}
                       <span className="truncate">{c.name}</span>
                     </h3>
                     {c.city && <p className="text-xs text-slate-500 truncate">{c.city}</p>}
@@ -1017,6 +1103,18 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               {detailCustomer.notes && (
                 <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-slate-700 whitespace-pre-wrap">
                   {detailCustomer.notes}
+                </div>
+              )}
+
+              {marketingEnabled && detailCustomer.consent_marketing != null && (
+                <div className="flex items-center gap-2 text-slate-700">
+                  <Mail className={`h-4 w-4 ${detailCustomer.consent_marketing ? 'text-emerald-600' : 'text-slate-400'}`} />
+                  <span>
+                    Consenso marketing: <span className={detailCustomer.consent_marketing ? 'text-emerald-700 font-medium' : 'text-slate-500'}>{detailCustomer.consent_marketing ? 'concesso' : 'negato'}</span>
+                    {detailCustomer.consent_marketing_updated_at && (
+                      <span className="text-xs text-slate-400"> · {formatLastVisit(detailCustomer.consent_marketing_updated_at)}</span>
+                    )}
+                  </span>
                 </div>
               )}
 

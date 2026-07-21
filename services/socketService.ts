@@ -104,6 +104,15 @@ export class SocketService {
     console.log(`Broadcasting reservation:deleted for ID ${id}`);
   }
 
+  // Silent variant: patch the reservation in clients' state WITHOUT a toast or
+  // notification. Used when a non-reservation action denormalizes onto the
+  // reservation row (e.g. a customer rename cascades customer_name) — the user
+  // did that edit elsewhere and shouldn't get "Prenotazione aggiornata" spam,
+  // one per affected booking.
+  broadcastReservationSynced(reservation: Reservation) {
+    this.io.emit('reservation:synced', reservation);
+  }
+
   // Table broadcast methods
   broadcastTableCreated(table: Table, excludeSocketId?: string) {
     // Broadcast to all clients except the originating socket

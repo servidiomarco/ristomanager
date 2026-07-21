@@ -29,6 +29,7 @@ import { ReservationAllergensManager } from './components/ReservationAllergensMa
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
+import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
@@ -36,6 +37,7 @@ import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { useAppBadge } from './hooks/useAppBadge';
+import { useScrollFade } from './hooks/useScrollFade';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
@@ -76,11 +78,12 @@ import {
 // presentation differ. Item labels, icons and routes must not be edited here
 // without an intentional change — this drives every nav surface.
 // ---------------------------------------------------------------------------
-type NavGroupId = 'servizio' | 'operazioni' | 'gestione' | 'sistema';
+type NavGroupId = 'servizio' | 'comunicazioni' | 'operazioni' | 'gestione' | 'sistema';
 
 // Eyebrow headings, in render order. Proper case by design — never all caps.
 const NAV_GROUPS: { id: NavGroupId; label: string }[] = [
   { id: 'servizio', label: 'Servizio' },
+  { id: 'comunicazioni', label: 'Comunicazioni' },
   { id: 'operazioni', label: 'Operazioni' },
   { id: 'gestione', label: 'Gestione' },
   { id: 'sistema', label: 'Sistema' },
@@ -107,15 +110,18 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
-  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'servizio', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
-  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'servizio', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'servizio', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
+
+  // Comunicazioni
+  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
+  // Email — voce da creare (nessuna ViewState ancora): aggiungerla qui.
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
   { kind: 'link', label: 'Inventario', Icon: Boxes, group: 'operazioni', isTab: false, view: ViewState.INVENTARIO },
   { kind: 'link', label: 'Lista della Spesa', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
   { kind: 'link', label: 'HACCP', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
+  { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
 
   // Gestione
   { kind: 'link', label: 'Clienti', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
@@ -157,6 +163,9 @@ const App: React.FC = () => {
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  // Scroll-aware edge fade on the sidebar nav (fades an edge only when there's
+  // more to scroll that way).
+  const navFadeRef = useScrollFade<HTMLElement>();
 
   // Global Cmd/Ctrl+K → open the command palette. Fires even while typing
   // in a form field so the operator can switch to global search mid-flow;
@@ -756,6 +765,16 @@ const App: React.FC = () => {
       if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
+    // Silent patch — a denormalized field (e.g. customer_name/phone from a
+    // customer rename or merge) changed on these reservations. Update the
+    // cards in place with no toast/notification: the user made that edit
+    // elsewhere and one booking edit can touch many reservations.
+    socket.on('reservation:synced', (reservation: Reservation) => {
+      setReservations(prev =>
+        prev.map(r => r.id === reservation.id ? reservation : r)
+      );
+    });
+
     // Table events
     socket.on('table:created', (table: Table) => {
       console.log('Socket received table:created for table:', table.name, 'ID:', table.id);
@@ -883,6 +902,7 @@ const App: React.FC = () => {
       socket.off('reservation:created');
       socket.off('reservation:updated');
       socket.off('reservation:deleted');
+      socket.off('reservation:synced');
       socket.off('table:created');
       socket.off('table:updated');
       socket.off('table:deleted');
@@ -1264,7 +1284,7 @@ const App: React.FC = () => {
     .filter(cluster => cluster.length > 0);
 
   return (
-    <div className="flex h-screen bg-[var(--color-surface-2)] font-sans text-[var(--color-fg)]">
+    <div className="flex h-[100dvh] overflow-hidden bg-[var(--color-surface-2)] font-sans text-[var(--color-fg)]">
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">Salta al contenuto</a>
 
@@ -1320,7 +1340,7 @@ const App: React.FC = () => {
           </button>
         )}
 
-        <nav className={`flex-1 py-5 space-y-0.5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
+        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y py-5 space-y-0.5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
               key={item.label}
@@ -1439,9 +1459,14 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
-      <main id="main" className="flex-1 overflow-y-auto relative pb-20 lg:pb-0 bg-[var(--color-surface-2)]">
+      {/* main is a flex column: a fixed header + one internal scroll region.
+          This replaces the old "main scrolls, header is sticky" model, which
+          on mobile let the whole view drift up under the header (100vh + the
+          bottom-nav padding overflowed the visible viewport). Now nothing
+          scrolls at the main level, so headers and toolbars stay put. */}
+      <main id="main" className="flex-1 min-w-0 flex flex-col min-h-0 relative bg-[var(--color-surface-2)]">
         {/* Header — taller on desktop to house the date/time/shift controls */}
-        <header className="h-14 md:h-[72px] bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] sticky top-0 z-10 flex items-center justify-between px-4 lg:px-6">
+        <header className="flex-shrink-0 h-14 md:h-[72px] bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] z-10 flex items-center justify-between px-4 lg:px-6">
            <div className="flex items-center gap-2 lg:hidden">
               <div className="bg-[var(--color-fg)] p-1.5 rounded-md">
                 <ChefHat className="text-[var(--color-fg-on-brand)] h-4 w-4" />
@@ -1449,8 +1474,11 @@ const App: React.FC = () => {
               <span className="font-semibold text-[15px] tracking-tight text-[var(--color-fg)]">RistoCRM</span>
            </div>
 
-           {/* Desktop date/time/shift control group — takes ~half the header width */}
-           <div className={`hidden md:flex items-center gap-2.5 w-1/2 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF].includes(view) ? '!hidden' : ''}`}>
+           {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
+               w-1/2) so it takes exactly the free space between the mobile logo
+               and the right actions — with the sidebar open at lg the content
+               area shrinks and a fixed half would overflow into the "+" button. */}
+           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
@@ -1461,8 +1489,9 @@ const App: React.FC = () => {
                backToToday="inline"
              />
 
-             {/* Live time chip */}
-             <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2 flex-shrink-0">
+             {/* Live time chip — secondary; hidden below xl so it never crowds
+                 the right actions when the sidebar narrows the header. */}
+             <div className="hidden xl:flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2 flex-shrink-0">
                <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
                  {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
@@ -1498,15 +1527,17 @@ const App: React.FC = () => {
                  (globalDate, globalShift) e permette toggle inline con
                  settings:full. */}
              {(globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER') && (
-               <BookingChannelsBar
-                 date={globalDateStr}
-                 shift={globalShiftFilter}
-                 showToast={addToast}
-               />
+               <div className="hidden xl:flex items-center flex-shrink-0">
+                 <BookingChannelsBar
+                   date={globalDateStr}
+                   shift={globalShiftFilter}
+                   showToast={addToast}
+                 />
+               </div>
              )}
            </div>
 
-           <div className="ml-auto flex items-center gap-2">
+           <div className="ml-auto flex items-center gap-2 flex-shrink-0 pl-2">
               {/* Global "+" create menu — replaces the old Nuova prenotazione + per-view secondary CTAs.
                   Identical on every page; desktop/tablet only (mobile uses the bottom "+" sheet). */}
               {visibleCreateClusters.length > 0 && (
@@ -1666,6 +1697,13 @@ const App: React.FC = () => {
 
            </div>
         </header>
+
+        {/* View container — the single scroll region below the fixed header,
+            keyed on the active view so every navigation re-mounts with a soft
+            rise-in (see .animate-view-in). pb-20 on mobile clears the fixed
+            bottom nav; full-height views (h-full) size to the padding-excluded
+            area so they sit neatly between header and nav. */}
+        <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-20 lg:pb-0 animate-view-in">
 
         {view === ViewState.DASHBOARD && (
           <Dashboard
@@ -2109,6 +2147,12 @@ const App: React.FC = () => {
 
             <PushNotificationsCard />
 
+            {/* Legale — tenant identity + generated legal documents (SaaS-ready) */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Legale</h3>
+              <LegalSettingsCard showToast={addToast} />
+            </div>
+
             {/* Integrations */}
             <div className="mb-8">
               <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Integrazioni</h3>
@@ -2138,6 +2182,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
         <nav className="fixed bottom-0 left-0 right-0 bg-[var(--color-surface)]/95 backdrop-blur-sm border-t border-[var(--color-line)] lg:hidden z-30" aria-label="Navigazione mobile">
@@ -2482,7 +2528,7 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
   <button
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
-    className={`flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 rounded-lg transition-colors duration-150 ${
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 rounded-lg ${
       active
         ? 'bg-[var(--color-surface-3)] text-[var(--color-fg)]'
         : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'

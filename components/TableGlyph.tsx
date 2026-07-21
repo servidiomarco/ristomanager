@@ -1,7 +1,12 @@
 import React from 'react';
 import { TableShape } from '../types';
 
-export type TableDisplayStatus = 'libera' | 'attesa' | 'arrivato' | 'noshow';
+// The six service states a table can display, as a narrative progression:
+// libera (silence) → attesa/Prenotato (promise) → inarrivo (gentle urgency,
+// the only animated state) → arrivato/Occupato (operational calm) →
+// uscita (draining, turnover ahead) → back to libera. noshow is the rose
+// off-ramp. Colors come from the --tg-{status}-* token families in index.css.
+export type TableDisplayStatus = 'libera' | 'attesa' | 'inarrivo' | 'arrivato' | 'uscita' | 'noshow';
 
 const PITCH = 26;
 const CHAIR_W = 20;
@@ -51,7 +56,10 @@ interface TableGlyphProps {
   chairColor?: string;
 }
 
-export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, status, isSelected, party, fit, chairColor }) => {
+// Memoized: all props are scalars, and dozens of glyphs re-render on every
+// hover/keystroke — and now on every useNow() minute tick — so unchanged
+// tables should bail out instead of rebuilding their SVG tree.
+export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, shape, status, isSelected, party, fit, chairColor }) => {
   const bg = `var(--tg-${status}-bg)`;
   const st = `var(--tg-${status}-stroke)`;
   const ch = chairColor ?? `var(--tg-${status}-chair)`;
@@ -77,6 +85,10 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         style={fit ? { width: '100%', height: 'auto', maxWidth: size, margin: '0 auto' } : undefined}>
         {isSelected && (
           <circle cx={cx} cy={cy} r={r + 3} fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
+        )}
+        {status === 'inarrivo' && (
+          <circle className="tg-pulse" cx={cx} cy={cy} r={r + 5}
+            fill="none" style={{ stroke: 'var(--tg-inarrivo-accent)' }} strokeWidth={2.5} />
         )}
         <circle className="dark:hidden" cx={cx} cy={cy + 2} r={r} fill="#000" opacity={0.08} />
         <circle className="tg-body" cx={cx} cy={cy} r={r} style={{ fill: bg, stroke: st }} strokeWidth={1} />
@@ -124,6 +136,10 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         <rect x={bodyX - 3} y={bodyY - 3} width={bodyW + 6} height={BODY_H + 6} rx={BODY_R + 3}
           fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
       )}
+      {status === 'inarrivo' && (
+        <rect className="tg-pulse" x={bodyX - 5} y={bodyY - 5} width={bodyW + 10} height={BODY_H + 10} rx={BODY_R + 5}
+          fill="none" style={{ stroke: 'var(--tg-inarrivo-accent)' }} strokeWidth={2.5} />
+      )}
       <rect className="dark:hidden" x={bodyX} y={bodyY + 2.5} width={bodyW} height={BODY_H} rx={BODY_R} fill="#000" opacity={0.08} />
       <rect className="tg-body" x={bodyX} y={bodyY} width={bodyW} height={BODY_H} rx={BODY_R}
         style={{ fill: bg, stroke: st }} strokeWidth={1} />
@@ -147,4 +163,5 @@ export const TableGlyph: React.FC<TableGlyphProps> = ({ name, seats, shape, stat
         style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
     </svg>
   );
-};
+});
+TableGlyph.displayName = 'TableGlyph';

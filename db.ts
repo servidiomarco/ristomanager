@@ -578,6 +578,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Index for the status-callback lookup (find reservation by Twilio SID).
         await client.query(`CREATE INDEX IF NOT EXISTS idx_reservations_confirmation_sid ON reservations (confirmation_provider_sid);`);
 
+        // GDPR consents captured at booking time. Kept on the reservation so we
+        // have per-booking proof (art. 7.1): what was consented and when.
+        // consent_marketing  → invio comunicazioni commerciali (art. 6.1.a)
+        // consent_data_health → trattamento allergie/intolleranze (dati sanitari, art. 9.2.a)
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS consent_marketing BOOLEAN;`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS consent_data_health BOOLEAN;`);
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS consent_updated_at TIMESTAMPTZ;`);
+
         // ============================================
         // ROLE PERMISSIONS TABLE
         // ============================================
@@ -1079,6 +1087,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS preferences_notes TEXT;`);
         await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS dietary_notes TEXT;`);
         await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_vip BOOLEAN NOT NULL DEFAULT FALSE;`);
+        // Marketing consent at customer level — propagated from the booking flow
+        // so it can be used to filter marketing sends. Timestamp = proof (art. 7).
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_marketing BOOLEAN;`);
+        await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_marketing_updated_at TIMESTAMPTZ;`);
 
         // Link banquet menus to customers (nullable). Using ON DELETE SET NULL
         // because deleting a customer should not destroy the banquet history.

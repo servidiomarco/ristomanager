@@ -1,10 +1,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, Table, Dish, Room, Shift, ArrivalStatus, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
 import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { isSeated, getTimedReservationState, PulseDot } from './reservationState';
+import { useNow } from '../hooks/useNow';
+import { toTitleCase } from '../utils/text';
 import { PaymentBadge, hasUnpaidDeposit } from './PaymentBadge';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
@@ -521,6 +524,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const openTableIds = useMemo(() => new Set(openTables.map(t => t.id)), [openTables]);
   const totalTables = openTables.length;
 
+  // --- "Adesso in sala" — live service pulse for the hero tile ---
+  // Same time-derivation engine as the floor map: seated (ARRIVED/DEPARTING),
+  // arriving (confirmed, due within the T−20′ window), departing (past the
+  // expected duration or flagged by staff). Null on non-today dates: the
+  // hero describes RIGHT NOW or it doesn't exist.
+  const nowTick = useNow(60_000);
+  const liveService = useMemo(() => {
+    if (!isToday) return null;
+    let seatedGuests = 0;
+    let departingCount = 0;
+    const seatedTableIds = new Set<number>();
+    const arriving: Reservation[] = [];
+    for (const r of selectedDayReservations) {
+      const st = getTimedReservationState(r, nowTick);
+      if (st === 'arrived' || st === 'departing') {
+        seatedGuests += r.guests || 0;
+        if (r.table_id && openTableIds.has(r.table_id)) seatedTableIds.add(r.table_id);
+        if (st === 'departing') departingCount++;
+      } else if (st === 'arriving') {
+        arriving.push(r);
+      }
+    }
+    arriving.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    return {
+      seatedGuests,
+      seatedTables: seatedTableIds.size,
+      departingCount,
+      arriving,
+      freeTables: Math.max(0, totalTables - seatedTableIds.size),
+    };
+  }, [isToday, selectedDayReservations, nowTick, openTableIds, totalTables]);
+
   // Banchetti scheduled for the selected day
   const banquetsToday = Array.isArray(banquetMenus)
     ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
@@ -546,8 +581,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // Per-shift KPI stats (guests + tables, expected vs arrived)
   const lunchExpectedGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
   const dinnerExpectedGuests = dinnerReservations.reduce((acc, r) => acc + r.guests, 0);
-  const lunchArrivedRes = lunchReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED);
-  const dinnerArrivedRes = dinnerReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED);
+  // "Arrivati" includes DEPARTING — the party is still in house until DEPARTED.
+  const lunchArrivedRes = lunchReservations.filter(r => isSeated(r));
+  const dinnerArrivedRes = dinnerReservations.filter(r => isSeated(r));
   const lunchArrivedGuests = lunchArrivedRes.reduce((acc, r) => acc + r.guests, 0);
   const dinnerArrivedGuests = dinnerArrivedRes.reduce((acc, r) => acc + r.guests, 0);
   const lunchArrivedTableIds = new Set(lunchArrivedRes.map(r => r.table_id).filter(Boolean));
@@ -833,6 +869,89 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
       })()}
 
+      {/* "Adesso in sala" — the live command deck. Inverted brand surface so
+          the one tile describing RIGHT NOW dominates the bento hierarchy
+          (near-black in light mode, flips to white in dark). Counts come from
+          the shared time-derivation engine, so this always agrees with the
+          floor map and the Reception rail. */}
+      {liveService && (
+        <div
+          className="rounded-2xl bg-[var(--color-brand)] text-[var(--color-brand-fg)] shadow-[var(--shadow-md)] overflow-hidden"
+          style={{ animation: 'tileIn .35s ease-out both' }}
+        >
+          <div className="px-5 lg:px-6 pt-4 pb-1 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <PulseDot dotClass="bg-emerald-500" pulse sizeClass="h-2 w-2" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-brand-fg)]/60">
+                Adesso in sala
+              </span>
+            </div>
+            <span className="text-[11px] tabular-nums text-[var(--color-brand-fg)]/50">
+              {new Date(nowTick).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          {/* Hairline dividers via gap-px over a translucent ground — they
+              stay correct when the grid wraps 4→2 columns. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-[var(--color-brand-fg)]/10 mt-2">
+            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> In sala
+              </div>
+              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.seatedGuests}</div>
+              <div className="text-[11px] text-[var(--color-brand-fg)]/50">{liveService.seatedTables} {liveService.seatedTables === 1 ? 'tavolo' : 'tavoli'}</div>
+            </div>
+            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
+                <PulseDot dotClass="bg-booked-300 dark:bg-booked-600" pulse={liveService.arriving.length > 0} />
+                In arrivo
+              </div>
+              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.arriving.length}</div>
+              <div className="text-[11px] text-[var(--color-brand-fg)]/50">nei prossimi 20 min</div>
+            </div>
+            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 dark:bg-cyan-600" /> In uscita
+              </div>
+              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.departingCount}</div>
+              <div className="text-[11px] text-[var(--color-brand-fg)]/50">turnover in vista</div>
+            </div>
+            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand-fg)]/30" /> Tavoli liberi
+              </div>
+              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.freeTables}</div>
+              <div className="text-[11px] text-[var(--color-brand-fg)]/50">su {totalTables}</div>
+            </div>
+          </div>
+
+          {/* Chi sta per entrare — tap deep-links the booking in Prenotazioni */}
+          {liveService.arriving.length > 0 && (
+            <div className="border-t border-[var(--color-brand-fg)]/10 px-5 lg:px-6 py-2.5 flex items-center gap-2 overflow-x-auto scrollbar-hide">
+              {liveService.arriving.slice(0, 6).map(r => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => onOpenReservationInList?.(r.id)}
+                  className="flex-none inline-flex items-center gap-2 pl-2.5 pr-3 py-1.5 rounded-full bg-[var(--color-brand-fg)]/10 hover:bg-[var(--color-brand-fg)]/20 transition-colors"
+                >
+                  <span className="text-xs font-bold tabular-nums">{getRomeTimePart(r.reservation_time)}</span>
+                  <span className="text-xs font-medium truncate max-w-[120px]">{toTitleCase(r.customer_name)}</span>
+                  <span className="text-[11px] text-[var(--color-brand-fg)]/60 inline-flex items-center gap-0.5">
+                    <UsersIcon className="h-3 w-3" />{r.guests}
+                  </span>
+                </button>
+              ))}
+              {liveService.arriving.length > 6 && (
+                <span className="flex-none text-[11px] text-[var(--color-brand-fg)]/50">
+                  +{liveService.arriving.length - 6} altri
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards — Ospiti / Tavoli / Prenotazioni & Banchetti, follow the global meal filter */}
       {(() => {
         const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
@@ -920,10 +1039,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
       })()}
 
-      {/* Row 1: Stato Tavoli + Note & Allergeni + Da confermare */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
+      {/* Row 1: Stato Tavoli + Note & Allergeni + Da confermare.
+          Tablet landscape (lg): 2 columns — Stato Tavoli full-width, then
+          Note + Da confermare side by side (~half each) so their inner cards
+          have room. The dense 4-column layout returns only at xl (1280+). */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 lg:gap-8">
       {/* Stato Tavoli — Pranzo / Cena side by side */}
-      <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+      <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
 
         <div className={`grid grid-cols-1 ${globalShiftFilter === 'ALL' ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-4 lg:gap-5`}>
@@ -1034,7 +1156,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Note & Allergeni */}
-      <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+      <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center mb-3 gap-2">
             <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">
               Note &amp; Allergeni
@@ -1131,7 +1253,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           When non-empty the card wears an amber accent (background + border
           + ring) so it reads as "needs attention" at a glance; empty stays
           neutral so an idle Dashboard doesn't scream. */}
-      <div className={`lg:col-span-1 p-4 lg:p-5 rounded-xl border shadow-[var(--shadow-sm)] flex flex-col ${
+      <div className={`lg:col-span-1 p-4 lg:p-5 rounded-2xl border shadow-[var(--shadow-sm)] flex flex-col ${
         pendingReservations.length > 0
           ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 dark:bg-amber-500/[0.08] dark:border-amber-500/40 dark:ring-amber-500/20'
           : 'bg-[var(--color-surface)] border-[var(--color-line)]'
@@ -1199,7 +1321,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 2: Affluenza — merged Orario + Settimana with shared shift filter */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         {/* Header: title, view tabs, shift filter */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza</h2>
@@ -1420,7 +1542,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 3: Attività + Spesa del giorno + Sotto Scorta */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Attività — compact summary */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
@@ -1517,7 +1639,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa — compact summary */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
@@ -1636,7 +1758,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Sotto Scorta (Low Stock) */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
+        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Sotto Scorta</h2>
@@ -1695,7 +1817,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       </div>
 
       {/* Row 4: Staff Presence */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
+      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
         <div className="mb-4">
           <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
         </div>
@@ -1816,7 +1938,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
+        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>
