@@ -45,7 +45,7 @@ import { messagesApiService } from './services/messagesApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
-import { getRomeDatePart } from './utils/reservationTime';
+import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime';
 
 import {
   getReservations,
@@ -1114,22 +1114,19 @@ const App: React.FC = () => {
 
   // --- Reservation Logic ---
   const buildReservationDetails = (res: Reservation): string[] => {
-    // Treat reservation_time as a wall-clock string ("YYYY-MM-DDTHH:MM[:SS]")
-    // and parse the components directly, otherwise new Date() may shift it
-    // by the local UTC offset (e.g. 21:00 → 23:00 in CEST).
-    const [datePart, timePartRaw] = res.reservation_time.split('T');
-    const [yStr, mStr, dStr] = (datePart || '').split('-');
-    const [hhStr, mmStr] = (timePartRaw || '00:00').split(':');
-    const localDate = new Date(
+    // Post write-path fix + migration the DB returns reservation_time as a
+    // proper UTC ISO ("2026-07-21T18:00:00.000Z" = 20:00 in Europe/Rome).
+    // Splitting on 'T' would grab the UTC hour and show 18:00 for a 20:00
+    // booking — the classic 2h CEST shift. Convert via the helpers instead.
+    const romeDate = getRomeDatePart(res.reservation_time);
+    const timeLabel = getRomeTimePart(res.reservation_time) || '00:00';
+    const [yStr, mStr, dStr] = (romeDate || '').split('-');
+    const dateLabelSource = new Date(
       Number(yStr),
       Number(mStr) - 1,
       Number(dStr),
-      Number(hhStr) || 0,
-      Number(mmStr) || 0,
     );
-
-    const dateLabel = localDate.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-    const timeLabel = `${(hhStr || '00').padStart(2, '0')}:${(mmStr || '00').padStart(2, '0').slice(0, 2)}`;
+    const dateLabel = dateLabelSource.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
     const shiftLabel = res.shift === Shift.LUNCH ? 'Pranzo' : 'Cena';
     const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
 
