@@ -1403,7 +1403,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         }
 
         if (outcome.status === 'already_cancelled') {
-            const { timeLabel } = formatBookingDateTime(outcome.reservation.reservation_time);
+            const { timeLabel } = formatBookingDateTime(asUtcInstant(outcome.reservation.reservation_time));
             console.log('[ElevenLabs] cancel-reservation: already cancelled', {
                 id: outcome.reservation.id, conversation_id: conversationId,
             });
@@ -1417,7 +1417,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
 
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map(c => {
-                const { timeLabel } = formatBookingDateTime(c.reservation_time);
+                const { timeLabel } = formatBookingDateTime(asUtcInstant(c.reservation_time));
                 return `${timeLabel} per ${c.guests}`;
             }).join(', ');
             console.log('[ElevenLabs] cancel-reservation: ambiguous', {
@@ -1665,7 +1665,7 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
         }
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map(c => {
-                const { timeLabel } = formatBookingDateTime(c.reservation_time);
+                const { timeLabel } = formatBookingDateTime(asUtcInstant(c.reservation_time));
                 return `${timeLabel} per ${c.guests}`;
             }).join(', ');
             return res.json({
@@ -3334,7 +3334,7 @@ function buildDepositConfirmationMessage(
     amountCents: number,
     roomName?: string | null
 ): string {
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
@@ -8339,7 +8339,13 @@ function buildConfirmationMessage(
     guests: number | null | undefined,
     roomName?: string | null
 ): string {
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    // This builder is always fed a DB `timestamptz` (a UTC instant). If it
+    // arrives as a bare naive string (no Z/offset), read it as UTC so the Rome
+    // formatting shows the real wall-clock — a 20:30 Rome booking is stored
+    // 18:30Z and must NOT display as 18:30. (formatBookingDateTime's naive
+    // branch assumes wall-clock, which is correct only for the web-form input
+    // used by the request email, not for DB-sourced confirmation times.)
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
@@ -8380,7 +8386,7 @@ function buildDeclineMessage(
     reservationTime: string | Date,
     guests: number | null | undefined
 ): string {
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = (customerName ?? '').trim();
     const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
@@ -8409,7 +8415,7 @@ function buildBookingConfirmedTemplate(
 ): WhatsAppTemplateOpts | undefined {
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED;
     if (!contentSid) return undefined;
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
         contentSid,
         contentVariables: {
@@ -8427,7 +8433,7 @@ function buildBookingDeclinedTemplate(
 ): WhatsAppTemplateOpts | undefined {
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DECLINED;
     if (!contentSid) return undefined;
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
         contentSid,
         contentVariables: {
@@ -8446,7 +8452,7 @@ function buildBookingDepositConfirmedTemplate(
 ): WhatsAppTemplateOpts | undefined {
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED;
     if (!contentSid) return undefined;
-    const { dateLabel, timeLabel } = formatBookingDateTime(reservationTime);
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
         contentSid,
         contentVariables: {
@@ -8588,6 +8594,22 @@ function escapeHtml(s: string): string {
 //      shifts it to Rome (+1h in CET, +2h in CEST) — that's the bug that
 //      showed 23:00 in a request-ack email for a 21:00 booking. For naive
 //      strings we extract the wall-clock parts directly, no Date detour.
+// Coerce a DB-sourced reservation_time to a real instant. node-pg normally
+// returns a Date, but a value can also reach a formatter as a bare naive ISO
+// string (no Z/offset). For DB-sourced values that string is the UTC instant,
+// so append 'Z' before it hits formatBookingDateTime's naive branch (which
+// would otherwise read it as wall-clock and show the UTC hour). Date and
+// already-marked strings pass through unchanged. Do NOT use this for the
+// web-form input (buildBookingRequestEmail), whose naive string is Rome
+// wall-clock — see fix #85.
+function asUtcInstant(v: string | Date): string | Date {
+    if (typeof v !== 'string') return v;
+    const isNaive = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)
+        && !/Z$/.test(v)
+        && !/[+-]\d{2}:?\d{2}$/.test(v);
+    return isNaive ? v + 'Z' : v;
+}
+
 function formatBookingDateTime(reservationTime: string | Date): { dateLabel: string; timeLabel: string } {
     if (typeof reservationTime === 'string') {
         const isNaive = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(reservationTime)
@@ -8667,7 +8689,9 @@ function buildBookingConfirmationEmail(params: {
     guests: number;
     roomName?: string | null;
 }): { subject: string; text: string; html: string } {
-    const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
+    // DB-sourced confirmation time → read a bare naive string as UTC (see
+    // asUtcInstant). The request email above keeps the raw web-form input (#85).
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
