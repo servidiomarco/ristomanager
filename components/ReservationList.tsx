@@ -1613,10 +1613,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
         notes: '',
         duration_minutes: defaultDurationForShift(newShift),
-        // GDPR "semplice": se il consenso allergie è attivo, parte già spuntato
-        // così in cassa non va rispuntato ogni volta. In modalità avanzata resta
-        // opt-in; se il tenant l'ha disattivato del tutto, resta undefined.
-        consent_data_health: (!marketingEnabled && askHealthConsent) ? true : undefined,
+        // Il consenso allergie compare (e si auto-spunta) solo quando viene
+        // inserito un allergene — vedi l'effect dedicato. Una nuova prenotazione
+        // parte senza allergeni, quindi senza consenso.
+        consent_data_health: undefined,
       });
       setSelectedAllergens([]);
       setSelectedQuickNotes([]);
@@ -1776,6 +1776,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }, 400);
     return () => clearTimeout(timer);
   }, [isFormOpen, isEditing, formData, selectedAllergens, selectedQuickNotes]);
+
+  // The allergy/health-data consent is only relevant when the booking actually
+  // records an allergen (special-category data, art. 9 GDPR). Auto-tick it the
+  // moment an allergen is added — staff shouldn't confirm it every time — and
+  // clear it when none remain. A manual un-tick (false) is preserved (the
+  // guard only acts on a null/undefined value).
+  useEffect(() => {
+    if (!isFormOpen || !askHealthConsent) return;
+    const hasAllergens = selectedAllergens.length > 0;
+    setFormData(prev => {
+      if (hasAllergens && prev.consent_data_health == null) return { ...prev, consent_data_health: true };
+      if (!hasAllergens && prev.consent_data_health != null) return { ...prev, consent_data_health: undefined };
+      return prev;
+    });
+  }, [selectedAllergens, askHealthConsent, isFormOpen]);
 
   // --- Helper Logic ---
 
@@ -4518,11 +4533,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {/* GDPR consents — captured at booking and stored with a timestamp as proof (art. 7 GDPR).
                                     Health/allergy consent is gated by the "Chiedi consenso allergie" legal setting;
                                     the whole card hides when neither consent applies. */}
-                                {(askHealthConsent || marketingEnabled) && (
+                                {((askHealthConsent && selectedAllergens.length > 0) || marketingEnabled) && (
                                 <div className="mt-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
                                     <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Consensi privacy (GDPR)</label>
                                     <div className="space-y-1.5">
-                                        {askHealthConsent && (
+                                        {askHealthConsent && selectedAllergens.length > 0 && (
                                         <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
                                             <input
                                                 type="checkbox"
