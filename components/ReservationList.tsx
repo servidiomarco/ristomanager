@@ -5251,8 +5251,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         document.body
       )}
 
-      {/* Confirmation Modal */}
-      {confirmModal?.isOpen && (
+      {/* Confirmation Modal — portaled: it opens above the (portaled) booking
+          form, so inside the list subtree it would paint underneath it. */}
+      {confirmModal?.isOpen && createPortal(
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={confirmModal.onCancel}>
             <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
@@ -5307,7 +5308,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Confirmation Modal */}
@@ -5351,7 +5353,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           return `${datePart} · ${timePart} · ${r.guests || '?'} ospiti`;
         };
 
-        return (
+        // Portaled: opens on top of the portaled booking form; rendered in the
+        // list subtree it would end up behind it (invisible "Conferma" tap).
+        return createPortal(
           <div
             className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4"
             onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
@@ -5470,7 +5474,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
@@ -5486,7 +5491,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           setConfirmationPicker(null);
           if (confirmationPicker.fromSave) setIsFormOpen(false);
         };
-        return (
+        return createPortal(
           <div
             className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4"
             onClick={closePicker}
@@ -5560,7 +5565,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
@@ -5578,7 +5584,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const canSend = customEmailSubject.trim().length > 0
           && customEmailBody.trim().length > 0
           && !customEmailSending;
-        return (
+        return createPortal(
           <div
             className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4"
             onClick={closeComposer}
@@ -5655,7 +5661,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
