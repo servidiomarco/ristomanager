@@ -1095,7 +1095,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         : req.body || {};
     const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
 
-    const customerName = String(p.customer_name ?? '').trim();
+    const customerName = normalizeCustomerName(String(p.customer_name ?? '').trim());
     // Phone: prefer `phone` (what the customer dictates or confirms), fall back
     // to `caller_id` (auto-captured from the SIP From: header by ElevenLabs).
     // The agent's system prompt pre-fills phone with {{system__caller_id}} and
@@ -3303,7 +3303,7 @@ function formatEuroMinor(cents: number): string {
 function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null): string {
     const amount = formatEuroMinor(amountCents);
     const desc = (description || '').trim();
-    const intro = `Ciao ${customerName}, per completare la prenotazione al Vecchio Frantoio serve un anticipo di ${amount}.`;
+    const intro = `Ciao ${toTitleCase(customerName)}, per completare la prenotazione al Vecchio Frantoio serve un anticipo di ${amount}.`;
     const line = desc ? `${intro}\n${desc}` : intro;
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
 }
@@ -3321,7 +3321,7 @@ function buildDepositRequestMessage(
     checkoutUrl: string
 ): string {
     const amount = formatEuroMinor(amountCents);
-    return `Ciao ${customerName}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (€ 10 a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
+    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (€ 10 a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
 }
 
 // Message sent to the customer as soon as the Revolut ORDER_COMPLETED webhook
@@ -3335,7 +3335,7 @@ function buildDepositConfirmationMessage(
     roomName?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
-    const fullName = (customerName ?? '').trim();
+    const fullName = toTitleCase(customerName);
     const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
@@ -8346,7 +8346,7 @@ function buildConfirmationMessage(
     // branch assumes wall-clock, which is correct only for the web-form input
     // used by the request email, not for DB-sourced confirmation times.)
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
-    const fullName = (customerName ?? '').trim();
+    const fullName = toTitleCase(customerName);
     const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
@@ -8387,7 +8387,7 @@ function buildDeclineMessage(
     guests: number | null | undefined
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
-    const fullName = (customerName ?? '').trim();
+    const fullName = toTitleCase(customerName);
     const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
@@ -8405,7 +8405,7 @@ function templateGuestsLabel(guests: number | null | undefined): string {
     return `${n} ${n === 1 ? 'persona' : 'persone'}`;
 }
 function templateName(customerName: string | null | undefined): string {
-    const t = (customerName ?? '').trim();
+    const t = toTitleCase(customerName);
     return t || '—';
 }
 function buildBookingConfirmedTemplate(
@@ -8652,7 +8652,7 @@ function buildBookingRequestEmail(params: {
     notes?: string | null;
 }): { subject: string; text: string; html: string } {
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
-    const name = (params.customerName || '').trim();
+    const name = toTitleCase(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
@@ -8702,7 +8702,7 @@ function buildBookingConfirmationEmail(params: {
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
     const roomPart = room ? ` · ${escapeHtml(room)}` : '';
-    const name = (params.customerName || '').trim();
+    const name = toTitleCase(params.customerName);
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
     const text = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
 
@@ -8730,7 +8730,7 @@ function buildCustomEmail(params: {
     subject: string;
     body: string;
 }): { subject: string; text: string; html: string } {
-    const name = (params.customerName || '').trim();
+    const name = toTitleCase(params.customerName);
     const subject = params.subject.trim();
     const rawBody = params.body.trim();
     const greeting = name ? `Ciao ${name},` : 'Ciao,';
@@ -11628,7 +11628,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             return res.status(201).json({ ok: true });
         }
 
-        const customer_name = typeof body.customer_name === 'string' ? body.customer_name.trim() : '';
+        const customer_name = typeof body.customer_name === 'string' ? normalizeCustomerName(body.customer_name.trim()) : '';
         const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
         const email = typeof body.email === 'string' ? body.email.trim() : '';
         const date = typeof body.date === 'string' ? body.date : '';
