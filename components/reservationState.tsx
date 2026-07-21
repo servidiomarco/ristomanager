@@ -74,6 +74,18 @@ export const isOverdue = (res: Reservation, now: number): boolean => {
   return now >= start + getEffectiveDurationMin(res) * 60_000;
 };
 
+/** Minutes granted when staff re-asserts that an overdue table is still seated. */
+export const OVERDUE_EXTEND_MIN = 30;
+
+/** A `duration_minutes` that keeps an overdue seated party reading as
+ *  "Arrivato" for another OVERDUE_EXTEND_MIN from `now` — the sanctioned way
+ *  to override the clock-derived "In uscita" (see header comment). */
+export const extendedDurationMin = (res: Reservation, now: number): number => {
+  const start = new Date(res.reservation_time).getTime();
+  if (!Number.isFinite(start)) return getEffectiveDurationMin(res) + OVERDUE_EXTEND_MIN;
+  return Math.max(getEffectiveDurationMin(res), Math.ceil((now - start) / 60_000)) + OVERDUE_EXTEND_MIN;
+};
+
 /** Enum state + clock. Pass `now` from `useNow()` so the UI re-derives live. */
 export const getTimedReservationState = (res: Reservation, now: number): ReservationStateKey => {
   const base = getReservationState(res);

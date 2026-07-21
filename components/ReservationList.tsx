@@ -13,6 +13,7 @@ import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './Table
 import {
   getReservationState, getTimedReservationState, RESERVATION_STATE_META,
   reservationStatePatch, deriveTableDisplayStatus, isSeated, StatusChip,
+  isOverdue, extendedDurationMin, OVERDUE_EXTEND_MIN, getEffectiveDurationMin,
   type ReservationStateKey,
 } from './reservationState';
 import { useNow } from '../hooks/useNow';
@@ -40,6 +41,9 @@ const formatLocalDate = (date: Date): string => {
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 };
+
+/** Minutes a dismissal quiets the overdue-table prompt on this device. */
+const OVERDUE_SNOOZE_MIN = 15;
 
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
@@ -1258,29 +1262,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const noshow: Reservation[] = [];
     const cancelled: Reservation[] = [];
 
+    // Group by the same timed state the row chips render, so a row can never
+    // sit under an "Arrivato" header while its own badge reads "In uscita".
     for (const r of dateFiltered) {
-      const resStatus = r.reservation_status || ReservationStatus.CONFIRMED;
-      if (resStatus === ReservationStatus.PENDING) {
-        pending.push(r);
-        continue;
-      }
-      if (resStatus === ReservationStatus.CANCELLED || resStatus === ReservationStatus.DECLINED) {
-        cancelled.push(r);
-        continue;
-      }
-      if (resStatus === ReservationStatus.NO_SHOW) {
-        noshow.push(r);
-        continue;
-      }
-      const status = r.arrival_status || ArrivalStatus.WAITING;
-      if (status === ArrivalStatus.DEPARTED) {
-        freed.push(r);
-      } else if (status === ArrivalStatus.DEPARTING) {
-        departing.push(r);
-      } else if (status === ArrivalStatus.ARRIVED) {
-        arrived.push(r);
-      } else {
-        waiting.push(r);
+      const state = isViewingToday ? getTimedReservationState(r, nowTick) : getReservationState(r);
+      switch (state) {
+        case 'pending':   pending.push(r); break;
+        case 'cancelled':
+        case 'declined':  cancelled.push(r); break;
+        case 'noshow':    noshow.push(r); break;
+        case 'freed':     freed.push(r); break;
+        case 'departing': departing.push(r); break;
+        case 'arrived':   arrived.push(r); break;
+        default:          waiting.push(r); break; // 'waiting' + clock-derived 'arriving'
       }
     }
 
@@ -1339,7 +1333,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       { key: 'freed', label: meta('freed').label, dotClass: meta('freed').dotClass, items: freed },
       { key: 'cancelled', label: 'Annullate', dotClass: meta('cancelled').dotClass, items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy]);
+  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
@@ -1455,8 +1449,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [declineReservation, setDeclineReservation] = useState<Reservation | null>(null);
 
   const handleSetReservationState = (res: Reservation, state: Exclude<ReservationStateKey, 'arriving'>) => {
-    onUpdateReservation({ ...res, ...reservationStatePatch(state) });
+    const patch = reservationStatePatch(state);
+    // Choosing "Arrivato" on an already-overdue table must stick: grant more
+    // time, or the timed layer re-labels it "In uscita" on the next tick.
+    if (state === 'arrived' && isOverdue(res, nowTick)) {
+      patch.duration_minutes = extendedDurationMin(res, nowTick);
+    }
+    onUpdateReservation({ ...res, ...patch });
     showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
+  };
+
+  // --- Overdue-table prompt ------------------------------------------------
+  // A seated party past its expected duration whose state nobody touched:
+  // ask the room whether the guests are still there (+30') or the table is
+  // actually free. Answers persist and sync to every device; a plain dismiss
+  // only snoozes the question on this screen.
+  const [overdueSnoozes, setOverdueSnoozes] = useState<Record<number, number>>({});
+  const overduePromptRes = useMemo(() => {
+    if (!canEdit) return null;
+    const today = formatLocalDate(new Date(nowTick));
+    return reservations.find(r =>
+      getRomeDatePart(r.reservation_time) === today &&
+      getReservationState(r) === 'arrived' &&
+      isOverdue(r, nowTick) &&
+      (overdueSnoozes[r.id] ?? 0) <= nowTick
+    ) ?? null;
+  }, [reservations, nowTick, canEdit, overdueSnoozes]);
+  const snoozeOverduePrompt = (res: Reservation) => {
+    setOverdueSnoozes(prev => ({ ...prev, [res.id]: nowTick + OVERDUE_SNOOZE_MIN * 60_000 }));
   };
 
   // Voice input handler
@@ -5685,10 +5705,68 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         document.body
       )}
 
+      {/* Overdue-table prompt: a seated party is past its expected duration
+          and the state was never updated — ask whether they're still there.
+          Yields to the pickers so it never stacks over an open modal. */}
+      {overduePromptRes && !stateChangeReservation && !declineReservation && (() => {
+        const res = overduePromptRes;
+        const table = res.table_id ? displayTables.find(t => t.id === res.table_id) : undefined;
+        const end = new Date(new Date(res.reservation_time).getTime() + getEffectiveDurationMin(res) * 60_000);
+        const endLabel = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => snoozeOverduePrompt(res)}>
+            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-center pt-3 pb-1 sm:hidden">
+                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              </div>
+              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+                <div className="min-w-0">
+                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-cyan-600" /> Tavolo ancora occupato?
+                  </h3>
+                  <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                    {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}{table ? ` · Tavolo ${table.name}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => snoozeOverduePrompt(res)}
+                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-[var(--color-fg)]">
+                  Il tempo previsto è terminato alle {endLabel} e lo stato non è stato aggiornato. I clienti sono ancora al tavolo?
+                </p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button type="button"
+                    onClick={() => {
+                      snoozeOverduePrompt(res);
+                      onUpdateReservation({ ...res, duration_minutes: extendedDurationMin(res, nowTick) });
+                      showToast(`${toTitleCase(res.customer_name)}: +${OVERDUE_EXTEND_MIN} minuti al tavolo`, 'success');
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 h-10 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+                    <UserCheck className="h-4 w-4" /> Ancora qui · +{OVERDUE_EXTEND_MIN} min
+                  </button>
+                  <button type="button"
+                    onClick={() => { snoozeOverduePrompt(res); handleSetReservationState(res, 'freed'); }}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 h-10 rounded-lg text-sm font-semibold border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <Armchair className="h-4 w-4" /> Libera il tavolo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* State picker modal */}
       {stateChangeReservation && (() => {
         const res = stateChangeReservation;
-        const current = getReservationState(res);
+        // Mirror the timed state the list chip shows, so the checked option
+        // never disagrees with the badge that opened this modal. The derived
+        // 'arriving' isn't a pickable option: it checks 'waiting', its base.
+        const timed = isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res);
+        const current: ReservationStateKey = timed === 'arriving' ? 'waiting' : timed;
         const isPending = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.PENDING;
         // For PENDING web bookings the only sensible actions are Conferma / Non confermata.
         const options: Exclude<ReservationStateKey, 'arriving'>[] = isPending
