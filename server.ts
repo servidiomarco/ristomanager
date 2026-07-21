@@ -10726,32 +10726,35 @@ app.get('/settings/legal', authenticate, async (_req, res) => {
 });
 
 app.put('/settings/legal', authenticate, requirePermission('settings:full'), async (req, res) => {
-    const body = req.body ?? {};
-    if (typeof body !== 'object' || Array.isArray(body)) {
-        return res.status(400).json({ error: 'invalid_value', message: 'Body must be an object' });
-    }
-    const current = await getLegalConfig();
-    const next: Record<string, string | boolean> = { ...current };
-    for (const k of LEGAL_STRING_FIELDS) {
-        if (k in body) {
-            if (typeof body[k] !== 'string') {
-                return res.status(400).json({ error: 'invalid_value', message: `${k} must be a string` });
-            }
-            // Cap length defensively; legal blurbs can be long but not unbounded.
-            next[k] = String(body[k]).slice(0, 5000);
-        }
-    }
-    for (const k of LEGAL_BOOL_FIELDS) {
-        if (k in body) {
-            if (typeof body[k] !== 'boolean') {
-                return res.status(400).json({ error: 'invalid_value', message: `${k} must be a boolean` });
-            }
-            next[k] = body[k];
-        }
-    }
-    // legal_mode must be one of the known modes; anything else falls back safely.
-    next.legal_mode = normalizeLegalMode(next.legal_mode);
+    // Whole handler wrapped so a throw in getLegalConfig()/DB never escapes to
+    // Express's default (HTML, non-JSON) error page — which surfaces on the
+    // client as an opaque "Request failed". The real cause is echoed in `detail`.
     try {
+        const body = req.body ?? {};
+        if (typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'invalid_value', message: 'Body must be an object' });
+        }
+        const current = await getLegalConfig();
+        const next: Record<string, string | boolean> = { ...current };
+        for (const k of LEGAL_STRING_FIELDS) {
+            if (k in body) {
+                if (typeof body[k] !== 'string') {
+                    return res.status(400).json({ error: 'invalid_value', message: `${k} must be a string` });
+                }
+                // Cap length defensively; legal blurbs can be long but not unbounded.
+                next[k] = String(body[k]).slice(0, 5000);
+            }
+        }
+        for (const k of LEGAL_BOOL_FIELDS) {
+            if (k in body) {
+                if (typeof body[k] !== 'boolean') {
+                    return res.status(400).json({ error: 'invalid_value', message: `${k} must be a boolean` });
+                }
+                next[k] = body[k];
+            }
+        }
+        // legal_mode must be one of the known modes; anything else falls back safely.
+        next.legal_mode = normalizeLegalMode(next.legal_mode);
         await queryWithRetry(
             `INSERT INTO app_settings (key, text_value, updated_at)
              VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -10760,9 +10763,9 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
             [LEGAL_CONFIG_KEY, JSON.stringify(next)]
         );
         res.json(next);
-    } catch (err) {
+    } catch (err: any) {
         console.error('PUT /settings/legal error:', err);
-        res.status(500).json({ error: 'Failed to update legal settings' });
+        res.status(500).json({ error: 'Failed to update legal settings', detail: err?.message });
     }
 });
 
