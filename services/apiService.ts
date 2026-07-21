@@ -942,6 +942,8 @@ export interface LegalSettings {
   last_updated: string;
   uses_analytics_cookies: boolean;
   records_calls: boolean;
+  /** Show the allergy/health-data consent checkbox in the reservation modal (default true). */
+  ask_health_consent: boolean;
 }
 
 export const getLegalSettings = async (): Promise<LegalSettings> => {

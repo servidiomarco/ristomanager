@@ -10672,6 +10672,7 @@ const LEGAL_STRING_FIELDS = [
 const LEGAL_BOOL_FIELDS = [
     'uses_analytics_cookies', // Il sito usa cookie analitici/di terze parti
     'records_calls',          // Le chiamate sono registrate
+    'ask_health_consent',     // Chiedi il consenso allergie/dati sanitari in prenotazione
 ] as const;
 
 function emptyLegalConfig(): Record<string, string | boolean> {
@@ -10679,6 +10680,9 @@ function emptyLegalConfig(): Record<string, string | boolean> {
     for (const k of LEGAL_STRING_FIELDS) out[k] = '';
     for (const k of LEGAL_BOOL_FIELDS) out[k] = false;
     out.legal_mode = LEGAL_MODE_DEFAULT;
+    // Default ON: preserves the previous always-on allergy-consent behaviour
+    // for tenants without a stored value.
+    out.ask_health_consent = true;
     return out;
 }
 

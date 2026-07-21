@@ -18,7 +18,7 @@ const EMPTY: LegalSettings = {
   website_url: '', app_name: 'RistoManager', voice_business_name: '',
   data_processors: '', retention_customer: '', retention_calls: '',
   retention_marketing: '', extra_eu_note: '', governing_law: '', last_updated: '',
-  uses_analytics_cookies: false, records_calls: true,
+  uses_analytics_cookies: false, records_calls: true, ask_health_consent: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -341,6 +341,20 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   <p className="text-[12px] text-[var(--color-fg-muted)] mt-1">Include marketing, consensi, cookie analitici e termini di servizio. I clienti senza consenso restano esclusi dai flussi marketing.</p>
                 </button>
               </div>
+            </div>
+
+            {/* ---------- Consenso allergie in prenotazione ---------- */}
+            <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3">
+              <label className="flex items-start gap-2.5 text-[14px] text-[var(--color-fg)] cursor-pointer">
+                <input type="checkbox" checked={data.ask_health_consent} disabled={!canEdit}
+                  onChange={e => setBool('ask_health_consent')(e.target.checked)} className="mt-0.5 h-4 w-4 rounded flex-shrink-0" />
+                <span>
+                  Chiedi il consenso al trattamento di allergie / intolleranze in prenotazione
+                  <span className="block text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                    Se disattivato, la casella dei dati sanitari (art. 9 GDPR) non compare nel modal prenotazione. Utile se le allergie le raccogli solo a voce al tavolo, senza registrarle nel gestionale.
+                  </span>
+                </span>
+              </label>
             </div>
 
             {/* ---------- Form fields ---------- */}

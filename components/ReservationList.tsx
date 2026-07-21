@@ -538,13 +538,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [allergenPresets, setAllergenPresets] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
   const [showNotesSection, setShowNotesSection] = useState(false);
-  // Marketing consent is only offered when the legal layer runs in "advanced".
+  // GDPR consent gating, read once from the legal settings:
+  //  - marketing consent only in "advanced" mode;
+  //  - allergy/health consent shown unless the tenant turned it off
+  //    (Impostazioni → Legale). Both default ON until the fetch resolves.
   const [marketingEnabled, setMarketingEnabled] = useState(true);
+  const [askHealthConsent, setAskHealthConsent] = useState(true);
   useEffect(() => {
     let cancelled = false;
     getLegalSettings()
-      .then(l => { if (!cancelled) setMarketingEnabled(l.legal_mode !== 'simple'); })
-      .catch(() => { /* keep default */ });
+      .then(l => {
+        if (cancelled) return;
+        setMarketingEnabled(l.legal_mode !== 'simple');
+        setAskHealthConsent(l.ask_health_consent !== false); // undefined (old config) → true
+      })
+      .catch(() => { /* keep defaults */ });
     return () => { cancelled = true; };
   }, []);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
@@ -1605,10 +1613,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
         notes: '',
         duration_minutes: defaultDurationForShift(newShift),
-        // GDPR "semplice": l'unico consenso mostrato (dati sanitari/allergie)
-        // parte già spuntato, così in cassa non va rispuntato ogni volta. In
-        // modalità avanzata resta opt-in (undefined = da spuntare a mano).
-        consent_data_health: marketingEnabled ? undefined : true,
+        // GDPR "semplice": se il consenso allergie è attivo, parte già spuntato
+        // così in cassa non va rispuntato ogni volta. In modalità avanzata resta
+        // opt-in; se il tenant l'ha disattivato del tutto, resta undefined.
+        consent_data_health: (!marketingEnabled && askHealthConsent) ? true : undefined,
       });
       setSelectedAllergens([]);
       setSelectedQuickNotes([]);
@@ -4507,10 +4515,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     )}
                                 </div>
 
-                                {/* GDPR consents — always visible; captured at booking and stored with a timestamp as proof (art. 7 GDPR) */}
+                                {/* GDPR consents — captured at booking and stored with a timestamp as proof (art. 7 GDPR).
+                                    Health/allergy consent is gated by the "Chiedi consenso allergie" legal setting;
+                                    the whole card hides when neither consent applies. */}
+                                {(askHealthConsent || marketingEnabled) && (
                                 <div className="mt-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
                                     <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Consensi privacy (GDPR)</label>
                                     <div className="space-y-1.5">
+                                        {askHealthConsent && (
                                         <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
                                             <input
                                                 type="checkbox"
@@ -4520,6 +4532,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             />
                                             <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--color-fg-muted)]">(dati sanitari, art. 9 GDPR)</span></span>
                                         </label>
+                                        )}
                                         {marketingEnabled && (
                                         <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
                                             <input
@@ -4538,6 +4551,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </p>
                                     )}
                                 </div>
+                                )}
                             </div>
                         </div>
 
