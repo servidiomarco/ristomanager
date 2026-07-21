@@ -221,6 +221,19 @@
                         />
                     </div>
 
+                    <!-- Allergie & Intolleranze -->
+                    <div>
+                        <label class="block text-xs font-medium text-stone-600 mb-2">Allergie e intolleranze (opzionale)</label>
+                        <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-stone-100 border border-stone-200 mb-3">
+                            <button type="button" data-diet-tab="allergie"
+                                class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Allergie</button>
+                            <button type="button" data-diet-tab="intolleranze"
+                                class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Intolleranze</button>
+                        </div>
+                        <div id="dietGrid" class="grid grid-cols-2 gap-2"></div>
+                        <p class="text-[11px] text-stone-400 mt-2">Le allergie sono gravi; le intolleranze più lievi. Tocca un alimento per assegnarlo.</p>
+                    </div>
+
                     <div>
                         <label for="notes" class="block text-xs font-medium text-stone-600 mb-1">Note (opzionale)</label>
                         <textarea
@@ -228,7 +241,7 @@
                             name="notes"
                             rows="2"
                             maxlength="500"
-                            placeholder="Allergie, esigenze, occasioni speciali…"
+                            placeholder="Esigenze, occasioni speciali…"
                             class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition resize-none"
                         ></textarea>
                     </div>
@@ -331,6 +344,70 @@
     const form = $('bookingForm');
     const confirmation = $('confirmation');
     const confirmRecap = $('confirmRecap');
+
+    // --- Allergie & Intolleranze --------------------------------------------
+    // Two tabs over the same preset list; a food belongs to exactly one list
+    // (exclusive). Saved into `notes` as "Allergie: X | Intolleranze: Y" so the
+    // internal CRM parses/renders them the same way.
+    const DIET_ITEMS = ['Glutine','Crostacei','Uova','Pesce','Arachidi','Soia','Latte','Frutta a guscio','Sedano','Senape','Sesamo','Solfiti','Lupini','Molluschi'];
+    const diet = { allergie: new Set(), intolleranze: new Set() };
+    let dietTab = 'allergie';
+    const dietGrid = $('dietGrid');
+    const dietTabBtns = document.querySelectorAll('.diet-tab');
+
+    function renderDietTabs() {
+        dietTabBtns.forEach((btn) => {
+            const key = btn.getAttribute('data-diet-tab');
+            const active = key === dietTab;
+            const activeCls = key === 'allergie' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white';
+            btn.className = 'diet-tab py-2 rounded-lg text-sm font-semibold transition-colors ' + (active ? activeCls : 'text-stone-500 hover:text-stone-800');
+            const count = diet[key].size;
+            btn.textContent = (key === 'allergie' ? 'Allergie' : 'Intolleranze') + (count ? ` · ${count}` : '');
+        });
+    }
+
+    function renderDietGrid() {
+        const activeSet = diet[dietTab];
+        const otherSet = diet[dietTab === 'allergie' ? 'intolleranze' : 'allergie'];
+        const onCls = dietTab === 'allergie' ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-amber-300 bg-amber-50 text-amber-800';
+        const boxCls = dietTab === 'allergie' ? 'bg-rose-600 border-rose-600' : 'bg-amber-600 border-amber-600';
+        dietGrid.innerHTML = '';
+        DIET_ITEMS.forEach((item) => {
+            const inActive = activeSet.has(item);
+            const inOther = otherSet.has(item);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl border text-left text-sm font-medium transition-colors ' +
+                (inActive ? onCls : 'border-stone-200 bg-stone-50 text-stone-500 hover:bg-white');
+            const check = inActive ? '<svg viewBox="0 0 24 24" class="w-3 h-3" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : '';
+            const tag = (inOther && !inActive) ? `<span class="ml-auto text-[9px] font-semibold uppercase tracking-wide text-stone-400 flex-shrink-0">${dietTab === 'allergie' ? 'intoll.' : 'allergia'}</span>` : '';
+            btn.innerHTML =
+                `<span class="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${inActive ? boxCls : 'border-stone-300 bg-white'}">${check}</span>` +
+                `<span class="truncate">${item}</span>` + tag;
+            btn.addEventListener('click', () => {
+                otherSet.delete(item);                       // exclusive
+                if (activeSet.has(item)) activeSet.delete(item); else activeSet.add(item);
+                renderDietTabs();
+                renderDietGrid();
+            });
+            dietGrid.appendChild(btn);
+        });
+    }
+
+    dietTabBtns.forEach((btn) => btn.addEventListener('click', () => {
+        dietTab = btn.getAttribute('data-diet-tab');
+        renderDietTabs();
+        renderDietGrid();
+    }));
+    renderDietTabs();
+    renderDietGrid();
+
+    function buildDietaryNote() {
+        const parts = [];
+        if (diet.allergie.size) parts.push('Allergie: ' + [...diet.allergie].join(', '));
+        if (diet.intolleranze.size) parts.push('Intolleranze: ' + [...diet.intolleranze].join(', '));
+        return parts.join(' | ');
+    }
 
     // Init date = today
     const today = new Date();
@@ -595,7 +672,9 @@
         const customer_name = $('customer_name').value.trim();
         const phone = $('phone').value.trim();
         const email = $('email').value.trim();
-        const notes = $('notes').value.trim();
+        // Prepend the dietary flags so the CRM parses "Allergie:/Intolleranze:".
+        const freeNote = $('notes').value.trim();
+        const notes = [buildDietaryNote(), freeNote].filter(Boolean).join(' | ');
         const website = form.elements['website'].value;
 
         if (!customer_name) { showError('Inserisci il tuo nome'); return; }
