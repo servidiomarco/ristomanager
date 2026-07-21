@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Customer } from '../types';
 import { createCustomer, getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -92,7 +93,9 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
 
   if (!isOpen) return null;
 
-  return (
+  // Portaled: this picker opens on top of forms that are themselves portaled
+  // to <body> (e.g. the reservation form), so it must live at the same level.
+  return createPortal(
     <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={onClose}>
       <div
         className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden"
@@ -241,6 +244,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -583,13 +583,18 @@ body {
    IMPORTANT: opacity-only, no transform. A transform animation (even filled at
    `none`) turns this wrapper into a containing block for its `position: fixed`
    descendants, which would trap every modal/overlay rendered inside a view and
-   mis-anchor it to the wrapper instead of the viewport. */
+   mis-anchor it to the wrapper instead of the viewport.
+   EQUALLY IMPORTANT: no `forwards`/`both` fill. A filled opacity animation
+   stays "applied" forever and keeps this wrapper a stacking context, which
+   pins every overlay rendered inside the view below the mobile/tablet bottom
+   nav (z-30) and below any body-portaled modal, whatever its z-index. With no
+   fill the context only exists for the 0.2s the fade actually runs. */
 @keyframes view-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 .animate-view-in {
-  animation: view-in 0.2s ease-out both;
+  animation: view-in 0.2s ease-out;
 }
 
 /* Tactile press feedback — the whole app's tap language. Composable with
