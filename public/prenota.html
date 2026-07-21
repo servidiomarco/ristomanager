@@ -256,6 +256,16 @@
                             class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition resize-none"
                         ></textarea>
                     </div>
+
+                    <!-- Consenso privacy -->
+                    <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input type="checkbox" id="privacyConsent" class="mt-1 h-4 w-4 flex-shrink-0 accent-amber-700" />
+                        <span class="text-xs text-stone-600 leading-relaxed">
+                            Ho letto l'<a href="/privacy" target="_blank" rel="noopener" class="text-amber-800 underline">informativa sulla privacy</a>
+                            e acconsento al trattamento dei miei dati per gestire la prenotazione, inclusi gli eventuali
+                            dati su allergie/intolleranze (dati sanitari, art. 9 GDPR) che scelgo di comunicare.
+                        </span>
+                    </label>
                 </div>
             </section>
 
@@ -710,6 +720,7 @@
         if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) { showError('Numero di telefono non valido'); return; }
         // Simple RFC-lite email check — server does authoritative validation.
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('Indirizzo email non valido'); return; }
+        if (!$('privacyConsent').checked) { showError('Per procedere, accetta l\'informativa sulla privacy'); return; }
 
         submitBtn.disabled = true;
         submitBtn.textContent = 'Invio in corso…';

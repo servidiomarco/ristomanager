@@ -11934,6 +11934,101 @@ app.get('/prenota', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
+// Public privacy notice (informativa) linked from the /prenota form. Built from
+// the legal settings so the restaurant edits it in one place (Impostazioni →
+// Legale) without touching HTML. Covers the personal data — and the special
+// category health data (allergies) — collected by the booking form.
+app.get(['/privacy', '/informativa-privacy'], async (_req, res) => {
+    try {
+        const c = await getLegalConfig();
+        const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, ch => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+        const ph = (v: unknown, fallback: string): string => {
+            const s = String(v ?? '').trim();
+            return s ? esc(s) : `<span style="color:#a8a29e">[${esc(fallback)}]</span>`;
+        };
+        const adv = c.legal_mode !== 'simple';
+        const company = ph(c.company_name, 'Ragione sociale');
+        const dpo = String(c.dpo_name ?? '').trim()
+            ? `<p><strong>Responsabile della protezione dei dati (DPO):</strong> ${esc(c.dpo_name)}${String(c.dpo_contact ?? '').trim() ? ` — ${esc(c.dpo_contact)}` : ''}</p>`
+            : '';
+        const processors = String(c.data_processors ?? '').trim()
+            ? String(c.data_processors).trim().split('\n').map(l => `<li>${esc(l.trim())}</li>`).join('')
+            : '<li style="color:#a8a29e">[Fornitori: hosting, assistente vocale, messaggistica, provider e-mail…]</li>';
+        const extraEu = String(c.extra_eu_note ?? '').trim()
+            ? esc(c.extra_eu_note)
+            : 'Alcuni fornitori possono trattare i dati fuori dallo Spazio Economico Europeo (anche negli USA), sulla base di garanzie adeguate ex artt. 44 ss. GDPR (Data Privacy Framework UE-USA o Clausole Contrattuali Standard).';
+        const html = `<!doctype html><html lang="it"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Informativa sulla privacy — ${company}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin:0; background:#fbf9f4; color:#292524; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.65; }
+  .wrap { max-width:720px; margin:0 auto; padding:40px 22px 80px; }
+  h1 { font-family:Georgia,"Times New Roman",serif; font-size:26px; font-weight:600; margin:0 0 6px; }
+  .sub { color:#78716c; font-size:13px; margin:0 0 28px; }
+  h2 { font-size:15px; font-weight:700; margin:28px 0 8px; color:#78350f; }
+  p, li { font-size:14.5px; }
+  ul { padding-left:20px; margin:8px 0; }
+  a { color:#92400e; }
+  .card { background:#fff; border:1px solid #e7e5e4; border-radius:16px; padding:20px 22px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .back { display:inline-block; margin-bottom:20px; font-size:14px; color:#92400e; text-decoration:none; }
+  footer { margin-top:32px; font-size:12px; color:#a8a29e; }
+</style></head><body><div class="wrap">
+  <a class="back" href="/prenota">← Torna alla prenotazione</a>
+  <div class="card">
+    <h1>Informativa sul trattamento dei dati personali</h1>
+    <p class="sub">Clienti e prenotazioni · resa ai sensi degli artt. 13-14 del Reg. (UE) 2016/679 (GDPR)</p>
+
+    <h2>1. Titolare del trattamento</h2>
+    <p>${company}${String(c.company_address ?? '').trim() ? ` — ${esc(c.company_address)}` : ''}${String(c.vat_number ?? '').trim() ? ` — P.IVA ${esc(c.vat_number)}` : ''}.<br>
+    Contatti privacy: ${ph(c.privacy_email, 'e-mail privacy')}${String(c.privacy_phone ?? '').trim() ? ` — ${esc(c.privacy_phone)}` : ''}.</p>
+    ${dpo}
+
+    <h2>2. Categorie di dati trattati</h2>
+    <ul>
+      <li>Dati identificativi e di contatto: nome, telefono, e-mail.</li>
+      <li>Dati della prenotazione: data, orario, numero di ospiti, sala, note.</li>
+      <li><strong>Dati relativi alla salute</strong> (categoria particolare, art. 9 GDPR): <strong>allergie e intolleranze</strong>, conferiti volontariamente per la sicurezza alimentare.</li>
+    </ul>
+
+    <h2>3. Finalità e base giuridica</h2>
+    <ul>
+      <li>Gestione della prenotazione e del servizio — esecuzione del contratto (art. 6.1.b).</li>
+      <li>Trattamento di allergie/intolleranze — consenso esplicito, prestato conferendo volontariamente il dato (art. 9.2.a).</li>
+      <li>Conferme e promemoria di prenotazione — esecuzione del contratto (art. 6.1.b).</li>
+      ${adv ? '<li>Eventuali comunicazioni commerciali — solo previo consenso, revocabile (art. 6.1.a).</li>' : ''}
+      <li>Adempimenti di legge (fiscali/contabili) — obbligo legale (art. 6.1.c).</li>
+    </ul>
+
+    <h2>4. Natura del conferimento</h2>
+    <p>Il conferimento dei dati di contatto è necessario per gestire la prenotazione. I dati su allergie/intolleranze sono facoltativi: il rifiuto non pregiudica la prenotazione ma può limitare la gestione della sicurezza alimentare.</p>
+
+    <h2>5. Destinatari</h2>
+    <p>I dati possono essere trattati, per conto del Titolare e sulla base di accordi ex art. 28 GDPR, da fornitori di servizi:</p>
+    <ul>${processors}</ul>
+    <p>I dati non sono diffusi; possono essere comunicati ad autorità competenti ove previsto dalla legge.</p>
+
+    <h2>6. Trasferimenti extra-UE</h2>
+    <p>${extraEu}</p>
+
+    <h2>7. Conservazione</h2>
+    <p>Dati cliente e storico prenotazioni: ${ph(c.retention_customer, 'es. 24 mesi dall’ultima interazione')}. Dati con obbligo fiscale: 10 anni.</p>
+
+    <h2>8. Diritti dell'interessato</h2>
+    <p>Puoi esercitare i diritti ex artt. 15-22 GDPR (accesso, rettifica, cancellazione, limitazione, portabilità, opposizione) e revocare il consenso in ogni momento scrivendo a ${ph(c.privacy_email, 'e-mail privacy')}. Hai inoltre diritto di reclamo al <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener">Garante per la protezione dei dati personali</a>.</p>
+  </div>
+  <footer>${company} · Informativa privacy</footer>
+</div></body></html>`;
+        res.set('Cache-Control', 'no-store');
+        res.type('html').send(html);
+    } catch (err) {
+        console.error('GET /privacy error:', err);
+        res.status(500).type('html').send('<p>Informativa temporaneamente non disponibile.</p>');
+    }
+});
+
 // Restaurant logo used by the /prenota landing page and the customer emails.
 // Served explicitly rather than via express.static to avoid exposing the whole
 // public/ folder. Two variants: default (dark artwork on transparent) and
