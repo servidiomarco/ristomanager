@@ -35,6 +35,8 @@ import { getReservations, getTables, getRooms, updateReservation, createReservat
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { StatusChip, PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
+import { DietaryChips } from './DietaryChips';
+import { stripDietaryNote } from '../utils/dietary';
 import { useNow } from '../hooks/useNow';
 
 // Local-date helper (avoid UTC drift)
@@ -954,8 +956,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         {/* Customer notes / preferences */}
         {(reservation.notes || reservation.customer_dietary_notes || reservation.customer_preferences_notes) && (
           <div className="mt-3 lg:mt-5 space-y-1.5 lg:space-y-2">
-            {reservation.notes && (
-              <NotesLine label="Note prenotazione" text={reservation.notes} />
+            <DietaryChips notes={reservation.notes} />
+            {stripDietaryNote(reservation.notes) && (
+              <NotesLine label="Note prenotazione" text={stripDietaryNote(reservation.notes)} />
             )}
             {reservation.customer_dietary_notes && (
               <NotesLine label="Dieta / allergie" text={reservation.customer_dietary_notes} tone="amber" />

@@ -6,6 +6,8 @@ import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { isSeated, getTimedReservationState, PulseDot } from './reservationState';
+import { DietaryChips } from './DietaryChips';
+import { stripDietaryNote } from '../utils/dietary';
 import { useNow } from '../hooks/useNow';
 import { toTitleCase } from '../utils/text';
 import { PaymentBadge, hasUnpaidDeposit } from './PaymentBadge';
@@ -1178,7 +1180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 const time = getRomeTimePart(reservation.reservation_time);
                 const circleBg = isLunch ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]';
                 const isExpanded = expandedNoteIds.has(reservation.id);
-                const noteText = reservation.notes || '';
+                const noteText = stripDietaryNote(reservation.notes);
                 const isTruncatable = noteText.length > 80;
                 return (
                   <div key={reservation.id} className="border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors">
@@ -1208,16 +1210,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       )}
                     </div>
 
-                    {/* Row 2: Allergen chips */}
-                    {allergens.length > 0 && (
-                      <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
-                        {allergens.map(a => (
-                          <span key={a} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30">
-                            {a}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {/* Row 2: Allergie (rose) + Intolleranze (amber) chips */}
+                    <DietaryChips notes={reservation.notes} presets={allergenPresets} size="sm" className="mt-2.5" />
 
                     {/* Row 3: Notes (truncatable) */}
                     {noteText && (

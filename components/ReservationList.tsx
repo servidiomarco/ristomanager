@@ -17,6 +17,8 @@ import {
 } from './reservationState';
 import { useNow } from '../hooks/useNow';
 import { SwipeToCheckIn } from './SwipeToCheckIn';
+import { DietaryChips } from './DietaryChips';
+import { buildDietaryNote, parseDietary, stripDietaryNote } from '../utils/dietary';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { PaymentBadge } from './PaymentBadge';
@@ -526,7 +528,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     fromSave: boolean;
   } | null>(null);
   const [sendingConfirmation, setSendingConfirmation] = useState<'sms' | 'whatsapp' | 'email' | null>(null);
+  // `selectedAllergens` holds the INTOLERANCES (kept for the notes "Intolleranze:"
+  // segment and backward compat); `selectedAllergies` holds the serious ALLERGIES.
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>([]);
+  const [selectedAllergies, setSelectedAllergies] = useState<string[]>([]);
+  // Which of the two dietary tabs is active in the form.
+  const [dietaryTab, setDietaryTab] = useState<'allergie' | 'intolleranze'>('allergie');
   const [selectedQuickNotes, setSelectedQuickNotes] = useState<string[]>([]);
   // Fetched from /settings/reservation-notes on mount so admins can edit the
   // chip list from Impostazioni. Each preset carries an optional lucide icon
@@ -1226,7 +1233,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ? true
         : (r.arrival_status || ArrivalStatus.WAITING) === filterArrivalStatus;
       const matchesGuests = matchesGuestRange(r.guests || 0);
-      const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /intolleranze:/i.test(r.notes));
+      const matchesAllergens = !filterHasAllergens || (typeof r.notes === 'string' && /(Allergie|Intolleranze):/i.test(r.notes));
       const matchesNotes = !filterHasNotes || (typeof r.notes === 'string' && r.notes.trim().length > 0);
       const matchesNoTable = !filterNoTable || !r.table_id;
       const matchesSource = filterSource === 'ALL'
@@ -1531,11 +1538,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       };
       setFormData(formattedReservation);
 
-      // Extract allergens from notes
-      const existingAllergens = allergenPresets.filter(allergen =>
-        res.notes?.toLowerCase().includes(allergen.toLowerCase())
-      );
-      setSelectedAllergens(existingAllergens);
+      // Extract allergies + intolerances from the notes' labelled segments.
+      const dietary = parseDietary(res.notes, allergenPresets);
+      setSelectedAllergies(dietary.allergies);
+      setSelectedAllergens(dietary.intolerances);
+      const existingAllergens = [...dietary.allergies, ...dietary.intolerances];
 
       // Extract quick notes
       const existingQuickNotes = quickNotes
@@ -1543,10 +1550,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         .map(n => n.label);
       setSelectedQuickNotes(existingQuickNotes);
 
-      // Clean notes: remove allergens and quick notes parts to avoid duplication
-      let cleanedNotes = res.notes || '';
-      // Remove "Intolleranze: ..." part
-      cleanedNotes = cleanedNotes.replace(/Intolleranze:\s*[^|]*(\s*\|\s*)?/gi, '');
+      // Clean notes: remove dietary + quick-note segments to avoid duplication
+      let cleanedNotes = stripDietaryNote(res.notes);
       // Remove quick notes
       existingQuickNotes.forEach(note => {
         cleanedNotes = cleanedNotes.replace(new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\|?\\s*', 'gi'), '');
@@ -1619,6 +1624,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         consent_data_health: undefined,
       });
       setSelectedAllergens([]);
+      setSelectedAllergies([]);
+      setDietaryTab('allergie');
       setSelectedQuickNotes([]);
       setShowAllergensSection(false);
       setShowNotesSection(false);
@@ -1730,6 +1737,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const existing = loadDraft<{
         formData: Partial<Reservation>;
         selectedAllergens: string[];
+        selectedAllergies?: string[];
         selectedQuickNotes: string[];
       }>(DRAFT_KEYS.RESERVATION_NEW);
       if (!existing) {
@@ -1738,8 +1746,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
       setFormData(existing.data.formData);
       setSelectedAllergens(existing.data.selectedAllergens || []);
+      setSelectedAllergies(existing.data.selectedAllergies || []);
       setSelectedQuickNotes(existing.data.selectedQuickNotes || []);
-      setShowAllergensSection((existing.data.selectedAllergens || []).length > 0);
+      setShowAllergensSection((existing.data.selectedAllergens || []).length > 0 || (existing.data.selectedAllergies || []).length > 0);
       setShowNotesSection(
         (existing.data.selectedQuickNotes || []).length > 0 ||
         !!existing.data.formData?.notes
@@ -1764,6 +1773,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       (formData.email && formData.email.trim() !== '') ||
       (formData.notes && formData.notes.trim() !== '') ||
       selectedAllergens.length > 0 ||
+      selectedAllergies.length > 0 ||
       selectedQuickNotes.length > 0;
     if (!hasContent) return;
 
@@ -1771,11 +1781,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       saveDraft(DRAFT_KEYS.RESERVATION_NEW, {
         formData,
         selectedAllergens,
+        selectedAllergies,
         selectedQuickNotes,
       });
     }, 400);
     return () => clearTimeout(timer);
-  }, [isFormOpen, isEditing, formData, selectedAllergens, selectedQuickNotes]);
+  }, [isFormOpen, isEditing, formData, selectedAllergens, selectedAllergies, selectedQuickNotes]);
 
   // The allergy/health-data consent is only relevant when the booking actually
   // records an allergen (special-category data, art. 9 GDPR). Auto-tick it the
@@ -1784,13 +1795,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // guard only acts on a null/undefined value).
   useEffect(() => {
     if (!isFormOpen || !askHealthConsent) return;
-    const hasAllergens = selectedAllergens.length > 0;
+    const hasAllergens = selectedAllergens.length > 0 || selectedAllergies.length > 0;
     setFormData(prev => {
       if (hasAllergens && prev.consent_data_health == null) return { ...prev, consent_data_health: true };
       if (!hasAllergens && prev.consent_data_health != null) return { ...prev, consent_data_health: undefined };
       return prev;
     });
-  }, [selectedAllergens, askHealthConsent, isFormOpen]);
+  }, [selectedAllergens, selectedAllergies, askHealthConsent, isFormOpen]);
 
   // --- Helper Logic ---
 
@@ -2138,10 +2149,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
       if (isSavingReservation) return;
 
-      // Combine allergens, quick notes, and additional notes
-      const allergensText = selectedAllergens.length > 0
-          ? `Intolleranze: ${selectedAllergens.join(', ')}`
-          : '';
+      // Combine dietary flags, quick notes, and additional notes
+      const allergensText = buildDietaryNote(selectedAllergies, selectedAllergens);
       const quickNotesText = selectedQuickNotes.length > 0
           ? selectedQuickNotes.join(', ')
           : '';
@@ -2475,9 +2484,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const table = displayTables.find(t => t.id === res.table_id);
     const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
     const isSelected = selectedReservationId === res.id;
-    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
-    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
-    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    const noteText = stripDietaryNote(res.notes);
     // Preset notes whose label appears in res.notes AND that carry an icon.
     // We render each as a small pill in tier 3 so operators can spot common
     // requests (seggiolone, cane, compleanno, ...) at a glance.
@@ -2568,11 +2575,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </span>
               );
             })}
-            {allergenText && (
-              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
-                <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
-              </span>
-            )}
+            <DietaryChips notes={res.notes} presets={allergenPresets} />
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
               <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
@@ -2668,9 +2671,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const tableRoomName = table ? rooms.find(r => r.id === table.room_id)?.name : null;
     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
     const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-    const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
-    const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
-    const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+    const noteText = stripDietaryNote(res.notes);
     const matchedNoteIcons = res.notes
       ? quickNotes
           .filter(n => n.icon && res.notes!.toLowerCase().includes(n.label.toLowerCase()))
@@ -2731,11 +2732,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <BookOpen className="h-2.5 w-2.5" /> {menu.name}
               </span>
             )}
-            {allergenText && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-medium">
-                <AlertTriangle className="h-2.5 w-2.5" /> {allergenText}
-              </span>
-            )}
+            <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
               <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-2.5 w-2.5" /> Tavolo preferito
@@ -3625,9 +3622,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             const table = displayTables.find(t => t.id === res.table_id);
                             const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
                             const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-                            const hasAllergens = res.notes && /intolleranze:/i.test(res.notes);
-                            const allergenText = hasAllergens ? res.notes!.match(/intolleranze:\s*([^|]*)/i)?.[1]?.trim() : null;
-                            const noteText = res.notes ? res.notes.replace(/intolleranze:.*$/im, '').trim() : '';
+                            const noteText = stripDietaryNote(res.notes);
                             const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
 
                             const isFlashing = newReservationFlashId === res.id;
@@ -3682,11 +3677,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <div className="flex items-center flex-wrap gap-1.5 mt-auto pt-2">
                                       {renderChannelIcon(res)}
                                       {renderConfirmationIcon(res)}
-                                      {allergenText && (
-                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Intolleranze: ${allergenText}`}>
-                                          <AlertTriangle className="h-3 w-3 flex-shrink-0" /> {allergenText}
-                                        </span>
-                                      )}
+                                      <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
                                       {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
                                         <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
                                           <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
@@ -4385,7 +4376,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             {/* Expandable Sections */}
                             <div className="space-y-3">
-                                {/* Allergens Button */}
+                                {/* Allergie & Intolleranze — two tabs, same preset list.
+                                    Selecting an item is exclusive: it moves between the
+                                    two lists. Allergie (serious) = rose, Intolleranze = amber. */}
                                 <div className="rounded-md border border-[var(--color-line)] overflow-hidden">
                                     <button
                                         type="button"
@@ -4395,11 +4388,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <AlertTriangle className={`h-4 w-4 ${selectedAllergens.length > 0 ? 'text-amber-600' : 'text-[var(--color-fg-muted)]'}`} />
+                                            <AlertTriangle className={`h-4 w-4 ${(selectedAllergies.length + selectedAllergens.length) > 0 ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--color-fg)]">Intolleranze</span>
-                                                {selectedAllergens.length > 0 && (
-                                                    <p className="text-xs text-[var(--color-fg-muted)]">{selectedAllergens.length} selezionate</p>
+                                                <span className="text-sm font-medium text-[var(--color-fg)]">Allergie &amp; Intolleranze</span>
+                                                {(selectedAllergies.length + selectedAllergens.length) > 0 && (
+                                                    <p className="text-xs text-[var(--color-fg-muted)]">
+                                                        {[selectedAllergies.length > 0 && `${selectedAllergies.length} allergie`, selectedAllergens.length > 0 && `${selectedAllergens.length} intolleranze`].filter(Boolean).join(' · ')}
+                                                    </p>
                                                 )}
                                             </div>
                                         </div>
@@ -4408,51 +4403,79 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                     {showAllergensSection && (
                                         <div className="p-3 pt-0 space-y-3 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
-                                            <div className="grid grid-cols-2 gap-2 pt-3">
-                                                {allergenPresets.map(allergen => {
-                                                    const isSelected = selectedAllergens.includes(allergen);
+                                            {/* Tab switcher */}
+                                            <div className="grid grid-cols-2 gap-1.5 p-1 mt-3 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)]">
+                                                {([['allergie', 'Allergie', selectedAllergies.length], ['intolleranze', 'Intolleranze', selectedAllergens.length]] as const).map(([key, label, count]) => (
+                                                    <button
+                                                        key={key}
+                                                        type="button"
+                                                        onClick={() => setDietaryTab(key)}
+                                                        className={`inline-flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-semibold transition-colors ${
+                                                            dietaryTab === key
+                                                                ? (key === 'allergie' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white')
+                                                                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                                                        }`}
+                                                        aria-pressed={dietaryTab === key}
+                                                    >
+                                                        {label}
+                                                        {count > 0 && (
+                                                            <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
+                                                                dietaryTab === key ? 'bg-white/25' : (key === 'allergie' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300')
+                                                            }`}>{count}</span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {/* Preset grid for the active tab */}
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {allergenPresets.map(item => {
+                                                    const inActive = (dietaryTab === 'allergie' ? selectedAllergies : selectedAllergens).includes(item);
+                                                    const inOther = (dietaryTab === 'allergie' ? selectedAllergens : selectedAllergies).includes(item);
+                                                    const onCls = dietaryTab === 'allergie'
+                                                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300'
+                                                        : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300';
+                                                    const boxCls = dietaryTab === 'allergie'
+                                                        ? 'bg-rose-600 border-rose-600 dark:bg-rose-500 dark:border-rose-500'
+                                                        : 'bg-amber-600 border-amber-600 dark:bg-amber-500 dark:border-amber-500';
                                                     return (
                                                         <button
-                                                            key={allergen}
+                                                            key={item}
                                                             type="button"
                                                             onClick={() => {
-                                                                setSelectedAllergens(prev =>
-                                                                    isSelected
-                                                                        ? prev.filter(a => a !== allergen)
-                                                                        : [...prev, allergen]
-                                                                );
+                                                                // Exclusive: assigning to one tab removes it from the other.
+                                                                if (dietaryTab === 'allergie') {
+                                                                    setSelectedAllergens(prev => prev.filter(a => a !== item));
+                                                                    setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
+                                                                } else {
+                                                                    setSelectedAllergies(prev => prev.filter(a => a !== item));
+                                                                    setSelectedAllergens(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
+                                                                }
                                                             }}
                                                             className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
-                                                                isSelected
-                                                                    ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300'
-                                                                    : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                                                                inActive ? onCls : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
                                                             }`}
                                                         >
                                                             <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                isSelected ? 'bg-amber-600 border-amber-600 dark:bg-amber-500 dark:border-amber-500' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+                                                                inActive ? boxCls : 'border-[var(--color-line)] bg-[var(--color-surface)]'
                                                             }`}>
-                                                                {isSelected && <Check className="text-[#ffffff] w-2.5 h-2.5" />}
+                                                                {inActive && <Check className="text-[#ffffff] w-2.5 h-2.5" />}
                                                             </div>
-                                                            <span className="text-sm font-medium truncate">{allergen}</span>
+                                                            <span className="text-sm font-medium truncate">{item}</span>
+                                                            {inOther && !inActive && (
+                                                                <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] flex-shrink-0">
+                                                                    {dietaryTab === 'allergie' ? 'intoll.' : 'allergia'}
+                                                                </span>
+                                                            )}
                                                         </button>
                                                     );
                                                 })}
                                             </div>
-                                            {selectedAllergens.length > 0 && (
-                                                <div className="flex flex-wrap gap-1.5 pt-2">
-                                                    {selectedAllergens.map(allergen => (
-                                                        <span key={allergen} className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 rounded-full text-xs font-medium">
-                                                            <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
-                                                            {allergen}
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setSelectedAllergens(prev => prev.filter(a => a !== allergen))}
-                                                                className="hover:text-amber-900 dark:hover:text-amber-200"
-                                                            >
-                                                                <X className="w-3 h-3" />
-                                                            </button>
-                                                        </span>
-                                                    ))}
+
+                                            {/* Combined summary — allergie (rose) + intolleranze (amber) */}
+                                            {(selectedAllergies.length > 0 || selectedAllergens.length > 0) && (
+                                                <div className="pt-1">
+                                                    <DietaryChips notes={buildDietaryNote(selectedAllergies, selectedAllergens)} presets={allergenPresets} />
                                                 </div>
                                             )}
                                         </div>
