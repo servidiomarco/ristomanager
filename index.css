@@ -95,6 +95,18 @@
   --color-rose-600: #dc2626;
   --color-rose-700: #b91c1c;
 
+  /* Booked (blue-violet) — the "Confermata / In arrivo" reservation family.
+     Same family as the table glyph 'attesa'/'inarrivo' tokens below, exposed
+     as a Tailwind scale so chips can say bg-booked-50 instead of raw hex. */
+  --color-booked-50:  #edeff7;
+  --color-booked-100: #e3e7f3;
+  --color-booked-200: #dce0ee;
+  --color-booked-300: #b9c2e0;
+  --color-booked-400: #8a97c4;
+  --color-booked-500: #5d6ca0;
+  --color-booked-600: #4d5a87;
+  --color-booked-700: #3a4670;
+
   /* Chart palette — accessible, color-blind friendly, sequential-ish */
   --color-chart-1: #111827;
   --color-chart-2: #6b7280;
@@ -123,6 +135,12 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
                Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* ---------- Motion ---------- */
+  /* One spring-ish curve for every micro-interaction, so taps, sheets and
+     view changes all share the same physical personality. Exposed as a
+     Tailwind ease (ease-spring) too. */
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
 /* ===========================================================================
@@ -213,12 +231,30 @@
   --tg-attesa-name: #2A3666;
   --tg-attesa-accent: #3D4E8C;
   --tg-attesa-pill-bg: #3D4E8C;
+  /* In arrivo — same blue-violet family as 'attesa' but deeper + saturated;
+     the pulse ring (see .tg-pulse) is its real signature, so it stays legible
+     for color-blind staff without stealing a new hue from the palette. */
+  --tg-inarrivo-bg: #E2E7FA;
+  --tg-inarrivo-stroke: #93A3E0;
+  --tg-inarrivo-chair: #2F45A0;
+  --tg-inarrivo-name: #1E2C66;
+  --tg-inarrivo-accent: #3B55C4;
+  --tg-inarrivo-pill-bg: #3B55C4;
   --tg-arrivato-bg: #E7F4E9;
   --tg-arrivato-stroke: #B7E0BE;
   --tg-arrivato-chair: #2B9D5B;
   --tg-arrivato-name: #1A5E33;
   --tg-arrivato-accent: #1F7A43;
   --tg-arrivato-pill-bg: #1F7A43;
+  /* In uscita — cyan, perceptually between occupied-green and free-neutral:
+     the table is draining. Cool hue, so it never clashes with the warm
+     banquet palette. */
+  --tg-uscita-bg: #E0F3F5;
+  --tg-uscita-stroke: #A9DBE1;
+  --tg-uscita-chair: #0E7490;
+  --tg-uscita-name: #0F5560;
+  --tg-uscita-accent: #0E7490;
+  --tg-uscita-pill-bg: #0E7490;
   --tg-noshow-bg: #FFE4E6;
   --tg-noshow-stroke: #FECDD3;
   --tg-noshow-chair: #BE123C;
@@ -248,12 +284,24 @@
   --tg-attesa-name: #C3C9E4;
   --tg-attesa-accent: #9AA6D6;
   --tg-attesa-pill-bg: #4A5C9E;
+  --tg-inarrivo-bg: #262E5C;
+  --tg-inarrivo-stroke: #4A5FC4;
+  --tg-inarrivo-chair: #A8B6F0;
+  --tg-inarrivo-name: #C9D2F5;
+  --tg-inarrivo-accent: #A8B6F0;
+  --tg-inarrivo-pill-bg: #4A5FC4;
   --tg-arrivato-bg: #1B3A22;
   --tg-arrivato-stroke: #2F6B40;
   --tg-arrivato-chair: #4FBE7A;
   --tg-arrivato-name: #BEE6C7;
   --tg-arrivato-accent: #7FD79A;
   --tg-arrivato-pill-bg: #2F8F50;
+  --tg-uscita-bg: #14323A;
+  --tg-uscita-stroke: #1F5A66;
+  --tg-uscita-chair: #53C0D6;
+  --tg-uscita-name: #B5E4EE;
+  --tg-uscita-accent: #67CBDE;
+  --tg-uscita-pill-bg: #17667A;
   --tg-noshow-bg: #3A1B22;
   --tg-noshow-stroke: #6B2F3F;
   --tg-noshow-chair: #F87171;
@@ -478,6 +526,31 @@ body {
   animation: glow-pulse 1.4s ease-in-out infinite;
 }
 
+/* Scroll-aware edge fade for vertical scroll containers — the top/bottom of
+   the content dissolves into the background to signal "there's more to
+   scroll". The `useScrollFade` hook drives --fade-top / --fade-bottom (0 = no
+   fade, --scroll-fade = fade) so an edge only fades when that direction is
+   actually scrollable. Content-only mask: reveals whatever sits behind it. */
+.scroll-fade-y {
+  --scroll-fade: 20px;
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent 100%
+  );
+}
+
 @keyframes pulse-ring {
   0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.6); }
   70% { box-shadow: 0 0 0 8px rgba(96, 165, 250, 0); }
@@ -486,6 +559,48 @@ body {
 
 .animate-pulse-ring {
   animation: pulse-ring 2s ease-out infinite;
+}
+
+/* Table-glyph "In arrivo" ring (SVG — box-shadow doesn't apply there).
+   A stroke ring around the table body swells and fades on a slow beat: the
+   only moving thing on the floor map, so the eye lands on the tables whose
+   party is due. Neutralized globally by prefers-reduced-motion above. */
+@keyframes tg-pulse-ring {
+  0%   { opacity: 0.85; transform: scale(1); }
+  70%  { opacity: 0;    transform: scale(1.08); }
+  100% { opacity: 0;    transform: scale(1.08); }
+}
+.tg-pulse {
+  animation: tg-pulse-ring 2.2s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+}
+
+/* View transition — every navigation re-mounts the view container (keyed on
+   the active view in App.tsx) with a soft rise-in. Short enough to feel like
+   response, not decoration. Neutralized by prefers-reduced-motion above. */
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-view-in {
+  animation: view-in 0.22s var(--ease-spring) both;
+}
+
+/* Tactile press feedback — the whole app's tap language. Composable with
+   color transitions (they're all declared here so the shorthand doesn't
+   clobber a co-existing transition-colors utility). */
+@utility pressable {
+  transition:
+    transform 0.15s var(--ease-spring),
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+  &:active {
+    transform: scale(0.97);
+  }
 }
 
 @keyframes search-pulse-ring {

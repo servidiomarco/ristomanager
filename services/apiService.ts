@@ -917,6 +917,71 @@ export const updateAutoDepositSettings = async (
   });
 };
 
+// ============================================
+// LEGAL SETTINGS (per-tenant identity used to generate legal documents)
+// ============================================
+export interface LegalSettings {
+  legal_mode: 'simple' | 'advanced' | string;
+  company_name: string;
+  company_address: string;
+  vat_number: string;
+  fiscal_code: string;
+  privacy_email: string;
+  privacy_phone: string;
+  dpo_name: string;
+  dpo_contact: string;
+  website_url: string;
+  app_name: string;
+  voice_business_name: string;
+  data_processors: string;
+  retention_customer: string;
+  retention_calls: string;
+  retention_marketing: string;
+  extra_eu_note: string;
+  governing_law: string;
+  last_updated: string;
+  uses_analytics_cookies: boolean;
+  records_calls: boolean;
+}
+
+export const getLegalSettings = async (): Promise<LegalSettings> => {
+  return apiRequest<LegalSettings>(`${API_URL}/settings/legal`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateLegalSettings = async (
+  updates: Partial<LegalSettings>
+): Promise<LegalSettings> => {
+  return apiRequest<LegalSettings>(`${API_URL}/settings/legal`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+export interface MarketingRecipient {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  consent_marketing_updated_at: string | null;
+}
+
+export interface MarketingAudience {
+  mode: string;
+  count: number;
+  recipients: MarketingRecipient[];
+}
+
+// Returns only marketing-consenting, contactable customers. Throws (409) when
+// the legal layer runs in "simple" mode.
+export const getMarketingAudience = async (): Promise<MarketingAudience> => {
+  return apiRequest<MarketingAudience>(`${API_URL}/customers/marketing-audience`, {
+    headers: getHeaders(false),
+  });
+};
+
 export interface ReservationNotePreset {
   id: number;
   label: string;

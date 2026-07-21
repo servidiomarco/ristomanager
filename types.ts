@@ -145,9 +145,10 @@ export interface RoomClosedOverride {
 }
 
 export enum ArrivalStatus {
-  WAITING = 'WAITING',      // In attesa - green border
-  ARRIVED = 'ARRIVED',      // Arrivato - orange border
-  DEPARTED = 'DEPARTED'     // Tavolo liberato - gray, table is free again
+  WAITING = 'WAITING',      // In attesa — booking is live, party not yet here
+  ARRIVED = 'ARRIVED',      // Arrivato — party seated, table occupied
+  DEPARTING = 'DEPARTING',  // In uscita — still seated but wrapping up (dolce/caffè/conto); table not yet free
+  DEPARTED = 'DEPARTED'     // Tavolo liberato — table is free again
 }
 
 export enum ReservationSource {
@@ -201,6 +202,10 @@ export interface Reservation {
   customer_preferred_table_name?: string | null;
   customer_dietary_notes?: string | null;
   customer_preferences_notes?: string | null;
+  // GDPR consents captured at booking time (proof: what + when).
+  consent_marketing?: boolean | null;
+  consent_data_health?: boolean | null;
+  consent_updated_at?: string | null;
   confirmation_status?: ConfirmationStatus | null;
   confirmation_channel?: ConfirmationChannel | null;
   confirmation_sent_at?: string | null;
@@ -300,6 +305,8 @@ export interface Customer {
   preferences_notes?: string | null;
   dietary_notes?: string | null;
   is_vip?: boolean;
+  consent_marketing?: boolean | null;
+  consent_marketing_updated_at?: string | null;
 }
 
 // ============================================

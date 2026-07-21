@@ -1931,6 +1931,61 @@ async function isTableInClosedRoom(tableId: number | null | undefined): Promise<
     return result.rows[0]?.is_closed === true;
 }
 
+// Re-select the given reservations with the same enrichment the GET
+// /reservations list uses (VIP/preferred-table/payment joins) and broadcast a
+// `reservation:updated` for each, so every connected client patches its
+// reservations array in place — no full refresh. Used when a NON-reservation
+// route mutates denormalized reservation fields (e.g. a customer rename or
+// merge cascades customer_name/phone onto matching reservations). Best-effort:
+// a broadcast failure must never fail the originating request.
+async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
+    if (!socketService || ids.length === 0) return;
+    try {
+        const result = await queryWithRetry(`
+            SELECT r.*, u.full_name AS created_by_user_name,
+                   c.is_vip AS customer_is_vip,
+                   c.preferred_table_id AS customer_preferred_table_id,
+                   pt.name AS customer_preferred_table_name,
+                   c.dietary_notes AS customer_dietary_notes,
+                   c.preferences_notes AS customer_preferences_notes,
+                   lp.id AS latest_payment_id,
+                   lp.status AS latest_payment_status,
+                   lp.amount_cents AS latest_payment_amount_cents,
+                   lp.currency AS latest_payment_currency,
+                   lp.provider AS latest_payment_provider,
+                   lp.delivery_channel AS latest_payment_delivery_channel,
+                   lp.created_at AS latest_payment_created_at,
+                   lp.completed_at AS latest_payment_completed_at
+            FROM reservations r
+            LEFT JOIN users u ON r.created_by_user_id = u.id
+            LEFT JOIN LATERAL (
+                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                WHERE r.phone IS NOT NULL
+                  AND cc.phone IS NOT NULL
+                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+                LIMIT 1
+            ) c ON true
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+            LEFT JOIN LATERAL (
+                SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
+                       pr.delivery_channel, pr.created_at, pr.completed_at
+                FROM payment_requests pr
+                WHERE pr.reservation_id = r.id
+                ORDER BY pr.created_at DESC
+                LIMIT 1
+            ) lp ON true
+            WHERE r.id = ANY($1::int[])
+        `, [ids]);
+        for (const row of result.rows) {
+            socketService.broadcastReservationSynced(row);
+        }
+    } catch (err) {
+        console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
+    }
+}
+
 // Find tables already booked on a given date+shift, either by a reservation
 // or by another banquet. Used to prevent overbooking across both sections.
 // Returns one row per (table_id, source) conflict; an empty result means free.
@@ -2103,8 +2158,13 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        // GDPR consents (optional). Stamp consent_updated_at whenever the client
+        // sent an explicit boolean for either consent — that's the moment of proof.
+        const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
+        const consentDataHealth = typeof consent_data_health === 'boolean' ? consent_data_health : null;
+        const consentUpdatedAt = (consentMarketing !== null || consentDataHealth !== null) ? new Date().toISOString() : null;
         // Explicit table hold; NULL means "use shift default" on lookups.
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
@@ -2165,8 +2225,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -2202,6 +2262,9 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 reservation_status ?? 'CONFIRMED',
                 durationValue,
                 req.user?.userId ?? null,
+                consentMarketing,
+                consentDataHealth,
+                consentUpdatedAt,
             ]
         );
         const newReservation = result.rows[0];
@@ -2228,6 +2291,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             email,
             req.user ? { userId: req.user.userId, email: req.user.email } : null
         );
+        // Propagate marketing consent to the (now-existing) customer record.
+        await setCustomerMarketingConsent(phone, consentMarketing);
 
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
@@ -2270,7 +2335,11 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        // Consents are non-destructive: only touched when the client sends an
+        // explicit boolean. Missing → keep the stored value (COALESCE).
+        const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
+        const consentDataHealth = typeof consent_data_health === 'boolean' ? consent_data_health : null;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
@@ -2304,7 +2373,10 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 SELECT reservation_status AS prev_status FROM reservations WHERE id = $14
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13
+                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
+                    consent_marketing = COALESCE($15, consent_marketing),
+                    consent_data_health = COALESCE($16, consent_data_health),
+                    consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END
                 WHERE id = $14
                 RETURNING *
             )
@@ -2341,6 +2413,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 reservation_status ?? 'CONFIRMED',
                 durationValue,
                 id,
+                consentMarketing,
+                consentDataHealth,
             ]
         );
         const updatedReservation = result.rows[0];
@@ -2370,6 +2444,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const actor = req.user ? { userId: req.user.userId, email: req.user.email } : null;
         await upsertCustomerFromReservation(customer_name, phone, email, actor);
         await syncCustomerFromReservation(customer_name, phone, email, actor);
+        // Propagate marketing consent to the customer record (only when provided).
+        await setCustomerMarketingConsent(phone, consentMarketing);
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
@@ -4862,6 +4938,29 @@ const upsertCustomerFromReservation = async (
     }
 };
 
+// Propagate the marketing consent captured at booking to the customer rubrica
+// (matched by phone-digits) so it can be used to filter marketing sends. Only
+// runs when an explicit boolean was provided. Side-effect — never throws.
+const setCustomerMarketingConsent = async (
+    phone: string | null | undefined,
+    consent: boolean | null | undefined
+): Promise<void> => {
+    try {
+        if (consent === null || consent === undefined) return;
+        if (!phone || !String(phone).trim()) return;
+        const phoneDigits = String(phone).replace(/\D/g, '');
+        if (!phoneDigits) return;
+        await queryWithRetry(
+            `UPDATE customers
+             SET consent_marketing = $2, consent_marketing_updated_at = CURRENT_TIMESTAMP
+             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
+            [phoneDigits, consent]
+        );
+    } catch (err) {
+        console.error('setCustomerMarketingConsent failed:', err);
+    }
+};
+
 // Keep the rubrica name in sync when a reservation is renamed. Looks up the
 // customer by phone-digits match and updates the name (and email if newly
 // provided) when they differ. Failures are swallowed.
@@ -4942,6 +5041,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                        consent_marketing, consent_marketing_updated_at,
                         ${noShowSubquery}
                  FROM customers c
                  WHERE phone IS NOT NULL AND TRIM(phone) <> ''
@@ -4955,6 +5055,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                    consent_marketing, consent_marketing_updated_at,
                     ${noShowSubquery}
              FROM customers c
              WHERE phone IS NOT NULL AND TRIM(phone) <> ''
@@ -4965,6 +5066,33 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         res.json(result.rows);
     } catch (err) {
         console.error('GET /customers error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Marketing audience — the ONLY sanctioned entry point for promotional sends.
+// By construction it returns just the customers who (a) gave marketing consent
+// and (b) have a usable channel, so non-consenting contacts are excluded
+// automatically. Disabled when the legal layer runs in "simple" mode.
+app.get('/customers/marketing-audience', authenticate, requirePermission('customers:view'), async (_req, res) => {
+    try {
+        const legal = await getLegalConfig();
+        if (legal.legal_mode !== 'advanced') {
+            return res.status(409).json({
+                error: 'marketing_disabled',
+                message: 'La modalità legale è impostata su "semplice": i flussi di marketing sono disattivati.',
+            });
+        }
+        const result = await queryWithRetry(
+            `SELECT id, name, phone, email, consent_marketing_updated_at
+             FROM customers
+             WHERE consent_marketing = TRUE
+               AND ((phone IS NOT NULL AND TRIM(phone) <> '') OR (email IS NOT NULL AND TRIM(email) <> ''))
+             ORDER BY name`
+        );
+        res.json({ mode: legal.legal_mode, count: result.rows.length, recipients: result.rows });
+    } catch (err) {
+        console.error('GET /customers/marketing-audience error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -5088,10 +5216,11 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         // propagate to the customer's booking history.
         const client = await pool.connect();
         let updated: any;
+        let cascadedReservationIds: number[] = [];
         try {
             await client.query('BEGIN');
             const prev = await client.query(
-                'SELECT name, phone FROM customers WHERE id = $1 FOR UPDATE',
+                'SELECT name, phone, is_vip, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 FOR UPDATE',
                 [id]
             );
             if (prev.rowCount === 0) {
@@ -5150,12 +5279,34 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     `UPDATE reservations
                      SET customer_name = $1,
                          phone = $2
-                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3`,
+                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3
+                     RETURNING id`,
                     [newName, newPhone, oldPhoneDigits]
                 );
+                cascadedReservationIds = cascade.rows.map(r => Number(r.id));
                 if (cascade.rowCount && cascade.rowCount > 0) {
                     console.log(`[customers] cascade updated ${cascade.rowCount} reservations for customer #${id} (name: "${oldName}" → "${newName}", phone: "${oldPhone}" → "${newPhone || ''}")`);
                 }
+            }
+
+            // The booking card also shows joined (not denormalized) customer
+            // fields — VIP star, preferred-table chip, dietary/preference notes.
+            // When only those change (name/phone untouched, so no cascade), the
+            // reservation rows don't change but the joined values do; collect
+            // the phone-matched reservations so they still re-broadcast and
+            // re-render with the fresh join.
+            const joinedFieldsChanged =
+                normalizedIsVip !== (prev.rows[0].is_vip === true) ||
+                normalizedPreferredTableId !== (prev.rows[0].preferred_table_id ?? null) ||
+                (dietary_notes ?? null) !== (prev.rows[0].dietary_notes ?? null) ||
+                (preferences_notes ?? null) !== (prev.rows[0].preferences_notes ?? null);
+            if (cascadedReservationIds.length === 0 && joinedFieldsChanged && oldPhoneDigits.length >= 6) {
+                const match = await client.query(
+                    `SELECT id FROM reservations
+                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
+                    [oldPhoneDigits]
+                );
+                cascadedReservationIds = match.rows.map(r => Number(r.id));
             }
 
             await client.query('COMMIT');
@@ -5165,6 +5316,11 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         } finally {
             client.release();
         }
+
+        // After the transaction commits, tell every connected client which
+        // reservations changed so their booking cards update in place (the
+        // denormalized customer_name/phone lives on the reservation row).
+        await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
             LogService.logActivity(
@@ -5258,14 +5414,17 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 
         // Re-tag reservations that used the source's phone so the merged
         // customer inherits the history (the stats aggregator joins on phone).
+        let cascadedReservationIds: number[] = [];
         if (source.phone) {
-            await client.query(
+            const cascade = await client.query(
                 `UPDATE reservations
                  SET phone = $1,
                      customer_name = $2
-                 WHERE phone = $3`,
+                 WHERE phone = $3
+                 RETURNING id`,
                 [target.phone || source.phone, target.name, source.phone]
             );
+            cascadedReservationIds = cascade.rows.map(r => Number(r.id));
         }
 
         // Re-parent banquet menus (real FK, ON DELETE SET NULL — we want to
@@ -5313,6 +5472,10 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 
         await client.query('DELETE FROM customers WHERE id = $1', [sourceId]);
         await client.query('COMMIT');
+
+        // Push the re-tagged reservations to every client so booking cards
+        // reflect the merged customer's name without a refresh.
+        await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
             LogService.logActivity(
@@ -10467,6 +10630,135 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
     } catch (err) {
         console.error('Error updating channel settings:', err);
         res.status(500).json({ error: 'Failed to update channel settings' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// LEGAL SETTINGS (app_settings → key 'legal_config', stored as a JSON blob)
+// Per-tenant identity + configuration used to generate the app's legal
+// documents (privacy policy, voice notice, cookie policy + banner, terms).
+// Multi-tenant/SaaS ready: everything is data, no hard-coded restaurant info.
+// ---------------------------------------------------------------------------
+const LEGAL_CONFIG_KEY = 'legal_config';
+// Operating mode for the legal layer:
+//   'simple'   → only the strict legal minimum (no marketing / non-essential).
+//   'advanced' → full: marketing consents, audience, analytics cookies, terms.
+const LEGAL_MODES = ['simple', 'advanced'] as const;
+type LegalMode = typeof LEGAL_MODES[number];
+const LEGAL_MODE_DEFAULT: LegalMode = 'advanced';
+// Whitelisted string fields. Unknown keys are ignored on write.
+const LEGAL_STRING_FIELDS = [
+    'legal_mode',          // 'simple' | 'advanced'
+    'company_name',        // Ragione sociale
+    'company_address',     // Sede legale
+    'vat_number',          // Partita IVA
+    'fiscal_code',         // Codice fiscale (facoltativo)
+    'privacy_email',       // E-mail per richieste privacy
+    'privacy_phone',       // Telefono
+    'dpo_name',            // Nome DPO (facoltativo)
+    'dpo_contact',         // Contatto DPO (facoltativo)
+    'website_url',         // Sito / canale di prenotazione online
+    'app_name',            // Nome applicazione mostrato (default RistoManager)
+    'voice_business_name', // Nome pronunciato nell'avviso vocale
+    'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
+    'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
+    'retention_calls',     // Conservazione registrazioni chiamate (es. "6 mesi")
+    'retention_marketing', // Conservazione dati marketing (es. "fino a revoca")
+    'extra_eu_note',       // Nota trasferimenti extra-UE
+    'governing_law',       // Legge applicabile / foro competente
+    'last_updated',        // Data ultimo aggiornamento (ISO, gestita lato client)
+] as const;
+// Whitelisted boolean fields.
+const LEGAL_BOOL_FIELDS = [
+    'uses_analytics_cookies', // Il sito usa cookie analitici/di terze parti
+    'records_calls',          // Le chiamate sono registrate
+] as const;
+
+function emptyLegalConfig(): Record<string, string | boolean> {
+    const out: Record<string, string | boolean> = {};
+    for (const k of LEGAL_STRING_FIELDS) out[k] = '';
+    for (const k of LEGAL_BOOL_FIELDS) out[k] = false;
+    out.legal_mode = LEGAL_MODE_DEFAULT;
+    return out;
+}
+
+function normalizeLegalMode(v: unknown): LegalMode {
+    return (typeof v === 'string' && (LEGAL_MODES as readonly string[]).includes(v)) ? (v as LegalMode) : LEGAL_MODE_DEFAULT;
+}
+
+async function getLegalConfig(): Promise<Record<string, string | boolean>> {
+    const base = emptyLegalConfig();
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [LEGAL_CONFIG_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw === 'string' && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                for (const k of LEGAL_STRING_FIELDS) {
+                    if (typeof parsed[k] === 'string') base[k] = parsed[k];
+                }
+                for (const k of LEGAL_BOOL_FIELDS) {
+                    if (typeof parsed[k] === 'boolean') base[k] = parsed[k];
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[legal-settings] failed to read legal_config:', err);
+    }
+    base.legal_mode = normalizeLegalMode(base.legal_mode);
+    return base;
+}
+
+app.get('/settings/legal', authenticate, async (_req, res) => {
+    try {
+        res.json(await getLegalConfig());
+    } catch (err) {
+        console.error('GET /settings/legal error:', err);
+        res.status(500).json({ error: 'Failed to fetch legal settings' });
+    }
+});
+
+app.put('/settings/legal', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    if (typeof body !== 'object' || Array.isArray(body)) {
+        return res.status(400).json({ error: 'invalid_value', message: 'Body must be an object' });
+    }
+    const current = await getLegalConfig();
+    const next: Record<string, string | boolean> = { ...current };
+    for (const k of LEGAL_STRING_FIELDS) {
+        if (k in body) {
+            if (typeof body[k] !== 'string') {
+                return res.status(400).json({ error: 'invalid_value', message: `${k} must be a string` });
+            }
+            // Cap length defensively; legal blurbs can be long but not unbounded.
+            next[k] = String(body[k]).slice(0, 5000);
+        }
+    }
+    for (const k of LEGAL_BOOL_FIELDS) {
+        if (k in body) {
+            if (typeof body[k] !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: `${k} must be a boolean` });
+            }
+            next[k] = body[k];
+        }
+    }
+    // legal_mode must be one of the known modes; anything else falls back safely.
+    next.legal_mode = normalizeLegalMode(next.legal_mode);
+    try {
+        await queryWithRetry(
+            `INSERT INTO app_settings (key, text_value, updated_at)
+             VALUES ($1, $2, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [LEGAL_CONFIG_KEY, JSON.stringify(next)]
+        );
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/legal error:', err);
+        res.status(500).json({ error: 'Failed to update legal settings' });
     }
 });
 

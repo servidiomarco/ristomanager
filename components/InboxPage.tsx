@@ -332,7 +332,7 @@ const InboxPage: React.FC = () => {
   }, [searchOpen]);
 
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-[var(--color-bg)]">
+    <div className="flex h-full bg-[var(--color-bg)]">
       {/* Sidebar: conversations */}
       <aside
         className={`${selectedKey ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-[var(--color-line)] flex-col bg-[var(--color-surface)]`}

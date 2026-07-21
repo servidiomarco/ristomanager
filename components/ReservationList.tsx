@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal } from 'lucide-react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage } from '../services/apiService';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4 } from 'lucide-react';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -10,6 +10,13 @@ import { isVoiceSupported, startListening, parseReservationText } from '../servi
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import {
+  getReservationState, getTimedReservationState, RESERVATION_STATE_META,
+  reservationStatePatch, deriveTableDisplayStatus, isSeated, StatusChip,
+  type ReservationStateKey,
+} from './reservationState';
+import { useNow } from '../hooks/useNow';
+import { SwipeToCheckIn } from './SwipeToCheckIn';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { PaymentBadge } from './PaymentBadge';
@@ -531,6 +538,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [allergenPresets, setAllergenPresets] = useState<string[]>([]);
   const [showAllergensSection, setShowAllergensSection] = useState(false);
   const [showNotesSection, setShowNotesSection] = useState(false);
+  // Marketing consent is only offered when the legal layer runs in "advanced".
+  const [marketingEnabled, setMarketingEnabled] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    getLegalSettings()
+      .then(l => { if (!cancelled) setMarketingEnabled(l.legal_mode !== 'simple'); })
+      .catch(() => { /* keep default */ });
+    return () => { cancelled = true; };
+  }, []);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
@@ -662,7 +678,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     onOpenReservationHandled?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openReservationId, reservations]);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'waiting', 'arrived', 'noshow']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['pending', 'waiting', 'arrived', 'departing', 'noshow']));
+  // Ticking clock (1/min) — drives the time-derived chip/glyph states
+  // (In arrivo / In uscita) so the list and map update by themselves.
+  const nowTick = useNow(60_000);
+  // Time-derived states (In arrivo / In uscita) only apply to today's
+  // service — past and future dates must read their persisted enum state.
+  const isViewingToday = selectedDate.split('T')[0] === formatLocalDate(new Date(nowTick));
+
+  // Density mode (cassa/desktop): 'compact' trades air for rows-on-screen.
+  // Persisted per device — the cassa PC stays compact, the tablet stays comfy.
+  const [density, setDensity] = useState<'comfy' | 'compact'>(() =>
+    localStorage.getItem('ristocrm_density') === 'compact' ? 'compact' : 'comfy');
+  const toggleDensity = () => setDensity(d => {
+    const next = d === 'comfy' ? 'compact' : 'comfy';
+    localStorage.setItem('ristocrm_density', next);
+    return next;
+  });
+  const compact = density === 'compact';
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
@@ -1169,7 +1202,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // --- Grouped reservation list for split-view ---
   // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
-  type ReservationGroup = { key: string; label: string; color: string; dotClass: string; items: Reservation[] };
+  type ReservationGroup = { key: string; label: string; dotClass: string; items: Reservation[] };
   const groupedReservations = useMemo((): ReservationGroup[] => {
     const dateFiltered = reservations.filter(r => {
       const matchesDate = getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0];
@@ -1205,6 +1238,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const pending: Reservation[] = [];
     const waiting: Reservation[] = [];
     const arrived: Reservation[] = [];
+    const departing: Reservation[] = [];
     const freed: Reservation[] = [];
     const noshow: Reservation[] = [];
     const cancelled: Reservation[] = [];
@@ -1226,6 +1260,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const status = r.arrival_status || ArrivalStatus.WAITING;
       if (status === ArrivalStatus.DEPARTED) {
         freed.push(r);
+      } else if (status === ArrivalStatus.DEPARTING) {
+        departing.push(r);
       } else if (status === ArrivalStatus.ARRIVED) {
         arrived.push(r);
       } else {
@@ -1267,6 +1303,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     pending.sort(compare);
     waiting.sort(compare);
     arrived.sort(compare);
+    departing.sort(compare);
     // Freed: keep "most recently departed first" only when the user is
     // sorting by reservation time; otherwise honor the global sort.
     freed.sort(sortBy === 'time-asc'
@@ -1275,17 +1312,61 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     noshow.sort(compare);
     cancelled.sort(compare);
 
+    // Labels/dots come from the shared state meta so group headers can never
+    // drift from the chips below them ('cancelled' keeps its plural label).
+    const meta = (k: Exclude<ReservationStateKey, 'arriving'>) => RESERVATION_STATE_META[k];
     return [
-      { key: 'pending', label: 'Da confermare', color: 'bg-amber-500', dotClass: 'bg-amber-500', items: pending },
-      { key: 'waiting', label: 'Confermata', color: 'bg-[#4D5A87]', dotClass: 'bg-[#4D5A87]', items: waiting },
-      { key: 'arrived', label: 'Arrivato', color: 'bg-emerald-500', dotClass: 'bg-emerald-500', items: arrived },
-      { key: 'noshow', label: 'No show', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: noshow },
-      { key: 'freed', label: 'Libera', color: 'bg-slate-400', dotClass: 'bg-slate-400', items: freed },
-      { key: 'cancelled', label: 'Annullate', color: 'bg-rose-500', dotClass: 'bg-rose-500', items: cancelled },
+      { key: 'pending', label: meta('pending').label, dotClass: meta('pending').dotClass, items: pending },
+      { key: 'waiting', label: meta('waiting').label, dotClass: meta('waiting').dotClass, items: waiting },
+      { key: 'arrived', label: meta('arrived').label, dotClass: meta('arrived').dotClass, items: arrived },
+      { key: 'departing', label: meta('departing').label, dotClass: meta('departing').dotClass, items: departing },
+      { key: 'noshow', label: meta('noshow').label, dotClass: meta('noshow').dotClass, items: noshow },
+      { key: 'freed', label: meta('freed').label, dotClass: meta('freed').dotClass, items: freed },
+      { key: 'cancelled', label: 'Annullate', dotClass: meta('cancelled').dotClass, items: cancelled },
     ].filter(g => g.items.length > 0);
   }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
+
+  // --- Search-first check-in (desktop cassa) ---
+  // "/" focuses the search from anywhere; with a search term active, Enter
+  // marks the single matching confirmed booking as arrived. Two keystrokes
+  // and a surname: that's the whole check-in.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const quickArriveCandidates = useMemo(() => {
+    // Today only: browsing another date to look something up must never
+    // check anyone in (Enter is muscle-memory for "run the search").
+    if (!searchTerm.trim() || !isViewingToday) return [];
+    return groupedReservations.find(g => g.key === 'waiting')?.items ?? [];
+  }, [groupedReservations, searchTerm, isViewingToday]);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setSearchTerm('');
+      e.currentTarget.blur();
+      return;
+    }
+    if (e.key !== 'Enter' || !searchTerm.trim()) return;
+    e.preventDefault();
+    if (quickArriveCandidates.length === 1) {
+      handleSetReservationState(quickArriveCandidates[0], 'arrived');
+      setSearchTerm(''); // input keeps focus: ready for the next surname
+    } else if (quickArriveCandidates.length > 1) {
+      showToast(`${quickArriveCandidates.length} prenotazioni confermate corrispondono — affina la ricerca`, 'info');
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const selectedReservation = selectedReservationId
     ? reservations.find(r => r.id === selectedReservationId) ?? null
@@ -1352,68 +1433,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
   };
 
-  type ReservationStateKey = 'pending' | 'waiting' | 'arrived' | 'freed' | 'noshow' | 'cancelled' | 'declined';
-
-  const getReservationState = (res: Reservation): ReservationStateKey => {
-    const rs = res.reservation_status || ReservationStatus.CONFIRMED;
-    if (rs === ReservationStatus.PENDING) return 'pending';
-    if (rs === ReservationStatus.DECLINED) return 'declined';
-    if (rs === ReservationStatus.CANCELLED) return 'cancelled';
-    if (rs === ReservationStatus.NO_SHOW) return 'noshow';
-    const a = res.arrival_status || ArrivalStatus.WAITING;
-    if (a === ArrivalStatus.DEPARTED) return 'freed';
-    if (a === ArrivalStatus.ARRIVED) return 'arrived';
-    return 'waiting';
-  };
-
-  const RESERVATION_STATE_META: Record<ReservationStateKey, { label: string; dotClass: string; chipClass: string }> = {
-    pending:   { label: 'Da confermare', dotClass: 'bg-amber-500', chipClass: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-amber-500/25' },
-    waiting:   { label: 'Confermata', dotClass: 'bg-[#4D5A87]', chipClass: 'bg-[#EDEFF7] text-[#4D5A87] border-[#DCE0EE] hover:bg-[#E3E7F3] dark:bg-[#4D5A87]/25 dark:text-[#B9C2E0] dark:border-[#4D5A87]/40 dark:hover:bg-[#4D5A87]/35' },
-    arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
-    freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
-    noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
-    cancelled: { label: 'Annullata',dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
-    declined:  { label: 'Non confermata', dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
-  };
+  // State keys, colors and the field patches live in ./reservationState —
+  // the single source of truth shared with Reception, FloorPlan & co.
 
   const [stateChangeReservation, setStateChangeReservation] = useState<Reservation | null>(null);
   const [declineReservation, setDeclineReservation] = useState<Reservation | null>(null);
 
-  const handleSetReservationState = (res: Reservation, state: ReservationStateKey) => {
-    const update: Partial<Reservation> = {};
-    switch (state) {
-      case 'pending':
-        update.arrival_status = ArrivalStatus.WAITING;
-        update.reservation_status = ReservationStatus.PENDING;
-        break;
-      case 'waiting':
-        update.arrival_status = ArrivalStatus.WAITING;
-        update.reservation_status = ReservationStatus.CONFIRMED;
-        break;
-      case 'arrived':
-        update.arrival_status = ArrivalStatus.ARRIVED;
-        update.reservation_status = ReservationStatus.CONFIRMED;
-        break;
-      case 'freed':
-        update.arrival_status = ArrivalStatus.DEPARTED;
-        update.reservation_status = ReservationStatus.CONFIRMED;
-        break;
-      case 'noshow':
-        update.arrival_status = ArrivalStatus.WAITING;
-        update.reservation_status = ReservationStatus.NO_SHOW;
-        break;
-      case 'cancelled':
-        update.arrival_status = ArrivalStatus.WAITING;
-        update.reservation_status = ReservationStatus.CANCELLED;
-        update.table_id = undefined;
-        break;
-      case 'declined':
-        update.arrival_status = ArrivalStatus.WAITING;
-        update.reservation_status = ReservationStatus.DECLINED;
-        update.table_id = undefined;
-        break;
-    }
-    onUpdateReservation({ ...res, ...update });
+  const handleSetReservationState = (res: Reservation, state: Exclude<ReservationStateKey, 'arriving'>) => {
+    onUpdateReservation({ ...res, ...reservationStatePatch(state) });
     showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
   };
 
@@ -2178,7 +2205,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const allReservations = getReservationsForTable(table.id);
       const hasMultipleReservations = allReservations.length > 1;
       const isOccupied = !!occupier;
-      const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
       const isHidden = hiddenTableIds.has(table.id);
       const trimmedSearch = searchTerm.trim().toLowerCase();
       const isSearchMatch = !!(trimmedSearch && (
@@ -2187,17 +2213,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         table.name.toLowerCase().includes(trimmedSearch)
       ));
 
-      // Map reservation/banquet occupancy → glyph display status
-      let displayStatus: TableDisplayStatus = 'libera';
-      if (reservation) {
-          if (reservation.reservation_status === ReservationStatus.NO_SHOW) {
-              displayStatus = 'noshow';
-          } else {
-              displayStatus = isArrived ? 'arrivato' : 'attesa';
-          }
-      } else if (banquet) {
-          displayStatus = 'attesa';
-      }
+      // Map reservation/banquet occupancy → glyph display status (shared,
+      // time-aware derivation — but only when viewing today's service: past
+      // or future dates must not read as "In arrivo"/"In uscita").
+      const displayStatus: TableDisplayStatus = deriveTableDisplayStatus(reservation, {
+          banquet: !reservation && !!banquet,
+          now: isViewingToday ? nowTick : undefined,
+      });
       const reservationTime = reservation
           ? (getRomeTimePart(reservation.reservation_time) || null)
           : null;
@@ -2458,7 +2480,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {/* Main content: tiers 1–3 (left) + party/table rail (right) */}
         <div className="flex">
         {/* Left content */}
-        <div className="flex-1 min-w-0 px-3 pt-2">
+        <div className={`flex-1 min-w-0 px-3 ${compact ? 'pt-1' : 'pt-2'}`}>
           {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
           <div className="flex items-center gap-1.5 h-5">
             <span className="text-xs text-[var(--color-fg)] tabular">
@@ -2497,13 +2519,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {res.customer_is_vip && (
               <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
             )}
-            <p className={`text-base font-semibold text-[var(--color-fg)] leading-6 truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+            <p className={`${compact ? 'text-[14px] leading-5' : 'text-base leading-6'} font-semibold text-[var(--color-fg)] truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
               {toTitleCase(res.customer_name)}
             </p>
           </div>
 
           {/* Tier 3 — attributes: channel · confirmation · dietary · preferred · note · payment · menu */}
-          <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+          <div className={`flex items-center flex-wrap gap-1.5 ${compact ? 'mt-0.5' : 'mt-1.5'}`}>
             {renderChannelIcon(res)}
             {renderConfirmationIcon(res)}
             {matchedNoteIcons.map(m => {
@@ -2551,7 +2573,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         </div>
 
           {/* Rail: party (top) + table chip (bottom-aligned with tier 3) */}
-          <div className="flex flex-col items-end justify-between self-stretch flex-shrink-0 py-2 pr-2 gap-2">
+          <div className={`flex flex-col items-end justify-between self-stretch flex-shrink-0 pr-2 ${compact ? 'py-1.5 gap-1' : 'py-2 gap-2'}`}>
             <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
               <Users className="h-3.5 w-3.5" />
               <span className="text-base font-medium tabular">{res.guests}</span>
@@ -2559,19 +2581,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <span className="text-[10px] opacity-75">({res.children}b)</span>
               ) : null}
             </div>
-            <div className={`min-w-[60px] max-w-[120px] min-h-[56px] px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
+            <div className={`min-w-[60px] max-w-[120px] ${compact ? 'min-h-[40px]' : 'min-h-[56px]'} px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
               table
                 ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
                   : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
                   : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-                  : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
+                  : group.key === 'departing' ? 'bg-cyan-50 dark:bg-cyan-500/15'
+                  : 'bg-booked-50 dark:bg-booked-600/25'
                 : 'bg-[var(--color-surface-3)]'
             }`}>
               {table ? renderTableStripContent(res, table, tableRoom,
                 group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
                   : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
                   : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
-                  : 'text-[#4D5A87] dark:text-[#B9C2E0]'
+                  : group.key === 'departing' ? 'text-cyan-700 dark:text-cyan-300'
+                  : 'text-booked-600 dark:text-booked-300'
               ) : (
                 <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
               )}
@@ -2581,20 +2605,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
         {/* Actions band: status (left) · edit + delete (right) */}
         {canEdit && (
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-3 pt-1.5 pb-2">
-            {(() => {
-              const state = getReservationState(res);
-              const meta = RESERVATION_STATE_META[state];
-              return (
-                <button type="button" onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                  className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${meta.chipClass}`}
-                  title="Cambia stato">
-                  {meta.label}
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                </button>
-              );
-            })()}
-            {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+          <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-3 ${compact ? 'pt-1 pb-1.5' : 'pt-1.5 pb-2'}`}>
+            <StatusChip
+              state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
+              size="sm"
+              onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+              title="Cambia stato"
+              trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
+            />
+            {isSeated(res) && !res.table_id && (
               <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                 className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
                 <MapPin className="h-3.5 w-3.5" /> Tavolo
@@ -2728,22 +2747,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
           )}
 
+          {/* Consensi privacy (read-only) — mostrati solo se registrati almeno una volta */}
+          {(res.consent_marketing != null || res.consent_data_health != null || res.consent_updated_at) && (
+            <div className="text-xs bg-[var(--color-surface-2)] rounded-md px-3 py-2 space-y-1">
+              <div className="font-medium text-[var(--color-fg-muted)]">Consensi privacy</div>
+              {[
+                { label: 'Allergie / dati sanitari', v: res.consent_data_health },
+                { label: 'Marketing', v: res.consent_marketing },
+              ].map(({ label, v }) => (
+                <div key={label} className="flex items-center gap-1.5 text-[var(--color-fg)]">
+                  {v === true ? (
+                    <Check className="h-3 w-3 text-emerald-600 flex-shrink-0" />
+                  ) : v === false ? (
+                    <X className="h-3 w-3 text-rose-600 flex-shrink-0" />
+                  ) : (
+                    <span className="h-3 w-3 inline-flex items-center justify-center text-[var(--color-fg-subtle)] flex-shrink-0">—</span>
+                  )}
+                  <span>{label}: <span className="text-[var(--color-fg-muted)]">{v === true ? 'concesso' : v === false ? 'negato' : 'non registrato'}</span></span>
+                </div>
+              ))}
+              {res.consent_updated_at && (
+                <div className="text-[11px] text-[var(--color-fg-subtle)]">
+                  Aggiornati il {new Date(res.consent_updated_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           {canEdit && (
             <div className="flex items-center gap-2.5 pt-1 flex-wrap">
-              {(() => {
-                const state = getReservationState(res);
-                const meta = RESERVATION_STATE_META[state];
-                return (
-                  <button onClick={() => setStateChangeReservation(res)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${meta.chipClass}`}
-                    title="Cambia stato">
-                    Stato: {meta.label}
-                    <ChevronDown className="h-3 w-3 opacity-60" />
-                  </button>
-                );
-              })()}
-              {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+              <StatusChip
+                state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
+                onClick={() => setStateChangeReservation(res)}
+                title="Cambia stato"
+                trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
+              />
+              {isSeated(res) && !res.table_id && (
                 <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:hover:bg-slate-500/25 transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
@@ -2774,8 +2814,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <div className="px-3 pt-3 pb-2 flex items-center gap-1.5">
         <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-          <input type="text" placeholder="Cerca per nome o tavolo..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
-            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <input ref={searchInputRef} type="text" placeholder="Cerca per nome o tavolo…  /" className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
+            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleSearchKeyDown} />
+          {searchTerm && quickArriveCandidates.length === 1 && (
+            <span className="hidden lg:inline-flex absolute right-9 top-1/2 -translate-y-1/2 items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 text-[10px] font-semibold whitespace-nowrap pointer-events-none">
+              ↵ Arrivato
+            </span>
+          )}
           {searchTerm && (
             <button type="button" onClick={() => setSearchTerm('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
@@ -2783,6 +2828,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </button>
           )}
         </div>
+
+        {/* Densità — desktop only: la cassa vuole righe, il tablet vuole aria */}
+        <button type="button" onClick={toggleDensity}
+          className="pressable hidden lg:flex h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] items-center justify-center flex-shrink-0"
+          aria-label={compact ? 'Densità: compatta (passa a comoda)' : 'Densità: comoda (passa a compatta)'}
+          title={compact ? 'Vista compatta — clic per comoda' : 'Vista comoda — clic per compatta'}>
+          {compact
+            ? <Rows4 className="h-3.5 w-3.5 text-[var(--color-fg)]" />
+            : <Rows3 className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />}
+        </button>
 
         {/* Sort — opens modal */}
         <button type="button" onClick={() => setShowSortModal(true)}
@@ -2837,7 +2892,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div key={group.key}>
               {/* Group header */}
               <button type="button" onClick={() => toggleGroup(group.key)}
-                className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10">
+                className={`w-full flex items-center gap-2.5 px-3 ${compact ? 'py-2' : 'py-3'} bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10`}>
                 <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${group.dotClass}`} />
                 <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap flex-shrink-0">{group.label}</span>
                 <span className="text-xs text-[var(--color-fg-muted)] font-medium whitespace-nowrap truncate min-w-0">
@@ -3256,7 +3311,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     const reservation = occupier?.kind === 'reservation' ? occupier.data : null;
                     const banquet = occupier?.kind === 'banquet' ? occupier.data : null;
                     const isOccupied = !!occupier;
-                    const isArrived = !!reservation && reservation.arrival_status === ArrivalStatus.ARRIVED;
+                    // "Seated" covers both ARRIVED and DEPARTING — the party
+                    // is still physically at the table either way.
+                    const isArrived = !!reservation && isSeated(reservation);
                     const trimmedSearch = searchTerm.trim().toLowerCase();
                     const isSearchMatch = !!(trimmedSearch && (
                       (reservation && reservation.customer_name.toLowerCase().includes(trimmedSearch)) ||
@@ -3396,15 +3453,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   return (
-    <div className={modalOnly ? 'contents' : 'h-[calc(100vh-56px)] flex flex-col'}>
+    <div className={modalOnly ? 'contents' : 'h-full flex flex-col overflow-hidden'}>
       {!modalOnly && (
       <React.Fragment>
 
       {/* ===== DESKTOP: Two-column split view (>= 1024px) ===== */}
       {isDesktop ? (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full overflow-hidden">
           {/* Split view */}
-          <div className="flex flex-1 min-h-0">
+          <div className="flex flex-1 min-h-0 min-w-0">
             {/* Left column — Reservation list (20%) */}
             <div className="w-[20%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
               {renderGroupedList()}
@@ -3418,7 +3475,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         </div>
       ) : (
         /* ===== MOBILE / TABLET: List only (< 1024px) ===== */
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full overflow-hidden">
           {/* Row 1: Date - Shift */}
           <div className="px-4 pt-2.5 pb-2 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
             <div className="flex items-start gap-2">
@@ -3548,7 +3605,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                             const isFlashing = newReservationFlashId === res.id;
                             return (
-                              <div key={res.id}
+                              <SwipeToCheckIn
+                                key={res.id}
+                                enabled={!!canEdit && group.key === 'waiting' && isViewingToday}
+                                onConfirm={() => handleSetReservationState(res, 'arrived')}
+                              >
+                              <div
                                 id={`reservation-row-${res.id}`}
                                 className={`bg-[var(--color-surface)] rounded-2xl border cursor-pointer p-3.5 ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''} ${isFlashing ? 'animate-flash-row' : ''}`}
                                 onMouseEnter={() => setHoveredReservationId(res.id)}
@@ -3637,14 +3699,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
                                           : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
                                           : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-                                          : 'bg-[#EDEFF7] dark:bg-[#4D5A87]/25'
+                                          : group.key === 'departing' ? 'bg-cyan-50 dark:bg-cyan-500/15'
+                                          : 'bg-booked-50 dark:bg-booked-600/25'
                                         : 'bg-[var(--color-surface-3)]'
                                     }`}>
                                       {table ? renderTableStripContent(res, table, tableRoom,
                                         group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
                                           : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
                                           : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
-                                          : 'text-[#4D5A87] dark:text-[#B9C2E0]',
+                                          : group.key === 'departing' ? 'text-cyan-700 dark:text-cyan-300'
+                                          : 'text-booked-600 dark:text-booked-300',
                                         true
                                       ) : (
                                         <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
@@ -3656,19 +3720,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {/* Actions band: status (left) · edit + delete (right) */}
                                 {canEdit && (
                                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3 pt-3 border-t border-[var(--color-line)]">
-                                    {(() => {
-                                      const state = getReservationState(res);
-                                      const meta = RESERVATION_STATE_META[state];
-                                      return (
-                                        <button onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                                          className={`inline-flex items-center gap-1.5 px-2.5 h-6 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${meta.chipClass}`}
-                                          title="Cambia stato">
-                                          {meta.label}
-                                          <ChevronDown className="h-3 w-3 opacity-60" />
-                                        </button>
-                                      );
-                                    })()}
-                                    {arrivalStatus === ArrivalStatus.ARRIVED && !res.table_id && (
+                                    <StatusChip
+                                      state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
+                                      size="sm"
+                                      onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
+                                      title="Cambia stato"
+                                      trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
+                                    />
+                                    {isSeated(res) && !res.table_id && (
                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
                                         className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
                                         <MapPin className="h-3.5 w-3.5" /> Tavolo
@@ -3687,6 +3746,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   </div>
                                 )}
                               </div>
+                              </SwipeToCheckIn>
                             );
                           })}
                         </div>
@@ -4442,6 +4502,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </div>
                                     )}
                                 </div>
+
+                                {/* GDPR consents — always visible; captured at booking and stored with a timestamp as proof (art. 7 GDPR) */}
+                                <div className="mt-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Consensi privacy (GDPR)</label>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="mt-0.5 h-4 w-4 rounded flex-shrink-0"
+                                                checked={formData.consent_data_health === true}
+                                                onChange={e => setFormData({ ...formData, consent_data_health: e.target.checked })}
+                                            />
+                                            <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--color-fg-muted)]">(dati sanitari, art. 9 GDPR)</span></span>
+                                        </label>
+                                        {marketingEnabled && (
+                                        <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="mt-0.5 h-4 w-4 rounded flex-shrink-0"
+                                                checked={formData.consent_marketing === true}
+                                                onChange={e => setFormData({ ...formData, consent_marketing: e.target.checked })}
+                                            />
+                                            <span>Consenso all'invio di comunicazioni commerciali <span className="text-[var(--color-fg-muted)]">(marketing)</span></span>
+                                        </label>
+                                        )}
+                                    </div>
+                                    {formData.consent_updated_at && (
+                                        <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1.5">
+                                            Consensi aggiornati il {new Date(formData.consent_updated_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -4458,20 +4550,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </p>
                                 </div>
                                 {selectedTableObj && (
-                                    <div className="flex items-center gap-1">
-                                        <span className="inline-flex items-center px-3 py-1 text-emerald-700 bg-emerald-50 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 rounded-l-full text-xs font-medium border border-r-0 border-emerald-100">
-                                            T. {selectedTableObj.name}
+                                    <div className="flex items-stretch rounded-full border border-emerald-300 dark:border-emerald-500/50 overflow-hidden shadow-[var(--shadow-xs)] flex-shrink-0">
+                                        <span className="inline-flex items-center gap-1.5 pl-3 pr-3 py-1.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-200 text-sm font-bold whitespace-nowrap">
+                                            <Armchair className="h-4 w-4 flex-shrink-0" />
+                                            Tavolo {selectedTableObj.name}
                                         </span>
                                         <button
                                             type="button"
                                             onClick={() => {
                                                 setFormData({...formData, table_id: undefined});
-                                                showToast('Tavolo rimosso dalla prenotazione', 'info');
+                                                showToast('Tavolo scollegato dalla prenotazione', 'info');
                                             }}
-                                            className="px-2 py-1 text-rose-600 bg-rose-50 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 dark:hover:bg-rose-500/25 rounded-r-full text-xs font-medium border border-rose-100 hover:bg-rose-100 transition-colors"
-                                            title="Rimuovi tavolo"
+                                            className="pressable inline-flex items-center gap-1 pl-2.5 pr-3 py-1.5 border-l border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 text-rose-600 hover:bg-rose-500 hover:text-white dark:bg-emerald-500/10 dark:text-rose-400 dark:hover:bg-rose-600 dark:hover:text-white text-xs font-semibold transition-colors"
+                                            title="Scollega il tavolo dalla prenotazione"
+                                            aria-label="Scollega tavolo dalla prenotazione"
                                         >
-                                            <X className="h-3.5 w-3.5" />
+                                            <X className="h-4 w-4 flex-shrink-0" />
+                                            <span className="hidden sm:inline">Scollega</span>
                                         </button>
                                     </div>
                                 )}
@@ -4607,7 +4702,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-banquet-bg)] border border-[var(--color-banquet-border)] rounded"></span> Evento / Banchetto</div>
                              </div>
 
-                             <div className="flex-1 rounded-lg overflow-y-auto max-h-[320px] sm:max-h-[440px] relative">
+                             <div className="flex-1 min-h-0 rounded-lg overflow-y-auto relative max-h-[50vh] lg:max-h-none">
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
                                         <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
@@ -5539,9 +5634,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const current = getReservationState(res);
         const isPending = (res.reservation_status || ReservationStatus.CONFIRMED) === ReservationStatus.PENDING;
         // For PENDING web bookings the only sensible actions are Conferma / Non confermata.
-        const options: ReservationStateKey[] = isPending
+        const options: Exclude<ReservationStateKey, 'arriving'>[] = isPending
           ? ['waiting', 'declined']
-          : ['pending', 'waiting', 'arrived', 'freed', 'noshow', 'cancelled', 'declined'];
+          : ['pending', 'waiting', 'arrived', 'departing', 'freed', 'noshow', 'cancelled', 'declined'];
         const title = isPending ? 'Rispondi al cliente' : 'Cambia stato';
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>

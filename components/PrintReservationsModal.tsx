@@ -4,6 +4,7 @@ import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { isSeated } from './reservationState';
 
 interface Props {
   isOpen: boolean;
@@ -70,7 +71,13 @@ export const PrintReservationsModal: React.FC<Props> = ({
         const table = tableById.get(r.table_id);
         return table?.room_id === printRoomId;
       })
-      .filter(r => printArrival === 'ALL' || (r.arrival_status || ArrivalStatus.WAITING) === printArrival)
+      // "Arrivati" prints everyone in house (ARRIVED + DEPARTING), matching
+      // the footer counter which also uses isSeated().
+      .filter(r => {
+        if (printArrival === 'ALL') return true;
+        if (printArrival === ArrivalStatus.ARRIVED) return isSeated(r);
+        return (r.arrival_status || ArrivalStatus.WAITING) === printArrival;
+      })
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
   }, [reservations, printDate, printShift, printRoomId, printArrival, tableById]);
 
@@ -81,7 +88,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
 
   const totalGuests = filteredReservations.reduce((acc, r) => acc + r.guests, 0);
   const totalChildren = filteredReservations.reduce((acc, r) => acc + (r.children || 0), 0);
-  const arrivedCount = filteredReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED).length;
+  const arrivedCount = filteredReservations.filter(r => isSeated(r)).length;
 
   const shiftLabel = printShift === 'ALL'
     ? 'Tutti i turni'
@@ -241,7 +248,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                   {filteredReservations.map(r => {
                     const table = r.table_id ? tableById.get(r.table_id) : null;
                     const time = getRomeTimePart(r.reservation_time);
-                    const arrived = r.arrival_status === ArrivalStatus.ARRIVED;
+                    const arrived = isSeated(r);
                     return (
                       <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '0.5rem', whiteSpace: 'nowrap', fontWeight: 600 }}>{time}</td>

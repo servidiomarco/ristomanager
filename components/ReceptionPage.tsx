@@ -28,11 +28,14 @@ import {
   Zap,
   List,
   LayoutGrid,
+  LogOut,
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
-import { TableGlyph, getGlyphDimensions } from './TableGlyph';
+import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { StatusChip, PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
+import { useNow } from '../hooks/useNow';
 
 // Local-date helper (avoid UTC drift)
 const formatLocalDate = (d: Date): string => {
@@ -110,6 +113,11 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Ticking clock (1/min) — drives the time-derived states (In arrivo /
+  // In uscita) on cards and the room map.
+  const nowTick = useNow(60_000);
+  const isViewingToday = formatLocalDate(globalDate) === formatLocalDate(new Date(nowTick));
+
   // Bookings for the date+shift chosen in the global top-bar control.
   // 'ALL' shows both shifts; any other value filters to that shift.
   const todayReservations = useMemo(() => {
@@ -134,7 +142,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     if (statusFilter === 'waiting') {
       list = list.filter(r => (r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.WAITING);
     } else if (statusFilter === 'arrived') {
-      list = list.filter(r => r.arrival_status === ArrivalStatus.ARRIVED);
+      // "Arrivati" = everyone in house: ARRIVED and DEPARTING alike.
+      list = list.filter(r => isSeated(r));
     } else if (statusFilter === 'noTable') {
       list = list.filter(r => !r.table_id);
     }
@@ -157,11 +166,22 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     return { adesso, prossima, piuTardi };
   }, [filtered]);
 
+  // "In arrivo adesso" — the bookings whose party is due right now (from
+  // T−20′ until they show up). Most-overdue first: that's who's probably
+  // standing at the door. Powers the one-tap check-in rail.
+  const arrivingNow = useMemo(() => {
+    if (!isViewingToday) return [];
+    return todayReservations
+      .filter(r => getTimedReservationState(r, nowTick) === 'arriving')
+      .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time))
+      .slice(0, 12);
+  }, [todayReservations, nowTick, isViewingToday]);
+
   // Header stats
   const stats = useMemo(() => ({
     count: todayReservations.length,
     guests: todayReservations.reduce((s, r) => s + (r.guests || 0), 0),
-    arrived: todayReservations.filter(r => r.arrival_status === ArrivalStatus.ARRIVED).length,
+    arrived: todayReservations.filter(r => isSeated(r)).length,
     noTable: todayReservations.filter(r => !r.table_id).length
   }), [todayReservations]);
 
@@ -194,7 +214,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const reservationByTableId = useMemo(() => {
     const m = new Map<number, Reservation>();
     const priority = (r: Reservation) => {
-      if (r.arrival_status === ArrivalStatus.ARRIVED) return 3;
+      if (isSeated(r)) return 3; // ARRIVED or DEPARTING — party at the table
       if (r.reservation_status === ReservationStatus.NO_SHOW) return 1;
       if (r.arrival_status === ArrivalStatus.DEPARTED) return 0;
       return 2; // WAITING
@@ -233,6 +253,16 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     if (!selectedReservation) return;
     await patchReservation(selectedReservation.id, { table_id: tableId });
     setShowTablePicker(false);
+  };
+
+  // One-tap check-in from the "In arrivo adesso" rail: mark arrived, focus
+  // the booking, and — if it has no table yet — jump straight into the
+  // table picker so seating happens in the same motion (walk-in pattern).
+  const handleQuickArrive = async (r: Reservation) => {
+    if (navigator.vibrate) navigator.vibrate(30);
+    setSelectedReservationId(r.id);
+    await patchReservation(r.id, { arrival_status: ArrivalStatus.ARRIVED });
+    if (!r.table_id) setShowTablePicker(true);
   };
 
   // Swap the selected reservation's table with another reservation's. One
@@ -295,6 +325,13 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     await patchReservation(selectedReservation.id, { arrival_status: ArrivalStatus.ARRIVED });
   };
 
+  // Toggle "In uscita" — the party is at dolce/caffè/conto: the table is
+  // still busy but the host knows it's about to turn over.
+  const handleMarkDeparting = async () => {
+    if (!selectedReservation) return;
+    await patchReservation(selectedReservation.id, { arrival_status: ArrivalStatus.DEPARTING });
+  };
+
   const handleMarkWaiting = async () => {
     if (!selectedReservation) return;
     await patchReservation(selectedReservation.id, { arrival_status: ArrivalStatus.WAITING });
@@ -323,21 +360,11 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   // Render a reservation card in the left list
   const renderCard = (r: Reservation) => {
     const isSelected = r.id === selectedReservationId;
-    const arr = r.arrival_status || ArrivalStatus.WAITING;
-    const noShow = r.reservation_status === ReservationStatus.NO_SHOW;
     const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
-
-    const badgeColor =
-      noShow ? 'bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/40'
-      : arr === ArrivalStatus.ARRIVED ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40'
-      : arr === ArrivalStatus.DEPARTED ? 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/40'
-      : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40';
-
-    const badgeLabel =
-      noShow ? 'No-show'
-      : arr === ArrivalStatus.ARRIVED ? 'Arrivato'
-      : arr === ArrivalStatus.DEPARTED ? 'Liberato'
-      : 'Confermata';
+    // Shared, time-aware badge — same visual language as the reservations
+    // list and the floor map (an imminent booking pulses as "In arrivo").
+    // Time-derived states only apply when viewing today's service.
+    const timedState = isViewingToday ? getTimedReservationState(r, nowTick) : getReservationState(r);
 
     return (
       <button
@@ -356,9 +383,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             </span>
             {r.customer_is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />}
           </div>
-          <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${badgeColor}`}>
-            {badgeLabel}
-          </span>
+          <StatusChip state={timedState} size="sm" />
         </div>
         <div className="text-base font-medium text-[var(--color-fg)] truncate mb-0.5">
           {r.customer_name || 'Senza nome'}
@@ -399,54 +424,58 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-surface)]">
-      {/* Top header bar (stays on top, sits above the split) */}
-      <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)] px-4 py-3 flex items-center gap-3">
-        {onBack && (
+      {/* Top header. Desktop: title · centred stats · Walk-in · refresh on one
+          row. Mobile: title + actions on row 1, a compact 4-up stats strip on
+          row 2 (the centred desktop stats overflow a phone). */}
+      <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
+        <div className="px-4 py-3 flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="pressable p-2 -ml-1 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
+              aria-label="Indietro"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+          <h1 className="text-lg lg:text-xl font-semibold text-[var(--color-fg)]">Reception</h1>
+
+          {/* Desktop centred stats */}
+          <div className="hidden lg:flex flex-1 items-center justify-center gap-6 text-sm">
+            <HeaderStat value={stats.count} label="Prenotazioni" />
+            <HeaderStat value={stats.guests} label="Coperti" />
+            <HeaderStat value={stats.arrived} label="Arrivati" tone="emerald" />
+            <HeaderStat value={stats.noTable} label="Senza tavolo" tone={stats.noTable > 0 ? 'amber' : undefined} />
+          </div>
+
+          {/* Mobile spacer pushes the actions to the right */}
+          <div className="flex-1 lg:hidden" />
+
           <button
-            onClick={onBack}
-            className="p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
-            aria-label="Indietro"
+            onClick={() => setShowWalkIn(true)}
+            className="pressable inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm shadow-sm flex-shrink-0"
+            title="Cliente senza prenotazione"
           >
-            <ChevronLeft className="h-5 w-5" />
+            <Zap className="h-4 w-4" />
+            Walk-in
           </button>
-        )}
-        <h1 className="text-xl font-semibold text-[var(--color-fg)]">Reception</h1>
-        <div className="flex-1 flex items-center justify-center gap-6 text-sm">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-[var(--color-fg)] tabular-nums">{stats.count}</div>
-            <div className="text-[10px] uppercase tracking-wider text-[var(--color-fg-muted)]">Prenotazioni</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-[var(--color-fg)] tabular-nums">{stats.guests}</div>
-            <div className="text-[10px] uppercase tracking-wider text-[var(--color-fg-muted)]">Coperti</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.arrived}</div>
-            <div className="text-[10px] uppercase tracking-wider text-[var(--color-fg-muted)]">Arrivati</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-2xl font-bold tabular-nums ${stats.noTable > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg)]'}`}>
-              {stats.noTable}
-            </div>
-            <div className="text-[10px] uppercase tracking-wider text-[var(--color-fg-muted)]">Senza tavolo</div>
-          </div>
+          <button
+            onClick={loadAll}
+            className="pressable p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"
+            aria-label="Aggiorna"
+            title="Aggiorna"
+          >
+            <RefreshCw className={`h-5 w-5 ${busy ? 'animate-spin' : ''}`} />
+          </button>
         </div>
-        <button
-          onClick={() => setShowWalkIn(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm shadow-sm"
-          title="Cliente senza prenotazione"
-        >
-          <Zap className="h-4 w-4" />
-          Walk-in
-        </button>
-        <button
-          onClick={loadAll}
-          className="p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
-          aria-label="Aggiorna"
-          title="Aggiorna"
-        >
-          <RefreshCw className={`h-5 w-5 ${busy ? 'animate-spin' : ''}`} />
-        </button>
+
+        {/* Mobile stats strip */}
+        <div className="grid grid-cols-4 gap-2 px-4 pb-3 lg:hidden">
+          <HeaderStat value={stats.count} label="Prenot." compact />
+          <HeaderStat value={stats.guests} label="Coperti" compact />
+          <HeaderStat value={stats.arrived} label="Arrivati" tone="emerald" compact />
+          <HeaderStat value={stats.noTable} label="Senza tav." tone={stats.noTable > 0 ? 'amber' : undefined} compact />
+        </div>
       </div>
 
       {error && (
@@ -456,10 +485,73 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         </div>
       )}
 
-      {/* Split 40/60 */}
+      {/* "In arrivo adesso" — one-tap check-in rail. The next parties due at
+          the door, most overdue first; a single tap seats them. */}
+      {arrivingNow.length > 0 && (
+        <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2.5">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <PulseDot dotClass="bg-booked-600" pulse sizeClass="h-2 w-2" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
+              In arrivo adesso
+            </span>
+            <span className="text-[11px] text-[var(--color-fg-subtle)] tabular-nums">· {arrivingNow.length}</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
+            {arrivingNow.map(r => {
+              const start = new Date(r.reservation_time).getTime();
+              const deltaMin = Math.round((nowTick - start) / 60_000);
+              const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
+              return (
+                <div
+                  key={r.id}
+                  className={`flex-shrink-0 flex items-center gap-3 pl-3.5 pr-2 py-2 rounded-2xl border transition-colors cursor-pointer ${
+                    r.id === selectedReservationId
+                      ? 'bg-booked-50 border-booked-300 dark:bg-booked-600/25 dark:border-booked-600/50'
+                      : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
+                  }`}
+                  onClick={() => setSelectedReservationId(r.id)}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-bold text-[var(--color-fg)] tabular-nums">{formatHHMM(r.reservation_time)}</span>
+                      <span className={`text-[11px] font-semibold tabular-nums ${
+                        deltaMin > 5 ? 'text-rose-600 dark:text-rose-400' : 'text-[var(--color-fg-subtle)]'
+                      }`}>
+                        {deltaMin > 0 ? `+${deltaMin}′` : deltaMin < 0 ? `tra ${-deltaMin}′` : 'ora'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-[var(--color-fg)] max-w-[180px]">
+                      <span className="font-medium truncate">{r.customer_name || 'Senza nome'}</span>
+                      <span className="text-xs text-[var(--color-fg-muted)] flex items-center gap-0.5 flex-none">
+                        <Users className="h-3 w-3" />{r.guests}
+                      </span>
+                      {table && (
+                        <span className="text-xs font-semibold text-[var(--color-fg-muted)] flex-none">· {table.name}</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
+                    aria-label={`Segna ${r.customer_name || 'prenotazione'} come arrivato`}
+                    className="flex-none inline-flex items-center gap-1.5 h-11 px-3.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-4.5 w-4.5" />
+                    Arrivato
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Desktop: 40/60 split. Mobile: the list is full-width and tapping a
+          card opens the detail as a full-screen drawer (below). */}
       <div className="flex-1 flex min-h-0">
-        {/* LEFT 40% — search + list */}
-        <div className="w-2/5 min-w-[320px] flex flex-col border-r border-[var(--color-line)] bg-[var(--color-surface)]">
+        {/* LEFT — full width on mobile, 40% on desktop */}
+        <div className="w-full lg:w-2/5 lg:min-w-[320px] flex flex-col lg:border-r border-[var(--color-line)] bg-[var(--color-surface)]">
           <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
             {/* Lista / Mappa toggle — controls the right pane so the host can
                 check the floor at any time without leaving the list view. */}
@@ -530,8 +622,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
         </div>
 
-        {/* RIGHT 60% — detail */}
-        <div className="flex-1 flex flex-col bg-[var(--color-surface)] min-w-0">
+        {/* RIGHT 60% — detail (desktop inline) */}
+        <div className="hidden lg:flex flex-1 flex-col bg-[var(--color-surface)] min-w-0">
           {!selectedReservation ? (
             <EmptyState count={filtered.length} />
           ) : (
@@ -544,11 +636,41 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               onMarkArrived={handleMarkArrived}
               onMarkWaiting={handleMarkWaiting}
               onMarkNoShow={handleMarkNoShow}
+              onMarkDeparting={handleMarkDeparting}
               onFreeTable={handleFreeTable}
             />
           )}
         </div>
       </div>
+
+      {/* Mobile detail drawer — full-screen over the list; a back chevron
+          returns to the list. Sits above the bottom nav (z-30). */}
+      {selectedReservation && (
+        <div className="lg:hidden fixed inset-0 z-40 flex flex-col bg-[var(--color-surface)] animate-view-in">
+          <div className="flex-shrink-0 flex items-center gap-2 px-3 h-14 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
+            <button
+              onClick={() => setSelectedReservationId(null)}
+              className="pressable p-2 -ml-1 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
+              aria-label="Torna alla lista"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <span className="font-semibold text-[var(--color-fg)]">Dettaglio prenotazione</span>
+          </div>
+          <DetailPanel
+            reservation={selectedReservation}
+            table={selectedTable}
+            busy={busy}
+            onAssignTable={() => setShowTablePicker(true)}
+            onRemoveTable={handleRemoveTable}
+            onMarkArrived={handleMarkArrived}
+            onMarkWaiting={handleMarkWaiting}
+            onMarkNoShow={handleMarkNoShow}
+            onMarkDeparting={handleMarkDeparting}
+            onFreeTable={handleFreeTable}
+          />
+        </div>
+      )}
 
       {/* Full-screen table picker so every table in a room is visible without
           horizontal scroll — the spatial map needs the whole viewport. */}
@@ -582,6 +704,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             setSelectedReservationId(id);
             setViewMode('list');
           }}
+          now={isViewingToday ? nowTick : undefined}
         />
       )}
 
@@ -747,6 +870,7 @@ interface DetailPanelProps {
   onMarkArrived: () => void;
   onMarkWaiting: () => void;
   onMarkNoShow: () => void;
+  onMarkDeparting: () => void;
   onFreeTable: () => void;
 }
 
@@ -759,65 +883,69 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   onMarkArrived,
   onMarkWaiting,
   onMarkNoShow,
+  onMarkDeparting,
   onFreeTable
 }) => {
   const arr = reservation.arrival_status || ArrivalStatus.WAITING;
   const noShow = reservation.reservation_status === ReservationStatus.NO_SHOW;
+  const seated = isSeated(reservation);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Big info header */}
-      <div className="flex-shrink-0 px-8 pt-8 pb-6 border-b border-[var(--color-line)]">
-        <div className="flex items-start justify-between gap-6 flex-wrap">
+    <div className="flex-1 flex flex-col overflow-y-auto">
+      {/* Info header. Compact on mobile so the action buttons stay in view even
+          with notes: smaller name, single meta row, table as a horizontal bar.
+          Desktop keeps the roomy layout with the big square table card. */}
+      <div className="flex-shrink-0 px-5 lg:px-8 pt-4 lg:pt-8 pb-4 lg:pb-6 border-b border-[var(--color-line)]">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 lg:gap-6">
           <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-3xl font-bold text-[var(--color-fg)] truncate">
+            <div className="flex items-center gap-2 lg:gap-3 mb-1.5 lg:mb-2">
+              <h2 className="text-2xl lg:text-3xl font-bold text-[var(--color-fg)] truncate">
                 {reservation.customer_name || 'Senza nome'}
               </h2>
               {reservation.customer_is_vip && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 text-xs font-semibold">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 text-xs font-semibold flex-shrink-0">
                   <Star className="h-3.5 w-3.5 fill-current" /> VIP
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-6 text-base text-[var(--color-fg-muted)] flex-wrap">
-              <span className="inline-flex items-center gap-2">
-                <Clock className="h-4 w-4" />
+            <div className="flex items-center gap-x-4 gap-y-1 text-sm lg:text-base text-[var(--color-fg-muted)] flex-wrap">
+              <span className="inline-flex items-center gap-1.5 lg:gap-2">
+                <Clock className="h-4 w-4 flex-shrink-0" />
                 <span className="font-semibold text-[var(--color-fg)]">
                   {formatHHMM(reservation.reservation_time)}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                <span className="font-semibold text-[var(--color-fg)]">
-                  {reservation.guests}{reservation.children ? ` + ${reservation.children} bimbi` : ''} coperti
+              <span className="inline-flex items-center gap-1.5 lg:gap-2">
+                <Users className="h-4 w-4 flex-shrink-0" />
+                <span className="font-semibold text-[var(--color-fg)] whitespace-nowrap">
+                  {reservation.guests}{reservation.children ? ` +${reservation.children} bimbi` : ''} coperti
                 </span>
               </span>
               {reservation.phone && (
                 <a
                   href={`tel:${reservation.phone}`}
-                  className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:underline"
+                  className="inline-flex items-center gap-1.5 lg:gap-2 text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
-                  <Phone className="h-4 w-4" />
+                  <Phone className="h-4 w-4 flex-shrink-0" />
                   <span className="font-semibold">{formatPhone(reservation.phone)}</span>
                 </a>
               )}
             </div>
           </div>
           {table ? (
-            <div className="flex-shrink-0 flex flex-col items-center px-6 py-4 rounded-2xl bg-indigo-50 border border-indigo-200 dark:bg-indigo-500/15 dark:border-indigo-500/40">
-              <div className="text-[10px] uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold mb-1">
-                Tavolo
+            <div className="flex-shrink-0 w-full lg:w-auto flex flex-row lg:flex-col items-center justify-between lg:justify-center gap-3 lg:gap-0 px-4 lg:px-6 py-2.5 lg:py-4 rounded-xl lg:rounded-2xl bg-indigo-50 border border-indigo-200 dark:bg-indigo-500/15 dark:border-indigo-500/40">
+              <div className="flex items-baseline lg:flex-col lg:items-center gap-2 lg:gap-0">
+                <span className="text-[10px] uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold lg:mb-1">Tavolo</span>
+                <span className="text-2xl lg:text-4xl font-extrabold text-indigo-700 dark:text-indigo-200 tabular-nums leading-none">
+                  {table.name}
+                </span>
               </div>
-              <div className="text-4xl font-extrabold text-indigo-700 dark:text-indigo-200 tabular-nums">
-                {table.name}
-              </div>
-              <div className="text-xs text-indigo-600 dark:text-indigo-300 mt-1">
+              <div className="text-xs text-indigo-600 dark:text-indigo-300 lg:mt-1">
                 {table.seats} posti
               </div>
             </div>
           ) : (
-            <div className="flex-shrink-0 px-6 py-4 rounded-2xl bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-sm font-medium">
+            <div className="flex-shrink-0 w-full lg:w-auto px-4 lg:px-6 py-2.5 lg:py-4 rounded-xl lg:rounded-2xl bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-sm font-medium text-center">
               Nessun tavolo assegnato
             </div>
           )}
@@ -825,7 +953,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
         {/* Customer notes / preferences */}
         {(reservation.notes || reservation.customer_dietary_notes || reservation.customer_preferences_notes) && (
-          <div className="mt-5 space-y-2">
+          <div className="mt-3 lg:mt-5 space-y-1.5 lg:space-y-2">
             {reservation.notes && (
               <NotesLine label="Note prenotazione" text={reservation.notes} />
             )}
@@ -840,8 +968,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       </div>
 
       {/* Action buttons — big touch targets */}
-      <div className="flex-shrink-0 px-8 py-6">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="flex-shrink-0 px-5 lg:px-8 py-4 lg:py-6">
+        <div className="grid grid-cols-2 gap-2.5 lg:gap-4">
           <ActionButton
             primary
             disabled={busy}
@@ -858,7 +986,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               variant="neutral"
             />
           )}
-          {arr === ArrivalStatus.ARRIVED ? (
+          {seated ? (
             <ActionButton
               disabled={busy}
               onClick={onFreeTable}
@@ -887,6 +1015,24 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           {arr === ArrivalStatus.ARRIVED && (
             <ActionButton
               disabled={busy}
+              onClick={onMarkDeparting}
+              icon={<LogOut className="h-6 w-6" />}
+              label="In uscita"
+              variant="info"
+            />
+          )}
+          {arr === ArrivalStatus.DEPARTING && (
+            <ActionButton
+              disabled={busy}
+              onClick={onMarkArrived}
+              icon={<CheckCircle2 className="h-6 w-6" />}
+              label="Annulla in uscita"
+              variant="neutral"
+            />
+          )}
+          {arr === ArrivalStatus.ARRIVED && (
+            <ActionButton
+              disabled={busy}
               onClick={onMarkWaiting}
               icon={<Clock className="h-6 w-6" />}
               label="In attesa"
@@ -909,7 +1055,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 };
 
 const NotesLine: React.FC<{ label: string; text: string; tone?: 'amber' }> = ({ label, text, tone }) => (
-  <div className={`text-sm px-3 py-2 rounded-xl border ${
+  <div className={`text-[13px] lg:text-sm px-3 py-1.5 lg:py-2 rounded-lg lg:rounded-xl border ${
     tone === 'amber'
       ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200'
       : 'bg-[var(--color-surface-2)] border-[var(--color-line)] text-[var(--color-fg)]'
@@ -925,7 +1071,7 @@ interface ActionButtonProps {
   icon: React.ReactNode;
   label: string;
   primary?: boolean;
-  variant?: 'success' | 'danger' | 'neutral';
+  variant?: 'success' | 'danger' | 'neutral' | 'info';
 }
 
 const ActionButton: React.FC<ActionButtonProps> = ({ onClick, disabled, icon, label, primary, variant }) => {
@@ -936,12 +1082,15 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, disabled, icon, la
     cls = 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700';
   } else if (variant === 'danger') {
     cls = 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700';
+  } else if (variant === 'info') {
+    // "In uscita" — cyan, matching the departing table state on the map.
+    cls = 'bg-cyan-700 text-white border-cyan-700 hover:bg-cyan-800';
   }
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center justify-center gap-3 px-4 py-5 rounded-2xl border text-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[80px] ${cls}`}
+      className={`pressable flex items-center justify-center gap-2.5 lg:gap-3 px-4 py-3.5 lg:py-5 rounded-xl lg:rounded-2xl border text-base lg:text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed min-h-[60px] lg:min-h-[80px] ${cls}`}
     >
       {icon}
       {label}
@@ -1317,12 +1466,27 @@ const SwapRow: React.FC<{ name: string; from: string; to: string }> = ({ name, f
   </div>
 );
 
-const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber'; label: string }> = ({ tone, label }) => {
+// Reception KPI — shared by the desktop centred row and the mobile 4-up strip
+// so the two never drift. `compact` shrinks it for the phone layout.
+const HeaderStat: React.FC<{ value: number; label: string; tone?: 'emerald' | 'amber'; compact?: boolean }> = ({ value, label, tone, compact }) => {
+  const valueColor = tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400'
+    : tone === 'amber' ? 'text-amber-600 dark:text-amber-400'
+    : 'text-[var(--color-fg)]';
+  return (
+    <div className={compact ? 'text-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-line)] py-1.5' : 'text-center'}>
+      <div className={`${compact ? 'text-xl' : 'text-2xl'} font-bold tabular-nums ${valueColor}`}>{value}</div>
+      <div className={`${compact ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-wider text-[var(--color-fg-muted)]`}>{label}</div>
+    </div>
+  );
+};
+
+const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber' | 'cyan'; label: string }> = ({ tone, label }) => {
   const dot =
     tone === 'emerald' ? 'bg-emerald-500'
     : tone === 'rose'  ? 'bg-rose-400'
     : tone === 'indigo' ? 'bg-indigo-500'
     : tone === 'amber' ? 'bg-amber-400'
+    : tone === 'cyan'  ? 'bg-cyan-600'
                        : 'bg-slate-300';
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
@@ -1340,6 +1504,8 @@ interface RoomMapProps {
   setActiveRoomId: (id: number) => void;
   onClose: () => void;
   onPickReservation: (id: number) => void;
+  /** Epoch ms for time-derived states; undefined = not viewing today. */
+  now?: number;
 }
 
 // Full-viewport live room map — shares the visual shell with the assign-table
@@ -1354,6 +1520,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
   setActiveRoomId,
   onClose,
   onPickReservation,
+  now,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 600, height: 600 });
@@ -1395,14 +1562,17 @@ const RoomMap: React.FC<RoomMapProps> = ({
 
   // Stats for the active room — gives the host a one-glance read on capacity.
   const stats = useMemo(() => {
-    let arrived = 0, waiting = 0, free = 0;
+    let arrived = 0, departing = 0, waiting = 0, free = 0;
     for (const t of roomTables) {
       const r = reservationByTableId.get(t.id);
-      if (!r) { free++; continue; }
-      if (r.arrival_status === ArrivalStatus.ARRIVED) arrived++;
+      // A DEPARTED-only table is free again — the glyph beside this counter
+      // renders it as libera, and the legend must agree.
+      if (!r || r.arrival_status === ArrivalStatus.DEPARTED) { free++; continue; }
+      if (r.arrival_status === ArrivalStatus.DEPARTING) departing++;
+      else if (r.arrival_status === ArrivalStatus.ARRIVED) arrived++;
       else if (r.reservation_status !== ReservationStatus.NO_SHOW) waiting++;
     }
-    return { arrived, waiting, free };
+    return { arrived, departing, waiting, free };
   }, [roomTables, reservationByTableId]);
 
   return (
@@ -1447,6 +1617,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
         ) : <div />}
         <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
           <LegendDot tone="emerald" label={`${stats.arrived} arrivati`} />
+          {stats.departing > 0 && <LegendDot tone="cyan" label={`${stats.departing} in uscita`} />}
           <LegendDot tone="indigo" label={`${stats.waiting} in attesa`} />
           <LegendDot tone="slate" label={`${stats.free} liberi`} />
         </div>
@@ -1475,25 +1646,32 @@ const RoomMap: React.FC<RoomMapProps> = ({
               const glyphH = dim.height * scale;
               const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
 
-              // Pick the glyph status from the actual reservation state so
-              // the room reads the same as the floor plan view.
-              let status: 'libera' | 'attesa' | 'arrivato' | 'noshow' = 'libera';
+              // Shared, time-aware derivation so the room reads exactly like
+              // the floor plan view (In arrivo pulses, In uscita reads cyan).
+              const status: TableDisplayStatus = deriveTableDisplayStatus(res, { now });
               let haloClass = '';
               let caption: string | null = null;
 
               if (res) {
-                if (res.arrival_status === ArrivalStatus.ARRIVED) {
-                  status = 'arrivato';
-                  haloClass = 'ring-2 ring-emerald-400/70';
-                  caption = `${res.customer_name?.split(' ')[0] || 'Ospite'} · ${res.guests}p`;
-                } else if (res.reservation_status === ReservationStatus.NO_SHOW) {
-                  status = 'noshow';
-                  haloClass = 'ring-2 ring-rose-400/70';
-                  caption = 'No-show';
-                } else {
-                  status = 'attesa';
-                  haloClass = 'ring-2 ring-indigo-400/70';
-                  caption = `${formatHHMM(res.reservation_time)} · ${res.customer_name?.split(' ')[0] || 'Ospite'}`;
+                const firstName = res.customer_name?.split(' ')[0] || 'Ospite';
+                switch (status) {
+                  case 'arrivato':
+                    haloClass = 'ring-2 ring-emerald-400/70';
+                    caption = `${firstName} · ${res.guests}p`;
+                    break;
+                  case 'uscita':
+                    haloClass = 'ring-2 ring-cyan-400/70';
+                    caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`;
+                    break;
+                  case 'noshow':
+                    haloClass = 'ring-2 ring-rose-400/70';
+                    caption = 'No-show';
+                    break;
+                  case 'inarrivo':
+                  case 'attesa':
+                    haloClass = 'ring-2 ring-indigo-400/70';
+                    caption = `${formatHHMM(res.reservation_time)} · ${firstName}`;
+                    break;
                 }
               }
 
