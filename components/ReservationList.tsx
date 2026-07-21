@@ -3907,7 +3907,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       </React.Fragment>
       )}
       {/* Reservation Modal */}
-      {isFormOpen && (
+      {isFormOpen && createPortal(
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}>
             <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-5xl overflow-hidden flex flex-col h-full sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
@@ -5189,7 +5189,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Confirmation Modal */}
