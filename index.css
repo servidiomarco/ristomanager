@@ -578,14 +578,18 @@ body {
 }
 
 /* View transition — every navigation re-mounts the view container (keyed on
-   the active view in App.tsx) with a soft rise-in. Short enough to feel like
-   response, not decoration. Neutralized by prefers-reduced-motion above. */
+   the active view in App.tsx) with a soft fade-in. Short enough to feel like
+   response, not decoration. Neutralized by prefers-reduced-motion above.
+   IMPORTANT: opacity-only, no transform. A transform animation (even filled at
+   `none`) turns this wrapper into a containing block for its `position: fixed`
+   descendants, which would trap every modal/overlay rendered inside a view and
+   mis-anchor it to the wrapper instead of the viewport. */
 @keyframes view-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .animate-view-in {
-  animation: view-in 0.22s var(--ease-spring) both;
+  animation: view-in 0.2s ease-out both;
 }
 
 /* Tactile press feedback — the whole app's tap language. Composable with
