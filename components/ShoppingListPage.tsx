@@ -11,6 +11,7 @@ import {
   CheckCircle2, Circle, Truck, Settings2, ListChecks,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonTaskList } from './SkeletonCards';
 
 interface ShoppingListPageProps {
   reservations: Reservation[];
@@ -815,8 +816,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
         {/* Items list */}
         <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl divide-y divide-[var(--color-line)]">
           {loading ? (
-            <div className="py-12 text-center">
-              <CookingPotLoader label="Caricamento..." />
+            <div className="p-3 sm:p-4">
+              <SkeletonTaskList count={6} />
             </div>
           ) : filteredItems.length === 0 ? (
             <div className="py-12 text-center">

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowLeft, Search, X, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
   emailApiService,
   EmailThreadSummary,
@@ -315,9 +316,7 @@ const EmailPage: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto">
           {threadsLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <CookingPotLoader label="Carico…" size={40} />
-            </div>
+            <SkeletonInboxList count={7} />
           ) : threadsError ? (
             <div className="p-4 text-sm text-rose-600">{threadsError}</div>
           ) : visibleThreads.length === 0 ? (
@@ -398,9 +397,7 @@ const EmailPage: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {msgLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <CookingPotLoader label="Carico…" size={40} />
-                </div>
+                <SkeletonEmailThread count={4} />
               ) : msgError ? (
                 <div className="text-sm text-rose-600">{msgError}</div>
               ) : (
