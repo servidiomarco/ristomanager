@@ -142,3 +142,109 @@ export const SkeletonPaymentList: React.FC<{ count?: number; className?: string 
         ))}
     </div>
 );
+
+// Customer-style card: name line (+ optional badges), city line, phone + email
+// rows, optional preference chips. Rendered in a 1/2/3-column responsive grid
+// by SkeletonCustomerGrid to match the real Clienti page.
+export const SkeletonCustomerCard: React.FC<{ variant?: 'compact' | 'full'; className?: string }> = ({
+    variant = 'full',
+    className,
+}) => (
+    <div
+        aria-hidden="true"
+        className={`bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm p-4 flex flex-col gap-2 motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+                <div className="h-4 w-3/4 rounded bg-[var(--color-surface-3)] mb-2" />
+                <div className="h-3 w-1/3 rounded bg-[var(--color-surface-3)]" />
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="h-6 w-6 rounded-lg bg-[var(--color-surface-3)]" />
+                <div className="h-6 w-6 rounded-lg bg-[var(--color-surface-3)]" />
+            </div>
+        </div>
+        <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+                <div className="h-3.5 w-3.5 rounded bg-[var(--color-surface-3)]" />
+                <div className="h-3 w-2/3 rounded bg-[var(--color-surface-3)]" />
+            </div>
+            {variant === 'full' && (
+                <div className="flex items-center gap-1.5">
+                    <div className="h-3.5 w-3.5 rounded bg-[var(--color-surface-3)]" />
+                    <div className="h-3 w-3/4 rounded bg-[var(--color-surface-3)]" />
+                </div>
+            )}
+        </div>
+        {variant === 'full' && (
+            <div className="flex flex-wrap gap-1.5 mt-1">
+                <div className="h-5 w-16 rounded-full bg-[var(--color-surface-3)]" />
+                <div className="h-5 w-20 rounded-full bg-[var(--color-surface-3)]" />
+            </div>
+        )}
+    </div>
+);
+
+// Responsive customer grid (1/2/3 columns) matching CustomerList's real
+// layout. `count` defaults to 6 so a stack of 2 rows appears on desktop.
+export const SkeletonCustomerGrid: React.FC<{ count?: number; className?: string }> = ({
+    count = 6,
+    className,
+}) => (
+    <div
+        className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 ${className ?? ''}`}
+        aria-hidden="true"
+    >
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonCustomerCard key={i} variant={i % 4 === 3 ? 'compact' : 'full'} />
+        ))}
+    </div>
+);
+
+// Notification-style row: circular category icon on left, title + timestamp
+// on top-right, body preview below, optional action row.
+export const SkeletonNotificationRow: React.FC<{ withBody?: boolean; unread?: boolean; className?: string }> = ({
+    withBody = true,
+    unread = false,
+    className,
+}) => (
+    <div
+        aria-hidden="true"
+        className={`rounded-xl border p-3 md:p-4 motion-safe:animate-pulse ${
+            unread
+                ? 'bg-indigo-50/40 border-indigo-200 dark:bg-indigo-500/10 dark:border-indigo-500/30'
+                : 'bg-[var(--color-surface)] border-[var(--color-line)]'
+        } ${className ?? ''}`}
+    >
+        <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 h-8 w-8 rounded-full bg-[var(--color-surface-3)]" />
+            <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="h-4 w-3/5 rounded bg-[var(--color-surface-3)]" />
+                    <div className="h-3 w-12 rounded bg-[var(--color-surface-3)] flex-shrink-0" />
+                </div>
+                {withBody && (
+                    <>
+                        <div className="h-3 w-full rounded bg-[var(--color-surface-3)] mb-1.5" />
+                        <div className="h-3 w-4/5 rounded bg-[var(--color-surface-3)]" />
+                    </>
+                )}
+            </div>
+        </div>
+    </div>
+);
+
+export const SkeletonNotificationList: React.FC<{ count?: number; className?: string }> = ({
+    count = 6,
+    className,
+}) => (
+    <div className={`space-y-2 ${className ?? ''}`} aria-hidden="true">
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonNotificationRow
+                key={i}
+                withBody={i % 3 !== 2}
+                unread={i < 2}
+            />
+        ))}
+    </div>
+);
