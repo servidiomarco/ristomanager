@@ -1919,6 +1919,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.SETTINGS && (
+          <CardErrorBoundary label="Impostazioni">
           <div className="p-6 lg:p-10 max-w-4xl mx-auto">
             <div className="mb-2" />
 
@@ -2190,6 +2191,7 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
+          </CardErrorBoundary>
         )}
 
         </div>{/* /view container */}
