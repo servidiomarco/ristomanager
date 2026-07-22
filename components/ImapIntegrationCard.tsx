@@ -221,7 +221,6 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                console.log('[imap-toggle] clicked, canEdit=', canEdit, 'saving=', saving, 'current=', effectiveEnabled);
                                 if (!canEdit || saving) return;
                                 setEnabledInput(!effectiveEnabled);
                             }}
