@@ -32,6 +32,7 @@ import { AutoDepositManager } from './components/AutoDepositManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
+import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
@@ -2177,9 +2178,15 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <RevolutIntegrationCard showToast={addToast} />
-                <SmtpIntegrationCard showToast={addToast} />
-                <ImapIntegrationCard showToast={addToast} />
+                <CardErrorBoundary label="Revolut">
+                  <RevolutIntegrationCard showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Server Email (SMTP)">
+                  <SmtpIntegrationCard showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Ricezione Email (IMAP)">
+                  <ImapIntegrationCard showToast={addToast} />
+                </CardErrorBoundary>
               </div>
             </div>
           </div>
