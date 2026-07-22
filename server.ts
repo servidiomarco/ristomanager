@@ -3277,30 +3277,86 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
-        const updated = await queryWithRetry(
-            `UPDATE table_bills
-             SET status = 'CLOSED',
-                 closed_at = CURRENT_TIMESTAMP,
-                 closed_by_user_id = $2,
-                 cash_settled_cents = $3,
-                 tip_cents = $4,
-                 notes = COALESCE($5, notes),
-                 share_token = NULL
-             WHERE id = $1
-               AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
-             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
-                       items, status, share_token, opened_at, closed_at,
-                       opened_by_user_id, closed_by_user_id, external_ref,
-                       cash_settled_cents, tip_cents, notes`,
-            [id, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notes]
-        );
-        if (updated.rows.length === 0) {
-            return res.status(404).json({ error: 'Bill not found or already closed/voided' });
+        // Need the current total + sum of PAID splits to decide between
+        // CLOSED and SETTLED_PARTIAL and to sanity-check the caller's
+        // cash/tip values. Fetch under a lock so a webhook-triggered
+        // PAID→SETTLED promotion can't race us and flip status underneath.
+        const client = await pool.connect();
+        let updatedRow: any = null;
+        try {
+            await client.query('BEGIN');
+            const billRs = await client.query(
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
+                [id]
+            );
+            if (billRs.rowCount === 0 || !['OPEN','LOCKED','SETTLED','SETTLED_PARTIAL'].includes(billRs.rows[0].status)) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Bill not found or already closed/voided' });
+            }
+            const totalCents: number = billRs.rows[0].total_cents;
+
+            // Sanity caps: a tip above the bill total or a cash-settled
+            // above 2x is almost certainly a typo. 2x on cash covers the
+            // waiter who accidentally records the tip inside cash — still
+            // wrong, but not a data-loss-level typo.
+            if (tipCents > totalCents) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'tip_cents exceeds total (max 100%)', max_allowed_cents: totalCents });
+            }
+            if (cashCents > totalCents * 2) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'cash_settled_cents implausible (>200% of total)', max_allowed_cents: totalCents * 2 });
+            }
+
+            const paidRs = await client.query(
+                `SELECT COALESCE(SUM(amount_cents), 0)::int AS paid_cents
+                 FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status = 'PAID'`,
+                [id]
+            );
+            const paidViaSplits: number = paidRs.rows[0].paid_cents;
+            const totalSettled = paidViaSplits + Math.round(cashCents);
+            const finalStatus = totalSettled >= totalCents ? 'CLOSED' : 'SETTLED_PARTIAL';
+
+            // Stamp an audit prefix on notes when closing with a shortfall
+            // so the accounting readout has a machine-parseable delta. The
+            // waiter-supplied `notes` still wins if provided; otherwise the
+            // existing DB notes stay put.
+            let notesForDb: string | null = notes;
+            if (finalStatus === 'SETTLED_PARTIAL') {
+                const delta = totalCents - totalSettled;
+                const shortfallTag = `[shortfall:${delta}]`;
+                notesForDb = notes ? `${shortfallTag} ${notes}` : shortfallTag;
+            }
+
+            const upd = await client.query(
+                `UPDATE table_bills
+                 SET status = $2,
+                     closed_at = CURRENT_TIMESTAMP,
+                     closed_by_user_id = $3,
+                     cash_settled_cents = $4,
+                     tip_cents = $5,
+                     notes = COALESCE($6, notes),
+                     share_token = NULL
+                 WHERE id = $1
+                 RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                           items, status, share_token, opened_at, closed_at,
+                           opened_by_user_id, closed_by_user_id, external_ref,
+                           cash_settled_cents, tip_cents, notes`,
+                [id, finalStatus, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notesForDb]
+            );
+            updatedRow = upd.rows[0];
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
         }
 
-        try { socketService?.broadcastToAll('bill:closed', updated.rows[0]); } catch (_) {}
+        try { socketService?.broadcastToAll('bill:closed', updatedRow); } catch (_) {}
 
-        res.json(updated.rows[0]);
+        res.json(updatedRow);
     } catch (err: any) {
         console.error('POST /bills/:id/close error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -3364,6 +3420,20 @@ const publicPayLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
+// Second, tighter limit specifically for the claim endpoint keyed by
+// share_token: an attacker who knows one token can't lock every split by
+// spamming CLAIMED+release cycles (each claim briefly holds capacity for
+// the 5-min TTL). Applied *in addition* to publicPayLimiter — the IP
+// limit stays as a broader shield against token-enumeration.
+const publicPayClaimLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) => `token:${req.params.token || 'unknown'}`,
+    message: { error: 'rate_limited', message: 'Troppe richieste per questo conto, riprova tra qualche secondo.' },
 });
 
 // Sanitizes a split for public consumption: hides ids that could enable
@@ -3448,7 +3518,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
 // claims (two guests scanning at the same instant). The trigger from PR 1
 // is the ultimate authority — if it fires we surface a 409 with the
 // current max_allowed.
-app.post('/pay/:token/claim', publicPayLimiter, async (req, res) => {
+app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => {
     const client = await pool.connect();
     try {
         const token = String(req.params.token || '');
