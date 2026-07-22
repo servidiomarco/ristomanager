@@ -16,6 +16,7 @@ import { ImapFlow, type FetchMessageObject } from 'imapflow';
 import { simpleParser, type ParsedMail, type AddressObject } from 'mailparser';
 import { queryWithRetry } from '../db.js';
 import type { SocketService } from './socketService.js';
+import { sendToRoles as pushSendToRoles } from './pushService.js';
 import {
     parseFromAddress,
     splitReferences,
@@ -358,6 +359,22 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
             try { socket.broadcastToAll('inboundEmail:received', insertedRow); }
             catch (err) { console.warn('[IMAP] broadcast failed:', err); }
         }
+        // Wake the PWA / notifications center. Mirrors what logInboundMessage
+        // does for SMS/WhatsApp so email replies show up with their own
+        // category badge instead of blending in with 'message'.
+        const preview = String(body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        const fromDisplay = fromEmail || 'sconosciuto';
+        pushSendToRoles(
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                category: 'email',
+                title: subject ? `Nuova email: ${subject}` : 'Nuova email dal cliente',
+                body: preview ? `${fromDisplay}: ${preview}` : `Da ${fromDisplay}`,
+                url: reservationId ? `/?view=RESERVATIONS&reservationId=${reservationId}` : '/?view=MESSAGGI',
+                tag: `email-inbound-${insertedRow.id}`,
+            },
+            { excludeUserId: null }
+        ).catch((err: any) => console.warn('[IMAP] push notification failed:', err?.message || err));
     }
 }
 

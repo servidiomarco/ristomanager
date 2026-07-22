@@ -58,6 +58,10 @@ async function computeAttentionBadge(): Promise<number | null> {
                      AND read_at IS NULL
                      AND from_phone_digits IS NOT NULL
                      AND length(from_phone_digits) >= 8)
+                + (SELECT COUNT(*) FROM outbound_messages
+                   WHERE direction = 'inbound'
+                     AND channel = 'email'
+                     AND read_at IS NULL)
             )::int AS badge
         `);
         const n = Number(result.rows[0]?.badge ?? 0);

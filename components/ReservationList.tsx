@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -5180,6 +5180,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   <div className="absolute left-2.5 top-4 bottom-4 w-px bg-[var(--color-line)]" aria-hidden />
                                   {outboundMessages.map(msg => {
                                     const isInbound = msg.direction === 'inbound';
+                                    // A reply is an inbound message that carries an In-Reply-To
+                                    // header pointing at one of our outbound messages. Cold
+                                    // customer emails (no In-Reply-To) get the plain "Entrata"
+                                    // badge instead, so staff can tell "the customer replied
+                                    // to our confirmation" from "the customer wrote in fresh".
+                                    const isReply = isInbound && !!msg.in_reply_to;
                                     const s = (msg.status || '').toLowerCase();
                                     const badgeCls = isInbound
                                       ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
@@ -5190,19 +5196,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         : s === 'failed' || s === 'undelivered'
                                         ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300'
                                         : 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-500/15 dark:border-slate-500/30 dark:text-slate-300';
-                                    const badgeLabel = isInbound
-                                      ? 'Ricevuto'
+                                    const badgeLabel = isReply
+                                      ? 'Risposta'
+                                      : isInbound
+                                      ? 'Entrata'
                                       : s === 'delivered' || s === 'read' ? 'Consegnato'
                                       : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending' ? 'Inviato'
                                       : s === 'failed' || s === 'undelivered' ? 'Fallito'
                                       : (s || 'In coda');
                                     const isEmail = msg.channel === 'email';
                                     const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : isEmail ? 'Email' : msg.channel;
-                                    const ChannelIcon = isInbound ? CornerDownLeft : (isEmail ? Mail : MessageCircle);
+                                    // Direction icon: outgoing → up-right arrow, incoming reply
+                                    // → the reply glyph, cold incoming → down-left arrow.
+                                    const ChannelIcon = isReply ? Reply : isInbound ? ArrowDownLeft : ArrowUpRight;
                                     const counterparty = isInbound
                                       ? (msg.from_email || msg.to_phone)
                                       : (isEmail ? msg.to_email : msg.to_phone);
-                                    const counterpartyPrefix = isInbound ? 'Da: ' : '';
+                                    const counterpartyPrefix = isInbound ? 'Da: ' : 'A: ';
                                     return (
                                       <li key={msg.id} className="relative pb-3 last:pb-0">
                                         {/* Timeline dot — emerald for inbound replies so the eye

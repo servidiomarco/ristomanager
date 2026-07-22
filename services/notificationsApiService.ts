@@ -78,6 +78,7 @@ class NotificationsApiService {
       voice: number;
       payment: number;
       message: number;
+      email: number;
       system: number;
       general: number;
     };

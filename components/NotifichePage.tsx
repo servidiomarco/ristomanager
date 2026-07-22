@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, CheckCheck, X, RefreshCw, Phone, CreditCard, Calendar, MessageCircle, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Bell, CheckCheck, X, RefreshCw, Phone, CreditCard, Calendar, MessageCircle, Mail, AlertTriangle, ExternalLink } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
 import { socketClient } from '../services/socketClient';
@@ -18,7 +18,7 @@ const formatRelative = (iso: string): string => {
 };
 
 // Category → visual bucket. Anything not mapped falls back to "general".
-type CategoryFilter = 'all' | 'unread' | 'voice' | 'payment' | 'reservation' | 'message' | 'system';
+type CategoryFilter = 'all' | 'unread' | 'voice' | 'payment' | 'reservation' | 'message' | 'email' | 'system';
 
 const categoryIcon = (cat: string | null) => {
   switch (cat) {
@@ -26,6 +26,7 @@ const categoryIcon = (cat: string | null) => {
     case 'payment': return { Icon: CreditCard, cls: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' };
     case 'reservation': return { Icon: Calendar, cls: 'bg-sky-50 text-sky-700 ring-1 ring-sky-200' };
     case 'message': return { Icon: MessageCircle, cls: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' };
+    case 'email': return { Icon: Mail, cls: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200' };
     case 'system': return { Icon: AlertTriangle, cls: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200' };
     default: return { Icon: Bell, cls: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200' };
   }
@@ -39,6 +40,7 @@ interface CountsShape {
     voice: number;
     payment: number;
     message: number;
+    email: number;
     system: number;
     general: number;
   };
@@ -46,7 +48,7 @@ interface CountsShape {
 
 const emptyCounts: CountsShape = {
   total: 0, unread: 0,
-  by_category: { reservation: 0, voice: 0, payment: 0, message: 0, system: 0, general: 0 },
+  by_category: { reservation: 0, voice: 0, payment: 0, message: 0, email: 0, system: 0, general: 0 },
 };
 
 const NotifichePage: React.FC = () => {
@@ -142,6 +144,7 @@ const NotifichePage: React.FC = () => {
     { v: 'reservation', l: 'Prenotazioni' },
     { v: 'voice', l: 'Chiamate' },
     { v: 'message', l: 'Messaggi' },
+    { v: 'email', l: 'Email' },
     { v: 'payment', l: 'Pagamenti' },
     { v: 'system', l: 'Sistema' },
   ];
@@ -194,6 +197,7 @@ const NotifichePage: React.FC = () => {
               : v === 'reservation' ? counts.by_category.reservation
               : v === 'voice' ? counts.by_category.voice
               : v === 'message' ? counts.by_category.message
+              : v === 'email' ? counts.by_category.email
               : v === 'payment' ? counts.by_category.payment
               : v === 'system' ? counts.by_category.system
               : 0;

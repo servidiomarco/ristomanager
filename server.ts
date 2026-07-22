@@ -8485,10 +8485,11 @@ app.get('/notifications/counts', authenticate, async (req: any, res) => {
                 COUNT(*) FILTER (WHERE category = 'voice')::int AS voice,
                 COUNT(*) FILTER (WHERE category = 'payment')::int AS payment,
                 COUNT(*) FILTER (WHERE category = 'message')::int AS message,
+                COUNT(*) FILTER (WHERE category = 'email')::int AS email,
                 COUNT(*) FILTER (WHERE category = 'system')::int AS system,
                 COUNT(*) FILTER (
                     WHERE category IS NULL
-                       OR category NOT IN ('reservation','voice','payment','message','system')
+                       OR category NOT IN ('reservation','voice','payment','message','email','system')
                 )::int AS general
              FROM notifications
              WHERE recipient_user_id = $1 AND dismissed_at IS NULL`,
@@ -8503,6 +8504,7 @@ app.get('/notifications/counts', authenticate, async (req: any, res) => {
                 voice: row.voice ?? 0,
                 payment: row.payment ?? 0,
                 message: row.message ?? 0,
+                email: row.email ?? 0,
                 system: row.system ?? 0,
                 general: row.general ?? 0,
             },
@@ -8958,6 +8960,25 @@ function escapeHtml(s: string): string {
         .replace(/'/g, '&#39;');
 }
 
+// Rendered block with call/WhatsApp CTAs for the customer emails. Kept in one
+// place so any future number change lives in a single spot. The WhatsApp link
+// uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
+// tel: so a tap on mobile opens the dialer.
+function contactBlockHtml(): string {
+    return `
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
+        <tr>
+          <td style="font-size:13px;line-height:1.6;color:#57534e;padding:8px 12px;border:1px solid #e7e5e4;border-radius:10px;background:#fbf9f4;">
+            <strong style="color:#292524;">Contattaci direttamente:</strong><br>
+            📞 <a href="tel:+390985876578" style="color:#065f46;text-decoration:none;">0985 876578</a>
+            &nbsp;·&nbsp;
+            💬 <a href="https://wa.me/393895916494" style="color:#065f46;text-decoration:none;">WhatsApp +39 389 591 6494</a>
+          </td>
+        </tr>
+      </table>
+    `;
+}
+
 // Small helper that formats reservation date/time in Italian for the customer
 // emails. Returns { dateLabel: '15/07/2026', timeLabel: '20:30' }.
 //
@@ -9040,6 +9061,10 @@ abbiamo ricevuto la tua richiesta di prenotazione:
 
 Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.
 
+Per qualsiasi cambio puoi contattarci:
+• Telefono: 0985 876578
+• WhatsApp: +39 389 591 6494
+
 Grazie e a presto!
 Il Vecchio Frantoio`;
 
@@ -9051,6 +9076,7 @@ Il Vecchio Frantoio`;
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
       </table>
       <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
+      ${contactBlockHtml()}
       <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Richiesta prenotazione ricevuta per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
@@ -9075,7 +9101,8 @@ function buildBookingConfirmationEmail(params: {
     const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const name = toTitleCase(params.customerName);
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
-    const text = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
+    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
+    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: 0985 876578\n• WhatsApp: +39 389 591 6494`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
@@ -9084,7 +9111,8 @@ function buildBookingConfirmationEmail(params: {
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
       </table>
-      <p class="muted" style="margin:0;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o chiamaci.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>
+      ${contactBlockHtml()}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
