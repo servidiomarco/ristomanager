@@ -213,18 +213,30 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 automaticamente ogni risposta.
                             </p>
                         </div>
-                        <label className="inline-flex items-center cursor-pointer">
-                            <input
-                                type="checkbox"
-                                className="sr-only peer"
-                                checked={effectiveEnabled}
-                                onChange={(e) => canEdit && setEnabledInput(e.target.checked)}
-                                disabled={!canEdit || saving}
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={effectiveEnabled}
+                            aria-label={effectiveEnabled ? 'Disattiva servizio IMAP' : 'Attiva servizio IMAP'}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('[imap-toggle] clicked, canEdit=', canEdit, 'saving=', saving, 'current=', effectiveEnabled);
+                                if (!canEdit || saving) return;
+                                setEnabledInput(!effectiveEnabled);
+                            }}
+                            disabled={!canEdit || saving}
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                effectiveEnabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                            }`}
+                        >
+                            <span
+                                aria-hidden="true"
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                    effectiveEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                                } translate-y-0.5`}
                             />
-                            <div className="relative w-11 h-6 bg-[var(--color-surface-3)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--color-fg)] rounded-full peer peer-checked:bg-emerald-500 peer-disabled:opacity-60 transition-colors">
-                                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${effectiveEnabled ? 'translate-x-5' : ''}`} />
-                            </div>
-                        </label>
+                        </button>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
