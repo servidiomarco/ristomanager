@@ -1294,6 +1294,16 @@ const App: React.FC = () => {
     if (item.sidebarCollapse === true) setSidebarCollapsed(true);
     else if (item.sidebarCollapse === false) setSidebarCollapsed(false);
     if (item.menuInitialTab) setMenuInitialTab(item.menuInitialTab);
+    // Dashboard is a "now" view — the live-service hero, KPIs and Stato Tavoli
+    // all describe today by design. If the user navigated in from a
+    // reservation/notification that pinned globalDate to a future or past day,
+    // snap back to today when they cross into the Dashboard. Skip when
+    // they're already on Dashboard (they may have just picked a date via the
+    // header navigator and are re-clicking).
+    if (item.view === ViewState.DASHBOARD && view !== ViewState.DASHBOARD) {
+      const today = new Date();
+      if (globalDate.toDateString() !== today.toDateString()) setGlobalDate(today);
+    }
     setView(item.view);
   };
 
@@ -2204,7 +2214,16 @@ const App: React.FC = () => {
                 icon={<LayoutDashboard size={20} />}
                 label="Dashboard"
                 active={view === ViewState.DASHBOARD}
-                onClick={() => setView(ViewState.DASHBOARD)}
+                onClick={() => {
+                  // Mirror the desktop sidebar behaviour: snap globalDate to
+                  // today when arriving on Dashboard from another view so the
+                  // live-service hero, KPIs and Stato Tavoli describe now.
+                  if (view !== ViewState.DASHBOARD) {
+                    const today = new Date();
+                    if (globalDate.toDateString() !== today.toDateString()) setGlobalDate(today);
+                  }
+                  setView(ViewState.DASHBOARD);
+                }}
               />
             )}
             {canAccessView(ViewState.RESERVATIONS) && (
