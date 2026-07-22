@@ -860,6 +860,7 @@ export interface SmtpIntegrationStatus {
   user: string;
   from_email: string;
   from_name: string;
+  reply_to: string;
   has_password: boolean;
   password_last4: string | null;
   has_resend_api_key: boolean;
@@ -879,6 +880,7 @@ export interface SmtpIntegrationUpdate {
   resend_api_key?: string;
   from_email?: string;
   from_name?: string;
+  reply_to?: string;
 }
 
 export const getSmtpIntegration = async (): Promise<SmtpIntegrationStatus> => {

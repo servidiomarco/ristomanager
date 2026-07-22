@@ -37,6 +37,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     const [resendKeyInput, setResendKeyInput] = useState('');
     const [fromEmailInput, setFromEmailInput] = useState('');
     const [fromNameInput, setFromNameInput] = useState('');
+    const [replyToInput, setReplyToInput] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showResendKey, setShowResendKey] = useState(false);
     const [testRecipient, setTestRecipient] = useState('');
@@ -56,6 +57,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setUserInput(data.user || '');
                     setFromEmailInput(data.from_email || '');
                     setFromNameInput(data.from_name || '');
+                    setReplyToInput(data.reply_to || '');
                     setTestRecipient(data.from_email || '');
                 }
             } catch (err: any) {
@@ -95,6 +97,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (providerInput !== null && providerInput !== status.provider) return true;
         if (fromEmailInput.trim() !== (status.from_email || '')) return true;
         if (fromNameInput.trim() !== (status.from_name || '')) return true;
+        if (replyToInput.trim() !== (status.reply_to || '')) return true;
         if (effectiveProvider === 'smtp') {
             if (hostInput.trim() !== (status.host || '')) return true;
             if (portInput.trim() !== (status.port ? String(status.port) : '')) return true;
@@ -105,7 +108,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             if (resendKeyInput.trim() !== '') return true;
         }
         return false;
-    }, [status, providerInput, effectiveProvider, hostInput, portInput, secureInput, userInput, passwordInput, resendKeyInput, fromEmailInput, fromNameInput]);
+    }, [status, providerInput, effectiveProvider, hostInput, portInput, secureInput, userInput, passwordInput, resendKeyInput, fromEmailInput, fromNameInput, replyToInput]);
 
     const handleSave = async () => {
         if (!canEdit || saving || !status) return;
@@ -113,6 +116,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (providerInput !== null && providerInput !== status.provider) payload.provider = providerInput;
         if (fromEmailInput.trim() !== (status.from_email || '')) payload.from_email = fromEmailInput.trim();
         if (fromNameInput.trim() !== (status.from_name || '')) payload.from_name = fromNameInput.trim();
+        if (replyToInput.trim() !== (status.reply_to || '')) payload.reply_to = replyToInput.trim();
         if (effectiveProvider === 'smtp') {
             if (hostInput.trim() !== (status.host || '')) payload.host = hostInput.trim();
             if (portInput.trim() !== (status.port ? String(status.port) : '')) {
@@ -405,6 +409,23 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
                             />
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Reply-To (dove ricevi le risposte)</label>
+                        <input
+                            type="email"
+                            value={replyToInput}
+                            onChange={(e) => setReplyToInput(e.target.value)}
+                            placeholder="prenotazioni@vecchiofrantoio.com"
+                            disabled={!canEdit || saving}
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                        />
+                        <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                            Quando il cliente clicca “Rispondi”, la mail va a questo indirizzo. Deve essere la casella pollata via IMAP.
+                        </p>
                     </div>
 
                     {status.updated_at && (
