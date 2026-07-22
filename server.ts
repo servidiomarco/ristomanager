@@ -4402,6 +4402,91 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
     }
 });
 
+// Propagate a Revolut order transition down to the table_bill_splits row
+// (and, on full payment, to the parent bill). Idempotent: the CLAIMED
+// guard on UPDATE means replaying an already-PAID split is a no-op.
+// Kept separate from applyRevolutOrderTransition so the split logic can
+// evolve without touching the deposit flow.
+async function applyBillSplitTransition(
+    splitId: number,
+    event: string,
+    isFirstCompletion: boolean,
+): Promise<void> {
+    // First: find the parent bill_id so we can broadcast and, on
+    // completion, promote the bill to SETTLED under a single query.
+    const splitRs = await queryWithRetry(
+        `SELECT table_bill_id, amount_cents, status FROM table_bill_splits WHERE id = $1`,
+        [splitId]
+    );
+    if (splitRs.rowCount === 0) {
+        console.warn('[bill-split] transition: split not found', splitId);
+        return;
+    }
+    const { table_bill_id: billId, amount_cents: amount } = splitRs.rows[0];
+
+    if (event === 'ORDER_COMPLETED') {
+        if (!isFirstCompletion) return;
+
+        const upd = await queryWithRetry(
+            `UPDATE table_bill_splits
+             SET status = 'PAID', paid_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'CLAIMED'
+             RETURNING id`,
+            [splitId]
+        );
+        if (upd.rowCount === 0) {
+            // Split may already be PAID (webhook replayed) or was
+            // released/refunded before payment landed — nothing to do.
+            return;
+        }
+
+        try {
+            socketService?.broadcastToAll('bill:split-paid', {
+                bill_id: billId, split_id: splitId, amount_cents: amount,
+            });
+        } catch (_) {}
+
+        // SETTLED promotion: total_cents == sum of PAID splits. Guard on
+        // status IN OPEN/LOCKED so a manually-closed bill doesn't get
+        // clobbered. Race-safe because it's a single UPDATE ... WHERE
+        // comparing against a sub-select computed atomically by PG.
+        const settled = await queryWithRetry(
+            `UPDATE table_bills b
+             SET status = 'SETTLED'
+             WHERE b.id = $1
+               AND b.status IN ('OPEN','LOCKED')
+               AND b.total_cents = (
+                   SELECT COALESCE(SUM(amount_cents), 0)
+                   FROM table_bill_splits
+                   WHERE table_bill_id = $1 AND status = 'PAID'
+               )
+             RETURNING id, reservation_id, table_id, total_cents, covers, status`,
+            [billId]
+        );
+        if (settled.rowCount > 0) {
+            try { socketService?.broadcastToAll('bill:settled', settled.rows[0]); } catch (_) {}
+        }
+        return;
+    }
+
+    if (event === 'ORDER_CANCELLED' || event === 'ORDER_PAYMENT_DECLINED' || event === 'ORDER_PAYMENT_FAILED') {
+        const upd = await queryWithRetry(
+            `UPDATE table_bill_splits
+             SET status = 'ABANDONED'
+             WHERE id = $1 AND status = 'CLAIMED'
+             RETURNING id`,
+            [splitId]
+        );
+        if (upd.rowCount > 0) {
+            try {
+                socketService?.broadcastToAll('bill:split-abandoned', {
+                    bill_id: billId, split_id: splitId,
+                });
+            } catch (_) {}
+        }
+    }
+}
+
 // Shared side-effect pipeline for a Revolut order state change. Called by
 // both the webhook receiver (real-time push from Revolut) and the manual
 // reconcile endpoint (poll GET /api/orders/{id} when a webhook was missed).
@@ -4472,8 +4557,24 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
     catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
 
     const isFirstCompletion = markCompleted && !wasCompleted;
+    const billSplitId: number | null = row.table_bill_split_id ?? null;
 
-    if (isFirstCompletion) {
+    // Bill split side effects: if the payment is attached to a
+    // table_bill_splits row, propagate the transition. Runs on both
+    // first-completion (mark PAID + check SETTLED) and on
+    // cancelled/failed (mark ABANDONED so the capacity is freed).
+    if (billSplitId) {
+        try {
+            await applyBillSplitTransition(billSplitId, event, isFirstCompletion);
+        } catch (err: any) {
+            console.error('[Revolut] bill split transition failed for split', billSplitId, err?.message || err);
+        }
+    }
+
+    // The deposit-confirmation flow below is only for prenotazione
+    // deposits, not for pay-at-table splits — the split guest doesn't
+    // want a "grazie, la tua prenotazione è confermata" WhatsApp.
+    if (isFirstCompletion && !billSplitId) {
         const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
         pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
             category: 'payment',
@@ -4486,7 +4587,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
         });
     }
 
-    if (isFirstCompletion && row.reservation_id) {
+    if (isFirstCompletion && row.reservation_id && !billSplitId) {
         (async () => {
             try {
                 const resvRes = await queryWithRetry(
@@ -5698,6 +5799,75 @@ async function runDailyBreadReminder(): Promise<void> {
     }
     console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
 }
+
+// Pay-at-table reconcile: every 60s scans CLAIMED splits whose 5-min TTL
+// has elapsed and either (a) polls Revolut to see if a webhook was
+// dropped, (b) marks the split ABANDONED so its capacity is released.
+// Runs in-process because we're already single-instance on Railway; if
+// that changes, wrap the loop with an advisory lock so only one node
+// processes each split.
+const startBillSplitReconcileScheduler = () => {
+    const tick = async () => {
+        try {
+            const stale = await queryWithRetry(
+                `SELECT s.id AS split_id, s.payment_request_id,
+                        pr.provider_order_id
+                 FROM table_bill_splits s
+                 LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
+                 WHERE s.status = 'CLAIMED'
+                   AND s.expires_at IS NOT NULL
+                   AND s.expires_at < NOW()
+                 LIMIT 50`
+            );
+            if (stale.rowCount === 0) return;
+
+            for (const row of stale.rows) {
+                const orderId: string | null = row.provider_order_id || null;
+                let handled = false;
+
+                // Recover missed webhook: ask Revolut what state the
+                // order is really in and reapply the transition.
+                if (orderId) {
+                    try {
+                        const order = await revolutGetOrder(orderId);
+                        const evt = revolutStateToEvent(order.state);
+                        if (evt) {
+                            await applyRevolutOrderTransition(orderId, evt);
+                            handled = true;
+                        }
+                    } catch (err: any) {
+                        console.warn('[bill-reconcile] getOrder failed for split', row.split_id, err?.message || err);
+                    }
+                }
+
+                // Fallback: if we couldn't reach Revolut, or there's no
+                // linked order (Revolut createOrder had failed at claim
+                // time), give up on the reservation and free capacity.
+                if (!handled) {
+                    const upd = await queryWithRetry(
+                        `UPDATE table_bill_splits
+                         SET status = 'ABANDONED'
+                         WHERE id = $1 AND status = 'CLAIMED'
+                         RETURNING id, table_bill_id`,
+                        [row.split_id]
+                    );
+                    if (upd.rowCount > 0) {
+                        try {
+                            socketService?.broadcastToAll('bill:split-abandoned', {
+                                bill_id: upd.rows[0].table_bill_id,
+                                split_id: upd.rows[0].id,
+                            });
+                        } catch (_) {}
+                    }
+                }
+            }
+        } catch (err: any) {
+            console.error('[bill-reconcile] scheduler tick failed:', err?.message || err);
+        }
+    };
+    tick();
+    setInterval(tick, 60 * 1000);
+};
 
 let lastBreadRunIso: string | null = null;
 const startBreadReminderScheduler = () => {
@@ -13366,6 +13536,12 @@ const startServer = async () => {
                         console.log('✅ Daily bread reminder scheduler started (20:00 Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Bread reminder scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startBillSplitReconcileScheduler();
+                        console.log('✅ Bill split reconcile scheduler started (60s)');
+                    } catch (schedErr) {
+                        console.error('Bill split reconcile scheduler failed to start:', schedErr);
                     }
                     try {
                         // Fire-and-forget: the IMAP handshake can take seconds

@@ -1811,12 +1811,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }, [isFormOpen, isEditing, formData.id]);
 
   // Live bill events from the backend: apply only to the bill currently
-  // displayed. The socket broadcast payload is the TableBill row, so we
-  // preserve any splits we already had loaded (splits change in later
-  // phases via bill:split-claimed / bill:split-paid).
+  // displayed. Life-cycle events (opened/closed/voided) carry the TableBill
+  // row directly; split events (claimed/paid/released/abandoned/settled)
+  // carry only {bill_id, split_id, ...} — we react by refetching, which is
+  // cheap and gives us the authoritative paid_cents/claimed_cents/residual.
   useEffect(() => {
     if (!socket || !isFormOpen || !isEditing || !formData.id) return;
     const reservationId = formData.id as number;
+
+    const refetch = () => {
+      billsApiService.getBill(reservationId)
+        .then(row => setBill(row))
+        .catch(err => console.warn('[bill] refetch failed:', err?.message || err));
+    };
+
     const onOpened = (row: TableBill) => {
       if (!row || row.reservation_id !== reservationId) return;
       setBill({ bill: row, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: row.total_cents });
@@ -1825,13 +1833,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (!row || row.reservation_id !== reservationId) return;
       setBill(prev => (prev && prev.bill.id === row.id ? null : prev));
     };
+    const onSplitEvent = (payload: { bill_id?: number }) => {
+      setBill(prev => {
+        if (!prev || !payload || prev.bill.id !== payload.bill_id) return prev;
+        refetch();
+        return prev;
+      });
+    };
+    const onSettled = (row: TableBill) => {
+      if (!row || row.reservation_id !== reservationId) return;
+      setBill(prev => {
+        if (!prev || prev.bill.id !== row.id) return prev;
+        return { ...prev, bill: row, paid_cents: prev.bill.total_cents, residual_cents: 0 };
+      });
+    };
+
     socket.on('bill:opened', onOpened);
     socket.on('bill:closed', onClosedOrVoided);
     socket.on('bill:voided', onClosedOrVoided);
+    socket.on('bill:split-claimed', onSplitEvent);
+    socket.on('bill:split-paid', onSplitEvent);
+    socket.on('bill:split-released', onSplitEvent);
+    socket.on('bill:split-abandoned', onSplitEvent);
+    socket.on('bill:settled', onSettled);
     return () => {
       socket.off('bill:opened', onOpened);
       socket.off('bill:closed', onClosedOrVoided);
       socket.off('bill:voided', onClosedOrVoided);
+      socket.off('bill:split-claimed', onSplitEvent);
+      socket.off('bill:split-paid', onSplitEvent);
+      socket.off('bill:split-released', onSplitEvent);
+      socket.off('bill:split-abandoned', onSplitEvent);
+      socket.off('bill:settled', onSettled);
     };
   }, [socket, isFormOpen, isEditing, formData.id]);
 
@@ -5276,6 +5309,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </button>
                                       </div>
                                     </div>
+                                  </div>
+                                )}
+
+                                {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').length > 0 && (
+                                  <div className="pt-1">
+                                    <div className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-wide mb-1.5">
+                                      Quote ({bill.splits.filter(s => s.status === 'PAID').length} pagate)
+                                    </div>
+                                    <ul className="space-y-1">
+                                      {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').map(s => {
+                                        const eur = (s.amount_cents / 100).toFixed(2).replace('.', ',');
+                                        return (
+                                          <li key={s.id} className="flex items-center gap-2 text-[12px]">
+                                            {s.status === 'PAID'
+                                              ? <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                              : <Loader2 className="h-3.5 w-3.5 text-amber-500 shrink-0 animate-spin" />}
+                                            <span className="text-[var(--color-fg)] truncate flex-1">{s.claimant_label || 'Anonimo'}</span>
+                                            <span className="text-[10px] text-[var(--color-fg-subtle)] uppercase tracking-wide">
+                                              {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
+                                            </span>
+                                            <span className="text-[12px] font-medium tabular-nums">€ {eur}</span>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
                                   </div>
                                 )}
 
