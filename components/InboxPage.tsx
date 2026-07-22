@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowLeft, Search, X } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonInboxList } from './SkeletonCards';
 import {
   messagesApiService,
   ConversationSummary,
@@ -403,7 +404,7 @@ const InboxPage: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto">
           {convLoading ? (
-            <div className="flex items-center justify-center h-32"><CookingPotLoader /></div>
+            <SkeletonInboxList count={7} />
           ) : convError ? (
             <div className="p-4 text-[13px] text-rose-600">{convError}</div>
           ) : conversations.length === 0 ? (

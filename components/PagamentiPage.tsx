@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonPaymentList } from './SkeletonCards';
 import {
   paymentsApiService,
   PaymentRequest,
@@ -583,9 +584,7 @@ const PagamentiPage: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <CookingPotLoader label="Carico…" />
-          </div>
+          <SkeletonPaymentList count={5} />
         ) : items.length === 0 ? (
           <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
             <CreditCard className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />

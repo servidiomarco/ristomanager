@@ -23,6 +23,7 @@ import { buildDietaryNote, parseDietary, stripDietaryNote } from '../utils/dieta
 import { computeAutoLayout } from '../utils/tableLayout';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { PaymentBadge } from './PaymentBadge';
+import { SkeletonReservationList } from './SkeletonCards';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
@@ -368,6 +369,10 @@ interface ReservationListProps {
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
   onDateChange?: (date: Date) => void;
   onShiftFilterChange?: (filter: 'ALL' | 'LUNCH' | 'DINNER') => void;
+  // True while the parent's first fetchData() hasn't returned yet. When true
+  // and `reservations` is empty we render skeleton cards instead of the
+  // "Nessuna prenotazione per questo servizio" empty state.
+  isInitialLoading?: boolean;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -397,6 +402,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   globalShiftFilter: globalShiftFilterProp,
   onDateChange,
   onShiftFilterChange,
+  isInitialLoading = false,
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -2955,7 +2961,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       </div>
 
       {/* Grouped reservation list */}
-      {totalGroupedCount === 0 ? (
+      {isInitialLoading && reservations.length === 0 ? (
+        <div className="flex-1 overflow-y-auto p-3">
+          <SkeletonReservationList
+            groups={[
+              { count: 3, titleWidth: 'lg' },
+              { count: 4, titleWidth: 'md' },
+              { count: 2, titleWidth: 'sm' },
+            ]}
+          />
+        </div>
+      ) : totalGroupedCount === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-4">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
             {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
@@ -3647,7 +3663,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </button>
             </div>
 
-            {totalGroupedCount === 0 ? (
+            {isInitialLoading && reservations.length === 0 ? (
+              <div className="px-4 pb-4">
+                <SkeletonReservationList
+                  groups={[
+                    { count: 3, titleWidth: 'lg' },
+                    { count: 2, titleWidth: 'md' },
+                  ]}
+                />
+              </div>
+            ) : totalGroupedCount === 0 ? (
               <div className="flex flex-col items-center justify-center text-center py-16 px-4">
                 <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
                   {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
