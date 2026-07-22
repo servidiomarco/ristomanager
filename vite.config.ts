@@ -14,13 +14,20 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        // Build-time app version. Railway sets RAILWAY_GIT_COMMIT_SHA on each
-        // deploy; we bake the 7-char short SHA into the bundle so the client
-        // can compare it against the current /version endpoint and prompt
-        // the user to reload when a newer deploy is available. Falls back
-        // to 'dev' for local development so the banner never fires there.
+        // Build-time app version. Read from whichever host is doing the SPA
+        // build: Vercel (frontend at crm.vecchiofrantoio.com) exposes
+        // VERCEL_GIT_COMMIT_SHA, Railway (backend, or if the SPA is ever
+        // built there) exposes RAILWAY_GIT_COMMIT_SHA. We bake the 7-char
+        // short SHA into the bundle so the client can compare it against
+        // the /version endpoint and prompt the user to reload when a newer
+        // deploy is live. Falls back to 'dev' locally so the banner never
+        // fires (useAppVersion early-returns on 'dev').
         __APP_VERSION__: JSON.stringify(
-          (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev'
+          (
+            process.env.VERCEL_GIT_COMMIT_SHA
+            || process.env.RAILWAY_GIT_COMMIT_SHA
+            || ''
+          ).slice(0, 7) || 'dev'
         ),
       },
       resolve: {
