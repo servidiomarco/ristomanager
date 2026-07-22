@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowLeft, Search, X } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowLeft, Search, X, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
   emailApiService,
@@ -346,9 +346,16 @@ const EmailPage: React.FC = () => {
                       {t.last_subject && (
                         <div className="text-[12px] font-medium text-[var(--color-fg)] truncate">{t.last_subject}</div>
                       )}
-                      <div className="text-[12px] text-[var(--color-fg-muted)] line-clamp-1">
-                        {t.last_direction === 'outbound' && <span className="text-[var(--color-fg-subtle)]">Tu: </span>}
-                        {t.last_body}
+                      <div className="text-[12px] text-[var(--color-fg-muted)] line-clamp-1 flex items-center gap-1">
+                        {t.last_direction === 'outbound' ? (
+                          <ArrowUpRight className="w-3 h-3 text-[var(--color-fg-subtle)] shrink-0" />
+                        ) : (
+                          <ArrowDownLeft className="w-3 h-3 text-indigo-500 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {t.last_direction === 'outbound' && <span className="text-[var(--color-fg-subtle)]">Tu: </span>}
+                          {t.last_body}
+                        </span>
                       </div>
                       {t.unread_count > 0 && (
                         <span className="inline-flex items-center h-4 px-1.5 mt-1 rounded-full bg-indigo-600 text-white text-[10px] font-semibold">
@@ -396,9 +403,16 @@ const EmailPage: React.FC = () => {
                     </div>
                     {group.items.map(m => {
                       const isOut = m.direction === 'outbound';
+                      const isReply = !isOut && !!m.in_reply_to;
+                      const DirIcon = isOut ? ArrowUpRight : isReply ? Reply : ArrowDownLeft;
+                      const dirLabel = isOut ? 'Uscita' : isReply ? 'Risposta' : 'Entrata';
                       return (
                         <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                           <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${isOut ? 'bg-indigo-600 text-white' : 'bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg)]'}`}>
+                            <div className={`flex items-center gap-1 mb-1 text-[10px] font-semibold uppercase tracking-wider ${isOut ? 'text-indigo-100' : 'text-[var(--color-fg-muted)]'}`}>
+                              <DirIcon className="w-3 h-3" />
+                              <span>{dirLabel}</span>
+                            </div>
                             {m.subject && (
                               <div className={`text-[13px] font-semibold mb-1.5 ${isOut ? 'text-white' : 'text-[var(--color-fg)]'}`}>
                                 {m.subject}
