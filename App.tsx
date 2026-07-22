@@ -116,10 +116,10 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
 
   // Comunicazioni
-  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
   { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
   { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: false, view: ViewState.EMAIL, sidebarCollapse: false },
-  { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: false, view: ViewState.NOTIFICHE, sidebarCollapse: false },
+  { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
@@ -485,8 +485,6 @@ const App: React.FC = () => {
       return [];
     }
   });
-  const [showNotifications, setShowNotifications] = useState(false);
-
   useEffect(() => {
     try {
       const serializable = notifications.slice(0, NOTIFICATIONS_MAX).map(n => ({
@@ -1591,7 +1589,7 @@ const App: React.FC = () => {
                 <div className="relative hidden md:block" ref={createMenuRef}>
                   <button
                     type="button"
-                    onClick={() => { setShowCreateMenu(v => !v); setShowNotifications(false); }}
+                    onClick={() => setShowCreateMenu(v => !v)}
                     aria-haspopup="menu"
                     aria-expanded={showCreateMenu}
                     aria-label="Crea nuovo"
@@ -1683,64 +1681,8 @@ const App: React.FC = () => {
                   <Search className="h-4 w-4" />
                </button>
 
-               <div className="relative">
-                   <button
-                      onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}
-                      className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] relative transition-colors"
-                      aria-label="Notifiche"
-                      aria-expanded={showNotifications}
-                    >
-                       <Bell className="h-4 w-4" />
-                       {notifications.some(n => !n.read) && (
-                           <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
-                       )}
-                   </button>
-
-                   {/* Notification Dropdown */}
-                   {showNotifications && (
-                       <div className="absolute right-0 top-full mt-2 w-80 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-lg)] border border-[var(--color-line)] overflow-hidden animate-in fade-in slide-in-from-top-2 z-30">
-                           <div className="px-3 py-2.5 border-b border-[var(--color-line)] flex justify-between items-center">
-                               <h3 className="font-semibold text-[13px] text-[var(--color-fg)]">Notifiche</h3>
-                               <button onClick={() => setShowNotifications(false)} className="text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]" aria-label="Chiudi"><X className="h-3.5 w-3.5" /></button>
-                           </div>
-                           <div className="max-h-72 overflow-y-auto">
-                               {notifications.length === 0 ? (
-                                   <div className="p-6 text-center text-sm text-[var(--color-fg-subtle)]">Nessuna notifica</div>
-                               ) : (
-                                   notifications.map(notif => {
-                                       const clickable = notif.reservationId != null && getAccessibleViews().includes(ViewState.RESERVATIONS);
-                                       const handleClick = () => {
-                                           setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-                                           setShowNotifications(false);
-                                           if (clickable && notif.reservationId != null) {
-                                               setPendingReservationId(notif.reservationId);
-                                               setView(ViewState.RESERVATIONS);
-                                           }
-                                       };
-                                       const rowClass = `w-full text-left p-3 border-b border-[var(--color-line)] last:border-0 transition-colors ${clickable ? 'cursor-pointer hover:bg-[var(--color-surface-hover)]' : ''} ${notif.read ? 'opacity-70' : ''}`;
-                                       const content = (
-                                           <>
-                                               <div className="flex justify-between items-start gap-2">
-                                                    <p className="text-sm font-medium text-[var(--color-fg)] flex items-center gap-1.5">
-                                                        {!notif.read && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0" aria-hidden />}
-                                                        {notif.title}
-                                                    </p>
-                                                    <span className="text-[10px] text-[var(--color-fg-subtle)] tabular shrink-0">{notif.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                               </div>
-                                               <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">{notif.message}</p>
-                                           </>
-                                       );
-                                       return clickable ? (
-                                           <button key={notif.id} type="button" onClick={handleClick} className={rowClass}>{content}</button>
-                                       ) : (
-                                           <div key={notif.id} className={rowClass}>{content}</div>
-                                       );
-                                   })
-                               )}
-                           </div>
-                       </div>
-                   )}
-               </div>
+               {/* Notification bell removed — history now lives in the
+                   dedicated Notifiche page (sidebar + mobile bottom-nav tab). */}
 
            </div>
         </header>
@@ -2273,13 +2215,13 @@ const App: React.FC = () => {
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
             </div>
-            {canAccessView(ViewState.CONVERSAZIONI) && (
+            {canAccessView(ViewState.NOTIFICHE) && (
               <BottomNavItem
-                icon={<Phone size={20} />}
-                label="Conversazioni"
-                active={view === ViewState.CONVERSAZIONI}
-                badge={voiceCallsPendingCount}
-                onClick={() => setView(ViewState.CONVERSAZIONI)}
+                icon={<Bell size={20} />}
+                label="Notifiche"
+                active={view === ViewState.NOTIFICHE}
+                badge={notificationsUnreadCount}
+                onClick={() => setView(ViewState.NOTIFICHE)}
               />
             )}
             {altroNavItems.length > 0 && (

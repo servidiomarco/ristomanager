@@ -191,7 +191,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh] px-4"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[6vh] sm:pt-[10vh] px-3 sm:px-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -199,49 +199,53 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     >
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-2xl bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden flex flex-col max-h-[75vh]"
+        className="relative w-full max-w-2xl bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[75vh]"
         onClick={e => e.stopPropagation()}
       >
-        {/* Search input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-line)]">
-          <Search className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+        {/* Search input — 16px font on mobile keeps iOS Safari from zooming
+            the viewport on focus; taller vertical padding gives fingers a
+            comfortable tap target. */}
+        <div className="flex items-center gap-3 px-4 py-4 sm:py-3 border-b border-[var(--color-line)]">
+          <Search className="h-5 w-5 sm:h-4 sm:w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Cerca prenotazioni o clienti (nome, telefono, email)..."
-            className="flex-1 bg-transparent outline-none text-[15px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)]"
+            placeholder="Cerca prenotazioni o clienti…"
+            className="flex-1 bg-transparent outline-none text-[16px] sm:text-[15px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)]"
           />
           {customersLoading && <Loader2 className="h-4 w-4 text-[var(--color-fg-muted)] animate-spin flex-shrink-0" />}
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+            className="p-1.5 sm:p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
             aria-label="Chiudi"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5 sm:h-4 sm:w-4" />
           </button>
         </div>
 
         {/* Results */}
         <div ref={listRef} className="flex-1 overflow-y-auto">
           {showHint && (
-            <div className="px-6 py-10 text-center text-[13px] text-[var(--color-fg-muted)]">
-              Cerca in tutte le prenotazioni e nei clienti in rubrica. La data non conta.
+            <div className="px-6 py-12 sm:py-10 text-center text-[14px] sm:text-[13px] text-[var(--color-fg-muted)] leading-relaxed">
+              Cerca in tutte le prenotazioni e nei clienti in rubrica.
+              <br className="hidden sm:inline" />
+              <span className="block sm:inline sm:ml-1 text-[var(--color-fg-subtle)]">La data non conta.</span>
             </div>
           )}
 
           {showEmpty && (
-            <div className="px-6 py-10 text-center text-[13px] text-[var(--color-fg-muted)]">
+            <div className="px-6 py-12 sm:py-10 text-center text-[14px] sm:text-[13px] text-[var(--color-fg-muted)]">
               Nessun risultato per <span className="font-medium text-[var(--color-fg)]">"{query.trim()}"</span>.
             </div>
           )}
 
           {reservationHits.length > 0 && (
             <div>
-              <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold">
+              <div className="px-4 pt-3 pb-1 text-[12px] sm:text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold">
                 Prenotazioni · {reservationHits.length}
               </div>
               {reservationHits.map((r, i) => {
@@ -254,7 +258,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     type="button"
                     onMouseEnter={() => setActiveIndex(i)}
                     onClick={() => commit({ kind: 'reservation', data: r })}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    className={`w-full flex items-center gap-3 px-4 py-3 sm:py-2.5 text-left transition-colors ${
                       isActive ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -263,7 +267,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[14px] font-medium text-[var(--color-fg)] truncate">
+                        <span className="text-[15px] sm:text-[14px] font-medium text-[var(--color-fg)] truncate">
                           {toTitleCase(r.customer_name) || '—'}
                         </span>
                         {chip && (
@@ -272,7 +276,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="text-[12px] text-[var(--color-fg-muted)] truncate tabular">
+                      <div className="text-[13px] sm:text-[12px] text-[var(--color-fg-muted)] truncate tabular">
                         {formatResDate(r.reservation_time)} · {formatResTime(r.reservation_time)} · {r.guests || 0} {r.guests === 1 ? 'ospite' : 'ospiti'}
                         {r.phone ? ` · ${r.phone}` : ''}
                       </div>
@@ -286,7 +290,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
           {customerHits.length > 0 && (
             <div>
-              <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold">
+              <div className="px-4 pt-3 pb-1 text-[12px] sm:text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold">
                 Clienti · {customerHits.length}
               </div>
               {customerHits.map((c, i) => {
@@ -299,7 +303,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     type="button"
                     onMouseEnter={() => setActiveIndex(flatIndex)}
                     onClick={() => commit({ kind: 'customer', data: c })}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    className={`w-full flex items-center gap-3 px-4 py-3 sm:py-2.5 text-left transition-colors ${
                       isActive ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -307,7 +311,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <User className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[14px] font-medium text-[var(--color-fg)] truncate">
+                      <div className="text-[15px] sm:text-[14px] font-medium text-[var(--color-fg)] truncate">
                         {toTitleCase(c.name)}
                         {c.is_vip && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">VIP</span>}
                       </div>
@@ -324,14 +328,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-[11px] text-[var(--color-fg-muted)]">
+        {/* Footer — kbd hints on desktop. On mobile the keyboard shortcuts
+            aren't useful (there's no ⌘K, ↑↓ or Esc), so we hide the whole
+            row to reclaim vertical space for results. */}
+        <div className="hidden sm:flex items-center justify-between px-4 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-[11px] text-[var(--color-fg-muted)]">
           <div className="flex items-center gap-3">
             <span><kbd className="px-1 py-0.5 rounded border border-[var(--color-line)] bg-[var(--color-surface)] font-mono text-[10px]">↑↓</kbd> Naviga</span>
             <span><kbd className="px-1 py-0.5 rounded border border-[var(--color-line)] bg-[var(--color-surface)] font-mono text-[10px]">⏎</kbd> Apri</span>
             <span><kbd className="px-1 py-0.5 rounded border border-[var(--color-line)] bg-[var(--color-surface)] font-mono text-[10px]">Esc</kbd> Chiudi</span>
           </div>
-          <span className="hidden sm:inline"><kbd className="px-1 py-0.5 rounded border border-[var(--color-line)] bg-[var(--color-surface)] font-mono text-[10px]">⌘K</kbd> per aprire</span>
+          <span><kbd className="px-1 py-0.5 rounded border border-[var(--color-line)] bg-[var(--color-surface)] font-mono text-[10px]">⌘K</kbd> per aprire</span>
         </div>
       </div>
     </div>,
