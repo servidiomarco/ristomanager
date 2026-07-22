@@ -146,6 +146,7 @@ app.get('/health', (req, res) => {
 // running a bundle from before the last deploy. `Cache-Control: no-store`
 // ensures the poll always sees the live process, not a cached response.
 // The banner check runs every 5 minutes plus on visibility change / focus.
+// Endpoint is public — no auth needed, it's just the current build SHA.
 app.get('/version', (_req, res) => {
     const version = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev';
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
