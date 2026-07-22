@@ -248,6 +248,82 @@ export interface PaymentRequest {
   updated_at: string;
   completed_at: string | null;
   metadata: Record<string, any> | null;
+  // Back-reference to the split this payment covers when the request was
+  // opened from the pay-at-table flow. NULL for classic deposit/full-payment
+  // requests created before or without a bill.
+  table_bill_split_id: number | null;
+}
+
+// Pay-at-table + split-bill (Fase 1 MVP). One bill per conto aperto al
+// tavolo; splits track how the guests decided to divvy it up. `items` is
+// JSONB reserved for Fase 2 (Passepartout), unused today.
+export type TableBillStatus =
+  | 'OPEN'              // waiter opened the bill, guests can claim
+  | 'LOCKED'            // reserved for future use (item-level split freeze)
+  | 'SETTLED'           // sum(paid) == total, waiter hasn't closed yet
+  | 'SETTLED_PARTIAL'   // waiter force-closed with residual paid off-band
+  | 'CLOSED'            // closed on the POS / archived
+  | 'VOIDED';           // cancelled, share_token rotated
+
+export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item';
+
+export type SplitStatus =
+  | 'CLAIMED'     // guest reserved the amount, Revolut order pending
+  | 'PAID'        // Revolut confirmed
+  | 'ABANDONED'   // TTL expired or Revolut cancelled/failed
+  | 'RELEASED'    // guest or waiter voluntarily rilasciato prima del pagamento
+  | 'REFUNDED';   // rimborsato via Revolut dopo il pagamento
+
+export interface TableBillItem {
+  name: string;
+  qty: number;
+  unit_price_cents: number;
+  category?: string | null;
+}
+
+export interface TableBill {
+  id: number;
+  reservation_id: number | null;
+  table_id: number | null;
+  total_cents: number;
+  covers: number;
+  currency: string;
+  items: TableBillItem[] | null;
+  status: TableBillStatus;
+  share_token: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  opened_by_user_id: number | null;
+  closed_by_user_id: number | null;
+  external_ref: string | null;
+  cash_settled_cents: number;
+  tip_cents: number;
+  notes: string | null;
+}
+
+export interface TableBillSplit {
+  id: number;
+  table_bill_id: number;
+  kind: SplitKind;
+  amount_cents: number;
+  item_ids: number[] | null;
+  claimant_label: string | null;
+  claimed_at: string;
+  expires_at: string | null;
+  payment_request_id: number | null;
+  status: SplitStatus;
+  paid_at: string | null;
+  released_at: string | null;
+}
+
+// Aggregate response for `GET /reservations/:id/bill`. Sums are computed
+// server-side so the UI doesn't have to re-derive them from `splits`.
+export interface TableBillWithSplits {
+  bill: TableBill;
+  splits: TableBillSplit[];
+  paid_cents: number;
+  claimed_cents: number;
+  residual_cents: number;
 }
 
 export interface Notification {
