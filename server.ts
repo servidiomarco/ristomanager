@@ -3175,6 +3175,179 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
     }
 });
 
+// Apre un bill al tavolo. Il cameriere fornisce l'importo totale e il
+// numero di coperti (default: guests della prenotazione). Rifiutiamo se
+// esiste già un bill attivo sulla stessa prenotazione per evitare due
+// QR concorrenti — il cameriere deve prima chiudere o annullare quello
+// vecchio. Lo `share_token` è opaco (32 char base64url ≈ 192 bit di
+// entropia), va nell'URL pubblico che stampiamo sul QR.
+app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
+
+        const totalCents = Number(req.body?.total_cents);
+        if (!Number.isFinite(totalCents) || totalCents <= 0) {
+            return res.status(400).json({ error: 'total_cents must be a positive integer' });
+        }
+        const totalRounded = Math.round(totalCents);
+
+        const resRow = await queryWithRetry(
+            'SELECT id, guests, table_id FROM reservations WHERE id = $1',
+            [id]
+        );
+        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
+
+        // covers: usa quello passato dal cameriere se valido, altrimenti
+        // fallback ai guests della prenotazione. Serve al pubblico per
+        // proporre lo split equo di default.
+        const requestedCovers = req.body?.covers != null ? Number(req.body.covers) : NaN;
+        const fallbackCovers = Number(resRow.rows[0].guests);
+        const covers = Number.isFinite(requestedCovers) && requestedCovers > 0
+            ? Math.round(requestedCovers)
+            : (Number.isFinite(fallbackCovers) && fallbackCovers > 0 ? fallbackCovers : 1);
+
+        // Un bill "attivo" (OPEN/LOCKED/SETTLED*) blocca l'apertura di uno
+        // nuovo per evitare che il pubblico veda due QR/URL diversi.
+        const existing = await queryWithRetry(
+            `SELECT id, status FROM table_bills
+             WHERE reservation_id = $1
+               AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+             LIMIT 1`,
+            [id]
+        );
+        if (existing.rows.length > 0) {
+            return res.status(409).json({
+                error: 'Reservation already has an active bill',
+                existing_bill_id: existing.rows[0].id,
+                existing_bill_status: existing.rows[0].status,
+            });
+        }
+
+        const shareToken = crypto.randomBytes(24).toString('base64url');
+
+        const inserted = await queryWithRetry(
+            `INSERT INTO table_bills
+                (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                       items, status, share_token, opened_at, closed_at,
+                       opened_by_user_id, closed_by_user_id, external_ref,
+                       cash_settled_cents, tip_cents, notes`,
+            [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null]
+        );
+        const bill = inserted.rows[0];
+
+        try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
+
+        res.status(201).json({
+            bill,
+            splits: [],
+            paid_cents: 0,
+            claimed_cents: 0,
+            residual_cents: bill.total_cents,
+        });
+    } catch (err: any) {
+        console.error('POST /reservations/:id/bill error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Chiude un bill (tipicamente perché è stato saldato al 100%, o perché
+// il cameriere forza la chiusura registrando l'incasso mancante come
+// contante/POS al tavolo). `cash_settled_cents` e `tip_cents` sono
+// opzionali: servono al breakdown per la contabilità (in Fase 2 saranno
+// il payload della POST /chiudi-conto verso Passepartout). Il token
+// pubblico viene invalidato subito (SET NULL) così un QR fotografato
+// prima non funziona più.
+app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        const cashRaw = req.body?.cash_settled_cents;
+        const tipRaw = req.body?.tip_cents;
+        const cashCents = cashRaw != null ? Number(cashRaw) : 0;
+        const tipCents = tipRaw != null ? Number(tipRaw) : 0;
+        if (!Number.isFinite(cashCents) || cashCents < 0) {
+            return res.status(400).json({ error: 'cash_settled_cents must be >= 0' });
+        }
+        if (!Number.isFinite(tipCents) || tipCents < 0) {
+            return res.status(400).json({ error: 'tip_cents must be >= 0' });
+        }
+        const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
+
+        const updated = await queryWithRetry(
+            `UPDATE table_bills
+             SET status = 'CLOSED',
+                 closed_at = CURRENT_TIMESTAMP,
+                 closed_by_user_id = $2,
+                 cash_settled_cents = $3,
+                 tip_cents = $4,
+                 notes = COALESCE($5, notes),
+                 share_token = NULL
+             WHERE id = $1
+               AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                       items, status, share_token, opened_at, closed_at,
+                       opened_by_user_id, closed_by_user_id, external_ref,
+                       cash_settled_cents, tip_cents, notes`,
+            [id, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notes]
+        );
+        if (updated.rows.length === 0) {
+            return res.status(404).json({ error: 'Bill not found or already closed/voided' });
+        }
+
+        try { socketService?.broadcastToAll('bill:closed', updated.rows[0]); } catch (_) {}
+
+        res.json(updated.rows[0]);
+    } catch (err: any) {
+        console.error('POST /bills/:id/close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Annulla un bill (errore di battitura del cameriere, tavolo che se n'è
+// andato prima di ricevere il QR, ecc.). I claim/PAID splits restano in
+// tabella per audit; il token pubblico è invalidato immediatamente.
+// Non fa refund automatico degli split PAID — se ne è già stato saldato
+// qualcuno, il cameriere deve rimborsare a mano (Fase 5 aggiungerà
+// endpoint refund dedicato).
+app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
+
+        const updated = await queryWithRetry(
+            `UPDATE table_bills
+             SET status = 'VOIDED',
+                 closed_at = CURRENT_TIMESTAMP,
+                 closed_by_user_id = $2,
+                 notes = COALESCE($3, notes),
+                 share_token = NULL
+             WHERE id = $1
+               AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                       items, status, share_token, opened_at, closed_at,
+                       opened_by_user_id, closed_by_user_id, external_ref,
+                       cash_settled_cents, tip_cents, notes`,
+            [id, req.user?.userId ?? null, notes]
+        );
+        if (updated.rows.length === 0) {
+            return res.status(404).json({ error: 'Bill not found or already closed/voided' });
+        }
+
+        try { socketService?.broadcastToAll('bill:voided', updated.rows[0]); } catch (_) {}
+
+        res.json(updated.rows[0]);
+    } catch (err: any) {
+        console.error('POST /bills/:id/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 
 // ============================================
 // INBOX (SMS / WhatsApp conversations)
