@@ -3111,6 +3111,70 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
     }
 });
 
+// Read-only view of the pay-at-table bill for a given reservation.
+// Returns the bill row (if any) plus the ordered list of splits and the
+// running totals the UI would otherwise re-derive. 404 when the
+// reservation has no active bill — the caller uses that to render the
+// "Apri conto" CTA. Voided/closed bills are not surfaced here (we only
+// return the most recent OPEN/LOCKED/SETTLED* one, since a table can be
+// reopened and past bills are historical).
+app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const billResult = await queryWithRetry(
+            `SELECT id, reservation_id, table_id, total_cents, covers, currency,
+                    items, status, share_token, opened_at, closed_at,
+                    opened_by_user_id, closed_by_user_id, external_ref,
+                    cash_settled_cents, tip_cents, notes
+             FROM table_bills
+             WHERE reservation_id = $1
+               AND status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
+             ORDER BY opened_at DESC
+             LIMIT 1`,
+            [id]
+        );
+        if (billResult.rows.length === 0) {
+            return res.status(404).json({ error: 'No active bill for this reservation' });
+        }
+        const bill = billResult.rows[0];
+
+        const splitsResult = await queryWithRetry(
+            `SELECT id, table_bill_id, kind, amount_cents, item_ids,
+                    claimant_label, claimed_at, expires_at,
+                    payment_request_id, status, paid_at, released_at
+             FROM table_bill_splits
+             WHERE table_bill_id = $1
+             ORDER BY claimed_at ASC`,
+            [bill.id]
+        );
+
+        // Compute totals server-side so the UI can render without touching
+        // the (possibly filtered) splits array.
+        const totals = splitsResult.rows.reduce(
+            (acc, s) => {
+                if (s.status === 'PAID') acc.paid_cents += s.amount_cents;
+                if (s.status === 'CLAIMED') acc.claimed_cents += s.amount_cents;
+                return acc;
+            },
+            { paid_cents: 0, claimed_cents: 0 }
+        );
+        const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
+
+        res.json({
+            bill,
+            splits: splitsResult.rows,
+            paid_cents: totals.paid_cents,
+            claimed_cents: totals.claimed_cents,
+            residual_cents,
+        });
+    } catch (err: any) {
+        console.error('GET /reservations/:id/bill error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 
 // ============================================
 // INBOX (SMS / WhatsApp conversations)

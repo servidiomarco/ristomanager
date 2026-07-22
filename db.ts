@@ -492,6 +492,136 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_reservation ON payment_requests(reservation_id) WHERE reservation_id IS NOT NULL;`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests(status);`);
 
+        // Pay-at-table + split-bill (Fase 1 MVP). One `table_bills` row per
+        // conto aperto al tavolo; N `table_bill_splits` per la ripartizione
+        // che gli ospiti dichiarano dal QR pubblico. Il pagamento vero e
+        // proprio resta su `payment_requests` (Revolut hosted checkout);
+        // ogni split punta al proprio payment_request via FK opzionale.
+        //
+        // `items` è JSONB nullable: popolato solo in Fase 2 quando arriverà
+        // la GET del conto da Passepartout. In Fase 1 lo split è solo per
+        // importo (equal_share / fixed_amount).
+        //
+        // `share_token` è il segreto opaco nell'URL pubblico
+        // (`/pay/:token`). Ruotato su VOID/CLOSED così un token compromesso
+        // muore appena il bill si chiude.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS table_bills (
+                id SERIAL PRIMARY KEY,
+                reservation_id INTEGER REFERENCES reservations(id) ON DELETE CASCADE,
+                table_id INTEGER REFERENCES tables(id) ON DELETE SET NULL,
+                total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+                covers INTEGER NOT NULL CHECK (covers > 0),
+                currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+                items JSONB,
+                status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                share_token VARCHAR(64) UNIQUE,
+                opened_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                closed_at TIMESTAMPTZ,
+                opened_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                closed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                external_ref VARCHAR(64),
+                cash_settled_cents INTEGER NOT NULL DEFAULT 0 CHECK (cash_settled_cents >= 0),
+                tip_cents INTEGER NOT NULL DEFAULT 0 CHECK (tip_cents >= 0),
+                notes TEXT
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bills_reservation ON table_bills(reservation_id) WHERE reservation_id IS NOT NULL;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bills_status ON table_bills(status);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bills_share_token ON table_bills(share_token) WHERE share_token IS NOT NULL;`);
+
+        // Ripartizione dichiarata dai singoli ospiti dal QR. `expires_at`
+        // scade il claim non pagato (~5 min) così un ospite distratto non
+        // blocca il residuo per sempre. Il job di reconcile controlla
+        // Revolut prima di rilasciarlo, per gestire webhook persi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS table_bill_splits (
+                id SERIAL PRIMARY KEY,
+                table_bill_id INTEGER NOT NULL REFERENCES table_bills(id) ON DELETE CASCADE,
+                kind VARCHAR(20) NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+                item_ids JSONB,
+                claimant_label TEXT,
+                claimed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMPTZ,
+                payment_request_id INTEGER REFERENCES payment_requests(id) ON DELETE SET NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'CLAIMED',
+                paid_at TIMESTAMPTZ,
+                released_at TIMESTAMPTZ
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_bill ON table_bill_splits(table_bill_id);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_expiring ON table_bill_splits(expires_at) WHERE status = 'CLAIMED';`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_payment ON table_bill_splits(payment_request_id) WHERE payment_request_id IS NOT NULL;`);
+
+        // Retro-FK sul payment_request così partendo dal webhook Revolut si
+        // risale allo split senza scan. ON DELETE SET NULL: se lo split
+        // sparisce (cascade dal bill) il payment_request sopravvive come
+        // record contabile.
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'payment_requests' AND column_name = 'table_bill_split_id'
+                ) THEN
+                    ALTER TABLE payment_requests
+                        ADD COLUMN table_bill_split_id INTEGER REFERENCES table_bill_splits(id) ON DELETE SET NULL;
+                END IF;
+            END $$;
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_split ON payment_requests(table_bill_split_id) WHERE table_bill_split_id IS NOT NULL;`);
+
+        // Invariante cross-row: la somma dei claim vivi (CLAIMED o PAID)
+        // non può eccedere il totale del bill. PostgreSQL non permette
+        // CHECK subquery, quindi lo enforce con trigger BEFORE INSERT/UPDATE
+        // su table_bill_splits. Lookup a caldo del bill in row-lock così
+        // due insert concorrenti sono serializzati e uno dei due riceve
+        // l'errore invece di sfondare il totale.
+        await client.query(`
+            CREATE OR REPLACE FUNCTION enforce_table_bill_split_sum()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                v_total INTEGER;
+                v_live_sum INTEGER;
+            BEGIN
+                -- Solo i claim che pesano sul residuo sono contati.
+                IF NEW.status NOT IN ('CLAIMED', 'PAID') THEN
+                    RETURN NEW;
+                END IF;
+
+                SELECT total_cents INTO v_total
+                FROM table_bills
+                WHERE id = NEW.table_bill_id
+                FOR UPDATE;
+
+                IF v_total IS NULL THEN
+                    RAISE EXCEPTION 'table_bill % not found', NEW.table_bill_id;
+                END IF;
+
+                SELECT COALESCE(SUM(amount_cents), 0) INTO v_live_sum
+                FROM table_bill_splits
+                WHERE table_bill_id = NEW.table_bill_id
+                  AND status IN ('CLAIMED', 'PAID')
+                  AND (TG_OP = 'INSERT' OR id <> NEW.id);
+
+                IF v_live_sum + NEW.amount_cents > v_total THEN
+                    RAISE EXCEPTION 'split sum (% + %) exceeds bill total (%) for bill %',
+                        v_live_sum, NEW.amount_cents, v_total, NEW.table_bill_id
+                        USING ERRCODE = '23514';
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        `);
+        await client.query(`DROP TRIGGER IF EXISTS trg_enforce_table_bill_split_sum ON table_bill_splits;`);
+        await client.query(`
+            CREATE TRIGGER trg_enforce_table_bill_split_sum
+            BEFORE INSERT OR UPDATE ON table_bill_splits
+            FOR EACH ROW EXECUTE FUNCTION enforce_table_bill_split_sum();
+        `);
+
         // Add reservation_status column to existing tables if it doesn't exist
         await client.query(`
             DO $$
