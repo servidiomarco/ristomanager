@@ -1520,6 +1520,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ADD COLUMN IF NOT EXISTS smtp_reply_to           TEXT,
                 ADD COLUMN IF NOT EXISTS resend_inbound_secret   TEXT;
         `);
+        // IMAP polling for inbound email. Alternative to the Resend inbound
+        // webhook: we connect to the mailbox we send from (e.g. Aruba) via
+        // IMAP+IDLE and thread each new message back to a reservation using
+        // the same In-Reply-To/References logic. `imap_last_seen_uid` is our
+        // watermark so a restart doesn't re-import the whole inbox.
+        await client.query(`
+            ALTER TABLE integration_settings
+                ADD COLUMN IF NOT EXISTS imap_host          TEXT,
+                ADD COLUMN IF NOT EXISTS imap_port          INTEGER,
+                ADD COLUMN IF NOT EXISTS imap_secure        BOOLEAN,
+                ADD COLUMN IF NOT EXISTS imap_user          TEXT,
+                ADD COLUMN IF NOT EXISTS imap_password      TEXT,
+                ADD COLUMN IF NOT EXISTS imap_enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS imap_last_seen_uid BIGINT;
+        `);
 
         // ============================================
         // OUTBOUND MESSAGES LOG (SMS / WhatsApp)

@@ -31,6 +31,7 @@ import { ReservationAllergensManager } from './components/ReservationAllergensMa
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
+import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
@@ -2178,6 +2179,7 @@ const App: React.FC = () => {
                 </div>
                 <RevolutIntegrationCard showToast={addToast} />
                 <SmtpIntegrationCard showToast={addToast} />
+                <ImapIntegrationCard showToast={addToast} />
               </div>
             </div>
           </div>

@@ -39,6 +39,20 @@ import {
     getResendInboundContext,
 } from './services/smtpService.js';
 import {
+    parseFromAddress,
+    pickHeader,
+    splitReferences,
+    resolveReservationByMessageIds,
+    resolveReservationByFromEmail,
+} from './services/emailThreading.js';
+import {
+    getImapConfigStatus,
+    verifyImapConnection,
+    startImapInboundService,
+    restartImapInboundService,
+    invalidateImapConfigCache,
+} from './services/imapInboundService.js';
+import {
     verifyElevenLabsSignature,
     findAvailability,
     findCustomerByPhone,
@@ -497,78 +511,6 @@ async function fetchResendReceivedEmail(id: string, apiKey: string): Promise<Res
         return (await r.json()) as ResendReceivedEmail;
     } catch (err: any) {
         console.warn('[Resend-inbound] fetch error:', err?.message || err);
-        return null;
-    }
-}
-
-// Pull a single header value in a case-insensitive way from Resend's headers
-// object. Values can be strings or arrays; we return the first non-empty.
-function pickHeader(headers: Record<string, string | string[]> | null | undefined, name: string): string | null {
-    if (!headers) return null;
-    const target = name.toLowerCase();
-    for (const [k, v] of Object.entries(headers)) {
-        if (k.toLowerCase() !== target) continue;
-        if (Array.isArray(v)) {
-            const first = v.find(x => typeof x === 'string' && x.trim().length > 0);
-            return first ? String(first).trim() : null;
-        }
-        return typeof v === 'string' ? v.trim() : null;
-    }
-    return null;
-}
-
-// The `From:` header is often `Name <addr@domain>` — extract the bare address.
-function parseFromAddress(from: string | null | undefined): string | null {
-    if (!from) return null;
-    const m = String(from).match(/<([^>]+)>/);
-    return (m ? m[1] : String(from)).trim().toLowerCase();
-}
-
-// Split the References header (space-separated Message-IDs) into individual ids.
-function splitReferences(refs: string | null): string[] {
-    if (!refs) return [];
-    return refs
-        .split(/\s+/)
-        .map(s => s.trim())
-        .filter(Boolean);
-}
-
-// Given the Message-IDs from a reply's In-Reply-To / References headers, find
-// the reservation those Message-IDs belong to. Returns null when no match.
-async function resolveReservationByMessageIds(candidateIds: string[]): Promise<number | null> {
-    const ids = candidateIds.filter(Boolean);
-    if (ids.length === 0) return null;
-    try {
-        const r = await queryWithRetry(
-            `SELECT reservation_id
-             FROM outbound_messages
-             WHERE message_id = ANY($1::text[]) AND reservation_id IS NOT NULL
-             ORDER BY sent_at DESC
-             LIMIT 1`,
-            [ids]
-        );
-        return r.rows[0]?.reservation_id ?? null;
-    } catch (err: any) {
-        console.warn('[Resend-inbound] resolve-by-message-id failed:', err?.message || err);
-        return null;
-    }
-}
-
-// Fallback resolver: match sender's email against a recent reservation.
-async function resolveReservationByFromEmail(fromEmail: string | null): Promise<number | null> {
-    if (!fromEmail) return null;
-    try {
-        const r = await queryWithRetry(
-            `SELECT id
-             FROM reservations
-             WHERE lower(email) = lower($1)
-             ORDER BY reservation_time DESC
-             LIMIT 1`,
-            [fromEmail]
-        );
-        return r.rows[0]?.id ?? null;
-    } catch (err: any) {
-        console.warn('[Resend-inbound] resolve-by-from failed:', err?.message || err);
         return null;
     }
 }
@@ -11661,6 +11603,159 @@ app.post('/settings/integrations/smtp/test', authenticate, requirePermission('se
 });
 
 // ============================================
+// INTEGRATION SETTINGS (IMAP inbound polling)
+// ============================================
+// Config lives on the same integration_settings row as SMTP (provider='smtp')
+// but under imap_* columns. Toggling `enabled` restarts the long-lived
+// IMAP+IDLE listener so config changes take effect without a redeploy.
+app.get('/settings/integrations/imap', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const status = await getImapConfigStatus();
+        let updatedAt: string | null = null;
+        let updatedByEmail: string | null = null;
+        try {
+            const meta = await queryWithRetry(
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'smtp'`
+            );
+            const row = meta.rows[0];
+            if (row) {
+                updatedAt = row.updated_at ?? null;
+                if (row.updated_by_user_id) {
+                    const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
+                    updatedByEmail = u.rows[0]?.email ?? null;
+                }
+            }
+        } catch (metaErr: any) {
+            console.warn('[IMAP] integration_settings metadata unavailable:', metaErr?.message || metaErr);
+        }
+        res.json({ ...status, updated_at: updatedAt, updated_by: updatedByEmail });
+    } catch (err: any) {
+        console.error('GET /settings/integrations/imap error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/integrations/imap', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const updates: Record<string, string | number | boolean | null> = {};
+
+        const nullableString = (v: unknown): string | null | undefined => {
+            if (v === undefined) return undefined;
+            if (v === null) return null;
+            if (typeof v !== 'string') return undefined;
+            const trimmed = v.trim();
+            return trimmed === '' ? null : trimmed;
+        };
+
+        const host = nullableString(body.host);
+        if (host !== undefined) updates.imap_host = host;
+        const user = nullableString(body.user);
+        if (user !== undefined) updates.imap_user = user;
+        if (body.password !== undefined) {
+            if (body.password === null || (typeof body.password === 'string' && body.password === '')) {
+                updates.imap_password = null;
+            } else if (typeof body.password === 'string') {
+                updates.imap_password = body.password;
+            }
+        }
+        if (body.port !== undefined) {
+            if (body.port === null || body.port === '') {
+                updates.imap_port = null;
+            } else {
+                const n = Number(body.port);
+                if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                    return res.status(400).json({ error: 'invalid_port' });
+                }
+                updates.imap_port = n;
+            }
+        }
+        if (body.secure !== undefined) {
+            if (typeof body.secure !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_secure' });
+            }
+            updates.imap_secure = body.secure;
+        }
+        if (body.enabled !== undefined) {
+            if (typeof body.enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_enabled' });
+            }
+            updates.imap_enabled = body.enabled;
+        }
+        // Manual reset of the watermark — useful when the operator wants to
+        // reingest the inbox after a bad match run.
+        if (body.reset_last_seen_uid === true) {
+            updates.imap_last_seen_uid = null;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+
+        const providedCols = Object.keys(updates);
+        const providedVals = providedCols.map(c => updates[c]);
+        const userId = req.user?.userId ?? null;
+
+        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
+        const insertValues = ['smtp', ...providedVals, userId, new Date()];
+        const updateSet = [
+            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
+            `updated_by_user_id = $${providedCols.length + 2}`,
+            `updated_at = CURRENT_TIMESTAMP`,
+        ].join(', ');
+
+        await queryWithRetry(
+            `INSERT INTO integration_settings (${insertCols.join(', ')})
+             VALUES (${insertPlaceholders})
+             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+            insertValues
+        );
+
+        invalidateImapConfigCache();
+
+        // Restart the listener so credentials / enabled toggle take effect
+        // right away. Fire-and-forget: HTTP response should not block on the
+        // IMAP handshake, which can be slow.
+        restartImapInboundService().catch((err) => {
+            console.error('[IMAP] restart after update failed:', err?.message || err);
+        });
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                undefined,
+                `Configurazione IMAP aggiornata`
+            );
+        }
+
+        const status = await getImapConfigStatus();
+        res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
+    } catch (err: any) {
+        console.error('PUT /settings/integrations/imap error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.post('/settings/integrations/imap/test', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const verify = await verifyImapConnection();
+        if (!verify.ok) {
+            console.warn('[IMAP] verify failed:', verify.error);
+            return res.status(400).json({ error: verify.error || 'Verifica IMAP fallita' });
+        }
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('POST /settings/integrations/imap/test error:', err);
+        res.status(500).json({ error: err?.message || 'Test IMAP fallito' });
+    }
+});
+
+// ============================================
 // AUTO-DEPOSIT POLICY (public web bookings)
 // ============================================
 // Stored on the Revolut integration row (both concerns share credentials);
@@ -12684,6 +12779,15 @@ const startServer = async () => {
                         console.log('✅ Daily bread reminder scheduler started (20:00 Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Bread reminder scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        // Fire-and-forget: the IMAP handshake can take seconds
+                        // and we don't want to block schema-init callbacks.
+                        startImapInboundService(() => socketService).catch((imapErr) => {
+                            console.error('IMAP inbound service startup error:', imapErr);
+                        });
+                    } catch (imapErr) {
+                        console.error('IMAP inbound service failed to start:', imapErr);
                     }
                 })
                 .catch((dbError) => {

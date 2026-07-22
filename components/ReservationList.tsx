@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4 } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft } from 'lucide-react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings } from '../services/apiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -1716,6 +1716,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       .finally(() => { if (!cancelled) setOutboundMessagesLoading(false); });
     return () => { cancelled = true; };
   }, [isFormOpen, isEditing, formData.id]);
+
+  // Live inbound-email delivery: when the IMAP service (or the Resend inbound
+  // webhook) inserts a new inbound row for this reservation, append it to the
+  // timeline without waiting for a refetch.
+  useEffect(() => {
+    if (!socket || !isFormOpen || !isEditing || !formData.id) return;
+    const reservationId = formData.id as number;
+    const onInbound = (row: OutboundMessage) => {
+      if (!row || row.reservation_id !== reservationId) return;
+      setOutboundMessages(prev => {
+        if (prev.some(m => m.id === row.id)) return prev;
+        // Keep chronological order (oldest first) so the newly arrived reply
+        // slots into the right position instead of always jumping to the end.
+        const next = [...prev, row];
+        next.sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());
+        return next;
+      });
+    };
+    socket.on('inboundEmail:received', onInbound);
+    return () => { socket.off('inboundEmail:received', onInbound); };
+  }, [socket, isFormOpen, isEditing, formData.id]);
 
   const handleCreatePaymentRequest = async () => {
     if (!formData.id) return;
@@ -5158,38 +5179,59 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   {/* Vertical timeline rail */}
                                   <div className="absolute left-2.5 top-4 bottom-4 w-px bg-[var(--color-line)]" aria-hidden />
                                   {outboundMessages.map(msg => {
+                                    const isInbound = msg.direction === 'inbound';
                                     const s = (msg.status || '').toLowerCase();
-                                    const badgeCls =
-                                      s === 'delivered' || s === 'read'
+                                    const badgeCls = isInbound
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
+                                      : s === 'delivered' || s === 'read'
                                         ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
                                         : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending'
                                         ? 'bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300'
                                         : s === 'failed' || s === 'undelivered'
                                         ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300'
                                         : 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-500/15 dark:border-slate-500/30 dark:text-slate-300';
-                                    const badgeLabel =
-                                      s === 'delivered' || s === 'read' ? 'Consegnato'
+                                    const badgeLabel = isInbound
+                                      ? 'Ricevuto'
+                                      : s === 'delivered' || s === 'read' ? 'Consegnato'
                                       : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending' ? 'Inviato'
                                       : s === 'failed' || s === 'undelivered' ? 'Fallito'
                                       : (s || 'In coda');
                                     const isEmail = msg.channel === 'email';
                                     const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : isEmail ? 'Email' : msg.channel;
-                                    const ChannelIcon = isEmail ? Mail : MessageCircle;
-                                    const recipient = isEmail ? msg.to_email : msg.to_phone;
+                                    const ChannelIcon = isInbound ? CornerDownLeft : (isEmail ? Mail : MessageCircle);
+                                    const counterparty = isInbound
+                                      ? (msg.from_email || msg.to_phone)
+                                      : (isEmail ? msg.to_email : msg.to_phone);
+                                    const counterpartyPrefix = isInbound ? 'Da: ' : '';
                                     return (
                                       <li key={msg.id} className="relative pb-3 last:pb-0">
-                                        {/* Timeline dot */}
-                                        <span className="absolute -left-[18px] top-2 flex items-center justify-center w-5 h-5 rounded-full bg-indigo-50 border border-indigo-200 dark:bg-indigo-500/20 dark:border-indigo-500/40">
-                                          <ChannelIcon className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-300" />
+                                        {/* Timeline dot — emerald for inbound replies so the eye
+                                            can scan received-vs-sent at a glance. */}
+                                        <span className={`absolute -left-[18px] top-2 flex items-center justify-center w-5 h-5 rounded-full border ${
+                                          isInbound
+                                            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/20 dark:border-emerald-500/40'
+                                            : 'bg-indigo-50 border-indigo-200 dark:bg-indigo-500/20 dark:border-indigo-500/40'
+                                        }`}>
+                                          <ChannelIcon className={`h-2.5 w-2.5 ${
+                                            isInbound
+                                              ? 'text-emerald-600 dark:text-emerald-300'
+                                              : 'text-indigo-600 dark:text-indigo-300'
+                                          }`} />
                                         </span>
-                                        <div className="rounded-lg bg-[var(--color-surface-2)] dark:bg-white/[0.02] border border-[var(--color-line)] p-2.5">
+                                        <div className={`rounded-lg border p-2.5 ${
+                                          isInbound
+                                            ? 'bg-emerald-50/40 dark:bg-emerald-500/[0.05] border-emerald-200/60 dark:border-emerald-500/20'
+                                            : 'bg-[var(--color-surface-2)] dark:bg-white/[0.02] border-[var(--color-line)]'
+                                        }`}>
                                           <div className="flex items-center justify-between gap-2 mb-1">
                                             <div className="flex items-center gap-2 text-[11px] text-[var(--color-fg-muted)] min-w-0">
                                               <span className="font-medium text-[var(--color-fg)]">{channelLabel}</span>
-                                              {recipient && (
+                                              {counterparty && (
                                                 <>
                                                   <span>·</span>
-                                                  <span className="truncate max-w-[180px]" title={recipient}>{recipient}</span>
+                                                  <span className="truncate max-w-[180px]" title={counterparty}>
+                                                    {counterpartyPrefix}{counterparty}
+                                                  </span>
                                                 </>
                                               )}
                                               <span>·</span>

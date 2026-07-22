@@ -483,12 +483,18 @@ export interface OutboundMessage {
   id: number;
   provider: string;
   channel: 'sms' | 'whatsapp' | 'email';
+  // Inbound rows (email replies received via IMAP, incoming SMS/WhatsApp)
+  // set direction='inbound' and leave to_* NULL; outbound rows leave from_* NULL.
+  direction: 'outbound' | 'inbound';
   to_phone: string | null;
   to_email: string | null;
+  from_email: string | null;
   subject: string | null;
   body: string;
   status: string | null;
   provider_sid: string | null;
+  message_id: string | null;
+  in_reply_to: string | null;
   reservation_id: number | null;
   sent_at: string;
   delivered_at: string | null;
@@ -896,6 +902,58 @@ export const sendSmtpTestEmail = async (to: string): Promise<{ success: boolean 
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ to }),
+  });
+};
+
+// ============================================
+// INTEGRATION SETTINGS (IMAP inbound polling)
+// ============================================
+export interface ImapIntegrationStatus {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  enabled: boolean;
+  has_password: boolean;
+  password_last4: string | null;
+  last_seen_uid: number | null;
+  configured: boolean;
+  connected: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface ImapIntegrationUpdate {
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  user?: string;
+  password?: string;
+  enabled?: boolean;
+  reset_last_seen_uid?: boolean;
+}
+
+export const getImapIntegration = async (): Promise<ImapIntegrationStatus> => {
+  return apiRequest<ImapIntegrationStatus>(`${API_URL}/settings/integrations/imap`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateImapIntegration = async (
+  updates: ImapIntegrationUpdate
+): Promise<ImapIntegrationStatus> => {
+  return apiRequest<ImapIntegrationStatus>(`${API_URL}/settings/integrations/imap`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+export const testImapConnection = async (): Promise<{ success: boolean }> => {
+  return apiRequest<{ success: boolean }>(`${API_URL}/settings/integrations/imap/test`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
   });
 };
 
