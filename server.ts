@@ -8473,6 +8473,49 @@ app.get('/notifications/unread-count', authenticate, async (req: any, res) => {
     }
 });
 
+// Per-category counts for the NotifichePage filter chips. One query with
+// FILTER clauses so the whole breakdown comes back in a single round-trip;
+// scope is "notifiche non ancora rimosse" (same as the default list view).
+app.get('/notifications/counts', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const r = await queryWithRetry(
+            `SELECT
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE read_at IS NULL)::int AS unread,
+                COUNT(*) FILTER (WHERE category = 'reservation')::int AS reservation,
+                COUNT(*) FILTER (WHERE category = 'voice')::int AS voice,
+                COUNT(*) FILTER (WHERE category = 'payment')::int AS payment,
+                COUNT(*) FILTER (WHERE category = 'message')::int AS message,
+                COUNT(*) FILTER (WHERE category = 'system')::int AS system,
+                COUNT(*) FILTER (
+                    WHERE category IS NULL
+                       OR category NOT IN ('reservation','voice','payment','message','system')
+                )::int AS general
+             FROM notifications
+             WHERE recipient_user_id = $1 AND dismissed_at IS NULL`,
+            [userId]
+        );
+        const row = r.rows[0] || {};
+        res.json({
+            total: row.total ?? 0,
+            unread: row.unread ?? 0,
+            by_category: {
+                reservation: row.reservation ?? 0,
+                voice: row.voice ?? 0,
+                payment: row.payment ?? 0,
+                message: row.message ?? 0,
+                system: row.system ?? 0,
+                general: row.general ?? 0,
+            },
+        });
+    } catch (err) {
+        console.error('GET /notifications/counts error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.post('/notifications/:id/read', authenticate, async (req: any, res) => {
     try {
         const userId = req.user?.userId;

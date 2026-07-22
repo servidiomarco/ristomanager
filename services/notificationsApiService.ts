@@ -70,6 +70,20 @@ class NotificationsApiService {
   async unreadCount(): Promise<{ count: number }> {
     return apiRequest(`${API_URL}/notifications/unread-count`, { headers: getHeaders() });
   }
+  async counts(): Promise<{
+    total: number;
+    unread: number;
+    by_category: {
+      reservation: number;
+      voice: number;
+      payment: number;
+      message: number;
+      system: number;
+      general: number;
+    };
+  }> {
+    return apiRequest(`${API_URL}/notifications/counts`, { headers: getHeaders() });
+  }
   async markRead(id: number): Promise<{ ok: true }> {
     return apiRequest(`${API_URL}/notifications/${id}/read`, { method: 'POST', headers: getHeaders() });
   }

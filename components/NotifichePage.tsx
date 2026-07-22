@@ -31,12 +31,38 @@ const categoryIcon = (cat: string | null) => {
   }
 };
 
+interface CountsShape {
+  total: number;
+  unread: number;
+  by_category: {
+    reservation: number;
+    voice: number;
+    payment: number;
+    message: number;
+    system: number;
+    general: number;
+  };
+}
+
+const emptyCounts: CountsShape = {
+  total: 0, unread: 0,
+  by_category: { reservation: 0, voice: 0, payment: 0, message: 0, system: 0, general: 0 },
+};
+
 const NotifichePage: React.FC = () => {
   const [items, setItems] = useState<NotificationRow[]>([]);
+  const [counts, setCounts] = useState<CountsShape>(emptyCounts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<CategoryFilter>('all');
   const [markingAll, setMarkingAll] = useState(false);
+
+  const refreshCounts = useCallback(async () => {
+    try {
+      const c = await notificationsApiService.counts();
+      setCounts(c);
+    } catch { /* silent — badge just stays stale until next refresh */ }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -44,14 +70,17 @@ const NotifichePage: React.FC = () => {
       const params: Parameters<typeof notificationsApiService.list>[0] = {};
       if (filter === 'unread') params.unread = true;
       else if (filter !== 'all') params.category = filter;
-      const { notifications } = await notificationsApiService.list(params);
+      const [{ notifications }] = await Promise.all([
+        notificationsApiService.list(params),
+        refreshCounts(),
+      ]);
       setItems(notifications);
     } catch (err: any) {
       setError(err?.message || 'Errore caricamento notifiche');
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, refreshCounts]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -78,6 +107,7 @@ const NotifichePage: React.FC = () => {
     try {
       await notificationsApiService.markRead(n.id);
       setItems(prev => prev.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+      refreshCounts();
     } catch { /* silent */ }
   };
 
@@ -85,6 +115,7 @@ const NotifichePage: React.FC = () => {
     try {
       await notificationsApiService.dismiss(n.id);
       setItems(prev => prev.filter(x => x.id !== n.id));
+      refreshCounts();
     } catch { /* silent */ }
   };
 
@@ -99,6 +130,7 @@ const NotifichePage: React.FC = () => {
       await notificationsApiService.markAllRead();
       const now = new Date().toISOString();
       setItems(prev => prev.map(x => x.read_at ? x : { ...x, read_at: now }));
+      refreshCounts();
     } catch { /* silent */ } finally {
       setMarkingAll(false);
     }
@@ -149,10 +181,22 @@ const NotifichePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Filter chips */}
+        {/* Filter chips with per-category count badges. Numbers come from the
+            /notifications/counts endpoint so they reflect the full dataset,
+            not just the currently rendered list. Chips with count = 0 hide
+            the badge so the row doesn't look padded with zeros. */}
         <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {filters.map(({ v, l }) => {
             const active = filter === v;
+            const badge =
+              v === 'all' ? counts.total
+              : v === 'unread' ? counts.unread
+              : v === 'reservation' ? counts.by_category.reservation
+              : v === 'voice' ? counts.by_category.voice
+              : v === 'message' ? counts.by_category.message
+              : v === 'payment' ? counts.by_category.payment
+              : v === 'system' ? counts.by_category.system
+              : 0;
             return (
               <button
                 key={v}
@@ -165,6 +209,19 @@ const NotifichePage: React.FC = () => {
                 }`}
               >
                 {l}
+                {badge > 0 && (
+                  <span
+                    className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold tabular ${
+                      active
+                        ? 'bg-white/25 text-white'
+                        : v === 'unread'
+                          ? 'bg-rose-500 text-white'
+                          : 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]'
+                    }`}
+                  >
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
               </button>
             );
           })}
