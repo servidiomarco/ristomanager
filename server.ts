@@ -1286,6 +1286,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
+                category: 'reservation',
                 title: 'Nuova prenotazione vocale',
                 body: `${toTitleCase(created.customer_name)} · ${created.guests} ospiti · ${reservationLabel}`,
                 url: `/?view=RESERVATIONS&reservationId=${created.id}`,
@@ -1484,6 +1485,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
+                category: 'reservation',
                 title: 'Prenotazione cancellata (voce)',
                 body: `${toTitleCase(cancelled.customer_name)} · ${cancelled.guests} ospiti · ${reservationLabel}`,
                 url: `/?view=RESERVATIONS&reservationId=${cancelled.id}`,
@@ -1749,6 +1751,7 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
+                category: 'reservation',
                 title: 'Prenotazione modificata (voce)',
                 body: `${toTitleCase(after.customer_name)} · ${after.guests} ospiti · ${reservationLabel}`,
                 url: `/?view=RESERVATIONS&reservationId=${after.id}`,
@@ -1890,6 +1893,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 pushSendToRoles(
                     ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                     {
+                        category: 'voice',
                         title: '⚠️ Prenotazione da recuperare',
                         body: `L'agent ha detto "confermata" ma NON c'è prenotazione. Chiama ${displayPhone}.`,
                         url: '/?view=CONVERSAZIONI',
@@ -1980,6 +1984,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
             pushSendToRoles(
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
+                    category: 'voice',
                     title: 'Chiamata da ricontattare',
                     body: bodyLine,
                     url: '/?view=CONVERSAZIONI',
@@ -2387,6 +2392,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
+                category: 'reservation',
                 title: 'Nuova prenotazione',
                 body: `${toTitleCase(customer_name)} · ${guests} ospiti · ${reservationLabel}`,
                 url: `/?view=RESERVATIONS&reservationId=${newReservation.id}`,
@@ -2544,6 +2550,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             pushSendToRoles(
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
+                    category: 'reservation',
                     title: 'Prenotazione annullata',
                     body: `${toTitleCase(updatedReservation.customer_name)} · ${updatedReservation.guests} ospiti · ${reservationLabel}`,
                     url: `/?view=RESERVATIONS&reservationId=${updatedReservation.id}`,
@@ -3379,15 +3386,24 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         if (!(await isSmtpConfigured())) {
             return res.status(503).json({ error: 'SMTP non configurato — vai in Impostazioni' });
         }
-        const reservationId = Number.isFinite(Number(reservation_id)) ? Math.trunc(Number(reservation_id)) : null;
-        // If a reservation_id is provided, fetch the customer name so the
-        // template can render "Ciao <Nome>" like the per-reservation composer.
+        // Reservation_id from the client may be stale (thread summary points
+        // to a reservation that got deleted between fetch and send). If the
+        // row no longer exists, clear the FK so the INSERT doesn't blow up —
+        // the email still lands in the thread, just without the reservation
+        // link. The composer prefill (customer_name) collapses to "cliente".
+        let reservationId: number | null = Number.isFinite(Number(reservation_id))
+            ? Math.trunc(Number(reservation_id))
+            : null;
         let customerName: string | null = null;
         if (reservationId != null) {
             const r = await queryWithRetry(
                 'SELECT customer_name FROM reservations WHERE id = $1', [reservationId]
             );
-            customerName = r.rows[0]?.customer_name ?? null;
+            if (r.rows.length === 0) {
+                reservationId = null;
+            } else {
+                customerName = r.rows[0]?.customer_name ?? null;
+            }
         }
         const inReplyTo = typeof in_reply_to === 'string' && in_reply_to.trim() ? in_reply_to.trim() : null;
 
@@ -3904,6 +3920,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
     if (isFirstCompletion) {
         const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
         pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+            category: 'payment',
             title: 'Pagamento ricevuto',
             body: bodyLine,
             url: row.reservation_id ? `/?view=RESERVATIONS&reservationId=${row.reservation_id}` : `/?view=RESERVATIONS`,
@@ -4974,6 +4991,7 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
                 pushSendToRoles(
                     ['KITCHEN'],
                     {
+                        category: 'system',
                         title: 'Promemoria cucina',
                         body: created.rows[0].title,
                         url: '/?view=DASHBOARD',
@@ -5113,6 +5131,7 @@ async function runDailyBreadReminder(): Promise<void> {
             pushSendToRoles(
                 ['OWNER'],
                 {
+                    category: 'system',
                     title: 'Promemoria pane',
                     body: title,
                     url: '/?view=DASHBOARD',
@@ -6377,6 +6396,7 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
             pushSendToRoles(
                 LOW_STOCK_ALERT_ROLES,
                 {
+                    category: 'system',
                     title: 'Scorta bassa',
                     body: `${v.p_name}: ${qtyText}${unit} rimanenti`,
                     url: '/?view=INVENTARIO',
@@ -6903,6 +6923,7 @@ app.post('/todos', authenticate, async (req, res) => {
 
         if (newTodo.assignedToUserId && newTodo.assignedToUserId !== req.user?.userId) {
             pushSendToUser(newTodo.assignedToUserId, {
+                category: 'system',
                 title: 'Nuovo todo assegnato',
                 body: newTodo.title,
                 url: '/?view=DASHBOARD',
@@ -7049,6 +7070,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             && newAssignee !== req.user?.userId
         ) {
             pushSendToUser(newAssignee, {
+                category: 'system',
                 title: 'Todo assegnato a te',
                 body: updatedTodo.title,
                 url: '/?view=DASHBOARD',
@@ -9239,6 +9261,7 @@ async function logInboundMessage(params: {
             pushSendToRoles(
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
+                    category: 'message',
                     title: `Nuovo messaggio ${channelLabel}`,
                     body: preview ? `${fromDisplay}: ${preview}` : `Da ${fromDisplay}`,
                     url: '/?view=MESSAGGI',
@@ -12067,6 +12090,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
+                category: 'reservation',
                 title: 'Nuova richiesta prenotazione',
                 body: `${toTitleCase(customer_name)} · ${guestsNum} ospiti · ${date} ${time}`,
                 url: `/?view=RESERVATIONS&reservationId=${created.id}`,
