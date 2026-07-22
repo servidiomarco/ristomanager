@@ -160,7 +160,12 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.INVENTARIO]: ['inventory:view'],
   [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view'],
-  [ViewState.PAGAMENTI]: ['payments:view']
+  [ViewState.PAGAMENTI]: ['payments:view'],
+  // Email inbox reuses the same permission as the SMS/WhatsApp inbox — anyone
+  // who can read reservations can read the email thread with those customers.
+  [ViewState.EMAIL]: ['reservations:view'],
+  // Notifiche is a personal centre — dashboard-level visibility is enough.
+  [ViewState.NOTIFICHE]: ['dashboard:view']
 };
 
 export class PermissionService {

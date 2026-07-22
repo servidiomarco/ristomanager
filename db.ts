@@ -1342,6 +1342,39 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);`);
 
         // ============================================
+        // NOTIFICATIONS INBOX (persistent log per user)
+        // ============================================
+        // Persistent history of every push notification we dispatch, one row
+        // per recipient user. Web push is fire-and-forget by design (delivery
+        // dies with the browser), so we save the payload *before* attempting
+        // delivery. Powers the NotifichePage centre so operators can rewind
+        // past alerts, mark them read/dismissed, and see counts survive across
+        // sessions and devices.
+        //
+        // category: coarse bucket used by the UI filters (voice, payment,
+        //   reservation, message, ...); tag: fine-grained dedupe key that
+        //   matches the web-push tag so the same alert doesn't spawn multiple
+        //   rows on retry.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS notifications (
+                id SERIAL PRIMARY KEY,
+                recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                category VARCHAR(40),
+                title TEXT NOT NULL,
+                body TEXT,
+                url TEXT,
+                tag VARCHAR(120),
+                metadata JSONB,
+                sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                read_at TIMESTAMPTZ,
+                dismissed_at TIMESTAMPTZ
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_user_id, sent_at DESC);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(recipient_user_id) WHERE read_at IS NULL AND dismissed_at IS NULL;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_notifications_tag ON notifications(recipient_user_id, tag) WHERE tag IS NOT NULL AND dismissed_at IS NULL;`);
+
+        // ============================================
         // OPENING HOURS + SPECIAL CLOSURES
         // ============================================
         await client.query(`

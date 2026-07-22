@@ -3233,6 +3233,203 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
     }
 });
 
+// ============================================
+// INBOX (Email conversations) — parallel to the SMS/WhatsApp block above.
+// Threads are keyed by lowercased email address (union of from_email +
+// to_email); customer name comes from the most recent reservation for that
+// address. Same DISTINCT ON + unread_count + last_inbound_at shape so the
+// EmailPage can reuse the InboxPage layout with minimal changes.
+// ============================================
+
+app.get('/email/threads', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(`
+            WITH pairs AS (
+                SELECT id, provider, channel, direction, subject, body, sent_at, read_at,
+                       reservation_id,
+                       lower(COALESCE(from_email, to_email)) AS email_key,
+                       COALESCE(from_email, to_email) AS email
+                FROM outbound_messages
+                WHERE channel = 'email'
+                  AND COALESCE(from_email, to_email) IS NOT NULL
+            ),
+            latest AS (
+                SELECT DISTINCT ON (email_key)
+                    email_key, email, direction, subject, body, sent_at, reservation_id
+                FROM pairs
+                ORDER BY email_key, sent_at DESC
+            ),
+            counts AS (
+                SELECT email_key,
+                       COUNT(*) FILTER (WHERE direction = 'inbound' AND read_at IS NULL)::int AS unread_count,
+                       MAX(sent_at) FILTER (WHERE direction = 'inbound') AS last_inbound_at
+                FROM pairs
+                GROUP BY email_key
+            )
+            SELECT l.email_key,
+                   l.email,
+                   l.direction    AS last_direction,
+                   l.subject      AS last_subject,
+                   l.body         AS last_body,
+                   l.sent_at      AS last_sent_at,
+                   l.reservation_id AS last_reservation_id,
+                   COALESCE(c.unread_count, 0)::int AS unread_count,
+                   c.last_inbound_at,
+                   r.customer_name
+            FROM latest l
+            LEFT JOIN counts c ON c.email_key = l.email_key
+            LEFT JOIN LATERAL (
+                SELECT customer_name FROM reservations
+                WHERE lower(email) = l.email_key
+                ORDER BY reservation_time DESC
+                LIMIT 1
+            ) r ON true
+            ORDER BY l.sent_at DESC
+            LIMIT 200
+        `);
+        res.json({ threads: result.rows });
+    } catch (err) {
+        console.error('GET /email/threads error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/email/unread-count', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(`
+            SELECT COUNT(*)::int AS count
+            FROM outbound_messages
+            WHERE direction = 'inbound'
+              AND channel = 'email'
+              AND read_at IS NULL
+              AND from_email IS NOT NULL
+        `);
+        res.json({ count: result.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /email/unread-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/email/threads/:emailKey', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const key = String(req.params.emailKey).trim().toLowerCase();
+        if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
+        const result = await queryWithRetry(
+            `SELECT id, provider, channel, direction, from_email, to_email, subject, body,
+                    status, provider_sid, message_id, in_reply_to, reservation_id,
+                    sent_at, delivered_at, failed_at, read_at, error_code, error_message
+             FROM outbound_messages
+             WHERE channel = 'email'
+               AND (lower(to_email) = $1 OR lower(from_email) = $1)
+             ORDER BY sent_at ASC
+             LIMIT 500`,
+            [key]
+        );
+        res.json({ messages: result.rows });
+    } catch (err) {
+        console.error('GET /email/threads/:emailKey error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const key = String(req.params.emailKey).trim().toLowerCase();
+        if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
+        const updated = await queryWithRetry(
+            `UPDATE outbound_messages
+             SET read_at = CURRENT_TIMESTAMP
+             WHERE direction = 'inbound'
+               AND read_at IS NULL
+               AND channel = 'email'
+               AND lower(from_email) = $1
+             RETURNING id`,
+            [key]
+        );
+        if (updated.rows.length > 0 && socketService) {
+            socketService.broadcastToAll('email:read', {
+                email_key: key,
+                count: updated.rows.length,
+            });
+        }
+        res.json({ ok: true, marked: updated.rows.length });
+    } catch (err) {
+        console.error('POST /email/threads/:emailKey/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Send an outbound email from the EmailPage composer. Free-form (subject +
+// body), optionally attached to a reservation for continuity. The
+// buildCustomEmail template wraps the body in the branded HTML shell — the
+// same one used by /reservations/:id/send-custom-email so both flows look
+// identical to the recipient.
+app.post('/email/send', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const { to, subject, body, reservation_id, in_reply_to } = req.body || {};
+        const toEmail = typeof to === 'string' ? to.trim() : '';
+        const subj = typeof subject === 'string' ? subject.trim() : '';
+        const bod = typeof body === 'string' ? body.trim() : '';
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(toEmail)) {
+            return res.status(400).json({ error: 'Destinatario email non valido' });
+        }
+        if (!subj || subj.length > 200) return res.status(400).json({ error: 'Oggetto richiesto (max 200)' });
+        if (!bod || bod.length > 5000) return res.status(400).json({ error: 'Corpo richiesto (max 5000)' });
+        if (!(await isSmtpConfigured())) {
+            return res.status(503).json({ error: 'SMTP non configurato — vai in Impostazioni' });
+        }
+        const reservationId = Number.isFinite(Number(reservation_id)) ? Math.trunc(Number(reservation_id)) : null;
+        // If a reservation_id is provided, fetch the customer name so the
+        // template can render "Ciao <Nome>" like the per-reservation composer.
+        let customerName: string | null = null;
+        if (reservationId != null) {
+            const r = await queryWithRetry(
+                'SELECT customer_name FROM reservations WHERE id = $1', [reservationId]
+            );
+            customerName = r.rows[0]?.customer_name ?? null;
+        }
+        const inReplyTo = typeof in_reply_to === 'string' && in_reply_to.trim() ? in_reply_to.trim() : null;
+
+        const template = buildCustomEmail({
+            customerName: customerName || 'cliente',
+            subject: subj,
+            body: bod,
+        });
+        const sendResult = await sendMail({
+            to: toEmail,
+            subject: template.subject,
+            text: template.text,
+            html: template.html,
+        });
+        // in_reply_to is persisted for our own thread reconstruction even if
+        // the underlying provider doesn't propagate the RFC header — it's a
+        // hint about the composer's intent, not authoritative Message-ID
+        // threading data.
+        const inserted = await queryWithRetry(
+            `INSERT INTO outbound_messages
+                (provider, channel, direction, to_email, subject, body, status,
+                 message_id, in_reply_to, reservation_id, sent_at)
+             VALUES ('smtp', 'email', 'outbound', $1, $2, $3, 'sent',
+                     $4, $5, $6, CURRENT_TIMESTAMP)
+             RETURNING id, provider, channel, direction, from_email, to_email,
+                       subject, body, status, provider_sid, message_id, in_reply_to,
+                       reservation_id, sent_at`,
+            [toEmail, subj, bod, sendResult.messageId || null, inReplyTo, reservationId]
+        );
+        const message = inserted.rows[0];
+
+        if (socketService) {
+            try { socketService.broadcastToAll('email:new', { email_key: toEmail.toLowerCase(), message }); }
+            catch (err) { console.warn('[email/send] socket broadcast failed:', (err as any)?.message || err); }
+        }
+        res.json({ ok: true, message });
+    } catch (err: any) {
+        console.error('POST /email/send error:', err);
+        res.status(500).json({ error: err?.message || 'Send failed' });
+    }
+});
+
 // Send an outbound reply from the inbox composer. Enforces Meta's 24h window
 // for WhatsApp freeform (needs an inbound < 24h ago); SMS has no constraint.
 // The customer-service window check is deliberately done server-side so the
@@ -8192,6 +8389,118 @@ app.post('/push/test', authenticate, async (req: any, res) => {
         res.json({ ok: true, ...result });
     } catch (err) {
         console.error('POST /push/test error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// NOTIFICATIONS INBOX — persistent per-user history of push events
+// ============================================
+// The rows are populated by pushService.sendTo{User,Roles} *before* web-push
+// delivery, so history survives closed browsers. Everything here is scoped
+// to `req.user.userId` — no cross-user reads.
+
+app.get('/notifications', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+        const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+        const includeDismissed = String(req.query.include_dismissed ?? '') === '1';
+        const unreadOnly = String(req.query.unread ?? '') === '1';
+        const category = typeof req.query.category === 'string' && req.query.category.trim() ? String(req.query.category).trim() : null;
+
+        const where: string[] = ['recipient_user_id = $1'];
+        const params: any[] = [userId];
+        if (!includeDismissed) where.push('dismissed_at IS NULL');
+        if (unreadOnly) where.push('read_at IS NULL');
+        if (category) {
+            params.push(category);
+            where.push(`category = $${params.length}`);
+        }
+        params.push(limit); params.push(offset);
+        const r = await queryWithRetry(
+            `SELECT id, category, title, body, url, tag, metadata,
+                    sent_at, read_at, dismissed_at
+             FROM notifications
+             WHERE ${where.join(' AND ')}
+             ORDER BY sent_at DESC
+             LIMIT $${params.length - 1} OFFSET $${params.length}`,
+            params
+        );
+        res.json({ notifications: r.rows });
+    } catch (err) {
+        console.error('GET /notifications error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/notifications/unread-count', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const r = await queryWithRetry(
+            `SELECT COUNT(*)::int AS count FROM notifications
+             WHERE recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL`,
+            [userId]
+        );
+        res.json({ count: r.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /notifications/unread-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/notifications/:id/read', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND recipient_user_id = $2 AND read_at IS NULL`,
+            [id, userId]
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /notifications/:id/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/notifications/read-all', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL
+             RETURNING id`,
+            [userId]
+        );
+        res.json({ ok: true, marked: r.rows.length });
+    } catch (err) {
+        console.error('POST /notifications/read-all error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        await queryWithRetry(
+            `UPDATE notifications
+             SET dismissed_at = CURRENT_TIMESTAMP, read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+             WHERE id = $1 AND recipient_user_id = $2 AND dismissed_at IS NULL`,
+            [id, userId]
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /notifications/:id/dismiss error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

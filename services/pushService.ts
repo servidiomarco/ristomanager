@@ -27,6 +27,16 @@ export interface PushPayload {
     // updates anche a PWA chiusa. Callers che vogliono un valore fisso
     // (es. 0 per pulire il badge) possono passarlo esplicitamente.
     badge?: number;
+    // Persistence knobs — everything routed through sendToUser/sendToRoles
+    // is logged in the `notifications` table so the operator can review
+    // history in the NotifichePage even when browsers were closed. `category`
+    // groups alerts in the UI filters ('voice', 'payment', 'reservation',
+    // 'message', 'system'). `persist=false` opts out for transient signals
+    // (e.g. mark-as-read badge refreshes) that should never surface as
+    // history entries. Defaults: category='general', persist=true.
+    category?: string;
+    persist?: boolean;
+    metadata?: Record<string, any>;
 }
 
 // Somma degli indicatori mostrati nel badge PWA — combacia esattamente con
@@ -131,7 +141,71 @@ const sendToSubscriptions = async (subs: SubscriptionRow[], payload: PushPayload
     return { sent, removed };
 };
 
+// Persist one row per recipient in the notifications table so the
+// NotifichePage can rebuild history even for users offline at send time.
+// Uses tag-based dedupe: the same (user, tag) combination is skipped when
+// there's already an unresolved notification with that tag — mirrors the
+// browser's own web-push tag semantics so operators don't see duplicates
+// pile up on retries.
+async function persistForUsers(
+    userIds: number[],
+    payload: PushPayload
+): Promise<void> {
+    if (payload.persist === false) return;
+    if (userIds.length === 0) return;
+    const category = payload.category ?? 'general';
+    const meta = payload.metadata ? JSON.stringify(payload.metadata) : null;
+    // One INSERT per user rather than a bulk one so ON CONFLICT-like dedupe
+    // stays readable; volumes here are small (dozens of managers max).
+    await Promise.all(userIds.map(async (uid) => {
+        try {
+            if (payload.tag) {
+                const existing = await queryWithRetry(
+                    `SELECT id FROM notifications
+                     WHERE recipient_user_id = $1 AND tag = $2 AND dismissed_at IS NULL
+                     ORDER BY sent_at DESC LIMIT 1`,
+                    [uid, payload.tag]
+                );
+                if (existing.rows.length > 0) {
+                    // Refresh the sent_at so the row bumps to the top of the
+                    // list; keeps read_at as-is (still red if unread).
+                    await queryWithRetry(
+                        `UPDATE notifications
+                         SET sent_at = CURRENT_TIMESTAMP,
+                             title = $1, body = $2, url = $3, metadata = $4,
+                             read_at = NULL
+                         WHERE id = $5`,
+                        [payload.title, payload.body, payload.url ?? null, meta, existing.rows[0].id]
+                    );
+                    return;
+                }
+            }
+            await queryWithRetry(
+                `INSERT INTO notifications
+                    (recipient_user_id, category, title, body, url, tag, metadata)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [uid, category, payload.title, payload.body, payload.url ?? null, payload.tag ?? null, meta]
+            );
+        } catch (err) {
+            console.warn('[push] persistForUsers failed for', uid, (err as any)?.message || err);
+        }
+    }));
+}
+
+async function fetchUserIdsForRoles(roles: string[], excludeUserId?: number | null): Promise<number[]> {
+    if (roles.length === 0) return [];
+    const params: any[] = [roles];
+    let where = 'role = ANY($1::text[]) AND is_active = TRUE';
+    if (excludeUserId) {
+        params.push(excludeUserId);
+        where += ` AND id <> $${params.length}`;
+    }
+    const r = await queryWithRetry(`SELECT id FROM users WHERE ${where}`, params);
+    return r.rows.map((row: any) => row.id as number);
+}
+
 export const sendToUser = async (userId: number, payload: PushPayload) => {
+    await persistForUsers([userId], payload);
     const subs = await fetchSubscriptionsForUser(userId);
     return sendToSubscriptions(subs, payload);
 };
@@ -141,6 +215,8 @@ export const sendToRoles = async (
     payload: PushPayload,
     options?: { excludeUserId?: number | null }
 ) => {
+    const recipients = await fetchUserIdsForRoles(roles, options?.excludeUserId);
+    await persistForUsers(recipients, payload);
     const subs = await fetchSubscriptionsForRoles(roles, options?.excludeUserId);
     return sendToSubscriptions(subs, payload);
 };

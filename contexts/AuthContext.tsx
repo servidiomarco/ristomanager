@@ -24,7 +24,9 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.INVENTARIO]: 'inventory:view',
   [ViewState.USERS]: 'users:view',
   [ViewState.SETTINGS]: 'settings:view',
-  [ViewState.PAGAMENTI]: 'payments:view'
+  [ViewState.PAGAMENTI]: 'payments:view',
+  [ViewState.EMAIL]: 'reservations:view',
+  [ViewState.NOTIFICHE]: 'dashboard:view'
 };
 
 interface AuthContextType {

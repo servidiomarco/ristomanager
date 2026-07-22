@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -17,6 +17,8 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
+import EmailPage from './components/EmailPage';
+import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
@@ -42,6 +44,8 @@ import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
 import { messagesApiService } from './services/messagesApiService';
+import { emailApiService } from './services/emailApiService';
+import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
@@ -114,7 +118,8 @@ const NAV_ITEMS: NavItem[] = [
   // Comunicazioni
   { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
   { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  // Email — voce da creare (nessuna ViewState ancora): aggiungerla qui.
+  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: false, view: ViewState.EMAIL, sidebarCollapse: false },
+  { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: false, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
@@ -283,6 +288,40 @@ const App: React.FC = () => {
       .then(({ count }) => setMessagesUnreadCount(count))
       .catch(() => {});
   }, [view, isAuthenticated, canSeeMessages]);
+
+  // Email and Notifiche unread badges — poll on view change + on focus, no
+  // socket wiring for now (both endpoints are cheap).
+  const [emailUnreadCount, setEmailUnreadCount] = useState(0);
+  const canSeeEmail = canAccessView(ViewState.EMAIL);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeEmail) return;
+    let cancelled = false;
+    const refresh = () => {
+      emailApiService.unreadCount()
+        .then(({ count }) => { if (!cancelled) setEmailUnreadCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, [isAuthenticated, canSeeEmail, view]);
+
+  const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0);
+  const canSeeNotifications = canAccessView(ViewState.NOTIFICHE);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeNotifications) return;
+    let cancelled = false;
+    const refresh = () => {
+      notificationsApiService.unreadCount()
+        .then(({ count }) => { if (!cancelled) setNotificationsUnreadCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, [isAuthenticated, canSeeNotifications, view]);
 
   // Global date/shift state — drives the header control group on desktop
   const [globalDate, setGlobalDate] = useState<Date>(new Date());
@@ -1407,6 +1446,8 @@ const App: React.FC = () => {
                       badge={
                         item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                         : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                        : item.view === ViewState.EMAIL ? emailUnreadCount
+                        : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                         : undefined
                       }
                     />
@@ -1893,6 +1934,14 @@ const App: React.FC = () => {
           <InboxPage />
         )}
 
+        {view === ViewState.EMAIL && (
+          <EmailPage />
+        )}
+
+        {view === ViewState.NOTIFICHE && (
+          <NotifichePage />
+        )}
+
         {view === ViewState.PAGAMENTI && (
           <PagamentiPage />
         )}
@@ -1958,6 +2007,8 @@ const App: React.FC = () => {
                       [ViewState.HACCP]: 'HACCP',
                       [ViewState.CONVERSAZIONI]: 'Conversazioni',
                       [ViewState.MESSAGGI]: 'Messaggi',
+                      [ViewState.EMAIL]: 'Email',
+                      [ViewState.NOTIFICHE]: 'Notifiche',
                       [ViewState.PAGAMENTI]: 'Pagamenti',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
@@ -2312,6 +2363,8 @@ const App: React.FC = () => {
                         const badge =
                           item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                           : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                          : item.view === ViewState.EMAIL ? emailUnreadCount
+                          : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                           : 0;
                         return (
                         <button
