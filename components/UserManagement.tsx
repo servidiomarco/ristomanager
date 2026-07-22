@@ -5,6 +5,7 @@ import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonCustomerGrid } from './SkeletonCards';
 
 interface UserManagementProps {
   // When provided, the component renders as a modal with a close button.
@@ -329,9 +330,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
 
           {/* Users List */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <CookingPotLoader label="Caricamento…" size={40} />
-            </div>
+            <SkeletonCustomerGrid count={6} />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {users.map((user) => (

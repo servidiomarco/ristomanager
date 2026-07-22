@@ -421,3 +421,42 @@ export const SkeletonKpiRow: React.FC<{ count?: number; className?: string }> = 
         ))}
     </div>
 );
+
+// Email thread bubbles: a small stack of chat-style skeleton messages,
+// alternating inbound (left, indigo tint) and outbound (right, plain).
+// Used by EmailPage while a thread's messages load.
+export const SkeletonEmailBubble: React.FC<{ side: 'in' | 'out'; className?: string }> = ({
+    side,
+    className,
+}) => (
+    <div
+        aria-hidden="true"
+        className={`w-full flex ${side === 'in' ? 'justify-start' : 'justify-end'} ${className ?? ''}`}
+    >
+        <div
+            className={`max-w-[75%] rounded-2xl p-3 motion-safe:animate-pulse ${
+                side === 'in'
+                    ? 'bg-indigo-50 dark:bg-indigo-500/15'
+                    : 'bg-[var(--color-surface-2)]'
+            }`}
+        >
+            <div className="h-3 w-32 rounded bg-[var(--color-surface-3)] mb-2" />
+            <div className="h-3 w-56 rounded bg-[var(--color-surface-3)] mb-1.5" />
+            <div className="h-3 w-40 rounded bg-[var(--color-surface-3)]" />
+        </div>
+    </div>
+);
+
+export const SkeletonEmailThread: React.FC<{ count?: number; className?: string }> = ({
+    count = 4,
+    className,
+}) => (
+    <div className={`space-y-4 ${className ?? ''}`} aria-hidden="true">
+        <div className="text-center">
+            <div className="inline-block h-2.5 w-16 rounded bg-[var(--color-surface-3)] motion-safe:animate-pulse" />
+        </div>
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonEmailBubble key={i} side={i % 2 === 0 ? 'in' : 'out'} />
+        ))}
+    </div>
+);
