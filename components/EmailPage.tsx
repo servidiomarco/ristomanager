@@ -337,6 +337,21 @@ const EmailPage: React.FC = () => {
                     >
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className={`inline-flex w-2 h-2 rounded-full ${t.unread_count > 0 ? 'bg-indigo-500' : 'bg-transparent'}`} />
+                        {t.last_direction === 'outbound' ? (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-300 shrink-0"
+                            title="Ultima email inviata da noi"
+                          >
+                            <ArrowUpRight className="w-3 h-3" />
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300 shrink-0"
+                            title="Ultima email ricevuta dal cliente"
+                          >
+                            <ArrowDownLeft className="w-3 h-3" />
+                          </span>
+                        )}
                         <span className="font-semibold text-[13px] text-[var(--color-fg)] truncate flex-1">{displayName(t)}</span>
                         <span className="text-[11px] text-[var(--color-fg-subtle)] tabular whitespace-nowrap">{formatRelative(t.last_sent_at)}</span>
                       </div>
@@ -346,16 +361,9 @@ const EmailPage: React.FC = () => {
                       {t.last_subject && (
                         <div className="text-[12px] font-medium text-[var(--color-fg)] truncate">{t.last_subject}</div>
                       )}
-                      <div className="text-[12px] text-[var(--color-fg-muted)] line-clamp-1 flex items-center gap-1">
-                        {t.last_direction === 'outbound' ? (
-                          <ArrowUpRight className="w-3 h-3 text-[var(--color-fg-subtle)] shrink-0" />
-                        ) : (
-                          <ArrowDownLeft className="w-3 h-3 text-indigo-500 shrink-0" />
-                        )}
-                        <span className="truncate">
-                          {t.last_direction === 'outbound' && <span className="text-[var(--color-fg-subtle)]">Tu: </span>}
-                          {t.last_body}
-                        </span>
+                      <div className="text-[12px] text-[var(--color-fg-muted)] line-clamp-1">
+                        {t.last_direction === 'outbound' && <span className="text-[var(--color-fg-subtle)]">Tu: </span>}
+                        {t.last_body}
                       </div>
                       {t.unread_count > 0 && (
                         <span className="inline-flex items-center h-4 px-1.5 mt-1 rounded-full bg-indigo-600 text-white text-[10px] font-semibold">
