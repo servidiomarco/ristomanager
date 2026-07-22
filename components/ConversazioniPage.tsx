@@ -5,6 +5,7 @@ import {
   BookUser, Send, Check, Users,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonInboxList } from './SkeletonCards';
 import {
   voiceCallsApiService,
   VoiceCallSummary,
@@ -914,9 +915,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <CookingPotLoader label="Carico…" />
-          </div>
+          <SkeletonInboxList count={6} className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] overflow-hidden" />
         ) : visibleItems.length === 0 ? (
           <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
             <Phone className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />

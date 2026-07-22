@@ -467,6 +467,11 @@ const App: React.FC = () => {
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [banquetMenus, setBanquetMenus] = useState<BanquetMenu[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  // Flips to false the first time fetchData() completes. Consumers (list
+  // pages) render skeleton placeholders while this is true and their data
+  // array is empty. Stays false thereafter so refetches (visibilitychange,
+  // pageshow, socket reconnect) never flash the skeleton over real data.
+  const [isInitialDataLoading, setIsInitialDataLoading] = useState(true);
 
   // Notification State — persisted to localStorage so they survive PWA
   // reloads and mobile app suspend/resume (iOS drops websocket in background
@@ -732,6 +737,8 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error fetching data:", error);
       addToast('Error fetching data', 'error');
+    } finally {
+      setIsInitialDataLoading(false);
     }
   };
 
@@ -1787,6 +1794,7 @@ const App: React.FC = () => {
                 globalShiftFilter={globalShiftFilter}
                 onDateChange={setGlobalDate}
                 onShiftFilterChange={setGlobalShiftFilter}
+                isInitialLoading={isInitialDataLoading}
             />
         )}
 
