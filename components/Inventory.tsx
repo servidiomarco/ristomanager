@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonProductList } from './SkeletonCards';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -585,11 +586,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       </div>
 
       {/* Loading / Error / Empty */}
-      {isLoading && (
-        <div className="flex items-center justify-center py-12 text-[var(--color-fg-muted)]">
-          <CookingPotLoader label="Caricamento..." />
-        </div>
-      )}
+      {isLoading && <SkeletonProductList count={7} />}
       {!isLoading && error && (
         <div className="p-4 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
           <AlertTriangle className="inline h-4 w-4 mr-2" />

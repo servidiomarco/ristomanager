@@ -11,6 +11,7 @@ import { stripDietaryNote } from '../utils/dietary';
 import { useNow } from '../hooks/useNow';
 import { toTitleCase } from '../utils/text';
 import { PaymentBadge, hasUnpaidDeposit } from './PaymentBadge';
+import { SkeletonKpiRow, SkeletonReservationCard } from './SkeletonCards';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -63,6 +64,9 @@ interface DashboardProps {
   // Deep-link a specific reservation in the Prenotazioni page (full editor).
   // Called from the pending modal's "Modifica completa" secondary link.
   onOpenReservationInList?: (id: number) => void;
+  // True while the parent's first fetchData() hasn't returned yet. Gates the
+  // initial-load skeletons for the KPI cards and the "Da confermare" list.
+  isInitialLoading?: boolean;
 }
 
 // Shopping List Labels and Colors
@@ -128,7 +132,7 @@ const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; 
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange, onUpdateReservation, onOpenReservationInList }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange, onUpdateReservation, onOpenReservationInList, isInitialLoading = false }) => {
   const { user } = useAuth();
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
@@ -955,7 +959,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       )}
 
       {/* KPI Cards — Ospiti / Tavoli / Prenotazioni & Banchetti, follow the global meal filter */}
-      {(() => {
+      {isInitialLoading && reservations.length === 0 ? (
+        <SkeletonKpiRow count={4} className="!grid-cols-1 sm:!grid-cols-2 lg:!grid-cols-4 !gap-3 sm:!gap-4 lg:!gap-5" />
+      ) : (() => {
         const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
         const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
         const cols = (showLunch && showDinner) ? 'grid-cols-2' : 'grid-cols-1';
@@ -1260,7 +1266,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </span>
           )}
         </div>
-        {pendingReservations.length === 0 ? (
+        {isInitialLoading && reservations.length === 0 ? (
+          <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+            <SkeletonReservationCard variant="wide" />
+            <SkeletonReservationCard variant="narrow" />
+            <SkeletonReservationCard variant="wide" />
+          </div>
+        ) : pendingReservations.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-center py-8">
             <div>
               <CheckCircle2 className="h-8 w-8 text-emerald-500/70 mx-auto mb-2" />

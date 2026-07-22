@@ -248,3 +248,176 @@ export const SkeletonNotificationList: React.FC<{ count?: number; className?: st
         ))}
     </div>
 );
+
+// Task-style row: checkbox left, title + optional meta row (priority chip +
+// due date). Used by Attività.
+export const SkeletonTaskRow: React.FC<{ className?: string }> = ({ className }) => (
+    <div
+        aria-hidden="true"
+        className={`p-3 rounded-lg border bg-[var(--color-surface)] border-[var(--color-line)] motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 h-5 w-5 rounded bg-[var(--color-surface-3)]" />
+            <div className="flex-1 min-w-0">
+                <div className="h-4 w-3/4 rounded bg-[var(--color-surface-3)] mb-2" />
+                <div className="flex items-center gap-2">
+                    <div className="h-4 w-16 rounded-full bg-[var(--color-surface-3)]" />
+                    <div className="h-3 w-20 rounded bg-[var(--color-surface-3)]" />
+                </div>
+            </div>
+        </div>
+    </div>
+);
+
+export const SkeletonTaskList: React.FC<{ count?: number; className?: string }> = ({
+    count = 5,
+    className,
+}) => (
+    <div className={`space-y-2 ${className ?? ''}`} aria-hidden="true">
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonTaskRow key={i} />
+        ))}
+    </div>
+);
+
+// Product-style row (Inventory): dense flex row with name, unit chip, and
+// stepper controls on the right.
+export const SkeletonProductRow: React.FC<{ isFirst?: boolean; className?: string }> = ({
+    isFirst = false,
+    className,
+}) => (
+    <div
+        aria-hidden="true"
+        className={`flex items-center gap-3 p-3 sm:p-4 motion-safe:animate-pulse ${!isFirst ? 'border-t border-[var(--color-line)]' : ''} ${className ?? ''}`}
+    >
+        <div className="flex-1 min-w-0">
+            <div className="h-4 w-3/5 rounded bg-[var(--color-surface-3)] mb-2" />
+            <div className="h-3 w-1/4 rounded bg-[var(--color-surface-3)]" />
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="h-8 w-8 rounded-full bg-[var(--color-surface-3)]" />
+            <div className="h-6 w-12 rounded bg-[var(--color-surface-3)]" />
+            <div className="h-8 w-8 rounded-full bg-[var(--color-surface-3)]" />
+        </div>
+    </div>
+);
+
+export const SkeletonProductList: React.FC<{ count?: number; className?: string }> = ({
+    count = 6,
+    className,
+}) => (
+    <div
+        className={`bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden ${className ?? ''}`}
+        aria-hidden="true"
+    >
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonProductRow key={i} isFirst={i === 0} />
+        ))}
+    </div>
+);
+
+// HACCP section: Card wrapper + header (icon + title + status pill) + 3-4
+// row skeletons that resemble a temperature reading form (label + input).
+export const SkeletonHaccpSection: React.FC<{ rows?: number; className?: string }> = ({
+    rows = 4,
+    className,
+}) => (
+    <div
+        aria-hidden="true"
+        className={`bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] overflow-hidden motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-line)]">
+            <div className="h-4 w-4 rounded bg-[var(--color-surface-3)]" />
+            <div className="h-4 w-40 rounded bg-[var(--color-surface-3)]" />
+            <div className="ml-auto h-4 w-24 rounded-full bg-[var(--color-surface-3)]" />
+        </div>
+        <div className="p-4 space-y-2.5">
+            {Array.from({ length: rows }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                    <div className="h-3 w-1/3 rounded bg-[var(--color-surface-3)]" />
+                    <div className="h-8 w-24 rounded bg-[var(--color-surface-3)] ml-auto" />
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
+export const SkeletonHaccpSections: React.FC<{ className?: string }> = ({ className }) => (
+    <div className={`space-y-4 ${className ?? ''}`} aria-hidden="true">
+        <SkeletonHaccpSection rows={5} />
+        <SkeletonHaccpSection rows={3} />
+        <SkeletonHaccpSection rows={4} />
+    </div>
+);
+
+// Staff column (Sala or Cucina): header + 2 sub-groups with 3 avatar rows
+// each. Matches the real StaffManagement layout.
+export const SkeletonStaffColumn: React.FC<{ label?: 'Sala' | 'Cucina'; className?: string }> = ({ label, className }) => (
+    <div
+        aria-hidden="true"
+        className={`bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-line)]">
+            <div className="h-4 w-4 rounded bg-[var(--color-surface-3)]" />
+            <div className="h-3 w-16 rounded bg-[var(--color-surface-3)]" />
+            <div className="ml-auto h-3 w-6 rounded bg-[var(--color-surface-3)]" />
+        </div>
+        <div className="p-2">
+            {[0, 1].map(group => (
+                <div key={group} className="mb-3 last:mb-0">
+                    <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
+                        <div className="h-4 w-20 rounded-full bg-[var(--color-surface-3)]" />
+                        <div className="h-3 w-6 rounded bg-[var(--color-surface-3)]" />
+                        <div className="flex-1 h-px bg-[var(--color-line)]" />
+                    </div>
+                    {[0, 1, 2].map(row => (
+                        <div key={row} className="flex items-center gap-3 p-2.5 rounded-md mb-1">
+                            <div className="w-9 h-9 rounded-full bg-[var(--color-surface-3)] flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                                <div className="h-4 w-3/4 rounded bg-[var(--color-surface-3)] mb-1.5" />
+                                <div className="h-3 w-1/3 rounded bg-[var(--color-surface-3)]" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
+// KPI card (Dashboard top row): rounded corner card with a small icon,
+// large number, and label underneath. Used for the initial-load "Ospiti /
+// Tavoli / Prenotazioni / Banchetti" strip.
+export const SkeletonKpiCard: React.FC<{ className?: string }> = ({ className }) => (
+    <div
+        aria-hidden="true"
+        className={`bg-[var(--color-surface)] p-4 rounded-xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="h-4 w-20 rounded bg-[var(--color-surface-3)] mb-4" />
+        <div className="h-9 w-9 rounded-full bg-[var(--color-surface-3)] mb-3" />
+        <div className="flex items-baseline gap-3">
+            <div>
+                <div className="h-2.5 w-10 rounded bg-[var(--color-surface-3)] mb-1.5" />
+                <div className="h-6 w-8 rounded bg-[var(--color-surface-3)]" />
+            </div>
+            <div className="flex-1">
+                <div className="h-2.5 w-12 rounded bg-[var(--color-surface-3)] mb-1.5" />
+                <div className="h-6 w-8 rounded bg-[var(--color-surface-3)]" />
+            </div>
+        </div>
+    </div>
+);
+
+export const SkeletonKpiRow: React.FC<{ count?: number; className?: string }> = ({
+    count = 4,
+    className,
+}) => (
+    <div
+        className={`grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 lg:gap-8 ${className ?? ''}`}
+        aria-hidden="true"
+    >
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonKpiCard key={i} />
+        ))}
+    </div>
+);
