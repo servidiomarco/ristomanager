@@ -1126,6 +1126,19 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             message: 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?'
         });
     }
+    // Placeholder guard: when the LLM skips the name-collection step it fills
+    // the required param with a generic filler ("Cliente") instead of a real
+    // name. Reject it so the agent is forced to actually ask the caller —
+    // the Italian message is read back to the LLM and drives the retry.
+    const NAME_PLACEHOLDERS = new Set(['cliente', 'customer', 'ospite', 'guest', 'anonimo', 'sconosciuto', 'signore', 'signora', 'sig', 'n/a', 'na', 'test', 'nome', 'nome cognome']);
+    if (NAME_PLACEHOLDERS.has(customerName.toLowerCase().trim())) {
+        console.warn('[ElevenLabs] create-reservation rejected: placeholder name', { received: customerName });
+        return res.json({
+            success: false,
+            error: 'invalid_customer_name',
+            message: 'Serve il nome reale del cliente per registrare la prenotazione. Chieda nome e cognome al cliente e riprovi.'
+        });
+    }
     if (!phoneRaw) {
         return res.json({
             success: false,
