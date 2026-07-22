@@ -130,6 +130,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         voice_agent_enabled: { title: 'Agente vocale', on: 'attivo', off: 'sospeso' },
         public_bookings_enabled: { title: 'Prenotazioni web', on: 'attive', off: 'sospese' },
         voice_bookings_suspended: { title: 'Prenotazioni telefoniche', on: 'sospese', off: 'riattivate' },
+        // Managed from its own settings section (PayAtTableSettingsManager),
+        // not from the booking-channels list; label kept here for type safety.
+        pay_at_table_enabled: { title: 'Conto al tavolo', on: 'attivo', off: 'disattivato' },
     };
 
     const toggle = async (key: FlagKey) => {

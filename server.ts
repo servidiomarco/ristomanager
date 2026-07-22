@@ -3183,6 +3183,13 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
 // entropia), va nell'URL pubblico che stampiamo sul QR.
 app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
+            });
+        }
+
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
@@ -3471,6 +3478,13 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
+        // When the operator disables the feature mid-service, guests scanning
+        // a still-valid QR get a 404 like any expired token — the waiter
+        // handles the payment through the normal channel.
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(404).json({ error: 'Not found' });
+        }
+
         const bill = await loadBillByToken(token);
         if (!bill) return res.status(404).json({ error: 'Not found' });
 
@@ -3523,6 +3537,10 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
     try {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(404).json({ error: 'Not found' });
+        }
 
         const kind = String(req.body?.kind || '');
         if (kind !== 'equal_share' && kind !== 'fixed_amount') {
@@ -3690,6 +3708,10 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
     try {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(404).json({ error: 'Not found' });
+        }
 
         const splitId = Number(req.body?.split_id);
         if (!Number.isFinite(splitId) || splitId <= 0) {
@@ -11594,8 +11616,8 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled'];
 
 async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -11612,6 +11634,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     public_bookings_enabled: false,
     voice_agent_enabled: true,
     voice_bookings_suspended: false,
+    // Off by default: the pay-at-table + split-bill flow depends on Revolut
+    // being configured and the QR link being physically distributed at the
+    // table. Owner opts in from Settings once ready.
+    pay_at_table_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (_req, res) => {
@@ -12102,10 +12128,7 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
             'SELECT key, value FROM app_settings WHERE key = ANY($1)',
             [FEATURE_FLAG_KEYS]
         );
-        const flags: Record<string, boolean> = {
-            public_bookings_enabled: false,
-            voice_agent_enabled: true,
-        };
+        const flags: Record<string, boolean> = { ...FEATURE_FLAG_DEFAULTS };
         for (const row of result.rows) {
             flags[row.key] = Boolean(row.value);
         }

@@ -29,6 +29,7 @@ import { ScheduledClosuresManager } from './components/ScheduledClosuresManager'
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
+import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
@@ -2109,6 +2110,12 @@ const App: React.FC = () => {
                   </div>
                 </details>
               </div>
+            </div>
+
+            {/* Conto al tavolo — feature flag + parametri tecnici read-only */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Conto al tavolo</h3>
+              <PayAtTableSettingsManager showToast={addToast} />
             </div>
 
             {/* Admin Section */}

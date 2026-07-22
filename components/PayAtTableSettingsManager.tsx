@@ -1,0 +1,144 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Receipt, Loader2, Clock, ShieldCheck, CreditCard } from 'lucide-react';
+import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
+import { useAuth } from '../contexts/AuthContext';
+
+interface Props {
+    showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
+}
+
+export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
+    const { hasPermission } = useAuth();
+    const canEdit = hasPermission('settings:full');
+
+    const [flags, setFlags] = useState<FeatureFlags | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    const showToastRef = useRef(showToast);
+    useEffect(() => { showToastRef.current = showToast; });
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await getFeatureFlags();
+                if (!cancelled) setFlags(data);
+            } catch (err: any) {
+                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
+    const toggle = async () => {
+        if (!flags || !canEdit || saving) return;
+        const nextValue = !flags.pay_at_table_enabled;
+        const previous = flags;
+        setFlags({ ...flags, pay_at_table_enabled: nextValue });
+        setSaving(true);
+        try {
+            const updated = await updateFeatureFlags({ pay_at_table_enabled: nextValue });
+            setFlags(updated);
+            showToast(`Conto al tavolo: ${nextValue ? 'attivo' : 'disattivato'}`, 'success');
+        } catch (err: any) {
+            setFlags(previous);
+            showToast(err?.message || 'Errore aggiornamento impostazione', 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading || !flags) {
+        return (
+            <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)] py-3">
+                <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
+            </div>
+        );
+    }
+
+    const enabled = flags.pay_at_table_enabled;
+
+    return (
+        <div className="space-y-3">
+            {/* Master toggle */}
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-sky-600 dark:text-sky-400 flex-shrink-0">
+                            <Receipt className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Conto al tavolo (pay-at-table + split bill)</h4>
+                                <span className={`text-[11px] font-medium uppercase tracking-wide ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
+                                    {enabled ? 'Attivo' : 'Disattivato'}
+                                </span>
+                            </div>
+                            <p className="text-[13px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                Il cameriere apre un conto per la prenotazione e genera un QR effimero. Gli ospiti lo scansionano e pagano la propria quota via Revolut hosted checkout — split equo o importo libero. Quando la somma raggiunge il totale, il conto diventa <em>SETTLED</em>; se il cameriere chiude con un delta viene stampato un <em>SETTLED_PARTIAL</em> con l'ammanco per audit.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        aria-label={`${enabled ? 'Disattiva' : 'Attiva'} conto al tavolo`}
+                        onClick={toggle}
+                        disabled={!canEdit || saving}
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                            enabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                        }`}
+                    >
+                        <span
+                            aria-hidden="true"
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                enabled ? 'translate-x-5' : 'translate-x-0.5'
+                            } translate-y-0.5`}
+                        />
+                    </button>
+                </div>
+            </div>
+
+            {/* Parametri tecnici — read-only. Sono costanti nel backend; qui
+                mostrati per trasparenza operativa (il gestore sa quando un
+                claim scade, e perché un guest colpisce il rate limit). */}
+            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+                <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">
+                    Parametri tecnici (sola lettura)
+                </h5>
+                <ul className="space-y-2.5 text-[13px]">
+                    <li className="flex items-start gap-2.5">
+                        <CreditCard className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[var(--color-fg)]">Provider di pagamento: <strong>Revolut</strong> (hosted checkout)</div>
+                            <div className="text-[12px] text-[var(--color-fg-muted)]">Prerequisito indispensabile. Configura chiavi API e webhook in Impostazioni → Integrazioni → Revolut.</div>
+                        </div>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                        <Clock className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[var(--color-fg)]">TTL prenotazione quota: <strong>5 minuti</strong></div>
+                            <div className="text-[12px] text-[var(--color-fg-muted)]">Un claim non pagato viene rilasciato automaticamente dal reconcile job (ogni 60s) così la capacità torna disponibile per altri ospiti.</div>
+                        </div>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                        <ShieldCheck className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[var(--color-fg)]">Rate limit endpoint pubblico: <strong>60 richieste/min per IP</strong> · <strong>10 claim/min per conto</strong></div>
+                            <div className="text-[12px] text-[var(--color-fg-muted)]">Limita spam e prevenzione lock-out del residuo: la protezione per token blocca chi cerca di monopolizzare le quote conoscendo un singolo QR.</div>
+                        </div>
+                    </li>
+                </ul>
+                {!canEdit && (
+                    <p className="text-[12px] text-[var(--color-fg-subtle)] mt-3 italic">
+                        Solo gli amministratori possono modificare queste impostazioni.
+                    </p>
+                )}
+            </div>
+        </div>
+    );
+};
