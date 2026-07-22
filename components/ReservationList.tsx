@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings } from '../services/apiService';
+import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -585,6 +587,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [paymentDescription, setPaymentDescription] = useState<string>('');
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [copiedPaymentId, setCopiedPaymentId] = useState<number | null>(null);
+
+  // Conto al tavolo (Fase 1 pay-at-table). One active bill per reservation
+  // at a time; the waiter opens it with a total, guests scan the QR to pay
+  // their share. Loaded on modal open (edit mode).
+  const [bill, setBill] = useState<TableBillWithSplits | null>(null);
+  const [billLoading, setBillLoading] = useState(false);
+  const [billTotalInput, setBillTotalInput] = useState<string>('');
+  const [billCoversInput, setBillCoversInput] = useState<string>('');
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'close' | 'void' | null>(null);
+  const [copiedBillUrl, setCopiedBillUrl] = useState(false);
 
   // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
@@ -1777,6 +1789,113 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setTimeout(() => setCopiedPaymentId(prev => prev === pr.id ? null : prev), 1500);
     } catch {
       showToast('Copia non riuscita, apri il link manualmente', 'error');
+    }
+  };
+
+  // Load the reservation's active bill (if any) when the modal opens in
+  // edit mode. 404 → no active bill, so the form to open one is shown.
+  useEffect(() => {
+    if (!isFormOpen || !isEditing || !formData.id) {
+      setBill(null);
+      setBillTotalInput('');
+      setBillCoversInput('');
+      return;
+    }
+    let cancelled = false;
+    setBillLoading(true);
+    billsApiService.getBill(formData.id as number)
+      .then(row => { if (!cancelled) setBill(row); })
+      .catch(err => console.warn('[bill] load failed:', err?.message || err))
+      .finally(() => { if (!cancelled) setBillLoading(false); });
+    return () => { cancelled = true; };
+  }, [isFormOpen, isEditing, formData.id]);
+
+  // Live bill events from the backend: apply only to the bill currently
+  // displayed. The socket broadcast payload is the TableBill row, so we
+  // preserve any splits we already had loaded (splits change in later
+  // phases via bill:split-claimed / bill:split-paid).
+  useEffect(() => {
+    if (!socket || !isFormOpen || !isEditing || !formData.id) return;
+    const reservationId = formData.id as number;
+    const onOpened = (row: TableBill) => {
+      if (!row || row.reservation_id !== reservationId) return;
+      setBill({ bill: row, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: row.total_cents });
+    };
+    const onClosedOrVoided = (row: TableBill) => {
+      if (!row || row.reservation_id !== reservationId) return;
+      setBill(prev => (prev && prev.bill.id === row.id ? null : prev));
+    };
+    socket.on('bill:opened', onOpened);
+    socket.on('bill:closed', onClosedOrVoided);
+    socket.on('bill:voided', onClosedOrVoided);
+    return () => {
+      socket.off('bill:opened', onOpened);
+      socket.off('bill:closed', onClosedOrVoided);
+      socket.off('bill:voided', onClosedOrVoided);
+    };
+  }, [socket, isFormOpen, isEditing, formData.id]);
+
+  const handleOpenBill = async () => {
+    if (!formData.id) return;
+    const euros = Number(String(billTotalInput).replace(',', '.'));
+    if (!Number.isFinite(euros) || euros <= 0) {
+      showToast('Inserisci un totale valido', 'error');
+      return;
+    }
+    const coversNum = Number(billCoversInput);
+    setBillActionLoading('open');
+    try {
+      const created = await billsApiService.openBill(formData.id as number, {
+        total_cents: Math.round(euros * 100),
+        covers: Number.isFinite(coversNum) && coversNum > 0 ? coversNum : undefined,
+      });
+      setBill(created);
+      setBillTotalInput('');
+      setBillCoversInput('');
+      showToast('Conto aperto', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore apertura conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  const handleCloseBill = async () => {
+    if (!bill) return;
+    setBillActionLoading('close');
+    try {
+      await billsApiService.closeBill(bill.bill.id);
+      setBill(null);
+      showToast('Conto chiuso', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore chiusura conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  const handleVoidBill = async () => {
+    if (!bill) return;
+    if (!window.confirm('Annullare il conto? Il QR non sarà più valido.')) return;
+    setBillActionLoading('void');
+    try {
+      await billsApiService.voidBill(bill.bill.id);
+      setBill(null);
+      showToast('Conto annullato', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Errore annullamento conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  const copyBillUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedBillUrl(true);
+      setTimeout(() => setCopiedBillUrl(false), 1500);
+    } catch {
+      showToast('Copia non riuscita', 'error');
     }
   };
 
@@ -5040,6 +5159,154 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              )}
                         </div>
                     </form>
+
+                    {/* Conto al tavolo (pay-at-table + split bill) — edit mode only */}
+                    {isEditing && formData.id && hasPermission('payments:view') && (
+                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
+                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Receipt className="h-4 w-4 text-sky-600" />
+                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Conto al tavolo</h4>
+                            {bill && (
+                              <span className="ml-auto inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300">
+                                {bill.bill.status}
+                              </span>
+                            )}
+                          </div>
+
+                          {billLoading && !bill && (
+                            <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Caricamento…
+                            </div>
+                          )}
+
+                          {!billLoading && !bill && hasPermission('payments:full') && (
+                            <>
+                              <p className="text-[12px] text-[var(--color-fg-subtle)] mb-2">
+                                Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
+                                <div className="relative">
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="Totale"
+                                    value={billTotalInput}
+                                    onChange={e => setBillTotalInput(e.target.value)}
+                                    disabled={billActionLoading === 'open'}
+                                    className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                  />
+                                </div>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  placeholder={formData.guests ? `${formData.guests} cop.` : 'Coperti'}
+                                  value={billCoversInput}
+                                  onChange={e => setBillCoversInput(e.target.value)}
+                                  disabled={billActionLoading === 'open'}
+                                  className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleOpenBill}
+                                  disabled={billActionLoading === 'open'}
+                                  className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                                  Apri conto
+                                </button>
+                              </div>
+                            </>
+                          )}
+
+                          {!billLoading && !bill && !hasPermission('payments:full') && (
+                            <p className="text-[12px] text-[var(--color-fg-subtle)]">Nessun conto attivo.</p>
+                          )}
+
+                          {bill && (() => {
+                            const totalEur = (bill.bill.total_cents / 100).toFixed(2).replace('.', ',');
+                            const paidEur = (bill.paid_cents / 100).toFixed(2).replace('.', ',');
+                            const paidPct = bill.bill.total_cents > 0
+                              ? Math.min(100, Math.round((bill.paid_cents / bill.bill.total_cents) * 100))
+                              : 0;
+                            const publicUrl = bill.bill.share_token
+                              ? `${window.location.origin}/pay/${bill.bill.share_token}`
+                              : null;
+                            return (
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-3 text-[13px]">
+                                  <span className="font-semibold text-[var(--color-fg)]">Totale: € {totalEur}</span>
+                                  <span className="text-[var(--color-fg-subtle)]">·</span>
+                                  <span className="text-[var(--color-fg-subtle)]">{bill.bill.covers} coperti</span>
+                                </div>
+
+                                <div>
+                                  <div className="flex items-center justify-between text-[11px] text-[var(--color-fg-subtle)] mb-1">
+                                    <span>Pagato € {paidEur}</span>
+                                    <span>{paidPct}%</span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">
+                                    <div className="h-full bg-emerald-500 transition-all" style={{ width: `${paidPct}%` }} />
+                                  </div>
+                                </div>
+
+                                {publicUrl && (
+                                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                                    <div className="p-2 bg-white rounded-lg border border-[var(--color-line)] shrink-0">
+                                      <QRCodeSVG value={publicUrl} size={128} level="M" />
+                                    </div>
+                                    <div className="flex-1 min-w-0 w-full">
+                                      <div className="text-[11px] text-[var(--color-fg-subtle)] mb-1">Link pubblico</div>
+                                      <div className="flex items-center gap-1.5">
+                                        <input
+                                          type="text"
+                                          readOnly
+                                          value={publicUrl}
+                                          onFocus={e => e.currentTarget.select()}
+                                          className="flex-1 min-w-0 h-8 px-2 text-[12px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-mono"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => copyBillUrl(publicUrl)}
+                                          className="inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-500 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-500/15"
+                                          title="Copia link"
+                                        >
+                                          {copiedBillUrl ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {hasPermission('payments:full') && (
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={handleCloseBill}
+                                      disabled={billActionLoading !== null}
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-600 text-white text-[12px] font-medium hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                      {billActionLoading === 'close' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                      Chiudi conto
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleVoidBill}
+                                      disabled={billActionLoading !== null}
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-rose-200 text-rose-700 text-[12px] font-medium hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10 disabled:opacity-50"
+                                    >
+                                      {billActionLoading === 'void' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                                      Annulla
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Revolut payment link — only in edit mode (needs a saved reservation to attach to) */}
                     {isEditing && formData.id && (
