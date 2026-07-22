@@ -7,6 +7,7 @@ import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../servic
 import { toTitleCase } from '../utils/text';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonStaffColumn } from './SkeletonCards';
 import {
   Users, UserPlus, Edit2, Trash2, X, Plus, ChevronLeft, ChevronRight,
   Calendar, Clock, Sun, Moon, Coffee, UtensilsCrossed, Check, AlertTriangle,
@@ -587,8 +588,20 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <CookingPotLoader label="Caricamento…" />
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1 space-y-6">
+            <SkeletonStaffColumn label="Sala" />
+            <SkeletonStaffColumn label="Cucina" />
+          </div>
+          <div className="hidden lg:block lg:col-span-2 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-8">
+            <div className="motion-safe:animate-pulse space-y-4" aria-hidden="true">
+              <div className="h-6 w-1/3 rounded bg-[var(--color-surface-3)]" />
+              <div className="h-4 w-2/3 rounded bg-[var(--color-surface-3)]" />
+              <div className="h-4 w-1/2 rounded bg-[var(--color-surface-3)]" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

@@ -11,6 +11,7 @@ import {
   ListTodo, UserCircle, UsersRound, Edit2, Search, Utensils,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonTaskList } from './SkeletonCards';
 
 interface AttivitaPageProps {
   banquetMenus: BanquetMenu[];
@@ -383,8 +384,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
         {/* List */}
         <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl">
           {loading ? (
-            <div className="py-12 text-center">
-              <CookingPotLoader label="Caricamento attività..." />
+            <div className="p-3 sm:p-4">
+              <SkeletonTaskList count={5} />
             </div>
           ) : filtered.length === 0 ? (
             <div className="py-12 text-center">

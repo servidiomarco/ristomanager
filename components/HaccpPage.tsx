@@ -22,6 +22,7 @@ import {
 } from '../services/haccpApiService';
 import { printHaccpReport } from '../utils/printHaccpReport';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonHaccpSections } from './SkeletonCards';
 
 const todayISO = (): string => {
   const d = new Date();
@@ -316,9 +317,7 @@ export const HaccpPage: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-[var(--color-fg-muted)]">
-            <CookingPotLoader label="Caricamento…" size={40} />
-          </div>
+          <SkeletonHaccpSections />
         ) : (
           <>
             <Card>

@@ -1735,6 +1735,7 @@ const App: React.FC = () => {
               setSidebarCollapsed(true);
               setView(ViewState.RESERVATIONS);
             }}
+            isInitialLoading={isInitialDataLoading}
           />
         )}
 
