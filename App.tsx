@@ -37,6 +37,7 @@ import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
+import { AppVersionBanner } from './components/AppVersionBanner';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
@@ -1347,6 +1348,9 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-[var(--color-surface-2)] font-sans text-[var(--color-fg)]">
+      {/* Version banner — shows when the running bundle is older than the
+          server. Fixed at the top, above every view. */}
+      <AppVersionBanner />
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">Salta al contenuto</a>
 

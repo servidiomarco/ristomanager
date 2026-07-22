@@ -10,6 +10,15 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// Client asks us to skip waiting when the "Ricarica" button in the version
+// banner is pressed. Without this, an updated SW would stay in the waiting
+// state and the client would boot the old cached scripts on reload.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('push', (event) => {
   let data = {};
   try {

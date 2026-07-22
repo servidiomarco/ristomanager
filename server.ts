@@ -140,6 +140,17 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Public build version. The Vite bundle bakes the same short SHA in via
+// `__APP_VERSION__`; the client polls this endpoint and shows an "update
+// available" banner when they diverge — usually because the browser is still
+// running a bundle from before the last deploy. `Cache-Control: no-store`
+// ensures the poll always sees the live process, not a cached response.
+app.get('/version', (_req, res) => {
+    const version = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev';
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({ version });
+});
+
 // ============================================
 // AUTHENTICATION ROUTES
 // ============================================
