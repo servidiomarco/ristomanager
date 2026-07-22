@@ -3350,6 +3350,314 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
 
 
 // ============================================
+// PUBLIC PAY-AT-TABLE (no auth, share_token gated)
+// ============================================
+// The endpoints below back the /pay/:token mobile page guests hit after
+// scanning the QR. No login: the opaque `share_token` (~192 bit entropy,
+// nulled on close/void) is the only credential. We rate-limit per IP to
+// discourage token-brute-forcing and to shield Revolut from claim
+// storms; the token itself is unguessable so the limit is generous.
+
+const publicPayLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
+// Sanitizes a split for public consumption: hides ids that could enable
+// tampering, keeps only what the UI needs to render "someone claimed X€".
+const publicSplitView = (s: any) => ({
+    kind: s.kind,
+    amount_cents: s.amount_cents,
+    claimant_label: s.claimant_label,
+    status: s.status,
+});
+
+// Helper: fetches a bill by share_token limited to active states. Returns
+// null if not found / not active — callers respond with 404 in both cases
+// so we don't leak whether the token ever existed.
+async function loadBillByToken(token: string) {
+    const rs = await queryWithRetry(
+        `SELECT id, reservation_id, table_id, total_cents, covers, currency,
+                items, status, share_token, opened_at, closed_at,
+                opened_by_user_id, closed_by_user_id, external_ref,
+                cash_settled_cents, tip_cents, notes
+         FROM table_bills
+         WHERE share_token = $1
+           AND status IN ('OPEN','LOCKED')
+         LIMIT 1`,
+        [token]
+    );
+    return rs.rows[0] || null;
+}
+
+// GET /pay/:token — the mobile page fetches this on load and after any
+// action. Response mirrors the authenticated GET, minus internal ids on
+// the splits.
+app.get('/pay/:token', publicPayLimiter, async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        const bill = await loadBillByToken(token);
+        if (!bill) return res.status(404).json({ error: 'Not found' });
+
+        const splitsRows = await queryWithRetry(
+            `SELECT kind, amount_cents, claimant_label, status
+             FROM table_bill_splits
+             WHERE table_bill_id = $1
+             ORDER BY claimed_at ASC`,
+            [bill.id]
+        );
+        const paidCents = splitsRows.rows
+            .filter((r: any) => r.status === 'PAID')
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+        const claimedCents = splitsRows.rows
+            .filter((r: any) => r.status === 'CLAIMED' || r.status === 'PAID')
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+        const residual = Math.max(0, bill.total_cents - claimedCents);
+
+        res.json({
+            bill: {
+                total_cents: bill.total_cents,
+                covers: bill.covers,
+                currency: bill.currency,
+                status: bill.status,
+            },
+            splits: splitsRows.rows.map(publicSplitView),
+            paid_cents: paidCents,
+            claimed_cents: claimedCents,
+            residual_cents: residual,
+        });
+    } catch (err: any) {
+        console.error('GET /pay/:token error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /pay/:token/claim — reserves a split and creates a Revolut order.
+// Body: { kind: 'equal_share'|'fixed_amount', amount_cents?: number,
+//         claimant_label?: string }
+//   - equal_share → amount = ceil(total/covers) (per invariance we round
+//     up so the last claimant doesn't get stuck with a fractional euro;
+//     residual is still enforced by the trigger)
+//   - fixed_amount → uses the supplied amount_cents
+// Concurrency: SELECT ... FOR UPDATE on the bill row serializes concurrent
+// claims (two guests scanning at the same instant). The trigger from PR 1
+// is the ultimate authority — if it fires we surface a 409 with the
+// current max_allowed.
+app.post('/pay/:token/claim', publicPayLimiter, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        const kind = String(req.body?.kind || '');
+        if (kind !== 'equal_share' && kind !== 'fixed_amount') {
+            return res.status(400).json({ error: 'kind must be equal_share or fixed_amount' });
+        }
+        const rawLabel = typeof req.body?.claimant_label === 'string' ? req.body.claimant_label.trim().slice(0, 40) : '';
+        const claimantLabel = rawLabel || null;
+
+        await client.query('BEGIN');
+
+        // Lock the bill row so a parallel claim can't oversubscribe.
+        const billRs = await client.query(
+            `SELECT id, total_cents, covers, status
+             FROM table_bills
+             WHERE share_token = $1
+               AND status IN ('OPEN','LOCKED')
+             FOR UPDATE`,
+            [token]
+        );
+        if (billRs.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Not found' });
+        }
+        const bill = billRs.rows[0];
+
+        // Compute claimed_cents under the lock so the residual is
+        // authoritative at insert time.
+        const sumRs = await client.query(
+            `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed_cents
+             FROM table_bill_splits
+             WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')`,
+            [bill.id]
+        );
+        const claimed = Number(sumRs.rows[0].claimed_cents || 0);
+        const residual = bill.total_cents - claimed;
+        if (residual <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'Bill already fully claimed', max_allowed_cents: 0 });
+        }
+
+        let amount: number;
+        if (kind === 'equal_share') {
+            const covers = Math.max(1, Number(bill.covers) || 1);
+            amount = Math.min(residual, Math.ceil(bill.total_cents / covers));
+        } else {
+            const raw = Number(req.body?.amount_cents);
+            if (!Number.isFinite(raw) || raw <= 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'amount_cents must be a positive integer' });
+            }
+            amount = Math.round(raw);
+            if (amount > residual) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+            }
+        }
+
+        // 5-minute TTL on the reservation. Reconcile job (PR 4) will flip
+        // stale CLAIMED rows to ABANDONED so their capacity is released.
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        let splitId: number;
+        try {
+            const ins = await client.query(
+                `INSERT INTO table_bill_splits
+                    (table_bill_id, kind, amount_cents, claimant_label, expires_at, status)
+                 VALUES ($1, $2, $3, $4, $5, 'CLAIMED')
+                 RETURNING id`,
+                [bill.id, kind, amount, claimantLabel, expiresAt.toISOString()]
+            );
+            splitId = ins.rows[0].id;
+        } catch (err: any) {
+            // Trigger enforces sum ≤ total: if a parallel writer slipped
+            // between our SELECT and INSERT (shouldn't happen given the
+            // FOR UPDATE but the trigger is our belt-and-braces), surface
+            // a friendly 409.
+            await client.query('ROLLBACK');
+            if (err?.code === '23514') {
+                return res.status(409).json({ error: 'Bill capacity changed, retry', detail: err?.message });
+            }
+            throw err;
+        }
+
+        await client.query('COMMIT');
+
+        // Create the Revolut order AFTER commit — if the API call fails
+        // the split stays CLAIMED and the reconcile job will abandon it
+        // once expires_at passes, freeing the capacity.
+        let checkoutUrl: string | null = null;
+        let paymentRequestId: number | null = null;
+        try {
+            if (!(await isRevolutConfigured())) {
+                throw new Error('Revolut not configured');
+            }
+            const order = await revolutCreateOrder({
+                amount,
+                currency: 'EUR',
+                description: `Conto tavolo #${bill.id} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
+                merchant_order_ext_ref: `bill_split:${splitId}`,
+            });
+            checkoutUrl = order.checkout_url;
+
+            const prIns = await queryWithRetry(
+                `INSERT INTO payment_requests
+                    (reservation_id, amount_cents, currency, description, status, provider,
+                     provider_order_id, checkout_url, table_bill_split_id, metadata)
+                 VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7, $8)
+                 RETURNING id`,
+                [
+                    bill.reservation_id || null,
+                    amount,
+                    `Conto tavolo #${bill.id}`,
+                    (order.state || 'PENDING').toUpperCase(),
+                    order.id,
+                    order.checkout_url,
+                    splitId,
+                    JSON.stringify({ revolut_token: order.token || null, bill_split_id: splitId }),
+                ]
+            );
+            paymentRequestId = prIns.rows[0].id;
+
+            await queryWithRetry(
+                `UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2`,
+                [paymentRequestId, splitId]
+            );
+        } catch (err: any) {
+            console.error('[pay] revolut order creation failed for split', splitId, err?.message || err);
+            // Non-fatal for the API response: the client gets the split
+            // but no checkout_url — the UI can offer "riprova" via a new
+            // claim after release.
+        }
+
+        try {
+            socketService?.broadcastToAll('bill:split-claimed', {
+                bill_id: bill.id,
+                split_id: splitId,
+                kind,
+                amount_cents: amount,
+                claimant_label: claimantLabel,
+            });
+        } catch (_) {}
+
+        res.status(201).json({
+            split_id: splitId,
+            amount_cents: amount,
+            claimant_label: claimantLabel,
+            expires_at: expiresAt.toISOString(),
+            checkout_url: checkoutUrl,
+            payment_request_id: paymentRequestId,
+        });
+    } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        console.error('POST /pay/:token/claim error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
+// POST /pay/:token/release — voluntarily gives up an unpaid claim. Both
+// the split_id and the token must match — this prevents someone with the
+// token from cancelling a split they didn't create (still not
+// authenticated, but at least you need to know the id you're releasing).
+app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        const splitId = Number(req.body?.split_id);
+        if (!Number.isFinite(splitId) || splitId <= 0) {
+            return res.status(400).json({ error: 'split_id required' });
+        }
+
+        const bill = await loadBillByToken(token);
+        if (!bill) return res.status(404).json({ error: 'Not found' });
+
+        const upd = await queryWithRetry(
+            `UPDATE table_bill_splits
+             SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+               AND table_bill_id = $2
+               AND status = 'CLAIMED'
+             RETURNING id`,
+            [splitId, bill.id]
+        );
+        if (upd.rowCount === 0) {
+            return res.status(409).json({ error: 'Split not found or not releasable' });
+        }
+
+        try {
+            socketService?.broadcastToAll('bill:split-released', {
+                bill_id: bill.id,
+                split_id: splitId,
+            });
+        } catch (_) {}
+
+        res.json({ released: true, split_id: splitId });
+    } catch (err: any) {
+        console.error('POST /pay/:token/release error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// ============================================
 // INBOX (SMS / WhatsApp conversations)
 // ============================================
 // Conversations are grouped by the last 10 digits of the customer phone so
