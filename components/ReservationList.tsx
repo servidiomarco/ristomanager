@@ -2040,6 +2040,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (!target) return;
       const fromSave = confirmationPicker?.fromSave === true;
 
+      // Toast wording depends on whether the backend actually flipped the
+      // status. On PENDING → CONFIRMED we surface both facts in one line so
+      // the operator sees "confermata e inviata" instead of just "inviata".
+      const buildToast = (channelLabel: string, promoted: boolean) =>
+        promoted
+          ? `Prenotazione confermata e ${channelLabel} inviato a ${toTitleCase(target.customer_name)}`
+          : `Conferma ${channelLabel} inviata a ${toTitleCase(target.customer_name)}`;
+
       if (channel === 'email') {
           if (!target.email) {
               showToast('Email cliente mancante.', 'error');
@@ -2051,8 +2059,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           }
           try {
               setSendingConfirmation('email');
-              await sendEmailConfirmation(target.id);
-              showToast(`Conferma email inviata a ${toTitleCase(target.customer_name)}`, 'success');
+              const result = await sendEmailConfirmation(target.id);
+              showToast(buildToast('email', !!result.status_changed), 'success');
               setConfirmationPicker(null);
               if (fromSave) setIsFormOpen(false);
           } catch (err: any) {
@@ -2075,9 +2083,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       try {
           setSendingConfirmation(channel);
-          await sendWhatsAppConfirmation(target.id, channel);
+          const result = await sendWhatsAppConfirmation(target.id, channel);
           const label = channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
-          showToast(`Conferma ${label} inviata a ${toTitleCase(target.customer_name)}`, 'success');
+          showToast(buildToast(label, !!result.status_changed), 'success');
           setConfirmationPicker(null);
           if (fromSave) setIsFormOpen(false);
       } catch (err: any) {
@@ -5486,6 +5494,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const target = confirmationPicker.reservation;
         const hasPhone = !!(target.phone && target.phone.trim());
         const hasEmail = !!(target.email && target.email.trim());
+        // A PENDING reservation is one that arrived via the public booking
+        // form and is waiting for staff to approve. When the operator picks
+        // a channel here, the backend flips it to CONFIRMED — so the labels
+        // and the header change to reflect the dual action.
+        const isPending = (target.reservation_status as any) === 'PENDING';
+        const actionPrefix = isPending ? 'Conferma e invia' : 'Invia';
         const closePicker = () => {
           if (sendingConfirmation) return;
           setConfirmationPicker(null);
@@ -5501,9 +5515,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               onClick={e => e.stopPropagation()}
             >
               <div className="p-5 border-b border-[var(--color-line)]">
-                <h3 className="text-lg font-semibold text-[var(--color-fg)]">Invia conferma al cliente?</h3>
+                <h3 className="text-lg font-semibold text-[var(--color-fg)]">
+                  {isPending ? 'Conferma la prenotazione' : 'Invia conferma al cliente?'}
+                </h3>
                 <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-                  Vuoi mandare una conferma della prenotazione a <strong>{toTitleCase(target.customer_name || '')}</strong>?
+                  {isPending ? (
+                    <>Scegli il canale per confermare la prenotazione di <strong>{toTitleCase(target.customer_name || '')}</strong>: lo stato passerà da "Da confermare" a "Confermata".</>
+                  ) : (
+                    <>Vuoi mandare una conferma della prenotazione a <strong>{toTitleCase(target.customer_name || '')}</strong>?</>
+                  )}
                 </p>
               </div>
               <div className="p-5 space-y-2">
@@ -5518,7 +5538,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       ? <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
                       : <MessageCircle className="h-5 w-5 text-emerald-600" />}
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">SMS</div>
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} SMS</div>
                       <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
                     </div>
                   </button>
@@ -5534,7 +5554,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       ? <Loader2 className="h-5 w-5 animate-spin text-green-600" />
                       : <MessageCircle className="h-5 w-5 text-green-600" />}
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">WhatsApp</div>
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} WhatsApp</div>
                       <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
                     </div>
                   </button>
@@ -5548,20 +5568,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   >
                     <Send className="h-5 w-5 text-indigo-600" />
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">Email</div>
+                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} Email</div>
                       <div className="text-[11px] text-[var(--color-fg-muted)]">{target.email}</div>
                     </div>
                   </button>
                 )}
               </div>
-              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+                {isPending ? (
+                  <span className="text-[11px] text-[var(--color-fg-subtle)]">
+                    La conferma parte solo dopo la tua scelta di canale.
+                  </span>
+                ) : <span />}
                 <button
                   type="button"
                   onClick={closePicker}
                   disabled={sendingConfirmation !== null}
                   className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
                 >
-                  Non ora
+                  {isPending ? 'Salva senza confermare' : 'Non ora'}
                 </button>
               </div>
             </div>

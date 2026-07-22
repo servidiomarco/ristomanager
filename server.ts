@@ -2806,6 +2806,35 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 // the path so the frontend keeps working; the channel is decided at runtime
 // by sendBookingConfirmation (SMS while Meta verification is pending,
 // WhatsApp after).
+// Flip a reservation from PENDING to CONFIRMED after a confirmation
+// message has been successfully sent to the customer. Idempotent: does
+// nothing if the reservation isn't PENDING (already CONFIRMED, or in a
+// terminal state like CANCELLED/DECLINED — we never resurrect those).
+// Returns true when a status change actually happened, so the caller
+// can include it in the response and toast the operator accordingly.
+async function promoteReservationIfPending(reservationId: number): Promise<boolean> {
+    try {
+        const upd = await queryWithRetry(
+            `UPDATE reservations
+             SET reservation_status = 'CONFIRMED',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND reservation_status = 'PENDING'
+             RETURNING *`,
+            [reservationId]
+        );
+        if (upd.rows.length === 0) return false;
+        // Live views listen on this event to update badges/status pills.
+        if (socketService) {
+            try { socketService.broadcastReservationUpdated(upd.rows[0]); }
+            catch (err) { console.warn('[confirm] broadcast failed:', (err as any)?.message || err); }
+        }
+        return true;
+    } catch (err) {
+        console.warn('[confirm] promoteReservationIfPending failed:', (err as any)?.message || err);
+        return false;
+    }
+}
+
 app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
@@ -2881,7 +2910,16 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
 
         const label = outcome.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
         console.log(`[${label}] ✅ Confirmation sent for reservation ${id} to ${reservation.phone}`);
-        res.json({ success: true, message: `Confirmation sent via ${label}`, channel: outcome.channel });
+        // Flip PENDING → CONFIRMED now that the "your booking is confirmed"
+        // message is actually out — the CRM status is only allowed to lag
+        // reality, never precede it.
+        const promoted = await promoteReservationIfPending(reservation.id);
+        res.json({
+            success: true,
+            message: `Confirmation sent via ${label}`,
+            channel: outcome.channel,
+            status_changed: promoted,
+        });
     } catch (err: any) {
         console.error('Error sending confirmation:', err);
         res.status(500).json({ error: err?.message || 'Failed to send confirmation' });
@@ -2966,7 +3004,11 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         }
 
         console.log(`[Email] ✅ Confirmation sent for reservation ${id} to ${reservation.email}`);
-        res.json({ success: true, message: 'Confirmation sent via Email', channel: 'email' });
+        // Same PENDING → CONFIRMED promotion as the SMS/WhatsApp branch: the
+        // customer just received a "you're booked" email, so the CRM must
+        // stop showing "Da confermare".
+        const promoted = await promoteReservationIfPending(reservation.id);
+        res.json({ success: true, message: 'Confirmation sent via Email', channel: 'email', status_changed: promoted });
     } catch (err: any) {
         console.error('Error sending email confirmation:', err);
         res.status(500).json({ error: err?.message || 'Failed to send email confirmation' });

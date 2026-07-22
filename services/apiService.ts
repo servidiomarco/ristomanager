@@ -627,12 +627,22 @@ export const postInventoryMovement = async (move: {
   });
 };
 
+// `status_changed` is true when the backend flipped the reservation from
+// PENDING to CONFIRMED as part of this confirmation send. The UI uses it to
+// contextualise the toast ("Prenotazione confermata e SMS inviato").
+export interface ConfirmationSendResult {
+  success: boolean;
+  message: string;
+  channel?: string;
+  status_changed?: boolean;
+}
+
 export const sendWhatsAppConfirmation = async (
   reservationId: number,
   channel?: 'sms' | 'whatsapp',
-): Promise<{ success: boolean; message: string; channel?: string }> => {
+): Promise<ConfirmationSendResult> => {
   const qs = channel ? `?channel=${channel}` : '';
-  return apiRequest<{ success: boolean; message: string; channel?: string }>(
+  return apiRequest<ConfirmationSendResult>(
     `${API_URL}/reservations/${reservationId}/confirm-whatsapp${qs}`,
     {
       method: 'POST',
@@ -643,8 +653,8 @@ export const sendWhatsAppConfirmation = async (
 
 export const sendEmailConfirmation = async (
   reservationId: number,
-): Promise<{ success: boolean; message: string; channel?: string }> => {
-  return apiRequest<{ success: boolean; message: string; channel?: string }>(
+): Promise<ConfirmationSendResult> => {
+  return apiRequest<ConfirmationSendResult>(
     `${API_URL}/reservations/${reservationId}/confirm-email`,
     {
       method: 'POST',
