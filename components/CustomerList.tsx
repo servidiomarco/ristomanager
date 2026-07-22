@@ -4,6 +4,7 @@ import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustom
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
+import { SkeletonCustomerGrid } from './SkeletonCards';
 
 interface Props {
   reservations: Reservation[];
@@ -640,7 +641,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       )}
 
       {isLoading ? (
-        <div className="p-12 text-center text-sm text-slate-400">Caricamento...</div>
+        <SkeletonCustomerGrid count={9} />
       ) : filtered.length === 0 ? (
         <div className="p-12 text-center bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm">
           <BookUser className="h-10 w-10 text-slate-300 mx-auto mb-3" />

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, CheckCheck, X, RefreshCw, Phone, CreditCard, Calendar, MessageCircle, Mail, AlertTriangle, ExternalLink } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { SkeletonNotificationList } from './SkeletonCards';
 import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
 import { socketClient } from '../services/socketClient';
 
@@ -236,9 +237,7 @@ const NotifichePage: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <CookingPotLoader label="Carico…" />
-          </div>
+          <SkeletonNotificationList count={6} />
         ) : items.length === 0 ? (
           <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
             <Bell className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
