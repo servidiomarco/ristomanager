@@ -210,6 +210,10 @@ const App: React.FC = () => {
   // Count of voice calls in the last 7 days without a linked reservation —
   // drives the follow-up badge on the Conversazioni sidebar icon.
   const [voiceCallsPendingCount, setVoiceCallsPendingCount] = useState(0);
+  // Bumped when a background mutation touches voice_calls rows (e.g. the
+  // quick-create flow links a call to the new reservation) so ConversazioniPage
+  // refetches list + open detail without a manual page reload.
+  const [voiceCallsRefreshTick, setVoiceCallsRefreshTick] = useState(0);
   const canSeeVoiceCalls = canAccessView(ViewState.CONVERSAZIONI);
   useEffect(() => {
     if (!isAuthenticated || !canSeeVoiceCalls) return;
@@ -1203,9 +1207,14 @@ const App: React.FC = () => {
       if (linkCallId != null) {
         linkVoiceCallOnCreateRef.current = null;
         voiceCallsApiService.linkReservation(linkCallId, returnedRes.id)
-          .then(() => voiceCallsApiService.pendingCount()
-            .then(({ count }) => setVoiceCallsPendingCount(count))
-            .catch(() => {}))
+          .then(() => {
+            // Signal ConversazioniPage: the call is now linked, badges must
+            // flip from "Da ricontattare" to the reservation state.
+            setVoiceCallsRefreshTick(t => t + 1);
+            return voiceCallsApiService.pendingCount()
+              .then(({ count }) => setVoiceCallsPendingCount(count))
+              .catch(() => {});
+          })
           .catch((err) => console.warn('linkReservation failed:', err));
       }
       // Optimistically include the new row so checks that scan `reservations`
@@ -1927,6 +1936,7 @@ const App: React.FC = () => {
               setAutoEditCustomerByPhone(phone);
               setView(ViewState.CLIENTI);
             }}
+            refreshTick={voiceCallsRefreshTick}
           />
         )}
 

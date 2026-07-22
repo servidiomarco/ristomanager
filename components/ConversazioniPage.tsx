@@ -94,9 +94,13 @@ interface DetailModalProps {
   onFollowUpChanged?: () => void;
   onCreateReservation?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
   onOpenCustomerProfile?: (args: { phone: string }) => void;
+  // Bumped by App after an async mutation that touches voice_calls rows
+  // (e.g. the quick-create reservation flow links the call in background).
+  // A change refetches the detail so badges update without a page reload.
+  refreshTick?: number;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile }) => {
+const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +135,20 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
     return () => { cancelled = true; };
   }, [callId]);
 
+  // Silent refetch when App signals a background mutation (quick-create →
+  // link). No loading flash and the notes draft is left untouched so an
+  // in-progress edit can't be clobbered.
+  const firstTickRef = useRef(true);
+  useEffect(() => {
+    if (firstTickRef.current) { firstTickRef.current = false; return; }
+    let cancelled = false;
+    voiceCallsApiService.getById(callId)
+      .then(d => { if (!cancelled) setDetail(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick]);
+
   useEffect(() => {
     let cancelled = false;
     setMessagesLoading(true);
@@ -140,7 +158,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
       .catch((err: Error) => { if (!cancelled) setMessagesError(err.message); })
       .finally(() => { if (!cancelled) setMessagesLoading(false); });
     return () => { cancelled = true; };
-  }, [callId]);
+  }, [callId, refreshTick]);
 
   const markPhantomRecovered = useCallback(async () => {
     setSaving(true);
@@ -644,9 +662,13 @@ interface ConversazioniPageProps {
   onFollowUpChanged?: () => void;
   onCreateReservationFromCall?: (prefill: { callId: number; customer_name: string; phone: string }) => void;
   onOpenCustomerProfile?: (args: { phone: string }) => void;
+  // Bumped by App when a background mutation touches voice_calls (e.g. the
+  // quick-create flow links the call to the new reservation) so list and
+  // open detail refetch without a manual page reload.
+  refreshTick?: number;
 }
 
-const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile }) => {
+const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile, refreshTick }) => {
   const [items, setItems] = useState<VoiceCallSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -702,7 +724,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
 
   useEffect(() => {
     fetchItems();
-  }, [fetchItems]);
+  }, [fetchItems, refreshTick]);
 
   // Client-side filter as a safety net: if the backend hasn't been redeployed
   // yet (or ignores the follow_up param for any reason), we still show the
@@ -1003,6 +1025,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
           onCreateReservation={onCreateReservationFromCall}
           onOpenCustomerProfile={onOpenCustomerProfile}
+          refreshTick={refreshTick}
         />
       )}
     </div>
