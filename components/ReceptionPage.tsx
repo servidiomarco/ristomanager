@@ -77,6 +77,12 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Flips to false the first time loadAll() completes. Used to swap the empty
+  // "no matches" copy for skeleton cards during the initial fetch — otherwise
+  // Reception opens blank for ~800ms and then pops in the list. Stays false
+  // on background refetches (visibilitychange, socket reconnect) so the
+  // existing list doesn't flicker into skeleton state each time.
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [showWalkIn, setShowWalkIn] = useState(false);
   // Open the walk-in modal when triggered from the global "+" create menu, then clear the flag.
   useEffect(() => {
@@ -108,6 +114,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       }
     } catch (err) {
       setError((err as Error)?.message || 'Errore di caricamento');
+    } finally {
+      setIsInitialLoading(false);
     }
   }, [activeRoomId]);
 
@@ -361,6 +369,48 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   };
 
   // Render a reservation card in the left list
+  // Placeholder card mirroring the real one's layout (min-h, header row with
+  // time/status chip, name line, meta line, optional table pill) so the
+  // initial load doesn't cause visual reflow when data actually arrives.
+  // Slight per-card variance keeps the group looking like real content.
+  const renderCardSkeleton = (key: string, variant: 'wide' | 'narrow' = 'wide') => (
+    <div
+      key={key}
+      aria-hidden="true"
+      className="w-full rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3 min-h-[88px] motion-safe:animate-pulse"
+    >
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="h-5 w-14 rounded bg-[var(--color-surface-3)]" />
+        <div className="h-4 w-16 rounded-full bg-[var(--color-surface-3)]" />
+      </div>
+      <div className={`h-4 rounded bg-[var(--color-surface-3)] mb-2 ${variant === 'wide' ? 'w-3/5' : 'w-2/5'}`} />
+      <div className="flex items-center gap-3">
+        <div className="h-3 w-10 rounded bg-[var(--color-surface-3)]" />
+        <div className="h-3 w-24 rounded bg-[var(--color-surface-3)]" />
+      </div>
+    </div>
+  );
+
+  const renderListSkeleton = () => (
+    <>
+      <div className="mb-3">
+        <div className="h-3 w-32 rounded bg-[var(--color-surface-3)] mb-2 motion-safe:animate-pulse" aria-hidden="true" />
+        <div className="space-y-2">
+          {renderCardSkeleton('sk-1', 'wide')}
+          {renderCardSkeleton('sk-2', 'narrow')}
+          {renderCardSkeleton('sk-3', 'wide')}
+        </div>
+      </div>
+      <div className="mb-3">
+        <div className="h-3 w-24 rounded bg-[var(--color-surface-3)] mb-2 motion-safe:animate-pulse" aria-hidden="true" />
+        <div className="space-y-2">
+          {renderCardSkeleton('sk-4', 'wide')}
+          {renderCardSkeleton('sk-5', 'narrow')}
+        </div>
+      </div>
+    </>
+  );
+
   const renderCard = (r: Reservation) => {
     const isSelected = r.id === selectedReservationId;
     const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
@@ -611,7 +661,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 pt-3 pb-4">
-            {filtered.length === 0 ? (
+            {isInitialLoading && reservations.length === 0 ? (
+              renderListSkeleton()
+            ) : filtered.length === 0 ? (
               <div className="text-center text-sm text-[var(--color-fg-muted)] py-10">
                 Nessuna prenotazione corrisponde ai filtri.
               </div>
