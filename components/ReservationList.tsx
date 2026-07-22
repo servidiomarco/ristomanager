@@ -2056,6 +2056,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // picker modal after either a fresh save or a click on the "Invia conferma"
   // button on the card. All three channels hit the backend now — email uses
   // the SMTP config from Impostazioni.
+  // Pull the freshest outbound_messages for the given reservation and drop
+  // them into local state. Used to refresh the "Comunicazione con il cliente"
+  // timeline immediately after a send (conferma email/WA/SMS, mail libera)
+  // so the new row shows up without a page refresh. Only touches state when
+  // the reservation is currently open in the form; otherwise the load-on-
+  // open effect will refetch anyway.
+  const refreshOutboundTimeline = async (reservationId: number) => {
+      if (formData.id !== reservationId) return;
+      try {
+          const rows = await getReservationMessages(reservationId);
+          setOutboundMessages(rows);
+      } catch { /* non-fatal — timeline will refresh on next open */ }
+  };
+
   const handlePickConfirmationChannel = async (channel: 'sms' | 'whatsapp' | 'email') => {
       const target = confirmationPicker?.reservation;
       if (!target) return;
@@ -2084,6 +2098,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               showToast(buildToast('email', !!result.status_changed), 'success');
               setConfirmationPicker(null);
               if (fromSave) setIsFormOpen(false);
+              else await refreshOutboundTimeline(target.id);
           } catch (err: any) {
               console.error('Errore invio conferma email:', err);
               showToast(err?.message || 'Errore invio conferma email', 'error');
@@ -2109,6 +2124,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           showToast(buildToast(label, !!result.status_changed), 'success');
           setConfirmationPicker(null);
           if (fromSave) setIsFormOpen(false);
+          else await refreshOutboundTimeline(target.id);
       } catch (err: any) {
           console.error('Errore invio conferma:', err);
           showToast(err?.message || `Errore invio conferma ${channel}`, 'error');
@@ -2146,11 +2162,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           setCustomEmailOpen(false);
           setCustomEmailSubject('');
           setCustomEmailBody('');
-          // Refresh the timeline so the new email surfaces immediately.
-          try {
-              const rows = await getReservationMessages(formData.id as number);
-              setOutboundMessages(rows);
-          } catch { /* non-fatal — timeline will refresh on next open */ }
+          await refreshOutboundTimeline(formData.id as number);
       } catch (err: any) {
           console.error('Errore invio email libera:', err);
           showToast(err?.message || 'Errore invio email', 'error');
