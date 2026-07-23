@@ -9948,14 +9948,17 @@ function buildBookingDepositConfirmedTemplate(
 }
 
 // Twilio template for the pay-at-table link. Media card:
-//   - Header: dynamic image URL {{1}} → QR PNG served by this backend at
-//     /pay/:token/qr.png (Meta re-fetches the URL every send, so the
-//     backend must remain publicly reachable while the bill is open).
+//   - Header image URL: baked into the template as
+//     https://ristomanager-production.up.railway.app/pay/{{1}}/qr.png
+//     because Twilio requires the Media URL field to be a valid URL
+//     literal (no full-URL placeholders). Meta re-fetches the URL for
+//     every send, so the QR endpoint must remain publicly reachable.
 //   - Body {{2}}..{{4}}: customer name, covers label, total.
 //   - CTA button URL hardcoded as https://crm.vecchiofrantoio.com/pay/{{5}}
-//     with {{5}} = share_token (only the token, never the full URL).
-// Returns undefined when the SID isn't set or when the backend base URL
-// is unknown (dev without PUBLIC_WEBHOOK_BASE_URL) → SMS fallback.
+//     with {{5}} = share_token.
+// Both {{1}} and {{5}} carry only the share_token (never a full URL),
+// which is why we don't need publicAppBaseUrl() here — the backend
+// prefix is a template concern, not a runtime one.
 function templateCoversLabel(covers: number | null | undefined): string {
     const n = Math.max(1, Math.trunc(Number(covers) || 1));
     return `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
@@ -9969,12 +9972,10 @@ function buildTableBillLinkTemplate(
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
     if (!contentSid) return undefined;
     if (!shareToken) return undefined;
-    const backendBase = publicAppBaseUrl();
-    if (!backendBase) return undefined;
     return {
         contentSid,
         contentVariables: {
-            '1': `${backendBase}/pay/${shareToken}/qr.png`,
+            '1': shareToken,
             '2': templateName(customerName),
             '3': templateCoversLabel(covers),
             '4': formatEuroMinor(amountCents),
