@@ -3314,7 +3314,14 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         );
 
         try {
-            const delivery = await sendBookingConfirmation(reservation.phone, message, reservation.id);
+            const delivery = await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+                whatsappTemplate: buildTableBillLinkTemplate(
+                    reservation.customer_name,
+                    Number(bill.covers) || 1,
+                    Number(bill.total_cents),
+                    bill.share_token
+                ),
+            });
             if (req.user) {
                 LogService.logActivity(
                     req.user.userId,
@@ -9760,6 +9767,36 @@ function buildBookingDepositConfirmedTemplate(
             '3': templateGuestsLabel(guests),
             '4': dateLabel,
             '5': timeLabel,
+        },
+    };
+}
+
+// Twilio template for the pay-at-table link. Utility CTA card:
+// body has {{1}}..{{3}} (name, covers label, total), and the button
+// URL is hardcoded as https://crm.vecchiofrantoio.com/pay/{{4}} — so
+// {{4}} carries ONLY the share_token, never the full URL. Returns
+// undefined when the SID isn't set (deploy without the env var yet)
+// so the dispatcher falls back to SMS instead of hard-failing.
+function templateCoversLabel(covers: number | null | undefined): string {
+    const n = Math.max(1, Math.trunc(Number(covers) || 1));
+    return `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
+}
+function buildTableBillLinkTemplate(
+    customerName: string | null | undefined,
+    covers: number | null | undefined,
+    amountCents: number,
+    shareToken: string
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
+    if (!contentSid) return undefined;
+    if (!shareToken) return undefined;
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateCoversLabel(covers),
+            '3': formatEuroMinor(amountCents),
+            '4': shareToken,
         },
     };
 }
