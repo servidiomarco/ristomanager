@@ -48,6 +48,13 @@ const formatLocalDate = (date: Date): string => {
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
 
+// Nasconde la sezione conto-al-tavolo dentro il modal prenotazione anche
+// quando il feature flag backend è attivo. Serve a tenere l'endpoint QR
+// raggiungibile durante l'approval Meta del template WhatsApp senza
+// esporre l'operatività ai camerieri finché il template non è live.
+// Rimettere `true` (o rimuovere il gate) quando il template è approved.
+const PAY_AT_TABLE_UI_VISIBLE = false;
+
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
   const min = String(date.getMinutes()).padStart(2, '0');
@@ -603,7 +610,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   useEffect(() => {
     let cancelled = false;
     getFeatureFlags()
-      .then(f => { if (!cancelled) setPayAtTableEnabled(!!f.pay_at_table_enabled); })
+      .then(f => { if (!cancelled) setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled); })
       .catch(() => { /* keep default false on error */ });
     return () => { cancelled = true; };
   }, []);
