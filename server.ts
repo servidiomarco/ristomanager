@@ -4555,7 +4555,7 @@ async function applyBillSplitTransition(
              RETURNING id, reservation_id, table_id, total_cents, covers, status`,
             [billId]
         );
-        if (settled.rowCount > 0) {
+        if ((settled.rowCount ?? 0) > 0) {
             try { socketService?.broadcastToAll('bill:settled', settled.rows[0]); } catch (_) {}
         }
         return;
@@ -4569,7 +4569,7 @@ async function applyBillSplitTransition(
              RETURNING id`,
             [splitId]
         );
-        if (upd.rowCount > 0) {
+        if ((upd.rowCount ?? 0) > 0) {
             try {
                 socketService?.broadcastToAll('bill:split-abandoned', {
                     bill_id: billId, split_id: splitId,
@@ -5943,7 +5943,7 @@ const startBillSplitReconcileScheduler = () => {
                          RETURNING id, table_bill_id`,
                         [row.split_id]
                     );
-                    if (upd.rowCount > 0) {
+                    if ((upd.rowCount ?? 0) > 0) {
                         try {
                             socketService?.broadcastToAll('bill:split-abandoned', {
                                 bill_id: upd.rows[0].table_bill_id,
