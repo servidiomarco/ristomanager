@@ -744,11 +744,37 @@ const App: React.FC = () => {
     }
   };
 
+  // Dedup guard: same message+type+title emitted within this window are
+  // collapsed to a single toast. Fires all the time we do "handler +
+  // socket:event" (both trigger the same feedback) or when React StrictMode
+  // double-invokes an effect in dev. 2500ms covers the typical socket
+  // roundtrip while staying short enough to not swallow legitimate repeat
+  // actions ("Salva" clicked twice on purpose).
+  const TOAST_DEDUP_WINDOW_MS = 2500;
+  const lastToastAtRef = useRef<Map<string, number>>(new Map());
+
   const addToast = (
     message: string,
     type: 'success' | 'error' | 'info' = 'info',
     options?: { title?: string; details?: string[]; duration?: number; action?: { label: string; onClick: () => void } }
   ) => {
+      const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
+      const now = Date.now();
+      const lastAt = lastToastAtRef.current.get(dedupKey);
+      if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
+          // Suppressed duplicate. Refresh the timestamp so back-to-back
+          // triggers keep the suppression alive instead of leaking through
+          // right after the window expires.
+          lastToastAtRef.current.set(dedupKey, now);
+          return;
+      }
+      lastToastAtRef.current.set(dedupKey, now);
+      // Periodic cleanup so the map doesn't grow unbounded during long
+      // sessions. Anything older than the window is safe to drop.
+      for (const [k, ts] of lastToastAtRef.current) {
+          if (now - ts > TOAST_DEDUP_WINDOW_MS * 4) lastToastAtRef.current.delete(k);
+      }
+
       const id = Math.random().toString(36).substr(2, 9);
       const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
       setToasts(prev => [...prev, {
