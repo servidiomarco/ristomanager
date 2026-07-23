@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import path from 'path';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
@@ -3611,6 +3612,39 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
     } catch (err: any) {
         console.error('GET /pay/:token error:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /pay/:token/qr.png — publicly-fetchable PNG of the pay page URL,
+// used as the header media in the WhatsApp template so guests see the
+// QR inline in the chat. Meta re-fetches the URL for every send, so it
+// must stay reachable while the bill is OPEN/LOCKED. 404 mirrors the
+// JSON endpoint: same-shape response whether the token never existed or
+// the bill was already closed, to avoid enumeration.
+app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).send('Not found');
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(404).send('Not found');
+        }
+        const bill = await loadBillByToken(token);
+        if (!bill) return res.status(404).send('Not found');
+
+        const publicUrl = `${payAtTableBaseUrl()}/pay/${token}`;
+        const png = await QRCode.toBuffer(publicUrl, {
+            errorCorrectionLevel: 'M',
+            margin: 2,
+            width: 512,
+        });
+        res.setHeader('Content-Type', 'image/png');
+        // Short cache: bills change state (close/void) and Meta may cache
+        // aggressively — keep it fresh but don't hammer the DB on retries.
+        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.send(png);
+    } catch (err: any) {
+        console.error('GET /pay/:token/qr.png error:', err);
+        res.status(500).send('Internal server error');
     }
 });
 
@@ -9912,12 +9946,15 @@ function buildBookingDepositConfirmedTemplate(
     };
 }
 
-// Twilio template for the pay-at-table link. Utility CTA card:
-// body has {{1}}..{{3}} (name, covers label, total), and the button
-// URL is hardcoded as https://crm.vecchiofrantoio.com/pay/{{4}} — so
-// {{4}} carries ONLY the share_token, never the full URL. Returns
-// undefined when the SID isn't set (deploy without the env var yet)
-// so the dispatcher falls back to SMS instead of hard-failing.
+// Twilio template for the pay-at-table link. Media card:
+//   - Header: dynamic image URL {{1}} → QR PNG served by this backend at
+//     /pay/:token/qr.png (Meta re-fetches the URL every send, so the
+//     backend must remain publicly reachable while the bill is open).
+//   - Body {{2}}..{{4}}: customer name, covers label, total.
+//   - CTA button URL hardcoded as https://crm.vecchiofrantoio.com/pay/{{5}}
+//     with {{5}} = share_token (only the token, never the full URL).
+// Returns undefined when the SID isn't set or when the backend base URL
+// is unknown (dev without PUBLIC_WEBHOOK_BASE_URL) → SMS fallback.
 function templateCoversLabel(covers: number | null | undefined): string {
     const n = Math.max(1, Math.trunc(Number(covers) || 1));
     return `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
@@ -9931,13 +9968,16 @@ function buildTableBillLinkTemplate(
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
     if (!contentSid) return undefined;
     if (!shareToken) return undefined;
+    const backendBase = publicAppBaseUrl();
+    if (!backendBase) return undefined;
     return {
         contentSid,
         contentVariables: {
-            '1': templateName(customerName),
-            '2': templateCoversLabel(covers),
-            '3': formatEuroMinor(amountCents),
-            '4': shareToken,
+            '1': `${backendBase}/pay/${shareToken}/qr.png`,
+            '2': templateName(customerName),
+            '3': templateCoversLabel(covers),
+            '4': formatEuroMinor(amountCents),
+            '5': shareToken,
         },
     };
 }
