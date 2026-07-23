@@ -2138,12 +2138,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Conto al tavolo — feature flag + parametri tecnici read-only */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Conto al tavolo</h3>
-              <PayAtTableSettingsManager showToast={addToast} />
-            </div>
-
             {/* Admin Section */}
             {canManageUsers() && (
               <div className="mb-8">
@@ -2237,6 +2231,9 @@ const App: React.FC = () => {
                 </div>
                 <CardErrorBoundary label="Revolut">
                   <RevolutIntegrationCard showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Conto al tavolo">
+                  <PayAtTableSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
