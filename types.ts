@@ -364,7 +364,8 @@ export enum ViewState {
   INVENTARIO = 'INVENTARIO',
   USERS = 'USERS',
   SETTINGS = 'SETTINGS',
-  PAGAMENTI = 'PAGAMENTI'
+  PAGAMENTI = 'PAGAMENTI',
+  DEVELOPMENT = 'DEVELOPMENT'
 }
 
 export interface Customer {

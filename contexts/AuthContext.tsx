@@ -26,8 +26,12 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.SETTINGS]: 'settings:view',
   [ViewState.PAGAMENTI]: 'payments:view',
   [ViewState.EMAIL]: 'reservations:view',
-  [ViewState.NOTIFICHE]: 'dashboard:view'
+  [ViewState.NOTIFICHE]: 'dashboard:view',
+  [ViewState.DEVELOPMENT]: '' // gated by account email, not by permission — see canAccessView
 };
+
+/** The dev board is a project tool tied to one specific account, not a role. */
+const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 
 interface AuthContextType {
   user: User | null;
@@ -118,10 +122,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [permissions]);
 
   const canAccessView = useCallback((view: ViewState): boolean => {
+    if (view === ViewState.DEVELOPMENT) {
+      return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
+    }
     const requiredPermission = VIEW_PERMISSIONS[view];
     if (!requiredPermission) return false;
     return permissions.includes(requiredPermission);
-  }, [permissions]);
+  }, [permissions, user]);
 
   const getAccessibleViews = useCallback((): ViewState[] => {
     return Object.values(ViewState).filter(view => canAccessView(view));

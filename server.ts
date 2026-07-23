@@ -8088,6 +8088,147 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
+// DEV BOARD — pagina Development, riservata all'account admin
+// ============================================
+// Non passa da role_permissions: il board è uno strumento di sviluppo del
+// progetto legato a un account preciso, non a un ruolo del ristorante.
+const DEV_BOARD_ADMIN_EMAIL = (process.env.DEV_BOARD_ADMIN_EMAIL || 'admin@ristomanager.com').toLowerCase();
+const requireDevBoardAdmin = (req: any, res: any, next: any) => {
+    if ((req.user?.email || '').toLowerCase() !== DEV_BOARD_ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Accesso riservato' });
+    }
+    next();
+};
+
+const DEV_BOARD_COLUMNS = ['in_progress', 'review', 'nice_to_have', 'paused', 'done'];
+
+app.get('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT id, title, description, column_key, position, created_at, updated_at
+             FROM dev_board_cards
+             ORDER BY column_key, position, id`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { title, description, column_key } = req.body;
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'Titolo obbligatorio' });
+        }
+        const column = DEV_BOARD_COLUMNS.includes(column_key) ? column_key : 'in_progress';
+        const result = await queryWithRetry(
+            `INSERT INTO dev_board_cards (title, description, column_key, position)
+             VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3))
+             RETURNING id, title, description, column_key, position, created_at, updated_at`,
+            [String(title).trim(), description ? String(description).trim() || null : null, column]
+        );
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, description, column_key } = req.body;
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'Titolo obbligatorio' });
+        }
+        if (column_key !== undefined && !DEV_BOARD_COLUMNS.includes(column_key)) {
+            return res.status(400).json({ error: 'Colonna non valida' });
+        }
+        // Cambio colonna da edit → la card va in coda alla colonna di arrivo.
+        const result = await queryWithRetry(
+            `UPDATE dev_board_cards SET
+                title = $1,
+                description = $2,
+                position = CASE WHEN $3::varchar IS NOT NULL AND $3::varchar <> column_key
+                    THEN (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar)
+                    ELSE position END,
+                column_key = COALESCE($3::varchar, column_key),
+                updated_at = NOW()
+             WHERE id = $4
+             RETURNING id, title, description, column_key, position, created_at, updated_at`,
+            [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Drop di un drag&drop: sposta la card in una colonna e rinumera l'intera
+// colonna di destinazione secondo l'ordine inviato dal client.
+app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { id } = req.params;
+        const { column_key, ordered_ids } = req.body;
+        if (!DEV_BOARD_COLUMNS.includes(column_key) || !Array.isArray(ordered_ids)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+        await client.query('BEGIN');
+        const moved = await client.query(
+            `UPDATE dev_board_cards SET column_key = $1, updated_at = NOW() WHERE id = $2 RETURNING id`,
+            [column_key, id]
+        );
+        if (moved.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        for (let i = 0; i < ordered_ids.length; i++) {
+            await client.query(
+                `UPDATE dev_board_cards SET position = $1 WHERE id = $2 AND column_key = $3`,
+                [i, ordered_ids[i], column_key]
+            );
+        }
+        await client.query('COMMIT');
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        res.json({ ok: true });
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
+    }
+});
+
+app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry('DELETE FROM dev_board_cards WHERE id = $1 RETURNING id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // SHOPPING LIST - require authentication
 // ============================================
 app.get('/shopping', authenticate, async (req, res) => {

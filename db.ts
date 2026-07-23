@@ -1894,6 +1894,39 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_haccp_production_date ON haccp_production_logs(date);
         `);
 
+        // ============================================
+        // DEV BOARD (pagina Development, solo account admin)
+        // ============================================
+        // Kanban di progetto: una card per implementazione. column_key è la
+        // colonna (in_progress / review / nice_to_have / paused / done);
+        // position ordina dentro la colonna — il client rinumera l'intera
+        // colonna di destinazione a ogni drop, quindi basta un intero.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS dev_board_cards (
+                id          SERIAL PRIMARY KEY,
+                title       VARCHAR(200) NOT NULL,
+                description TEXT,
+                column_key  VARCHAR(20) NOT NULL DEFAULT 'in_progress',
+                position    INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_dev_board_cards_column ON dev_board_cards(column_key, position);
+        `);
+        const existingDevCardCount = await client.query(`SELECT COUNT(*)::int AS n FROM dev_board_cards;`);
+        if (existingDevCardCount.rows[0]?.n === 0) {
+            await client.query(`
+                INSERT INTO dev_board_cards (title, description, column_key, position) VALUES
+                    ('Pay-at-table + split bill (Fase 1)', 'QR effimero, Revolut hosted checkout, split equal/custom.', 'in_progress', 0),
+                    ('Integrazione Passepartout (Fase 2)', 'Sblocca item-level split e scontrino fiscale. In attesa di risposte dal rivenditore.', 'paused', 0),
+                    ('Redesign UX 2.0', 'Stati time-derived, check-in zero friction, hero dashboard, GDPR.', 'done', 0),
+                    ('Popup tavolo scaduto + coerenza stati timed', 'Prompt "Tavolo ancora occupato?" e board lista/modal allineati sullo stato derivato.', 'done', 1),
+                    ('Template WhatsApp via Twilio', '5/5 template Utility approvati e collegati; SMS resta fallback automatico.', 'done', 2);
+            `);
+        }
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

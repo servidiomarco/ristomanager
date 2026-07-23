@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -20,6 +20,7 @@ import InboxPage from './components/InboxPage';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
+import { DevelopmentPage } from './components/DevelopmentPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
@@ -139,6 +140,8 @@ const NAV_ITEMS: NavItem[] = [
 
   // Sistema
   { kind: 'link', label: 'Impostazioni', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
+  // Visibile solo all'account admin (gate email-based in canAccessView)
+  { kind: 'link', label: 'Development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
   { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
@@ -1950,6 +1953,10 @@ const App: React.FC = () => {
           <PagamentiPage />
         )}
 
+        {view === ViewState.DEVELOPMENT && (
+          <DevelopmentPage />
+        )}
+
         {view === ViewState.RECEPTION && (
           <ReceptionPage
             globalDate={globalDate}
@@ -2018,6 +2025,7 @@ const App: React.FC = () => {
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
+                      [ViewState.DEVELOPMENT]: 'Development',
                     };
                     return (
                       <option key={v} value={v}>{labels[v]}</option>

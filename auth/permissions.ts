@@ -165,7 +165,11 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   // who can read reservations can read the email thread with those customers.
   [ViewState.EMAIL]: ['reservations:view'],
   // Notifiche is a personal centre — dashboard-level visibility is enough.
-  [ViewState.NOTIFICHE]: ['dashboard:view']
+  [ViewState.NOTIFICHE]: ['dashboard:view'],
+  // Development (dev board) is gated by account email, not by role
+  // permissions — see requireDevBoardAdmin in server.ts. No role can reach
+  // it through the permission system.
+  [ViewState.DEVELOPMENT]: []
 };
 
 export class PermissionService {
