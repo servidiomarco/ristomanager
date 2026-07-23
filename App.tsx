@@ -797,6 +797,13 @@ const App: React.FC = () => {
 
   useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
 
+  // Socket connectivity — refs used to filter spurious connect/disconnect
+  // toasts. Real drops (Wi-Fi off, server restart) last well over 2.5s and
+  // still surface a toast; brief flaps (iOS backgrounding, transport
+  // upgrade, single missed heartbeat) do not.
+  const disconnectToastTimerRef = useRef<number | null>(null);
+  const disconnectToastShownRef = useRef(false);
+
   // PWA icon badge — somma le "cose da attenzionare" in un unico numero
   // che appare sopra l'icona dell'app installata. Segnali scelti:
   //   • prenotazioni PENDING ("Da confermare" nella Dashboard)
@@ -941,12 +948,30 @@ const App: React.FC = () => {
       setBanquetMenus(prev => prev.filter(m => m.id !== id));
     });
 
-    // Connection/Disconnection handlers with offline queue
+    // Connection/Disconnection handlers with offline queue.
+    // Toast policy:
+    //  - First connect after page load: silent (nothing was "restored").
+    //  - Disconnect: schedule the "persa" toast after 2.5s. If the socket
+    //    reconnects before then, cancel it — the user never sees a flap.
+    //  - Real reconnect (we actually showed "persa"): show "ristabilita".
+    // Data policy (unchanged): always fetchData + flush offline queue on
+    // every connect — that's the correctness path, not the UI concern.
     socket.on('connect', async () => {
       console.log('✅ Socket connected - refreshing data');
 
-      // Show reconnection toast
-      addToast('Connessione ristabilita', 'success');
+      // Cancel a pending "persa" toast if the drop was < 2.5s (glitch).
+      if (disconnectToastTimerRef.current !== null) {
+        clearTimeout(disconnectToastTimerRef.current);
+        disconnectToastTimerRef.current = null;
+      }
+
+      // Only surface "ristabilita" if we actually alerted the user that
+      // the connection was down. Otherwise stay quiet (first connect,
+      // brief reconnect that never reached the toast timer).
+      if (disconnectToastShownRef.current) {
+        addToast('Connessione ristabilita', 'success');
+        disconnectToastShownRef.current = false;
+      }
 
       // Always re-fetch on (re)connect. iOS suspends websockets when the PWA
       // is backgrounded; on resume the socket reconnects and we may have
@@ -975,7 +1000,17 @@ const App: React.FC = () => {
 
     socket.on('disconnect', (reason) => {
       console.log('⚠️ Socket disconnected:', reason);
-      addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error');
+      // Debounce: only pop the "persa" toast if the disconnect lasts >2.5s.
+      // Guards against transient flaps (iOS background, network handoff,
+      // single missed pong, Socket.IO transport upgrade churn).
+      if (disconnectToastTimerRef.current !== null) {
+        clearTimeout(disconnectToastTimerRef.current);
+      }
+      disconnectToastTimerRef.current = window.setTimeout(() => {
+        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error');
+        disconnectToastShownRef.current = true;
+        disconnectToastTimerRef.current = null;
+      }, 2500);
     });
 
     // Cleanup all event listeners on unmount
@@ -998,6 +1033,12 @@ const App: React.FC = () => {
       socket.off('banquet:deleted');
       socket.off('connect');
       socket.off('disconnect');
+      // Clear the pending "persa" timer so an unmount mid-flap doesn't
+      // fire the toast after the component has already gone away.
+      if (disconnectToastTimerRef.current !== null) {
+        clearTimeout(disconnectToastTimerRef.current);
+        disconnectToastTimerRef.current = null;
+      }
     };
   }, [socket]);
 
