@@ -3617,20 +3617,20 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
 
 // GET /pay/:token/qr.png — publicly-fetchable PNG of the pay page URL,
 // used as the header media in the WhatsApp template so guests see the
-// QR inline in the chat. Meta re-fetches the URL for every send, so it
-// must stay reachable while the bill is OPEN/LOCKED. 404 mirrors the
-// JSON endpoint: same-shape response whether the token never existed or
-// the bill was already closed, to avoid enumeration.
+// QR inline in the chat. Deliberately does NOT load the bill: the QR
+// only encodes the same URL that was already in the request path (no
+// data leak), and Meta's template approval / cache warm-up hits this
+// endpoint with the sample token, which won't correspond to any real
+// bill. Gated on the feature flag and on a minimum token shape.
 app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
     try {
         const token = String(req.params.token || '');
-        if (!token || token.length < 20) return res.status(404).send('Not found');
+        if (!token || token.length < 20 || !/^[A-Za-z0-9_-]+$/.test(token)) {
+            return res.status(404).send('Not found');
+        }
         if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
             return res.status(404).send('Not found');
         }
-        const bill = await loadBillByToken(token);
-        if (!bill) return res.status(404).send('Not found');
-
         const publicUrl = `${payAtTableBaseUrl()}/pay/${token}`;
         const png = await QRCode.toBuffer(publicUrl, {
             errorCorrectionLevel: 'M',
@@ -3638,9 +3638,10 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
             width: 512,
         });
         res.setHeader('Content-Type', 'image/png');
-        // Short cache: bills change state (close/void) and Meta may cache
-        // aggressively — keep it fresh but don't hammer the DB on retries.
-        res.setHeader('Cache-Control', 'public, max-age=60');
+        // Long cache: the PNG is a pure function of the token, so it
+        // never changes; freshness only matters when a bill is voided,
+        // and in that case Meta has already delivered the message.
+        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
         res.send(png);
     } catch (err: any) {
         console.error('GET /pay/:token/qr.png error:', err);
