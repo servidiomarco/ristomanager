@@ -595,7 +595,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'close' | 'void' | null>(null);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | null>(null);
   const [copiedBillUrl, setCopiedBillUrl] = useState(false);
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
@@ -1880,7 +1880,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     };
   }, [socket, isFormOpen, isEditing, formData.id]);
 
-  const handleOpenBill = async () => {
+  const handleOpenBill = async (opts?: { notify?: boolean }) => {
     if (!formData.id) return;
     const euros = Number(String(billTotalInput).replace(',', '.'));
     if (!Number.isFinite(euros) || euros <= 0) {
@@ -1888,7 +1888,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return;
     }
     const coversNum = Number(billCoversInput);
-    setBillActionLoading('open');
+    const notify = !!opts?.notify;
+    setBillActionLoading(notify ? 'open-and-notify' : 'open');
     try {
       const created = await billsApiService.openBill(formData.id as number, {
         total_cents: Math.round(euros * 100),
@@ -1897,9 +1898,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setBill(created);
       setBillTotalInput('');
       setBillCoversInput('');
-      showToast('Conto aperto', 'success');
+      if (!notify) {
+        showToast('Conto aperto', 'success');
+        return;
+      }
+      // The bill row is committed; the notify call is a best-effort follow-up.
+      // If it fails, the bill is still open and the waiter can retry via
+      // "Invia link al cliente" without re-opening the bill.
+      try {
+        const delivery = await billsApiService.notifyBillLink(formData.id as number);
+        showToast(`Conto aperto e link inviato via ${delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`, 'success');
+      } catch (notifyErr: any) {
+        showToast(notifyErr?.message || 'Conto aperto, ma invio del link non riuscito', 'error');
+      }
     } catch (err: any) {
       showToast(err?.message || 'Errore apertura conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  const handleNotifyBill = async () => {
+    if (!formData.id || !bill) return;
+    setBillActionLoading('notify');
+    try {
+      const delivery = await billsApiService.notifyBillLink(formData.id as number);
+      showToast(`Link inviato al cliente via ${delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Invio del link non riuscito', 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -5232,38 +5258,58 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <p className="text-[12px] text-[var(--color-fg-subtle)] mb-2">
                                 Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
                               </p>
-                              <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
-                                <div className="relative">
-                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    placeholder="Totale"
-                                    value={billTotalInput}
-                                    onChange={e => setBillTotalInput(e.target.value)}
-                                    disabled={billActionLoading === 'open'}
-                                    className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
-                                  />
-                                </div>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  placeholder={formData.guests ? `${formData.guests} cop.` : 'Coperti'}
-                                  value={billCoversInput}
-                                  onChange={e => setBillCoversInput(e.target.value)}
-                                  disabled={billActionLoading === 'open'}
-                                  className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleOpenBill}
-                                  disabled={billActionLoading === 'open'}
-                                  className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                                  Apri conto
-                                </button>
-                              </div>
+                              {(() => {
+                                const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify';
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
+                                      <div className="relative">
+                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
+                                        <input
+                                          type="text"
+                                          inputMode="decimal"
+                                          placeholder="Totale"
+                                          value={billTotalInput}
+                                          onChange={e => setBillTotalInput(e.target.value)}
+                                          disabled={busy}
+                                          className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                        />
+                                      </div>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        placeholder={formData.guests ? `${formData.guests} cop.` : 'Coperti'}
+                                        value={billCoversInput}
+                                        onChange={e => setBillCoversInput(e.target.value)}
+                                        disabled={busy}
+                                        className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenBill()}
+                                        disabled={busy}
+                                        className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                                        Apri conto
+                                      </button>
+                                    </div>
+                                    {/* One-tap combo: open the bill AND immediately push the link
+                                        to the customer (SMS today; WhatsApp when a template lands).
+                                        Disabled if the reservation has no phone. */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenBill({ notify: true })}
+                                      disabled={busy || !formData.phone}
+                                      title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
+                                      className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-sky-200 bg-white text-sky-700 text-sm font-medium hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:border-sky-500/40 dark:text-sky-300 dark:hover:bg-sky-500/10"
+                                    >
+                                      {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                      Apri e invia link al cliente
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </>
                           )}
 
@@ -5353,6 +5399,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                 {hasPermission('payments:full') && (
                                   <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={handleNotifyBill}
+                                      disabled={billActionLoading !== null || !formData.phone}
+                                      title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-sky-200 bg-white text-sky-700 text-[12px] font-medium hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:border-sky-500/40 dark:text-sky-300 dark:hover:bg-sky-500/10"
+                                    >
+                                      {billActionLoading === 'notify' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                      Invia link al cliente
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={handleCloseBill}

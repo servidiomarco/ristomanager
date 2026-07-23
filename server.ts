@@ -3260,6 +3260,92 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
     }
 });
 
+// Notifica al cliente il link del conto al tavolo. Idempotente rispetto
+// al bill (non ne crea di nuovi), ma NON idempotente sul canale: ogni
+// chiamata invia un nuovo messaggio, così il cameriere può "reinviare"
+// se il primo tentativo si è perso. La consegna è sincrona qui — a
+// differenza di /payments/requests — perché la UI mostra un toast
+// esplicito con il canale usato.
+app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
+            });
+        }
+
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
+
+        const resvRow = await queryWithRetry(
+            'SELECT id, customer_name, phone FROM reservations WHERE id = $1',
+            [id]
+        );
+        if (resvRow.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
+        const reservation = resvRow.rows[0];
+        if (!reservation.phone) {
+            return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
+        }
+
+        const billRow = await queryWithRetry(
+            `SELECT id, total_cents, covers, share_token, status
+             FROM table_bills
+             WHERE reservation_id = $1
+               AND status IN ('OPEN','LOCKED')
+             ORDER BY opened_at DESC
+             LIMIT 1`,
+            [id]
+        );
+        if (billRow.rowCount === 0) {
+            return res.status(404).json({ error: 'Nessun conto aperto per questa prenotazione' });
+        }
+        const bill = billRow.rows[0];
+        if (!bill.share_token) {
+            return res.status(409).json({ error: 'Il conto non ha un link pubblico attivo' });
+        }
+
+        const publicUrl = `${payAtTableBaseUrl()}/pay/${bill.share_token}`;
+        const message = buildTableBillLinkMessage(
+            reservation.customer_name,
+            Number(bill.total_cents),
+            Number(bill.covers) || 1,
+            publicUrl
+        );
+
+        try {
+            const delivery = await sendBookingConfirmation(reservation.phone, message, reservation.id);
+            if (req.user) {
+                LogService.logActivity(
+                    req.user.userId,
+                    req.user.email,
+                    req.user.email,
+                    ActivityAction.CREATE,
+                    ResourceType.RESERVATION,
+                    reservation.id,
+                    `${reservation.customer_name} — inviato link conto al tavolo (${delivery.channel})`
+                );
+            }
+            res.json({
+                ok: true,
+                bill_id: bill.id,
+                channel: delivery.channel,
+                provider_sid: delivery.sid || null,
+                public_url: publicUrl,
+            });
+        } catch (err: any) {
+            console.error('[bill:notify] delivery failed:', err?.message || err);
+            res.status(502).json({
+                error: 'delivery_failed',
+                message: err?.message || 'Invio del messaggio non riuscito',
+            });
+        }
+    } catch (err: any) {
+        console.error('POST /reservations/:id/bill/notify error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Chiude un bill (tipicamente perché è stato saldato al 100%, o perché
 // il cameriere forza la chiusura registrando l'incasso mancante come
 // contante/POS al tavolo). `cash_settled_cents` e `tip_cents` sono
@@ -4156,6 +4242,25 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
 // Format an amount in minor units as an Italian euro string ("€ 15,00").
 function formatEuroMinor(cents: number): string {
     return `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+}
+
+// Base URL where the SPA is served (the pay-at-table page lives at
+// {base}/pay/{token}). Read from CRM_APP_BASE_URL first so it can be
+// pointed at a preview/dev deploy; falls back to the production domain
+// so the flow works out of the box.
+function payAtTableBaseUrl(): string {
+    const raw = (process.env.CRM_APP_BASE_URL || 'https://crm.vecchiofrantoio.com').trim();
+    return raw.replace(/\/+$/, '');
+}
+
+// Message sent to the guest when the waiter forwards the pay-at-table
+// link from the reservation modal. Free-form (SMS or WhatsApp inside the
+// 24h window) because we don't have a Meta-approved template for this
+// flow yet — keep it short so a single SMS segment covers it.
+function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string): string {
+    const amount = formatEuroMinor(amountCents);
+    const coversLabel = covers === 1 ? '1 coperto' : `${covers} coperti`;
+    return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare al tavolo (${coversLabel} · totale ${amount}): ${url}\nGrazie!`;
 }
 
 // Compose the message we send to the customer with the Revolut checkout link.

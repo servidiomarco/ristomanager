@@ -89,6 +89,22 @@ class BillsApiService {
       body: JSON.stringify(payload),
     });
   }
+
+  // Server picks WhatsApp when a Meta-approved template is available and the
+  // customer is inside the 24h service window; otherwise falls back to SMS.
+  // The returned `channel` tells the UI which one was actually used.
+  async notifyBillLink(reservationId: number): Promise<{
+    ok: true;
+    bill_id: number;
+    channel: 'sms' | 'whatsapp' | string;
+    provider_sid: string | null;
+    public_url: string;
+  }> {
+    return apiRequest(`${API_URL}/reservations/${reservationId}/bill/notify`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
 }
 
 export const billsApiService = new BillsApiService();
