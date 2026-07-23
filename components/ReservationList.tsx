@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -597,6 +597,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billCoversInput, setBillCoversInput] = useState<string>('');
   const [billActionLoading, setBillActionLoading] = useState<'open' | 'close' | 'void' | null>(null);
   const [copiedBillUrl, setCopiedBillUrl] = useState(false);
+  // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
+  // Default false so we don't briefly flash the section before flags load.
+  const [payAtTableEnabled, setPayAtTableEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setPayAtTableEnabled(!!f.pay_at_table_enabled); })
+      .catch(() => { /* keep default false on error */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
@@ -1794,8 +1804,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Load the reservation's active bill (if any) when the modal opens in
   // edit mode. 404 → no active bill, so the form to open one is shown.
+  // Skipped entirely when the pay-at-table feature is off — the section
+  // won't render anyway and we avoid a wasted 403.
   useEffect(() => {
-    if (!isFormOpen || !isEditing || !formData.id) {
+    if (!isFormOpen || !isEditing || !formData.id || !payAtTableEnabled) {
       setBill(null);
       setBillTotalInput('');
       setBillCoversInput('');
@@ -1808,7 +1820,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       .catch(err => console.warn('[bill] load failed:', err?.message || err))
       .finally(() => { if (!cancelled) setBillLoading(false); });
     return () => { cancelled = true; };
-  }, [isFormOpen, isEditing, formData.id]);
+  }, [isFormOpen, isEditing, formData.id, payAtTableEnabled]);
 
   // Live bill events from the backend: apply only to the bill currently
   // displayed. Life-cycle events (opened/closed/voided) carry the TableBill
@@ -5193,8 +5205,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         </div>
                     </form>
 
-                    {/* Conto al tavolo (pay-at-table + split bill) — edit mode only */}
-                    {isEditing && formData.id && hasPermission('payments:view') && (
+                    {/* Conto al tavolo (pay-at-table + split bill) — edit mode only.
+                        Hidden entirely when the feature flag is off; the toggle
+                        lives in Settings → Conto al tavolo. */}
+                    {isEditing && formData.id && hasPermission('payments:view') && payAtTableEnabled && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
                         <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
                           <div className="flex items-center gap-2 mb-3">
