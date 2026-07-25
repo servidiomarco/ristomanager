@@ -48,12 +48,12 @@ const formatLocalDate = (date: Date): string => {
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
 
-// Nasconde la sezione conto-al-tavolo dentro il modal prenotazione anche
-// quando il feature flag backend è attivo. Interruttore lato client sopra
-// al feature flag: finché è `false` la sezione resta nascosta ai camerieri
-// pur tenendo raggiungibile l'endpoint QR. Rimettere `true` (o rimuovere il
-// gate) quando si vuole riesporre l'operatività.
-const PAY_AT_TABLE_UI_VISIBLE = false;
+// Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
+// sopra al feature flag backend `pay_at_table_enabled`: con entrambi attivi
+// la sezione compare in modalità edit per chi ha `payments:view`. Tenuto
+// come kill-switch rapido (già servito più volte) — mettere `false` per
+// nascondere l'operatività ai camerieri senza toccare l'endpoint QR.
+const PAY_AT_TABLE_UI_VISIBLE = true;
 
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
