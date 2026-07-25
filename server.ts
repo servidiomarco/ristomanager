@@ -9947,18 +9947,18 @@ function buildBookingDepositConfirmedTemplate(
     };
 }
 
-// Twilio template for the pay-at-table link. Media card:
-//   - Header image URL: baked into the template as
-//     https://ristomanager-production.up.railway.app/pay/{{1}}/qr.png
-//     because Twilio requires the Media URL field to be a valid URL
-//     literal (no full-URL placeholders). Meta re-fetches the URL for
-//     every send, so the QR endpoint must remain publicly reachable.
-//   - Body {{2}}..{{4}}: customer name, covers label, total.
-//   - CTA button URL hardcoded as https://crm.vecchiofrantoio.com/pay/{{5}}
-//     with {{5}} = share_token.
-// Both {{1}} and {{5}} carry only the share_token (never a full URL),
-// which is why we don't need publicAppBaseUrl() here — the backend
-// prefix is a template concern, not a runtime one.
+// Twilio templates for the pay-at-table link. Two shapes are supported so
+// we can switch as Meta approvals land:
+//   - CTA (preferred, `TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA`):
+//     twilio/call-to-action, body {{1}}..{{3}} (name, covers, total),
+//     button URL `https://crm.vecchiofrantoio.com/pay/{{4}}`.
+//     Body starts at {{1}} so Meta's positional body-var mapping matches
+//     Twilio's ContentVariables — the previous card template failed with
+//     63028 because body started at {{2}} (media occupied {{1}}).
+//   - QR card (`TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK`):
+//     twilio/card with media header + CTA. Reintroduces the QR image.
+//     Body still starts at {{1}}; media uses {{4}}, button uses {{5}}.
+// When both envs are set the CTA one wins.
 function templateCoversLabel(covers: number | null | undefined): string {
     const n = Math.max(1, Math.trunc(Number(covers) || 1));
     return `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
@@ -9969,16 +9969,31 @@ function buildTableBillLinkTemplate(
     amountCents: number,
     shareToken: string
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
-    if (!contentSid) return undefined;
     if (!shareToken) return undefined;
+    const name = templateName(customerName);
+    const coversLabel = templateCoversLabel(covers);
+    const total = formatEuroMinor(amountCents);
+    const ctaSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA;
+    if (ctaSid) {
+        return {
+            contentSid: ctaSid,
+            contentVariables: {
+                '1': name,
+                '2': coversLabel,
+                '3': total,
+                '4': shareToken,
+            },
+        };
+    }
+    const cardSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
+    if (!cardSid) return undefined;
     return {
-        contentSid,
+        contentSid: cardSid,
         contentVariables: {
-            '1': shareToken,
-            '2': templateName(customerName),
-            '3': templateCoversLabel(covers),
-            '4': formatEuroMinor(amountCents),
+            '1': name,
+            '2': coversLabel,
+            '3': total,
+            '4': shareToken,
             '5': shareToken,
         },
     };
