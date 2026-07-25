@@ -48,12 +48,12 @@ const formatLocalDate = (date: Date): string => {
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
 
-// Nasconde la sezione conto-al-tavolo dentro il modal prenotazione anche
-// quando il feature flag backend è attivo. Serve a tenere l'endpoint QR
-// raggiungibile durante l'approval Meta del template WhatsApp senza
-// esporre l'operatività ai camerieri finché il template non è live.
-// Rimettere `true` (o rimuovere il gate) quando il template è approved.
-const PAY_AT_TABLE_UI_VISIBLE = false;
+// Sezione conto-al-tavolo nel modal prenotazione. Il gate resta come
+// interruttore lato client sopra al feature flag backend: quando è `true`
+// la sezione compare se anche `pay_at_table_enabled` è attivo, permessi e
+// modalità edit sono soddisfatti. Il template WhatsApp è ora approvato,
+// quindi l'operatività è esposta ai camerieri.
+const PAY_AT_TABLE_UI_VISIBLE = true;
 
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
