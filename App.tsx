@@ -426,6 +426,12 @@ const App: React.FC = () => {
         accessibleViews.includes(preferred)
       ) {
         setView(preferred);
+        // Mirror the sidebar side-effect that clicking the nav item would
+        // trigger — so landing on Reception/Prenotazioni opens with a
+        // collapsed sidebar (max real estate for task-focused views).
+        const navItem = NAV_ITEMS.find(n => n.view === preferred);
+        if (navItem?.sidebarCollapse === true) setSidebarCollapsed(true);
+        else if (navItem?.sidebarCollapse === false) setSidebarCollapsed(false);
         appliedPreferredLandingRef.current = true;
         return;
       }
