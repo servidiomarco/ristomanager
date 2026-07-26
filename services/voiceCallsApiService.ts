@@ -207,6 +207,14 @@ class VoiceCallsApiService {
     });
   }
 
+  // Bulk: mark every call still awaiting follow-up as CONTACTED.
+  async markAllContacted(): Promise<{ updated: number }> {
+    return apiRequest(`${API_URL}/voice-calls/mark-all-contacted`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   async markPhantomRecovered(id: number): Promise<{
     id: number;
     phantom_confirmation: boolean;

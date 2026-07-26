@@ -767,6 +767,39 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     }
   }, [fetchItems]);
 
+  // Bulk "segna tutte come ricontattate": two-step confirm (first click arms
+  // the button, second within 4s executes) so a stray tap can't flip the
+  // whole queue. Result lands in the same message slot used by sync.
+  const [markingAll, setMarkingAll] = useState(false);
+  const [markAllArmed, setMarkAllArmed] = useState(false);
+  const markAllTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (markAllTimerRef.current) clearTimeout(markAllTimerRef.current); }, []);
+  const handleMarkAllContacted = useCallback(async () => {
+    if (!markAllArmed) {
+      setMarkAllArmed(true);
+      if (markAllTimerRef.current) clearTimeout(markAllTimerRef.current);
+      markAllTimerRef.current = setTimeout(() => setMarkAllArmed(false), 4000);
+      return;
+    }
+    if (markAllTimerRef.current) clearTimeout(markAllTimerRef.current);
+    setMarkAllArmed(false);
+    setMarkingAll(true);
+    setSyncMessage(null);
+    try {
+      const { updated } = await voiceCallsApiService.markAllContacted();
+      setSyncMessage(updated > 0
+        ? `${updated} conversazion${updated === 1 ? 'e segnata' : 'i segnate'} come ricontattat${updated === 1 ? 'a' : 'e'}`
+        : 'Nessuna conversazione da ricontattare');
+      await fetchItems();
+      onFollowUpChanged?.();
+    } catch (err) {
+      setSyncMessage(`Errore: ${(err as Error).message}`);
+    } finally {
+      setMarkingAll(false);
+      setTimeout(() => setSyncMessage(null), 5000);
+    }
+  }, [markAllArmed, fetchItems, onFollowUpChanged]);
+
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="space-y-4">
@@ -781,6 +814,19 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
             {syncMessage && (
               <span className="text-[12px] text-[var(--color-fg-muted)]">{syncMessage}</span>
             )}
+            <button
+              onClick={handleMarkAllContacted}
+              disabled={markingAll}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors disabled:opacity-50 ${
+                markAllArmed
+                  ? 'bg-amber-500 text-white border-amber-500 hover:bg-amber-600'
+                  : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+              title="Segna tutte le conversazioni in attesa come ricontattate"
+            >
+              {markingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {markAllArmed ? 'Confermi?' : 'Segna tutte ricontattate'}
+            </button>
             <button
               onClick={handleSync}
               disabled={syncing}

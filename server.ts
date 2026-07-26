@@ -11918,6 +11918,29 @@ app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (
     }
 });
 
+// Bulk: flip every call still awaiting follow-up (no linked reservation,
+// status NULL/PENDING) to CONTACTED in one shot. Powers the "segna tutte
+// come ricontattate" button in Conversazioni — returns how many rows
+// changed so the UI can report it. Declared before the `:id` routes.
+app.post('/voice-calls/mark-all-contacted', authenticate, voiceCallsAuthorize, async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `UPDATE voice_calls
+             SET follow_up_status = 'CONTACTED',
+                 follow_up_updated_by = $1,
+                 follow_up_updated_at = NOW()
+             WHERE reservation_id IS NULL
+               AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
+             RETURNING id`,
+            [req.user?.userId ?? null]
+        );
+        res.json({ updated: result.rows.length });
+    } catch (err) {
+        console.error('POST /voice-calls/mark-all-contacted error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Update follow-up state for a call: mark as contacted / pending, and store
 // free-text notes for whoever picks it up next. Fields are patched
 // individually — omitted fields stay as-is.
