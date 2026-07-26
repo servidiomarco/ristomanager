@@ -74,6 +74,7 @@ import { toTitleCase } from './utils/text.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
+    getOpeningHours,
     listClosures,
     formatSlotListItalian,
 } from './utils/slots.js';
@@ -5960,7 +5961,7 @@ const addDaysIso = (iso: string, days: number): string => {
     return d.toISOString().substring(0, 10);
 };
 
-async function runDailyBreadReminder(): Promise<void> {
+async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise<void> {
     const todayIso = getItalianTodayIso();
     const tomorrowIso = addDaysIso(todayIso, 1);
 
@@ -6003,17 +6004,23 @@ async function runDailyBreadReminder(): Promise<void> {
         LIMIT 1
     `, [BREAD_AUTO_KIND, tomorrowIso]);
 
+    // Upsert the todo record. Skip only if the todo already exists AND has
+    // been completed by the owner — in that case they've already acted on
+    // it and re-firing the notification would be spam.
+    let todoAlreadyDone = false;
     if (existing.rows.length > 0) {
         const todo = existing.rows[0];
-        // Don't overwrite a completed reminder — owner already acted on it
-        if (todo.completed) return;
-        const updated = await queryWithRetry(`
-            UPDATE todos
-            SET title = $1, description = $2
-            WHERE id = $3
-            RETURNING ${TODO_FULL_SELECT}
-        `, [title, description, todo.id]);
-        if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+        if (todo.completed) {
+            todoAlreadyDone = true;
+        } else {
+            const updated = await queryWithRetry(`
+                UPDATE todos
+                SET title = $1, description = $2
+                WHERE id = $3
+                RETURNING ${TODO_FULL_SELECT}
+            `, [title, description, todo.id]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+        }
     } else {
         const created = await queryWithRetry(`
             INSERT INTO todos (
@@ -6023,18 +6030,26 @@ async function runDailyBreadReminder(): Promise<void> {
             RETURNING ${TODO_FULL_SELECT}
         `, [title, description, tomorrowIso, BREAD_AUTO_KIND]);
         if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
-        if (created.rows[0]) {
-            pushSendToRoles(
-                ['OWNER'],
-                {
-                    category: 'system',
-                    title: 'Promemoria pane',
-                    body: title,
-                    url: '/?view=DASHBOARD',
-                    tag: `bread-${tomorrowIso}`,
-                }
-            ).catch(err => console.error('Push (bread reminder) failed:', err));
-        }
+    }
+
+    // Always fire the push (unless the todo is already completed): the push
+    // IS the reminder. Previously the push lived inside the INSERT branch,
+    // so if a prior tick had already created tomorrow's todo (e.g. after a
+    // deploy at midnight) the operator never got the notification when the
+    // reminder was actually scheduled to fire. Tag stays stable per day so
+    // the browser (and our notifications table) deduplicate on retries.
+    if (!todoAlreadyDone) {
+        const roles = (targetRoles && targetRoles.length > 0) ? targetRoles : ['OWNER'];
+        pushSendToRoles(
+            roles,
+            {
+                category: 'system',
+                title: 'Promemoria pane',
+                body: title,
+                url: '/?view=DASHBOARD',
+                tag: `bread-${tomorrowIso}`,
+            }
+        ).catch(err => console.error('Push (bread reminder) failed:', err));
     }
     console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
 }
@@ -6116,7 +6131,9 @@ const startBillSplitReconcileScheduler = () => {
 // their stored title/description verbatim.
 type ReminderHandler = (reminder: ReminderRow) => Promise<void>;
 const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
-    BREAD_DAILY: async () => { await runDailyBreadReminder(); },
+    // Forward the reminder's target_roles so the operator's Impostazioni
+    // choice ("Chi riceve?") is honoured by the system handler as well.
+    BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.target_roles); },
 };
 
 interface ReminderRow {
@@ -11151,7 +11168,10 @@ app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:ful
     if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
         return res.status(400).json({ error: 'invalid_weekday', message: 'weekday must be 0-6 (0=Sun)' });
     }
-    const { lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes } = req.body ?? {};
+    const {
+        lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes,
+        disabled_lunch_slots, disabled_dinner_slots,
+    } = req.body ?? {};
 
     const lo = validateHHMM(lunch_open);
     const lc = validateHHMM(lunch_close);
@@ -11171,28 +11191,75 @@ app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:ful
         return res.status(400).json({ error: 'invalid_slot_minutes', message: 'slot_minutes must be 5-240' });
     }
 
+    // Optional per-slot blacklist arrays. `undefined` = leave as-is; explicit
+    // array = full replace. Any invalid entry rejects the whole request.
+    const parseDisabled = (input: unknown): string[] | undefined | null => {
+        if (input === undefined) return undefined;
+        if (!Array.isArray(input)) return null;
+        const out = new Set<string>();
+        for (const raw of input) {
+            const v = validateHHMM(raw);
+            if (!v) return null;
+            out.add(v);
+        }
+        return Array.from(out);
+    };
+    const disabledLunch = parseDisabled(disabled_lunch_slots);
+    const disabledDinner = parseDisabled(disabled_dinner_slots);
+    if (disabledLunch === null || disabledDinner === null) {
+        return res.status(400).json({ error: 'invalid_disabled_slots', message: 'disabled slot arrays must contain HH:MM strings' });
+    }
+
+    const client = await pool.connect();
     try {
-        const result = await queryWithRetry(
+        await client.query('BEGIN');
+        const upd = await client.query(
             `UPDATE opening_hours
              SET lunch_open = $2::time, lunch_close = $3::time,
                  dinner_open = $4::time, dinner_close = $5::time,
                  slot_minutes = $6
-             WHERE weekday = $1
-             RETURNING weekday,
-                       to_char(lunch_open,  'HH24:MI') AS lunch_open,
-                       to_char(lunch_close, 'HH24:MI') AS lunch_close,
-                       to_char(dinner_open, 'HH24:MI') AS dinner_open,
-                       to_char(dinner_close,'HH24:MI') AS dinner_close,
-                       slot_minutes`,
+             WHERE weekday = $1`,
             [weekday, lo, lc, dorn, dc, step]
         );
-        if (result.rowCount === 0) {
+        if (upd.rowCount === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'not_found' });
         }
-        res.json(result.rows[0]);
+        if (disabledLunch !== undefined) {
+            await client.query(
+                `DELETE FROM opening_hours_disabled_slots WHERE weekday = $1 AND shift = 'LUNCH'`,
+                [weekday]
+            );
+            if (disabledLunch.length > 0) {
+                await client.query(
+                    `INSERT INTO opening_hours_disabled_slots (weekday, shift, slot_time)
+                     SELECT $1, 'LUNCH', unnest($2::text[])::time`,
+                    [weekday, disabledLunch]
+                );
+            }
+        }
+        if (disabledDinner !== undefined) {
+            await client.query(
+                `DELETE FROM opening_hours_disabled_slots WHERE weekday = $1 AND shift = 'DINNER'`,
+                [weekday]
+            );
+            if (disabledDinner.length > 0) {
+                await client.query(
+                    `INSERT INTO opening_hours_disabled_slots (weekday, shift, slot_time)
+                     SELECT $1, 'DINNER', unnest($2::text[])::time`,
+                    [weekday, disabledDinner]
+                );
+            }
+        }
+        await client.query('COMMIT');
+        const fresh = await getOpeningHours(weekday);
+        res.json(fresh);
     } catch (error) {
+        try { await client.query('ROLLBACK'); } catch {}
         console.error('Error updating opening_hours:', error);
         res.status(500).json({ error: 'Failed to update opening hours' });
+    } finally {
+        client.release();
     }
 });
 
