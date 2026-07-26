@@ -27,6 +27,7 @@ import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
+import { RemindersManager } from './components/RemindersManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
@@ -2118,6 +2119,15 @@ const App: React.FC = () => {
                   <ScheduledClosuresManager showToast={addToast} />
                 </div>
               </details>
+            </div>
+
+            {/* Promemoria — notifiche automatiche configurabili (una tantum,
+                giornaliere, settimanali, mensili). Include per default il
+                "Promemoria pane" che ora è modificabile ed eliminabile
+                come qualsiasi altro. */}
+            <div className="mb-8">
+              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Promemoria</h3>
+              <RemindersManager showToast={addToast} />
             </div>
 
             {/* Canali di prenotazione — collapsible per-channel cards: enable/disable

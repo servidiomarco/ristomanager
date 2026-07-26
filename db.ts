@@ -1505,6 +1505,70 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_notifications_tag ON notifications(recipient_user_id, tag) WHERE tag IS NOT NULL AND dismissed_at IS NULL;`);
 
         // ============================================
+        // REMINDERS — user-editable scheduled push notifications
+        // ============================================
+        // Powers the "Promemoria" section in Impostazioni. Every reminder is
+        // a schedule + a message + a set of recipient roles. The scheduler
+        // (startRemindersScheduler in server.ts) polls this table every 5
+        // minutes and fires the due rows. `system_key` lets a row hook into
+        // a hardcoded handler (e.g. BREAD_DAILY computes the daily bread
+        // quantity from the reservation coperti); when the handler exists
+        // the description is generated at fire time, otherwise the stored
+        // title/description are used verbatim.
+        //
+        // kind:
+        //   ONE_OFF   — fires on `schedule_date` at `schedule_time` then
+        //               is auto-deactivated (active=false) so it doesn't
+        //               re-fire tomorrow.
+        //   RECURRING — driven by `frequency`:
+        //                DAILY   → every day at schedule_time
+        //                WEEKLY  → on each weekday in `weekdays`
+        //                MONTHLY → on `month_day` of every month (1..28
+        //                          to avoid missing months with fewer days)
+        //
+        // schedule_time is HH:MM in Europe/Rome (the whole app uses local
+        // wall-clock semantics; scheduler compares against Italian time).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(200) NOT NULL,
+                description TEXT,
+                kind VARCHAR(20) NOT NULL CHECK (kind IN ('ONE_OFF', 'RECURRING')),
+                frequency VARCHAR(20) CHECK (frequency IS NULL OR frequency IN ('DAILY', 'WEEKLY', 'MONTHLY')),
+                schedule_time VARCHAR(5) NOT NULL,
+                schedule_date DATE,
+                weekdays TEXT[],
+                month_day INTEGER CHECK (month_day IS NULL OR (month_day >= 1 AND month_day <= 28)),
+                target_roles TEXT[] NOT NULL DEFAULT ARRAY['OWNER']::TEXT[],
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                system_key VARCHAR(50),
+                last_run_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_reminders_active ON reminders(active) WHERE active = TRUE;`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_reminders_system_key ON reminders(system_key) WHERE system_key IS NOT NULL;`);
+
+        // Seed the Bread reminder ONLY on first create — never re-insert if
+        // the operator has deleted it or edited its schedule. The row
+        // behaves like any other reminder (fully editable), but its
+        // system_key keys into the runDailyBreadReminder handler so the
+        // "N kg per M coperti" body stays auto-computed.
+        await client.query(`
+            INSERT INTO reminders
+                (title, description, kind, frequency, schedule_time, target_roles, active, system_key)
+            SELECT
+                'Promemoria pane',
+                'Calcola automaticamente i kg di pane per il giorno seguente in base ai coperti previsti.',
+                'RECURRING', 'DAILY', '20:00',
+                ARRAY['OWNER']::TEXT[], TRUE, 'BREAD_DAILY'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM reminders WHERE system_key = 'BREAD_DAILY'
+            );
+        `);
+
+        // ============================================
         // OPENING HOURS + SPECIAL CLOSURES
         // ============================================
         await client.query(`
@@ -1536,6 +1600,22 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_special_closures_date ON special_closures(date);`);
+
+        // Slot-level blacklist per weekday+shift. When the operator disabilita
+        // uno slot (es. 20:00 il sabato sera) l'ora sparisce da getAvailableSlots
+        // e quindi anche dal modal prenotazioni, /public/availability (usato da
+        // /prenota) e dalla validazione del webhook create-reservation
+        // dell'agente vocale. Regola ricorrente — per disabilitare uno slot
+        // solo per una data specifica, resta la strada di special_closures
+        // (che oggi ha granularità turno intero).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS opening_hours_disabled_slots (
+                weekday   SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+                shift     VARCHAR(10) NOT NULL CHECK (shift IN ('LUNCH','DINNER')),
+                slot_time TIME NOT NULL,
+                PRIMARY KEY (weekday, shift, slot_time)
+            );
+        `);
 
         // ============================================
         // FEATURE FLAGS (app_settings)

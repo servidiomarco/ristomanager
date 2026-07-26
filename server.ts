@@ -5938,15 +5938,15 @@ const BREAD_AUTO_KIND = 'BREAD_DAILY';
 const BREAD_TARGET_TZ = 'Europe/Rome';
 const BREAD_TRIGGER_HOUR = 20;
 
-const getItalianDateParts = (date: Date): { year: string; month: string; day: string; hour: string } => {
+const getItalianDateParts = (date: Date): { year: string; month: string; day: string; hour: string; minute: string } => {
     const fmt = new Intl.DateTimeFormat('en-CA', {
         timeZone: BREAD_TARGET_TZ,
         year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', hour12: false,
+        hour: '2-digit', minute: '2-digit', hour12: false,
     });
     const parts = fmt.formatToParts(date);
     const get = (t: string) => parts.find(p => p.type === t)?.value || '00';
-    return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour') };
+    return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute') };
 };
 
 const getItalianTodayIso = (date: Date = new Date()): string => {
@@ -6108,24 +6108,126 @@ const startBillSplitReconcileScheduler = () => {
     setInterval(tick, 60 * 1000);
 };
 
-let lastBreadRunIso: string | null = null;
-const startBreadReminderScheduler = () => {
+// Registry of hardcoded handlers for reminders that need dynamic content
+// (e.g. Pane computes kg from tomorrow's coperti at fire time). Keyed by
+// the `system_key` column; a reminder row with a matching key delegates
+// firing to the handler, so title/description edits in the UI don't
+// clobber the auto-computed body. Rows without a system_key just push
+// their stored title/description verbatim.
+type ReminderHandler = (reminder: ReminderRow) => Promise<void>;
+const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
+    BREAD_DAILY: async () => { await runDailyBreadReminder(); },
+};
+
+interface ReminderRow {
+    id: number;
+    title: string;
+    description: string | null;
+    kind: 'ONE_OFF' | 'RECURRING';
+    frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | null;
+    schedule_time: string;      // 'HH:MM'
+    schedule_date: string | null; // 'YYYY-MM-DD' (ONE_OFF)
+    weekdays: string[] | null;    // ['MON','TUE',...] (WEEKLY)
+    month_day: number | null;     // 1..28 (MONTHLY)
+    target_roles: string[];
+    active: boolean;
+    system_key: string | null;
+    last_run_at: Date | null;
+}
+
+const WEEKDAY_CODES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+
+// Decide if a reminder should fire NOW (current Italian time), given its
+// schedule + last_run_at. Returns true when:
+//   - schedule_time has already passed for today AND
+//   - the applicable day-of-week / day-of-month / date matches today AND
+//   - the reminder didn't already fire today
+// The "already fired today" check is what protects against re-firing at
+// every 5-min tick after the trigger hour.
+function isReminderDue(r: ReminderRow, now: Date): boolean {
+    const { year, month, day, hour, minute } = getItalianDateParts(now);
+    const todayIso = `${year}-${month}-${day}`;
+    const [schedH, schedM] = r.schedule_time.split(':').map(x => parseInt(x, 10));
+    if (!Number.isFinite(schedH) || !Number.isFinite(schedM)) return false;
+    const nowMinutes = parseInt(hour, 10) * 60 + parseInt(minute, 10);
+    const schedMinutes = schedH * 60 + schedM;
+    if (nowMinutes < schedMinutes) return false;
+
+    // Compare last_run_at as YYYY-MM-DD in Italian time — a fire earlier
+    // today (from a previous tick) means "already done".
+    if (r.last_run_at) {
+        const lastParts = getItalianDateParts(r.last_run_at);
+        if (`${lastParts.year}-${lastParts.month}-${lastParts.day}` === todayIso) return false;
+    }
+
+    if (r.kind === 'ONE_OFF') {
+        return r.schedule_date === todayIso;
+    }
+    // RECURRING
+    if (r.frequency === 'DAILY') return true;
+    if (r.frequency === 'WEEKLY') {
+        if (!r.weekdays || r.weekdays.length === 0) return false;
+        const dow = new Date(`${todayIso}T00:00:00Z`).getUTCDay();
+        return r.weekdays.includes(WEEKDAY_CODES[dow]);
+    }
+    if (r.frequency === 'MONTHLY') {
+        return r.month_day === parseInt(day, 10);
+    }
+    return false;
+}
+
+async function fireReminder(r: ReminderRow): Promise<void> {
+    const handler = r.system_key ? SYSTEM_REMINDER_HANDLERS[r.system_key] : undefined;
+    if (handler) {
+        await handler(r);
+    } else {
+        // Generic path: push the reminder's own title/description to the
+        // chosen target roles. Body falls back to title if description is
+        // empty so the push isn't rendered blank.
+        const roles = (r.target_roles && r.target_roles.length > 0) ? r.target_roles : ['OWNER'];
+        await pushSendToRoles(roles, {
+            category: 'system',
+            title: r.title,
+            body: r.description || r.title,
+            url: '/?view=DASHBOARD',
+            tag: `reminder-${r.id}-${new Date().toISOString().slice(0, 10)}`,
+        }).catch(err => console.error(`Reminder ${r.id} push failed:`, err));
+    }
+}
+
+const startRemindersScheduler = () => {
     const tick = async () => {
         try {
-            const { year, month, day, hour } = getItalianDateParts(new Date());
-            const todayItalian = `${year}-${month}-${day}`;
-            const hourNum = parseInt(hour, 10);
-            if (hourNum >= BREAD_TRIGGER_HOUR && lastBreadRunIso !== todayItalian) {
-                await runDailyBreadReminder();
-                lastBreadRunIso = todayItalian;
+            const result = await queryWithRetry(
+                `SELECT id, title, description, kind, frequency, schedule_time,
+                        to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
+                        weekdays, month_day, target_roles, active, system_key, last_run_at
+                 FROM reminders
+                 WHERE active = TRUE`
+            );
+            const now = new Date();
+            for (const row of result.rows as ReminderRow[]) {
+                if (!isReminderDue(row, now)) continue;
+                try {
+                    await fireReminder(row);
+                    await queryWithRetry(
+                        `UPDATE reminders
+                         SET last_run_at = CURRENT_TIMESTAMP,
+                             active = CASE WHEN kind = 'ONE_OFF' THEN FALSE ELSE active END,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $1`,
+                        [row.id]
+                    );
+                    console.log(`⏰ Reminder fired: #${row.id} "${row.title}" (kind=${row.kind}, system_key=${row.system_key ?? '-'})`);
+                } catch (err) {
+                    console.error(`Reminder #${row.id} fire failed:`, err);
+                }
             }
         } catch (err) {
-            console.error('Bread reminder scheduler error:', err);
+            console.error('Reminders scheduler error:', err);
         }
     };
-    // First check immediately (in case server started past 20:00 Italian time today)
     tick();
-    // Then poll every 5 minutes
     setInterval(tick, 5 * 60 * 1000);
 };
 
@@ -10885,6 +10987,155 @@ function validateHHMM(v: unknown): string | null {
     return v;
 }
 
+// ============================================
+// REMINDERS CRUD (Impostazioni → Promemoria)
+// ============================================
+// Roles allowed to edit: settings:full. Everyone sees the list because
+// the scheduler runs server-side regardless; write access is what's gated.
+
+const REMINDER_HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const REMINDER_KINDS = new Set(['ONE_OFF', 'RECURRING']);
+const REMINDER_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'MONTHLY']);
+const REMINDER_WEEKDAY_CODES_SET = new Set(WEEKDAY_CODES);
+const REMINDER_VALID_ROLES = new Set(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
+
+function normalizeReminderPayload(body: any): { ok: true; data: Omit<ReminderRow, 'id' | 'last_run_at'> } | { ok: false; error: string } {
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    if (!title || title.length > 200) return { ok: false, error: 'Titolo richiesto (max 200 caratteri)' };
+    const description = typeof body?.description === 'string' ? body.description.trim() : null;
+    const kind = String(body?.kind || '').toUpperCase();
+    if (!REMINDER_KINDS.has(kind)) return { ok: false, error: 'Tipo non valido (ONE_OFF o RECURRING)' };
+    const schedule_time = String(body?.schedule_time || '').trim();
+    if (!REMINDER_HHMM_RE.test(schedule_time)) return { ok: false, error: 'Orario non valido (HH:MM)' };
+
+    let frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | null = null;
+    let schedule_date: string | null = null;
+    let weekdays: string[] | null = null;
+    let month_day: number | null = null;
+
+    if (kind === 'ONE_OFF') {
+        const d = typeof body?.schedule_date === 'string' ? body.schedule_date.trim() : '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: 'Data richiesta per promemoria temporaneo (YYYY-MM-DD)' };
+        schedule_date = d;
+    } else {
+        const f = String(body?.frequency || '').toUpperCase();
+        if (!REMINDER_FREQUENCIES.has(f)) return { ok: false, error: 'Frequenza non valida per promemoria ricorrente' };
+        frequency = f as 'DAILY' | 'WEEKLY' | 'MONTHLY';
+        if (frequency === 'WEEKLY') {
+            const raw = Array.isArray(body?.weekdays) ? body.weekdays : [];
+            const norm = Array.from(new Set(raw.map((x: any) => String(x).toUpperCase()))).filter(x => REMINDER_WEEKDAY_CODES_SET.has(x as string)) as string[];
+            if (norm.length === 0) return { ok: false, error: 'Seleziona almeno un giorno della settimana' };
+            weekdays = norm;
+        }
+        if (frequency === 'MONTHLY') {
+            const n = parseInt(String(body?.month_day ?? ''), 10);
+            if (!Number.isFinite(n) || n < 1 || n > 28) return { ok: false, error: 'Giorno del mese non valido (1-28)' };
+            month_day = n;
+        }
+    }
+
+    const rawRoles = Array.isArray(body?.target_roles) ? body.target_roles : [];
+    const target_roles = Array.from(new Set(rawRoles.map((x: any) => String(x).toUpperCase()))).filter(x => REMINDER_VALID_ROLES.has(x as string)) as string[];
+    if (target_roles.length === 0) return { ok: false, error: 'Seleziona almeno un destinatario' };
+
+    const active = body?.active === undefined ? true : !!body.active;
+
+    return {
+        ok: true,
+        data: {
+            title, description, kind: kind as 'ONE_OFF' | 'RECURRING',
+            frequency, schedule_time, schedule_date, weekdays, month_day,
+            target_roles, active,
+            system_key: null, // system_key is never editable via the API
+        },
+    };
+}
+
+app.get('/reminders', authenticate, async (_req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT id, title, description, kind, frequency, schedule_time,
+                    to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
+                    weekdays, month_day, target_roles, active, system_key,
+                    last_run_at, created_at, updated_at
+             FROM reminders
+             ORDER BY active DESC, created_at DESC`
+        );
+        res.json({ reminders: r.rows });
+    } catch (err: any) {
+        console.error('GET /reminders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/reminders', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const parsed = normalizeReminderPayload(req.body || {});
+        if (parsed.ok === false) return res.status(400).json({ error: parsed.error });
+        const d = parsed.data;
+        const inserted = await queryWithRetry(
+            `INSERT INTO reminders
+                (title, description, kind, frequency, schedule_time,
+                 schedule_date, weekdays, month_day, target_roles, active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING id, title, description, kind, frequency, schedule_time,
+                       to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
+                       weekdays, month_day, target_roles, active, system_key,
+                       last_run_at, created_at, updated_at`,
+            [d.title, d.description, d.kind, d.frequency, d.schedule_time,
+             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active]
+        );
+        res.status(201).json(inserted.rows[0]);
+    } catch (err: any) {
+        console.error('POST /reminders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/reminders/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const parsed = normalizeReminderPayload(req.body || {});
+        if (parsed.ok === false) return res.status(400).json({ error: parsed.error });
+        const d = parsed.data;
+        // Preserve system_key across edits (never accepted from client, but
+        // an existing row may still be a system reminder like the Pane).
+        const updated = await queryWithRetry(
+            `UPDATE reminders
+             SET title = $1, description = $2, kind = $3, frequency = $4,
+                 schedule_time = $5, schedule_date = $6, weekdays = $7,
+                 month_day = $8, target_roles = $9, active = $10,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $11
+             RETURNING id, title, description, kind, frequency, schedule_time,
+                       to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
+                       weekdays, month_day, target_roles, active, system_key,
+                       last_run_at, created_at, updated_at`,
+            [d.title, d.description, d.kind, d.frequency, d.schedule_time,
+             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active, id]
+        );
+        if (updated.rows.length === 0) return res.status(404).json({ error: 'Reminder not found' });
+        res.json(updated.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /reminders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/reminders/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const r = await queryWithRetry('DELETE FROM reminders WHERE id = $1 RETURNING id', [id]);
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Reminder not found' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /reminders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/opening-hours', authenticate, async (_req, res) => {
     try {
         const rows = await getAllOpeningHours();
@@ -13965,8 +14216,8 @@ const startServer = async () => {
                         console.error('Banquet reminder backfill failed:', backfillErr);
                     }
                     try {
-                        startBreadReminderScheduler();
-                        console.log('✅ Daily bread reminder scheduler started (20:00 Europe/Rome)');
+                        startRemindersScheduler();
+                        console.log('✅ Reminders scheduler started (polls every 5 min, Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Bread reminder scheduler failed to start:', schedErr);
                     }
