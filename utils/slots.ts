@@ -16,6 +16,10 @@ export interface OpeningHoursRow {
     dinner_open: string | null;
     dinner_close: string | null;
     slot_minutes: number;
+    // Blacklist di slot HH:MM da nascondere per questo weekday+turno. Popolata
+    // da opening_hours_disabled_slots — vedi getAvailableSlots().
+    disabled_lunch_slots: string[];
+    disabled_dinner_slots: string[];
 }
 
 export interface SpecialClosureRow {
@@ -44,16 +48,32 @@ function generateSlots(open: string, close: string, stepMinutes: number): string
     return out;
 }
 
+// Aggregate disabled_slots per (weekday, shift). Doing this in SQL con
+// array_agg + FILTER evita una seconda query per ogni row di opening_hours.
+const OPENING_HOURS_SELECT = `
+    SELECT h.weekday,
+           to_char(h.lunch_open,  'HH24:MI') AS lunch_open,
+           to_char(h.lunch_close, 'HH24:MI') AS lunch_close,
+           to_char(h.dinner_open, 'HH24:MI') AS dinner_open,
+           to_char(h.dinner_close,'HH24:MI') AS dinner_close,
+           h.slot_minutes,
+           COALESCE(
+               array_agg(to_char(d.slot_time, 'HH24:MI') ORDER BY d.slot_time)
+                   FILTER (WHERE d.shift = 'LUNCH'),
+               '{}'
+           ) AS disabled_lunch_slots,
+           COALESCE(
+               array_agg(to_char(d.slot_time, 'HH24:MI') ORDER BY d.slot_time)
+                   FILTER (WHERE d.shift = 'DINNER'),
+               '{}'
+           ) AS disabled_dinner_slots
+    FROM opening_hours h
+    LEFT JOIN opening_hours_disabled_slots d ON d.weekday = h.weekday
+`;
+
 export async function getOpeningHours(weekday: number): Promise<OpeningHoursRow | null> {
     const result = await queryWithRetry(
-        `SELECT weekday,
-                to_char(lunch_open,  'HH24:MI') AS lunch_open,
-                to_char(lunch_close, 'HH24:MI') AS lunch_close,
-                to_char(dinner_open, 'HH24:MI') AS dinner_open,
-                to_char(dinner_close,'HH24:MI') AS dinner_close,
-                slot_minutes
-         FROM opening_hours
-         WHERE weekday = $1`,
+        `${OPENING_HOURS_SELECT} WHERE h.weekday = $1 GROUP BY h.weekday`,
         [weekday]
     );
     return result.rows[0] ?? null;
@@ -61,14 +81,7 @@ export async function getOpeningHours(weekday: number): Promise<OpeningHoursRow 
 
 export async function getAllOpeningHours(): Promise<OpeningHoursRow[]> {
     const result = await queryWithRetry(
-        `SELECT weekday,
-                to_char(lunch_open,  'HH24:MI') AS lunch_open,
-                to_char(lunch_close, 'HH24:MI') AS lunch_close,
-                to_char(dinner_open, 'HH24:MI') AS dinner_open,
-                to_char(dinner_close,'HH24:MI') AS dinner_close,
-                slot_minutes
-         FROM opening_hours
-         ORDER BY weekday ASC`
+        `${OPENING_HOURS_SELECT} GROUP BY h.weekday ORDER BY h.weekday ASC`
     );
     return result.rows;
 }
@@ -116,7 +129,10 @@ export async function getAvailableSlots(date: string, shift: Shift): Promise<str
 
     if (await isShiftClosed(date, shift)) return [];
 
-    return generateSlots(open, close, hours.slot_minutes);
+    const disabled = new Set(
+        shift === Shift.LUNCH ? hours.disabled_lunch_slots : hours.disabled_dinner_slots
+    );
+    return generateSlots(open, close, hours.slot_minutes).filter(s => !disabled.has(s));
 }
 
 export async function isValidSlotForShift(time: string, date: string, shift: Shift): Promise<boolean> {

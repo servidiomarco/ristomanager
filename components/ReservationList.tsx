@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -43,6 +43,46 @@ const formatLocalDate = (date: Date): string => {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+};
+
+// Client-side mirror of utils/slots.ts::generateSlots. Kept small so the
+// modal dropdown + arrival heatmap can derive the slot list without
+// round-tripping to the backend.
+const generateSlotList = (open: string | null, close: string | null, stepMinutes: number): string[] => {
+  if (!open || !close || !Number.isFinite(stepMinutes) || stepMinutes <= 0) return [];
+  const [oh, om] = open.split(':').map(Number);
+  const [ch, cm] = close.split(':').map(Number);
+  const startMin = oh * 60 + om;
+  const endMin = ch * 60 + cm;
+  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin < startMin) return [];
+  const out: string[] = [];
+  for (let m = startMin; m <= endMin; m += stepMinutes) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }
+  return out;
+};
+
+const LEGACY_LUNCH_SLOTS = ['13:00', '13:30', '14:00'];
+const LEGACY_DINNER_SLOTS = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
+
+// Derives the allowed HH:MM slot list for a given ISO date + shift given the
+// opening-hours config. Applies both per-weekday hours and the disabled-slot
+// blacklist. Falls back to the historic hardcoded list when opening_hours
+// hasn't loaded yet, so the modal always has *something* usable.
+const getSlotsForDateShift = (
+  isoDate: string | null | undefined,
+  shift: Shift | null | undefined,
+  openingHours: OpeningHoursRow[],
+): string[] => {
+  const legacy = shift === Shift.LUNCH ? LEGACY_LUNCH_SLOTS : LEGACY_DINNER_SLOTS;
+  if (!isoDate || !shift || openingHours.length === 0) return legacy;
+  const weekday = new Date(isoDate + 'T00:00:00').getDay();
+  const row = openingHours.find(r => r.weekday === weekday);
+  if (!row) return [];
+  const open = shift === Shift.LUNCH ? row.lunch_open : row.dinner_open;
+  const close = shift === Shift.LUNCH ? row.lunch_close : row.dinner_close;
+  const disabled = new Set(shift === Shift.LUNCH ? row.disabled_lunch_slots : row.disabled_dinner_slots);
+  return generateSlotList(open, close, row.slot_minutes).filter(s => !disabled.has(s));
 };
 
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
@@ -615,6 +655,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; };
   }, []);
 
+  // Opening hours drive the reservation-modal time dropdown and the arrival
+  // heatmap. Fetched once on mount — the SettingsPage save flow invalidates
+  // by full page reload today, so no live refresh needed here.
+  const [openingHours, setOpeningHours] = useState<OpeningHoursRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getOpeningHours()
+      .then(rows => { if (!cancelled) setOpeningHours(rows); })
+      .catch(() => { /* empty list = fallback to legacy hardcoded slots */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
   const [outboundMessages, setOutboundMessages] = useState<OutboundMessage[]>([]);
@@ -1030,12 +1082,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Thresholds scale with total dining-room seats so the coloring adapts to
   // restaurants of different sizes; fall back to fixed numbers if tables
   // haven't loaded yet.
+  // Slot list for the reservation-form's current date+shift. Filters
+  // opening_hours + disabled slots so operator-side choices match /prenota
+  // and the voice-agent's `check-availability` output.
+  const formSlots = useMemo(() => {
+    const date = formData.reservation_time?.split('T')[0] ?? null;
+    return getSlotsForDateShift(date, formData.shift, openingHours);
+  }, [formData.reservation_time, formData.shift, openingHours]);
+
   const slotArrivalStats = useMemo(() => {
     if (!formData.reservation_time || !formData.shift) return null;
     const date = formData.reservation_time.split('T')[0];
-    const slots = formData.shift === Shift.LUNCH
-      ? ['13:00', '13:30', '14:00']
-      : ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
+    const slots = formSlots;
+    if (slots.length === 0) return null;
     const totals = new Map<string, number>(slots.map(s => [s, 0]));
     for (const r of reservations) {
       if (r.id === (formData as Reservation).id) continue;
@@ -1061,7 +1120,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       else level = 'high';
       return { time, guests, level };
     });
-  }, [reservations, tables, formData.reservation_time, formData.shift, (formData as Reservation).id]);
+  }, [reservations, tables, formData.reservation_time, formData.shift, (formData as Reservation).id, formSlots]);
 
   // Refresh merges from the server. Used after local merge/split actions so
   // the originating client updates immediately even when the socket is offline.
@@ -4370,25 +4429,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
                                             }}
                                         >
-                                            {formData.shift === Shift.LUNCH ? (
-                                                <>
-                                                    <option value="13:00">13:00</option>
-                                                    <option value="13:30">13:30</option>
-                                                    <option value="14:00">14:00</option>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <option value="19:30">19:30</option>
-                                                    <option value="20:00">20:00</option>
-                                                    <option value="20:30">20:30</option>
-                                                    <option value="21:00">21:00</option>
-                                                    <option value="21:30">21:30</option>
-                                                    <option value="22:00">22:00</option>
-                                                    <option value="22:30">22:30</option>
-                                                    <option value="23:00">23:00</option>
-                                                    <option value="23:30">23:30</option>
-                                                </>
-                                            )}
+                                            {(() => {
+                                                // Keep the currently-selected time visible even if it's
+                                                // been disabled since the reservation was created — so
+                                                // editing an existing row doesn't silently blank the field.
+                                                const current = formData.reservation_time?.split('T')[1]?.substring(0, 5) || '';
+                                                const options = [...formSlots];
+                                                if (current && !options.includes(current)) options.push(current);
+                                                options.sort();
+                                                if (options.length === 0) {
+                                                    return <option value="" disabled>Nessuno slot disponibile</option>;
+                                                }
+                                                return options.map(s => <option key={s} value={s}>{s}</option>);
+                                            })()}
                                         </select>
                                     </div>
                                 </div>

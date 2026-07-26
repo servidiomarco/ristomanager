@@ -31,6 +31,31 @@ function formatItalianDate(iso: string): string {
     }
 }
 
+// Mirror of utils/slots.ts::generateSlots. Kept as a small pure helper so the
+// checkbox grid stays a client-only concern (no round-trip needed while the
+// operator edits open/close/step).
+function generateSlots(open: string | null, close: string | null, stepMinutes: number): string[] {
+    if (!open || !close || !Number.isFinite(stepMinutes) || stepMinutes <= 0) return [];
+    const [oh, om] = open.split(':').map(Number);
+    const [ch, cm] = close.split(':').map(Number);
+    const startMin = oh * 60 + om;
+    const endMin = ch * 60 + cm;
+    if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin < startMin) return [];
+    const out: string[] = [];
+    for (let m = startMin; m <= endMin; m += stepMinutes) {
+        out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+    }
+    return out;
+}
+
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+    if (a.length !== b.length) return false;
+    const sa = [...a].sort();
+    const sb = [...b].sort();
+    for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
+    return true;
+}
+
 export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
@@ -80,7 +105,9 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 d.lunch_close !== orig.lunch_close ||
                 d.dinner_open !== orig.dinner_open ||
                 d.dinner_close !== orig.dinner_close ||
-                d.slot_minutes !== orig.slot_minutes
+                d.slot_minutes !== orig.slot_minutes ||
+                !arraysEqual(d.disabled_lunch_slots ?? [], orig.disabled_lunch_slots ?? []) ||
+                !arraysEqual(d.disabled_dinner_slots ?? [], orig.disabled_dinner_slots ?? [])
             ) dirty.add(orig.weekday);
         });
         return dirty;
@@ -96,17 +123,42 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
         }));
     };
 
+    const toggleDisabledSlot = (weekday: number, shift: Shift, slot: string) => {
+        setDrafts(prev => {
+            const draft = prev[weekday];
+            if (!draft) return prev;
+            const key = shift === Shift.LUNCH ? 'disabled_lunch_slots' : 'disabled_dinner_slots';
+            const current = new Set(draft[key] ?? []);
+            if (current.has(slot)) current.delete(slot);
+            else current.add(slot);
+            return {
+                ...prev,
+                [weekday]: { ...draft, [key]: Array.from(current).sort() },
+            };
+        });
+    };
+
     const handleSave = async (weekday: number) => {
         const draft = drafts[weekday];
         if (!draft) return;
         setSavingWeekday(weekday);
         try {
+            // Prune disabled entries that no longer belong to the generated
+            // slot grid (open/close/step may have shrunk since they were
+            // toggled). Keeps the persisted set tidy and defensive.
+            const lunchSlots = new Set(generateSlots(draft.lunch_open, draft.lunch_close, draft.slot_minutes));
+            const dinnerSlots = new Set(generateSlots(draft.dinner_open, draft.dinner_close, draft.slot_minutes));
+            const disabledLunch = (draft.disabled_lunch_slots ?? []).filter(s => lunchSlots.has(s));
+            const disabledDinner = (draft.disabled_dinner_slots ?? []).filter(s => dinnerSlots.has(s));
+
             const updated = await updateOpeningHours(weekday, {
                 lunch_open: draft.lunch_open,
                 lunch_close: draft.lunch_close,
                 dinner_open: draft.dinner_open,
                 dinner_close: draft.dinner_close,
                 slot_minutes: draft.slot_minutes,
+                disabled_lunch_slots: disabledLunch,
+                disabled_dinner_slots: disabledDinner,
             });
             setHours(prev => prev.map(r => r.weekday === weekday ? updated : r));
             setDrafts(prev => ({ ...prev, [weekday]: updated }));
@@ -268,6 +320,71 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         className="w-20 rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
                                     />
                                 </div>
+                                {(() => {
+                                    const lunchSlots = generateSlots(d.lunch_open, d.lunch_close, d.slot_minutes);
+                                    const dinnerSlots = generateSlots(d.dinner_open, d.dinner_close, d.slot_minutes);
+                                    if (lunchSlots.length === 0 && dinnerSlots.length === 0) return null;
+                                    const disabledLunch = new Set(d.disabled_lunch_slots ?? []);
+                                    const disabledDinner = new Set(d.disabled_dinner_slots ?? []);
+                                    const renderChip = (slot: string, shift: Shift, disabled: boolean) => {
+                                        const enabled = !disabled;
+                                        const base = 'text-[11px] font-medium rounded px-1.5 py-0.5 border transition-colors';
+                                        const on = shift === Shift.LUNCH
+                                            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-500/40'
+                                            : 'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-500/20 dark:text-indigo-200 dark:border-indigo-500/40';
+                                        const off = 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-line)] line-through opacity-60';
+                                        return (
+                                            <button
+                                                key={`${shift}-${slot}`}
+                                                type="button"
+                                                disabled={!canEdit}
+                                                onClick={() => toggleDisabledSlot(weekday, shift, slot)}
+                                                title={enabled ? 'Disattiva slot' : 'Riattiva slot'}
+                                                className={`${base} ${enabled ? on : off} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                                            >
+                                                {slot}
+                                            </button>
+                                        );
+                                    };
+                                    return (
+                                        <div className="mt-2 pt-2 border-t border-[var(--color-line)]">
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[11px] font-semibold text-[var(--color-fg-muted)] uppercase tracking-wide">
+                                                    Slot prenotabili
+                                                </span>
+                                                <span className="text-[10px] text-[var(--color-fg-muted)]">
+                                                    Clicca per attivare/disattivare
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <div>
+                                                    <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300 mb-1 uppercase tracking-wide">
+                                                        <Sun className="h-2.5 w-2.5" /> Pranzo
+                                                    </div>
+                                                    {lunchSlots.length === 0 ? (
+                                                        <p className="text-[11px] text-[var(--color-fg-muted)] italic">Turno non attivo</p>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {lunchSlots.map(s => renderChip(s, Shift.LUNCH, disabledLunch.has(s)))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-1 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1 uppercase tracking-wide">
+                                                        <Moon className="h-2.5 w-2.5" /> Cena
+                                                    </div>
+                                                    {dinnerSlots.length === 0 ? (
+                                                        <p className="text-[11px] text-[var(--color-fg-muted)] italic">Turno non attivo</p>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {dinnerSlots.map(s => renderChip(s, Shift.DINNER, disabledDinner.has(s)))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         );
                     })}

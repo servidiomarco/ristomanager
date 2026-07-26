@@ -698,6 +698,8 @@ export interface OpeningHoursRow {
   dinner_open: string | null;
   dinner_close: string | null;
   slot_minutes: number;
+  disabled_lunch_slots: string[];
+  disabled_dinner_slots: string[];
 }
 
 export interface SpecialClosure {
