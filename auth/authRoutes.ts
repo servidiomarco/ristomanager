@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { AuthService } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
-import { UserRole } from '../types.js';
+import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 
@@ -131,9 +131,10 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
 
     const { preferred_landing_view } = req.body as { preferred_landing_view?: string | null };
 
-    // Validate against the known view enum so we don't store junk that the
-    // client would silently ignore on next login.
-    const allowedViews = ['DASHBOARD', 'FLOOR_PLAN', 'MENU', 'RESERVATIONS', 'STAFF', 'CLIENTI', 'INVENTARIO', 'USERS', 'SETTINGS'];
+    // Validate against the ViewState enum so this stays in sync with the
+    // frontend automatically — the previous static list drifted (missing
+    // RECEPTION, HACCP, PAGAMENTI…) and rejected legitimate choices.
+    const allowedViews = Object.values(ViewState) as string[];
     if (preferred_landing_view !== null && preferred_landing_view !== undefined && !allowedViews.includes(preferred_landing_view)) {
       return res.status(400).json({ error: 'Invalid preferred_landing_view' });
     }
