@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, CalendarOff, Plus, Save, Trash2, Loader2, Sun, Moon } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { Shift } from '../types';
@@ -72,6 +72,12 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
     const [newReason, setNewReason] = useState('');
     const [addingClosure, setAddingClosure] = useState(false);
 
+    // Mount-only fetch. `showToast` from App re-renders frequently (not
+    // memoized) — including it in the deps re-fired this effect on every
+    // parent update, flashing the loader over the content. Route the toast
+    // via ref so we always call the latest callback without re-running load.
+    const showToastRef = useRef(showToast);
+    useEffect(() => { showToastRef.current = showToast; });
     useEffect(() => {
         let cancelled = false;
         const load = async () => {
@@ -86,14 +92,14 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 setDrafts(draft);
                 setClosures(c);
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento orari', 'error');
+                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento orari', 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
         };
         load();
         return () => { cancelled = true; };
-    }, [showToast]);
+    }, []);
 
     const dirtyWeekdays = useMemo(() => {
         const dirty = new Set<number>();
