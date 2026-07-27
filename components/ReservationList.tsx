@@ -93,7 +93,7 @@ const OVERDUE_SNOOZE_MIN = 15;
 // la sezione compare in modalità edit per chi ha `payments:view`. Tenuto
 // come kill-switch rapido (già servito più volte) — mettere `false` per
 // nascondere l'operatività ai camerieri senza toccare l'endpoint QR.
-const PAY_AT_TABLE_UI_VISIBLE = false;
+const PAY_AT_TABLE_UI_VISIBLE = true;
 
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
