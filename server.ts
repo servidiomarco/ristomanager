@@ -10074,9 +10074,13 @@ function buildBookingDepositConfirmedTemplate(
 //     Body starts at {{1}} so Meta's positional body-var mapping matches
 //     Twilio's ContentVariables — the previous card template failed with
 //     63028 because body started at {{2}} (media occupied {{1}}).
-//   - QR card (`TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK`):
-//     twilio/card with media header + CTA. Reintroduces the QR image.
-//     Body still starts at {{1}}; media uses {{4}}, button uses {{5}}.
+//   - QR card (`TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK`, template
+//     `table_bill_link_qr_v2`): twilio/card with media header + CTA.
+//     Body {{1}}..{{3}}; media is `https://<railway>/{{4}}` where {{4}} is
+//     the WHOLE path `pay/<token>/qr.png` — Twilio requires the media
+//     variable to be the trailing suffix of the URL and to carry the file
+//     extension; a variable mid-URL (the v1 shape) fails at send with 63028
+//     even when the template is approved. Button uses {{5}} (token only).
 // When both envs are set the CTA one wins.
 function templateCoversLabel(covers: number | null | undefined): string {
     const n = Math.max(1, Math.trunc(Number(covers) || 1));
@@ -10112,7 +10116,7 @@ function buildTableBillLinkTemplate(
             '1': name,
             '2': coversLabel,
             '3': total,
-            '4': shareToken,
+            '4': `pay/${shareToken}/qr.png`,
             '5': shareToken,
         },
     };
