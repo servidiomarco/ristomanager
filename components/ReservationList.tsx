@@ -1933,6 +1933,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     socket.on('bill:split-paid', onSplitEvent);
     socket.on('bill:split-released', onSplitEvent);
     socket.on('bill:split-abandoned', onSplitEvent);
+    socket.on('bill:split-refunded', onSplitEvent);
     socket.on('bill:settled', onSettled);
     return () => {
       socket.off('bill:opened', onOpened);
@@ -1942,6 +1943,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       socket.off('bill:split-paid', onSplitEvent);
       socket.off('bill:split-released', onSplitEvent);
       socket.off('bill:split-abandoned', onSplitEvent);
+      socket.off('bill:split-refunded', onSplitEvent);
       socket.off('bill:settled', onSettled);
     };
   }, [socket, isFormOpen, isEditing, formData.id]);
@@ -1994,6 +1996,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(err?.message || 'Invio del link non riuscito', 'error');
     } finally {
       setBillActionLoading(null);
+    }
+  };
+
+  // Refund di una quota (PR 6): il bottone chiede conferma al secondo tap.
+  const [refundConfirmSplitId, setRefundConfirmSplitId] = useState<number | null>(null);
+  const [refundingSplitId, setRefundingSplitId] = useState<number | null>(null);
+  const handleRefundSplit = async (splitId: number) => {
+    if (refundConfirmSplitId !== splitId) {
+      setRefundConfirmSplitId(splitId);
+      return;
+    }
+    setRefundConfirmSplitId(null);
+    setRefundingSplitId(splitId);
+    try {
+      const result = await billsApiService.refundSplit(splitId);
+      if (formData.id) {
+        const fresh = await billsApiService.getBill(formData.id as number).catch(() => null);
+        setBill(fresh);
+      }
+      showToast(result.reopened ? 'Quota rimborsata, conto riaperto' : 'Quota rimborsata', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Rimborso non riuscito', 'error');
+    } finally {
+      setRefundingSplitId(null);
     }
   };
 
@@ -5450,6 +5476,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                               {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
                                             </span>
                                             <span className="text-[12px] font-medium tabular-nums">€ {eur}</span>
+                                            {s.status === 'PAID' && hasPermission('payments:full') && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleRefundSplit(s.id)}
+                                                onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
+                                                disabled={refundingSplitId !== null}
+                                                title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
+                                                className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-[10px] font-semibold shrink-0 transition-colors disabled:opacity-50 ${
+                                                  refundConfirmSplitId === s.id
+                                                    ? 'bg-rose-600 text-white hover:bg-rose-700'
+                                                    : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15'
+                                                }`}
+                                              >
+                                                {refundingSplitId === s.id
+                                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                                  : <RotateCcw className="h-3 w-3" />}
+                                                {refundConfirmSplitId === s.id && 'Confermi?'}
+                                              </button>
+                                            )}
                                           </li>
                                         );
                                       })}

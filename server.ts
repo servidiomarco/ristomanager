@@ -26,6 +26,7 @@ import {
     isRevolutConfigured,
     createOrder as revolutCreateOrder,
     cancelOrder as revolutCancelOrder,
+    refundOrder as revolutRefundOrder,
     getOrder as revolutGetOrder,
     verifyWebhookSignature as verifyRevolutWebhook,
     getRevolutConfigStatus,
@@ -3507,6 +3508,112 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
     }
 });
 
+// PR 6 — rimborso di una quota. Copre due casi:
+//   a) split PAID normale: refund Revolut, split → REFUNDED, e se il conto
+//      era SETTLED riapre (OPEN) per l'importo rimborsato;
+//   b) overpayment (split ABANDONED ma pagamento COMPLETED, il caso del
+//      checkout completato dopo la scadenza del claim): refund Revolut e
+//      marcatura REFUNDED, il conto non si tocca perché la quota non
+//      contribuiva al saldo.
+// Il refund parte PRIMA della scrittura DB: se Revolut fallisce non
+// cambiamo nulla; se la scrittura fallisse dopo, i log Revolut restano la
+// fonte di verità e un retry dell'endpoint è idempotente lato nostro
+// (lo split non è più in stato rimborsabile).
+app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const splitId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(splitId)) return res.status(400).json({ error: 'Invalid split id' });
+
+        const rs = await queryWithRetry(
+            `SELECT s.id, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
+                    b.status AS bill_status, b.reservation_id, b.total_cents,
+                    pr.id AS payment_request_id, pr.status AS pr_status, pr.provider, pr.provider_order_id
+             FROM table_bill_splits s
+             JOIN table_bills b ON b.id = s.table_bill_id
+             LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
+             WHERE s.id = $1`,
+            [splitId]
+        );
+        if (rs.rowCount === 0) return res.status(404).json({ error: 'Quota non trovata' });
+        const row = rs.rows[0];
+
+        const prPaid = ['COMPLETED', 'PAID'].includes(String(row.pr_status || '').toUpperCase());
+        const refundablePaid = row.split_status === 'PAID';
+        const refundableOverpaid = row.split_status === 'ABANDONED' && prPaid;
+        if (!refundablePaid && !refundableOverpaid) {
+            return res.status(409).json({ error: `La quota non è rimborsabile (stato ${row.split_status})` });
+        }
+        if (row.provider !== 'revolut' || !row.provider_order_id) {
+            return res.status(409).json({ error: 'Nessun ordine Revolut collegato alla quota' });
+        }
+
+        await revolutRefundOrder(
+            row.provider_order_id,
+            row.amount_cents,
+            `Rimborso quota${row.claimant_label ? ' ' + row.claimant_label : ''} - conto #${row.table_bill_id}`
+        );
+
+        const updSplit = await queryWithRetry(
+            `UPDATE table_bill_splits
+             SET status = 'REFUNDED', released_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id, table_bill_id, amount_cents`,
+            [splitId]
+        );
+        let updatedPr: any = null;
+        if (row.payment_request_id) {
+            const prUpd = await queryWithRetry(
+                `UPDATE payment_requests
+                 SET status = 'REFUNDED', updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1
+                 RETURNING *`,
+                [row.payment_request_id]
+            );
+            updatedPr = prUpd.rows[0] || null;
+        }
+
+        // Il conto torna incassabile per la parte rimborsata solo se la
+        // quota contava nel saldo (caso a) e il conto era SETTLED.
+        let reopened = false;
+        if (refundablePaid && row.bill_status === 'SETTLED') {
+            const billUpd = await queryWithRetry(
+                `UPDATE table_bills SET status = 'OPEN', closed_at = NULL
+                 WHERE id = $1 AND status = 'SETTLED'
+                 RETURNING *`,
+                [row.table_bill_id]
+            );
+            reopened = (billUpd.rowCount ?? 0) > 0;
+            if (reopened && socketService) {
+                try { socketService.broadcastToAll('bill:opened', billUpd.rows[0]); } catch (_) {}
+            }
+        }
+
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) {
+            try {
+                socketService.broadcastToAll('bill:split-refunded', {
+                    bill_id: row.table_bill_id, split_id: splitId, amount_cents: row.amount_cents,
+                }, socketId);
+                if (updatedPr) socketService.broadcastToAll('paymentRequest:updated', updatedPr);
+            } catch (_) {}
+        }
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION,
+                row.reservation_id,
+                `Rimborsata quota ${formatEuroMinor(row.amount_cents)}${row.claimant_label ? ' di ' + row.claimant_label : ''} (conto #${row.table_bill_id}${reopened ? ', conto riaperto' : ''})`
+            );
+        }
+
+        res.json({ ok: true, split_id: splitId, bill_id: row.table_bill_id, reopened });
+    } catch (err: any) {
+        console.error('POST /bills/splits/:id/refund error:', err);
+        res.status(502).json({ error: 'Rimborso non riuscito', detail: err?.message });
+    }
+});
+
 
 // ============================================
 // PUBLIC PAY-AT-TABLE (no auth, share_token gated)
@@ -4423,6 +4530,7 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
                     r.reservation_status AS reservation_status,
+                    pr.table_bill_split_id AS table_bill_split_id,
                     tbs.table_bill_id AS table_bill_id,
                     tbs.claimant_label AS claimant_label,
                     tb.total_cents AS bill_total_cents,

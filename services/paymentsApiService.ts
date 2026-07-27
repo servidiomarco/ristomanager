@@ -40,6 +40,7 @@ export interface PaymentRequest {
   reservation_status: string | null;
   // Pay-at-table: set only when the payment comes from a bill split. The
   // table name is the REAL number shown in the room, not the internal id.
+  table_bill_split_id: number | null;
   table_bill_id: number | null;
   claimant_label: string | null;
   bill_total_cents: number | null;

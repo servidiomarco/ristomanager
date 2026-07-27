@@ -223,6 +223,41 @@ export async function cancelOrder(orderId: string): Promise<RevolutOrder> {
     return (parsed && typeof parsed === 'object' ? parsed : { id: orderId, state: 'CANCELLED' }) as RevolutOrder;
 }
 
+// POST /api/orders/{id}/refund — sends money back to the customer for a
+// COMPLETED order. Amount is in minor units and may be partial; we only ever
+// refund whole splits, so callers pass the split's amount_cents verbatim.
+export async function refundOrder(orderId: string, amountMinor: number, description?: string): Promise<any> {
+    const config = await getConfig();
+    if (!config.apiKey) {
+        throw new Error('Revolut is not configured (API key missing)');
+    }
+
+    const response = await fetch(`${config.apiBase}/api/orders/${encodeURIComponent(orderId)}/refund`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${config.apiKey}`,
+            'Revolut-Api-Version': config.apiVersion,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+            amount: Math.round(amountMinor),
+            description: description || undefined,
+        }),
+    });
+
+    const text = await response.text();
+    let parsed: any;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+
+    if (!response.ok) {
+        console.error('[Revolut] refundOrder failed', response.status, parsed);
+        throw new Error(`Revolut refundOrder ${response.status}: ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
+    }
+
+    return parsed;
+}
+
 // GET /api/orders/{id} — retrieves the authoritative state of an order. Used
 // by the manual reconciliation endpoint when a webhook was missed (e.g. an
 // order created before the webhook endpoint existed, or a delivery Revolut

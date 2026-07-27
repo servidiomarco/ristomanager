@@ -90,6 +90,14 @@ class BillsApiService {
     });
   }
 
+  /** Refunds a paid split via Revolut; the bill reopens if it was SETTLED. */
+  async refundSplit(splitId: number): Promise<{ ok: true; split_id: number; bill_id: number; reopened: boolean }> {
+    return apiRequest(`${API_URL}/bills/splits/${splitId}/refund`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   // Server picks WhatsApp when a Meta-approved template is available and the
   // customer is inside the 24h service window; otherwise falls back to SMS.
   // The returned `channel` tells the UI which one was actually used.

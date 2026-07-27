@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CreditCard, Search, X, Loader2, Calendar, Clock, AlertCircle, Filter,
   ExternalLink, MessageSquare, MessageCircle, Mail, Users as UsersIcon,
-  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw, Armchair, Receipt,
+  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw, Armchair, Receipt, RotateCcw,
 } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
+import { billsApiService } from '../services/billsApiService';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonPaymentList } from './SkeletonCards';
 import {
@@ -53,6 +54,8 @@ const paymentStatusView = (status: string | null | undefined): StatusView => {
       return { label: 'Annullato', cls: 'bg-slate-100 text-slate-700 ring-slate-200', Icon: Ban };
     case 'EXPIRED':
       return { label: 'Scaduto', cls: 'bg-slate-100 text-slate-600 ring-slate-200', Icon: Ban };
+    case 'REFUNDED':
+      return { label: 'Rimborsato', cls: 'bg-violet-50 text-violet-700 ring-violet-200', Icon: RotateCcw };
     default:
       return { label: s || 'Sconosciuto', cls: 'bg-slate-100 text-slate-700 ring-slate-200', Icon: AlertCircle };
   }
@@ -104,6 +107,8 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
   const [copied, setCopied] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [reconcileFeedback, setReconcileFeedback] = useState<{ kind: 'ok' | 'info' | 'err'; text: string } | null>(null);
+  const [refundArmed, setRefundArmed] = useState(false);
+  const [refunding, setRefunding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +144,32 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
     hasPermission('payments:full') &&
     payment.provider === 'revolut' &&
     !!payment.provider_order_id;
+
+  // Refund of a bill-split payment (PR 6). Two-tap confirm, then the server
+  // refunds via Revolut and reopens the bill if it was settled. Covers the
+  // overpayment case too (payment completed after the claim was abandoned).
+  const canRefund =
+    hasPermission('payments:full') &&
+    payment.table_bill_split_id != null &&
+    ['COMPLETED', 'PAID'].includes((payment.status || '').toUpperCase());
+
+  const refund = async () => {
+    if (!refundArmed) { setRefundArmed(true); return; }
+    setRefundArmed(false);
+    setRefunding(true);
+    setReconcileFeedback(null);
+    try {
+      const result = await billsApiService.refundSplit(payment.table_bill_split_id as number);
+      const updated = { ...payment, status: 'REFUNDED' };
+      setPayment(updated);
+      onReconciled?.(updated);
+      setReconcileFeedback({ kind: 'ok', text: result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito' });
+    } catch (err) {
+      setReconcileFeedback({ kind: 'err', text: (err as Error).message });
+    } finally {
+      setRefunding(false);
+    }
+  };
 
   const reconcile = async () => {
     if (reconciling) return;
@@ -214,6 +245,24 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
                       ? <Loader2 className="h-3 w-3 animate-spin" />
                       : <RefreshCw className="h-3 w-3" />}
                     {reconciling ? 'Riconcilio…' : 'Riconcilia'}
+                  </button>
+                )}
+                {canRefund && (
+                  <button
+                    onClick={refund}
+                    onBlur={() => setRefundArmed(false)}
+                    disabled={refunding}
+                    className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                      refundArmed
+                        ? 'bg-rose-600 text-white hover:bg-rose-700'
+                        : 'border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:hover:bg-rose-500/10'
+                    }`}
+                    title={refundArmed ? 'Clicca di nuovo per confermare' : 'Rimborsa la quota via Revolut'}
+                  >
+                    {refunding
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <RotateCcw className="h-3 w-3" />}
+                    {refunding ? 'Rimborso…' : refundArmed ? 'Confermi il rimborso?' : 'Rimborsa'}
                   </button>
                 )}
               </div>
