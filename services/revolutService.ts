@@ -190,6 +190,39 @@ export async function createOrder(input: RevolutCreateOrderInput): Promise<Revol
     return parsed as RevolutOrder;
 }
 
+// POST /api/orders/{id}/cancel — voids a not-yet-paid order so its hosted
+// checkout stops accepting payment. Vital when a bill-split claim expires:
+// without this the customer can keep the checkout tab open past our TTL and
+// pay a share that has already been re-claimed by someone else (overpayment).
+// Throws on non-2xx EXCEPT when Revolut refuses because the order is already
+// in a terminal state — callers must re-getOrder and reconcile in that case.
+export async function cancelOrder(orderId: string): Promise<RevolutOrder> {
+    const config = await getConfig();
+    if (!config.apiKey) {
+        throw new Error('Revolut is not configured (API key missing)');
+    }
+
+    const response = await fetch(`${config.apiBase}/api/orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${config.apiKey}`,
+            'Revolut-Api-Version': config.apiVersion,
+            'Accept': 'application/json',
+        },
+    });
+
+    const text = await response.text();
+    let parsed: any;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+
+    if (!response.ok) {
+        console.error('[Revolut] cancelOrder failed', response.status, parsed);
+        throw new Error(`Revolut cancelOrder ${response.status}: ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
+    }
+
+    return (parsed && typeof parsed === 'object' ? parsed : { id: orderId, state: 'CANCELLED' }) as RevolutOrder;
+}
+
 // GET /api/orders/{id} — retrieves the authoritative state of an order. Used
 // by the manual reconciliation endpoint when a webhook was missed (e.g. an
 // order created before the webhook endpoint existed, or a delivery Revolut

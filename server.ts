@@ -25,6 +25,7 @@ import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, send
 import {
     isRevolutConfigured,
     createOrder as revolutCreateOrder,
+    cancelOrder as revolutCancelOrder,
     getOrder as revolutGetOrder,
     verifyWebhookSignature as verifyRevolutWebhook,
     getRevolutConfigStatus,
@@ -4722,7 +4723,7 @@ async function applyBillSplitTransition(
     if (event === 'ORDER_COMPLETED') {
         if (!isFirstCompletion) return;
 
-        const upd = await queryWithRetry(
+        let upd = await queryWithRetry(
             `UPDATE table_bill_splits
              SET status = 'PAID', paid_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'CLAIMED'
@@ -4730,9 +4731,38 @@ async function applyBillSplitTransition(
             [splitId]
         );
         if (upd.rowCount === 0) {
-            // Split may already be PAID (webhook replayed) or was
-            // released/refunded before payment landed — nothing to do.
-            return;
+            // Not CLAIMED anymore. If the claim was ABANDONED but the guest
+            // paid anyway (checkout kept open past the TTL), the money IS
+            // collected: resurrect the split when the bill still has room —
+            // the sum trigger rejects the UPDATE if it doesn't.
+            try {
+                upd = await queryWithRetry(
+                    `UPDATE table_bill_splits
+                     SET status = 'PAID', paid_at = CURRENT_TIMESTAMP
+                     WHERE id = $1 AND status = 'ABANDONED'
+                     RETURNING id`,
+                    [splitId]
+                );
+            } catch (resErr: any) {
+                // Trigger refused: capacity was re-claimed and paid by
+                // someone else → this is a real overpayment. Make it loud:
+                // the staff must refund it by hand (until the dedicated
+                // refund endpoint lands).
+                console.error('[bill-split] OVERPAYMENT: split', splitId, 'paid after abandon, bill', billId, 'has no capacity left:', resErr?.message);
+                pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+                    category: 'payment',
+                    title: 'Pagamento in eccesso da rimborsare',
+                    body: `${formatEuroMinor(amount)} pagati su un conto già saldato (conto #${billId}). Serve un rimborso manuale da Revolut.`,
+                    url: `/?view=PAGAMENTI`,
+                    tag: `bill-overpaid-${splitId}`,
+                }, { excludeUserId: null }).catch(() => {});
+                return;
+            }
+            if (upd.rowCount === 0) {
+                // Already PAID (webhook replay) or RELEASED/REFUNDED —
+                // nothing to do.
+                return;
+            }
         }
 
         try {
@@ -6143,15 +6173,47 @@ const startBillSplitReconcileScheduler = () => {
                         if (evt) {
                             await applyRevolutOrderTransition(orderId, evt);
                             handled = true;
+                        } else {
+                            // Order still payable (PENDING/AUTHORISED-ish).
+                            // CANCEL it before freeing the capacity: an
+                            // abandoned claim with a live checkout lets the
+                            // guest pay a share someone else re-claims →
+                            // double incasso (successo davvero, conto #12).
+                            try {
+                                await revolutCancelOrder(orderId);
+                                await applyRevolutOrderTransition(orderId, 'ORDER_CANCELLED');
+                                handled = true;
+                            } catch (cancelErr: any) {
+                                // Cancel refused: maybe it completed in the
+                                // race window. Re-read and apply the truth;
+                                // if Revolut is unreachable keep the claim —
+                                // next tick retries. NEVER free capacity
+                                // while a payable order is out there.
+                                try {
+                                    const fresh = await revolutGetOrder(orderId);
+                                    const freshEvt = revolutStateToEvent(fresh.state);
+                                    if (freshEvt) {
+                                        await applyRevolutOrderTransition(orderId, freshEvt);
+                                    } else {
+                                        console.warn('[bill-reconcile] cancel failed, order still', fresh.state, '— will retry split', row.split_id);
+                                    }
+                                } catch (_) {
+                                    console.warn('[bill-reconcile] cancel+refetch failed for split', row.split_id, cancelErr?.message || cancelErr);
+                                }
+                                handled = true; // retried next tick; don't fall through to blind ABANDON
+                            }
                         }
                     } catch (err: any) {
+                        // Revolut unreachable: keep the claim and retry next
+                        // tick rather than abandoning with a live checkout.
                         console.warn('[bill-reconcile] getOrder failed for split', row.split_id, err?.message || err);
+                        handled = true;
                     }
                 }
 
-                // Fallback: if we couldn't reach Revolut, or there's no
-                // linked order (Revolut createOrder had failed at claim
-                // time), give up on the reservation and free capacity.
+                // Fallback: only for splits with NO linked order (Revolut
+                // createOrder had failed at claim time) — nothing payable
+                // exists, so freeing the capacity is safe.
                 if (!handled) {
                     const upd = await queryWithRetry(
                         `UPDATE table_bill_splits
