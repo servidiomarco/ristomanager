@@ -3526,7 +3526,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
 
         const rs = await queryWithRetry(
             `SELECT s.id, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
-                    b.status AS bill_status, b.reservation_id, b.total_cents,
+                    b.status AS bill_status, b.reservation_id, b.total_cents, b.currency,
                     pr.id AS payment_request_id, pr.status AS pr_status, pr.provider, pr.provider_order_id
              FROM table_bill_splits s
              JOIN table_bills b ON b.id = s.table_bill_id
@@ -3550,6 +3550,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         await revolutRefundOrder(
             row.provider_order_id,
             row.amount_cents,
+            row.currency || 'EUR',
             `Rimborso quota${row.claimant_label ? ' ' + row.claimant_label : ''} - conto #${row.table_bill_id}`
         );
 

@@ -226,7 +226,7 @@ export async function cancelOrder(orderId: string): Promise<RevolutOrder> {
 // POST /api/orders/{id}/refund — sends money back to the customer for a
 // COMPLETED order. Amount is in minor units and may be partial; we only ever
 // refund whole splits, so callers pass the split's amount_cents verbatim.
-export async function refundOrder(orderId: string, amountMinor: number, description?: string): Promise<any> {
+export async function refundOrder(orderId: string, amountMinor: number, currency: string, description?: string): Promise<any> {
     const config = await getConfig();
     if (!config.apiKey) {
         throw new Error('Revolut is not configured (API key missing)');
@@ -242,6 +242,7 @@ export async function refundOrder(orderId: string, amountMinor: number, descript
         },
         body: JSON.stringify({
             amount: Math.round(amountMinor),
+            currency,
             description: description || undefined,
         }),
     });
