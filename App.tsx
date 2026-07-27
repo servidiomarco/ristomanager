@@ -50,6 +50,7 @@ import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
 import { messagesApiService } from './services/messagesApiService';
+import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
@@ -334,6 +335,48 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeNotifications, view]);
+
+  // Pagamenti badge — paid-but-not-yet-seen payments. Live via the payment
+  // socket events (webhook completions land without any user action) plus
+  // 'payments:seen' so opening the page on one device clears every sidebar.
+  const [paymentsUnseenCount, setPaymentsUnseenCount] = useState(0);
+  const canSeePayments = canAccessView(ViewState.PAGAMENTI);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeePayments) return;
+    let cancelled = false;
+    const refresh = () => {
+      paymentsApiService.unseenCount()
+        .then(({ count }) => { if (!cancelled) setPaymentsUnseenCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const onEvent = () => refresh();
+    let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attachedSocket === s) return;
+      if (attachedSocket) {
+        attachedSocket.off('paymentRequest:updated', onEvent);
+        attachedSocket.off('paymentRequest:created', onEvent);
+        attachedSocket.off('payments:seen', onEvent);
+      }
+      attachedSocket = s;
+      if (attachedSocket) {
+        attachedSocket.on('paymentRequest:updated', onEvent);
+        attachedSocket.on('paymentRequest:created', onEvent);
+        attachedSocket.on('payments:seen', onEvent);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      unsubSocket();
+      attach(null);
+    };
+  }, [isAuthenticated, canSeePayments, view]);
 
   // Global date/shift state — drives the header control group on desktop
   const [globalDate, setGlobalDate] = useState<Date>(new Date());
@@ -1556,6 +1599,7 @@ const App: React.FC = () => {
                         : item.view === ViewState.MESSAGGI ? messagesUnreadCount
                         : item.view === ViewState.EMAIL ? emailUnreadCount
                         : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
+                        : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
                         : undefined
                       }
                     />
@@ -2455,6 +2499,7 @@ const App: React.FC = () => {
                           : item.view === ViewState.MESSAGGI ? messagesUnreadCount
                           : item.view === ViewState.EMAIL ? emailUnreadCount
                           : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
+                          : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
                           : 0;
                         return (
                         <button

@@ -4417,9 +4417,17 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
                     r.phone AS reservation_phone,
                     r.reservation_time AS reservation_time,
                     r.guests AS reservation_guests,
-                    r.reservation_status AS reservation_status
+                    r.reservation_status AS reservation_status,
+                    tbs.table_bill_id AS table_bill_id,
+                    tbs.claimant_label AS claimant_label,
+                    tb.total_cents AS bill_total_cents,
+                    tb.status AS bill_status,
+                    t.name AS table_name
              FROM payment_requests pr
              LEFT JOIN reservations r ON r.id = pr.reservation_id
+             LEFT JOIN table_bill_splits tbs ON tbs.id = pr.table_bill_split_id
+             LEFT JOIN table_bills tb ON tb.id = tbs.table_bill_id
+             LEFT JOIN tables t ON t.id = tb.table_id
              ${whereSql}
              ORDER BY pr.created_at DESC
              LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -4443,6 +4451,44 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
     } catch (err: any) {
         console.error('GET /payments error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Badge sidebar "Pagamenti": conta gli incassi (COMPLETED/PAID) non ancora
+// visti. La colonna seen_at viene marcata da /payments/mark-seen quando
+// l'operatore apre la pagina — così il conteggio è condiviso tra dispositivi
+// (a differenza di un last-seen in localStorage).
+app.get('/payments/unseen-count', authenticate, requirePermission('payments:view'), async (_req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT COUNT(*)::int AS count
+             FROM payment_requests
+             WHERE upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL`
+        );
+        res.json({ count: result.rows[0]?.count ?? 0 });
+    } catch (err: any) {
+        console.error('GET /payments/unseen-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Marca visti SOLO i pagati: un PENDING che si completa più tardi deve poter
+// tornare a far salire il badge.
+app.post('/payments/mark-seen', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `UPDATE payment_requests SET seen_at = NOW()
+             WHERE upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL
+             RETURNING id`
+        );
+        if (result.rows.length > 0) {
+            const socketId = req.headers['x-socket-id'] as string;
+            if (socketService) socketService.broadcastToAll('payments:seen', { count: result.rows.length }, socketId);
+        }
+        res.json({ marked: result.rows.length });
+    } catch (err: any) {
+        console.error('POST /payments/mark-seen error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

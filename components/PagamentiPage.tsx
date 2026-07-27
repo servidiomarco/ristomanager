@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CreditCard, Search, X, Loader2, Calendar, Clock, AlertCircle, Filter,
   ExternalLink, MessageSquare, MessageCircle, Mail, Users as UsersIcon,
-  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw,
+  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw, Armchair, Receipt,
 } from 'lucide-react';
+import { socketClient } from '../services/socketClient';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonPaymentList } from './SkeletonCards';
 import {
@@ -242,6 +243,25 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
             </div>
           </div>
 
+          {payment.table_bill_id != null && (
+            <div className="rounded-xl border border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-500/10 p-3">
+              <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0 flex-wrap">
+                <Armchair className="h-4 w-4 text-sky-600 shrink-0" />
+                <span className="font-medium">
+                  {payment.table_name ? `Tavolo ${payment.table_name}` : `Conto #${payment.table_bill_id}`}
+                </span>
+                {payment.claimant_label && (
+                  <span className="text-[var(--color-fg-muted)]">· quota di {toTitleCase(payment.claimant_label)}</span>
+                )}
+                {payment.bill_total_cents != null && payment.bill_total_cents > 0 && (
+                  <span className="text-[12px] text-[var(--color-fg-muted)] tabular ml-auto">
+                    conto {formatEuro(payment.bill_total_cents)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {payment.reservation_id != null && (
             <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
               <div className="flex items-center justify-between gap-2">
@@ -442,6 +462,44 @@ const PagamentiPage: React.FC = () => {
     fetchItems();
   }, [fetchItems]);
 
+  // The operator is looking at the list: clear the sidebar badge. Re-marked
+  // after every live refresh so payments landing while the page is open
+  // don't pile up as "unseen".
+  useEffect(() => {
+    if (!loading) paymentsApiService.markSeen().catch(() => {});
+  }, [loading, items]);
+
+  // Live refresh: any payment created/updated (webhook, reconcile, altro
+  // dispositivo) refetches the list. Debounced so a burst of split payments
+  // triggers one request.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const onEvent = () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = setTimeout(() => { fetchItems(); }, 400);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('paymentRequest:created', onEvent);
+        attached.off('paymentRequest:updated', onEvent);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('paymentRequest:created', onEvent);
+        attached.on('paymentRequest:updated', onEvent);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      unsub();
+      attach(null);
+    };
+  }, [fetchItems]);
+
   const hasActiveFilters = statusFilter !== 'all' || !!from || !!to || !!searchDebounced.trim();
   const resetAll = () => {
     setStatusFilter('all');
@@ -467,6 +525,26 @@ const PagamentiPage: React.FC = () => {
     { v: 'failed', l: 'Falliti', dot: 'bg-rose-500' },
     { v: 'expired', l: 'Scaduti', dot: 'bg-slate-400' },
   ] as const;
+
+  // Split payments of the same table bill render as one visual group: the
+  // group takes the list position of its most recent payment (list is
+  // created_at DESC), standalone payments flow through untouched.
+  const grouped = useMemo(() => {
+    const byBill = new Map<number, PaymentRequest[]>();
+    const order: Array<{ billId: number | null; items: PaymentRequest[] }> = [];
+    for (const p of items) {
+      if (p.table_bill_id != null) {
+        const existing = byBill.get(p.table_bill_id);
+        if (existing) { existing.push(p); continue; }
+        const arr = [p];
+        byBill.set(p.table_bill_id, arr);
+        order.push({ billId: p.table_bill_id, items: arr });
+      } else {
+        order.push({ billId: null, items: [p] });
+      }
+    }
+    return order;
+  }, [items]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -594,71 +672,130 @@ const PagamentiPage: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-2">
-            {items.map(item => {
-              const status = paymentStatusView(item.status);
-              const StatusIcon = status.Icon;
-              const resBadge = reservationStatusBadge(item.reservation_status);
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setSelected(item)}
-                  className="w-full text-left bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 hover:border-[var(--color-line-strong)] hover:shadow-sm transition-all"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <CreditCard className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
-                          {formatEuro(item.amount_cents, item.currency)}
-                          {item.reservation_customer_name && (
-                            <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.reservation_customer_name)}</span>
+            {grouped.map(group => {
+              const renderRow = (item: PaymentRequest, inGroup: boolean) => {
+                const status = paymentStatusView(item.status);
+                const StatusIcon = status.Icon;
+                const resBadge = reservationStatusBadge(item.reservation_status);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelected(item)}
+                    className={`w-full text-left p-3 md:p-4 transition-all ${
+                      inGroup
+                        ? 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                        : 'bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] hover:border-[var(--color-line-strong)] hover:shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CreditCard className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
+                            {formatEuro(item.amount_cents, item.currency)}
+                            {inGroup && item.claimant_label ? (
+                              <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.claimant_label)}</span>
+                            ) : item.reservation_customer_name && (
+                              <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.reservation_customer_name)}</span>
+                            )}
+                          </span>
+                          {item.reservation_phone && !inGroup && (
+                            <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
+                              {item.reservation_phone}
+                            </span>
                           )}
+                        </div>
+                        <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${status.cls}`}>
+                          <StatusIcon className="h-3 w-3" />
+                          {status.label}
                         </span>
-                        {item.reservation_phone && (
-                          <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
-                            {item.reservation_phone}
+                        {!inGroup && item.table_name && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-sky-50 text-sky-700 ring-sky-200">
+                            <Armchair className="h-3 w-3" /> Tavolo {item.table_name}
+                          </span>
+                        )}
+                        {resBadge && !inGroup && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
+                            Prenotaz.: {resBadge.label}
                           </span>
                         )}
                       </div>
-                      <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${status.cls}`}>
-                        <StatusIcon className="h-3 w-3" />
-                        {status.label}
-                      </span>
-                      {resBadge && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
-                          Prenotaz.: {resBadge.label}
+                      <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] shrink-0">
+                        {item.delivery_channel && (
+                          <span className="inline-flex items-center gap-1 capitalize">
+                            {(() => {
+                              const ch = channelView(item.delivery_channel);
+                              const ChIcon = ch.Icon;
+                              return <ChIcon className="h-3 w-3" />;
+                            })()}
+                            {item.delivery_channel}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1 tabular">
+                          <Clock className="h-3 w-3" />
+                          {formatDateTime(item.created_at)}
                         </span>
-                      )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] shrink-0">
-                      {item.delivery_channel && (
-                        <span className="inline-flex items-center gap-1 capitalize">
-                          {(() => {
-                            const ch = channelView(item.delivery_channel);
-                            const ChIcon = ch.Icon;
-                            return <ChIcon className="h-3 w-3" />;
-                          })()}
-                          {item.delivery_channel}
+                    {item.description && !inGroup && (
+                      <p className="text-[13px] text-[var(--color-fg-muted)] mt-2 line-clamp-1">
+                        {item.description}
+                      </p>
+                    )}
+                    {item.delivery_error && (
+                      <p className="text-[12px] text-rose-600 mt-1 inline-flex items-start gap-1">
+                        <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                        Consegna fallita: {item.delivery_error}
+                      </p>
+                    )}
+                  </button>
+                );
+              };
+
+              if (group.billId == null) return renderRow(group.items[0], false);
+
+              // Grouped bill: header with table + progress, rows separated by
+              // hairlines inside one bordered container.
+              const first = group.items[0];
+              const paidCents = group.items.reduce((s, p) => {
+                const st = (p.status || '').toUpperCase();
+                return s + ((st === 'COMPLETED' || st === 'PAID') ? p.amount_cents : 0);
+              }, 0);
+              const billTotal = first.bill_total_cents || 0;
+              const pct = billTotal > 0 ? Math.min(100, Math.round(paidCents / billTotal * 100)) : 0;
+              return (
+                <div key={`bill-${group.billId}`} className="bg-[var(--color-surface)] rounded-xl border border-sky-200 dark:border-sky-500/30 overflow-hidden">
+                  <div className="px-3 md:px-4 py-2.5 bg-sky-50/60 dark:bg-sky-500/10 border-b border-sky-100 dark:border-sky-500/20">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0 text-[13px]">
+                        <Receipt className="h-4 w-4 text-sky-600 shrink-0" />
+                        <span className="font-semibold text-[var(--color-fg)]">
+                          {first.table_name ? `Tavolo ${first.table_name}` : `Conto #${group.billId}`}
                         </span>
-                      )}
-                      <span className="inline-flex items-center gap-1 tabular">
-                        <Clock className="h-3 w-3" />
-                        {formatDateTime(item.created_at)}
-                      </span>
+                        {first.reservation_customer_name && (
+                          <span className="text-[var(--color-fg-muted)] truncate">· {toTitleCase(first.reservation_customer_name)}</span>
+                        )}
+                        <span className="text-[11px] text-[var(--color-fg-muted)]">
+                          · {group.items.length} pagament{group.items.length === 1 ? 'o' : 'i'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[12px] shrink-0">
+                        <span className="tabular text-[var(--color-fg-muted)]">
+                          <strong className="text-emerald-700 dark:text-emerald-400">{formatEuro(paidCents)}</strong>
+                          {billTotal > 0 && <> / {formatEuro(billTotal)}</>}
+                        </span>
+                        {billTotal > 0 && (
+                          <div className="w-20 h-1.5 rounded-full bg-[var(--color-line)] overflow-hidden">
+                            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  {item.description && (
-                    <p className="text-[13px] text-[var(--color-fg-muted)] mt-2 line-clamp-1">
-                      {item.description}
-                    </p>
-                  )}
-                  {item.delivery_error && (
-                    <p className="text-[12px] text-rose-600 mt-1 inline-flex items-start gap-1">
-                      <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                      Consegna fallita: {item.delivery_error}
-                    </p>
-                  )}
-                </button>
+                  <div className="divide-y divide-[var(--color-line)]">
+                    {group.items.map(p => renderRow(p, true))}
+                  </div>
+                </div>
               );
             })}
           </div>

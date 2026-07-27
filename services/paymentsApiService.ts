@@ -38,6 +38,13 @@ export interface PaymentRequest {
   reservation_time: string | null;
   reservation_guests: number | null;
   reservation_status: string | null;
+  // Pay-at-table: set only when the payment comes from a bill split. The
+  // table name is the REAL number shown in the room, not the internal id.
+  table_bill_id: number | null;
+  claimant_label: string | null;
+  bill_total_cents: number | null;
+  bill_status: string | null;
+  table_name: string | null;
 }
 
 export interface PaymentsListResponse {
@@ -155,6 +162,21 @@ class PaymentsApiService {
 
   async reconcile(id: number): Promise<PaymentReconcileResponse> {
     return apiRequest<PaymentReconcileResponse>(`${API_URL}/payments/${id}/reconcile`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
+  /** Paid payments nobody has looked at yet — feeds the sidebar badge. */
+  async unseenCount(): Promise<{ count: number }> {
+    return apiRequest<{ count: number }>(`${API_URL}/payments/unseen-count`, {
+      headers: getHeaders(),
+    });
+  }
+
+  /** Marks every currently-paid payment as seen (server-side, all devices). */
+  async markSeen(): Promise<{ marked: number }> {
+    return apiRequest<{ marked: number }>(`${API_URL}/payments/mark-seen`, {
       method: 'POST',
       headers: getHeaders(),
     });

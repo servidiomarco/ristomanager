@@ -572,6 +572,24 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_payment_requests_split ON payment_requests(table_bill_split_id) WHERE table_bill_split_id IS NOT NULL;`);
 
+        // Badge "nuovi pagamenti" in sidebar: un pagamento COMPLETED/PAID con
+        // seen_at NULL è "non visto". La pagina Pagamenti marca tutto visto
+        // all'apertura. Backfill una tantum dentro lo stesso DO $$ (guardato
+        // dall'esistenza della colonna) così al primo deploy il badge parte
+        // da zero invece di contare tutto lo storico.
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'payment_requests' AND column_name = 'seen_at'
+                ) THEN
+                    ALTER TABLE payment_requests ADD COLUMN seen_at TIMESTAMPTZ;
+                    UPDATE payment_requests SET seen_at = NOW();
+                END IF;
+            END $$;
+        `);
+
         // Invariante cross-row: la somma dei claim vivi (CLAIMED o PAID)
         // non può eccedere il totale del bill. PostgreSQL non permette
         // CHECK subquery, quindi lo enforce con trigger BEFORE INSERT/UPDATE
