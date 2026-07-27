@@ -3681,12 +3681,16 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         await client.query('BEGIN');
 
         // Lock the bill row so a parallel claim can't oversubscribe.
+        // t.name is the REAL table number shown in the room (e.g. "23"), not
+        // the internal id — it feeds the payment descriptions below.
         const billRs = await client.query(
-            `SELECT id, total_cents, covers, status
-             FROM table_bills
-             WHERE share_token = $1
-               AND status IN ('OPEN','LOCKED')
-             FOR UPDATE`,
+            `SELECT b.id, b.total_cents, b.covers, b.status, b.reservation_id,
+                    t.name AS table_name
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id
+             WHERE b.share_token = $1
+               AND b.status IN ('OPEN','LOCKED')
+             FOR UPDATE OF b`,
             [token]
         );
         if (billRs.rowCount === 0) {
@@ -3694,6 +3698,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             return res.status(404).json({ error: 'Not found' });
         }
         const bill = billRs.rows[0];
+        const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
         // Compute claimed_cents under the lock so the residual is
         // authoritative at insert time.
@@ -3767,7 +3772,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             const order = await revolutCreateOrder({
                 amount,
                 currency: 'EUR',
-                description: `Conto tavolo #${bill.id} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
+                description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
                 merchant_order_ext_ref: `bill_split:${splitId}`,
             });
             checkoutUrl = order.checkout_url;
@@ -3781,7 +3786,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 [
                     bill.reservation_id || null,
                     amount,
-                    `Conto tavolo #${bill.id}`,
+                    `Conto ${billLabel}`,
                     (order.state || 'PENDING').toUpperCase(),
                     order.id,
                     order.checkout_url,
