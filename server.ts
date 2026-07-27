@@ -3774,6 +3774,10 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 currency: 'EUR',
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
                 merchant_order_ext_ref: `bill_split:${splitId}`,
+                // Back to the bill page after checkout (Revolut Pay, Apple
+                // Pay, card — all of them), so the guest sees the progress
+                // bar advance instead of landing on the provider default.
+                redirect_url: `${payAtTableBaseUrl()}/pay/${token}`,
             });
             checkoutUrl = order.checkout_url;
 

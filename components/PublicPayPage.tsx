@@ -28,21 +28,33 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [claim, setClaim] = useState<ClaimResponse | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErrorMsg(null);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    if (!background) setErrorMsg(null);
     try {
       const data = await publicPayApiService.getBill(token);
       if (!data) { setNotFound(true); return; }
       setBill(data);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Errore di rete');
+      if (!background) setErrorMsg(err?.message || 'Errore di rete');
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Keep the shared bill fresh: guests come BACK to this page after the
+  // Revolut redirect, often a couple of seconds before the webhook flips
+  // their split to PAID — and the other diners' progress moves on its own.
+  // No socket here (public page, no auth), so a light poll while visible.
+  useEffect(() => {
+    if (notFound) return;
+    const tick = () => { if (document.visibilityState === 'visible') load(true); };
+    const id = setInterval(tick, 5000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
+  }, [load, notFound]);
 
   const handleEqualShare = () => { setMode('equal'); setErrorMsg(null); };
   const handleFixedAmount = () => { setMode('fixed'); setErrorMsg(null); };
