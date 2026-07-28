@@ -394,6 +394,9 @@ export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
 export interface OrderItem {
   id: number;
   order_id: number;
+  /** DISH = piatto, COVER = coperto, SERVICE = servizio. Le righe di
+   *  sistema non vanno mai in cucina ma pesano sul conto. */
+  line_kind?: 'DISH' | 'COVER' | 'SERVICE';
   dish_id: number | null;
   name_snapshot: string;
   unit_price_cents: number;
@@ -433,6 +436,9 @@ export interface Order {
   opened_at?: string;
   closed_at?: string | null;
   notes?: string | null;
+  discount_type?: 'PERCENT' | 'AMOUNT' | null;
+  discount_value?: number | null;
+  discount_reason?: string | null;
 }
 
 export interface OrderCourse {
@@ -448,7 +454,10 @@ export interface OrderWithItems {
   order: Order;
   items: OrderItem[];
   courses: OrderCourse[];
-  /** Somma delle righe non stornate. */
+  /** Somma delle righe non stornate, prima dello sconto. */
+  subtotal_cents: number;
+  discount_cents: number;
+  /** Quanto si deve davvero. */
   total_cents: number;
   voided_cents: number;
 }

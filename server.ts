@@ -14539,6 +14539,19 @@ const lineTotalCents = (row: any): number => {
     return (Number(row.unit_price_cents) + delta) * Number(row.qty);
 };
 
+// Sconto applicato all'imponibile. Percentuale o importo, mai sotto zero:
+// un conto negativo non esiste, e uno sconto battuto male non deve
+// trasformarsi in un credito verso il cliente.
+const applyDiscount = (subtotalCents: number, type: string | null, value: any): number => {
+    if (!type || value == null) return subtotalCents;
+    const v = Number(value);
+    if (!Number.isFinite(v) || v <= 0) return subtotalCents;
+    const cut = type === 'PERCENT'
+        ? Math.round((subtotalCents * Math.min(v, 100)) / 100)
+        : Math.round(v * 100);
+    return Math.max(0, subtotalCents - cut);
+};
+
 // Stato dell'uscita derivato dalle righe, mai materializzato: due fonti di
 // verità divergono al primo storno a metà preparazione.
 const deriveCourseStatus = (items: any[]): string => {
@@ -14576,12 +14589,20 @@ async function loadOrderView(orderId: number): Promise<any | null> {
                              .reduce((s, i) => s + i.line_total_cents, 0),
         }));
 
-    const total_cents = items.filter(i => i.status !== 'VOIDED')
-                             .reduce((s, i) => s + i.line_total_cents, 0);
+    const subtotal_cents = items.filter(i => i.status !== 'VOIDED')
+                                .reduce((s, i) => s + i.line_total_cents, 0);
     const voided_cents = items.filter(i => i.status === 'VOIDED')
                               .reduce((s, i) => s + i.line_total_cents, 0);
+    const order = o.rows[0];
+    const total_cents = applyDiscount(subtotal_cents, order.discount_type, order.discount_value);
 
-    return { order: o.rows[0], items, courses, total_cents, voided_cents };
+    return {
+        order, items, courses,
+        subtotal_cents,
+        discount_cents: subtotal_cents - total_cents,
+        total_cents,
+        voided_cents,
+    };
 }
 
 // Lancio di un'uscita: QUEUED → SENT con lo scaglionamento per partita.
@@ -14909,6 +14930,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         await client.query('COMMIT');
         client.release();
 
+        await syncSystemLines(orderId);
         const view = await loadOrderView(orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
         const sync = await resyncBillForOrder(orderId);
@@ -14974,6 +14996,7 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
             vals
         );
 
+        await syncSystemLines(upd.rows[0].order_id);
         const view = await loadOrderView(upd.rows[0].order_id);
         const sync = await resyncBillForOrder(upd.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
@@ -15000,6 +15023,7 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
         }
         await queryWithRetry(`DELETE FROM order_items WHERE id = $1`, [id]);
 
+        await syncSystemLines(cur.rows[0].order_id);
         const view = await loadOrderView(cur.rows[0].order_id);
         const sync = await resyncBillForOrder(cur.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
@@ -15638,19 +15662,26 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
         throw new BillSyncError('Il conto non è più modificabile', { status: bill.status });
     }
 
+    // Una riga per comanda: lo sconto è per comanda, quindi va applicato
+    // prima di sommare, non sul totale aggregato.
     const totalRs = await client.query(
-        `SELECT COALESCE(SUM(
+        `SELECT o.id, o.discount_type, o.discount_value,
+                COALESCE(SUM(
                     (oi.unit_price_cents + COALESCE((
                         SELECT SUM((m->>'price_delta_cents')::int)
                         FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
                     ), 0)) * oi.qty
-                ), 0)::int AS total
-         FROM order_items oi
-         JOIN orders o ON o.id = oi.order_id
-         WHERE o.table_bill_id = $1 AND oi.status <> 'VOIDED'`,
+                ) FILTER (WHERE oi.status <> 'VOIDED'), 0)::int AS subtotal
+         FROM orders o
+         LEFT JOIN order_items oi ON oi.order_id = o.id
+         WHERE o.table_bill_id = $1
+         GROUP BY o.id, o.discount_type, o.discount_value`,
         [billId]
     );
-    const newTotal: number = totalRs.rows[0].total;
+    const newTotal: number = totalRs.rows.reduce(
+        (sum: number, r: any) => sum + applyDiscount(Number(r.subtotal), r.discount_type, r.discount_value),
+        0
+    );
 
     const splitsRs = await client.query(
         `SELECT id, amount_cents, status, claimed_at
@@ -15765,6 +15796,11 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata o non aperta' });
 
+        // Cambiare i coperti cambia la riga "Coperto".
+        if (req.body?.covers != null) {
+            await syncSystemLines(id);
+            await resyncBillForOrder(id);
+        }
         // I coperti viaggiano anche sul conto: è il divisore dello split equo.
         if (upd.rows[0].table_bill_id && req.body?.covers != null) {
             await queryWithRetry(
@@ -16000,6 +16036,295 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         res.status(201).json({ bill, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: bill.total_cents });
     } catch (err: any) {
         console.error('POST /tables/:id/bill error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Storni, sconti, coperti e trasferimenti (PR 7) --------------------------
+
+// Coperto e servizio come righe, non come campi del conto: si scontano con lo
+// stesso codice degli altri importi e compaiono nel dettaglio che l'ospite
+// vede dal QR. Ricalcolate a ogni mutazione — il servizio è una percentuale
+// dell'imponibile, quindi si muove con le righe.
+async function syncSystemLinesInTx(client: any, orderId: number): Promise<void> {
+    const cfg = await client.query(
+        `SELECT key, int_value FROM app_settings
+         WHERE key IN ('cover_charge_cents','service_charge_percent')`
+    );
+    const map = Object.fromEntries(cfg.rows.map((r: any) => [r.key, Number(r.int_value ?? 0)]));
+    const coverCents = Math.max(0, map.cover_charge_cents ?? 0);
+    const servicePct = Math.max(0, map.service_charge_percent ?? 0);
+
+    const ord = await client.query(`SELECT covers FROM orders WHERE id = $1`, [orderId]);
+    if (ord.rows.length === 0) return;
+    const covers = Number(ord.rows[0].covers);
+
+    // Sempre ricreate da zero: inseguire le variazioni con UPDATE mirati
+    // lascerebbe righe orfane appena cambia il numero di coperti.
+    await client.query(
+        `DELETE FROM order_items WHERE order_id = $1 AND line_kind IN ('COVER','SERVICE')`,
+        [orderId]
+    );
+
+    if (coverCents > 0 && covers > 0) {
+        await client.query(
+            `INSERT INTO order_items
+                (order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
+             VALUES ($1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER')`,
+            [orderId, coverCents, covers]
+        );
+    }
+
+    if (servicePct > 0) {
+        // Il servizio si calcola sull'imponibile dei piatti, non sul coperto:
+        // addebitare il servizio sul servizio è il classico errore che il
+        // cliente nota e contesta.
+        const sub = await client.query(
+            `SELECT COALESCE(SUM(
+                        (oi.unit_price_cents + COALESCE((
+                            SELECT SUM((m->>'price_delta_cents')::int)
+                            FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                        ), 0)) * oi.qty
+                    ), 0)::int AS total
+             FROM order_items oi
+             WHERE oi.order_id = $1 AND oi.status <> 'VOIDED' AND oi.line_kind = 'DISH'`,
+            [orderId]
+        );
+        const amount = Math.round((Number(sub.rows[0].total) * servicePct) / 100);
+        if (amount > 0) {
+            await client.query(
+                `INSERT INTO order_items
+                    (order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
+                 VALUES ($1, $2, $3, 1, 1, 'SERVED', 'SERVICE')`,
+                [orderId, `Servizio ${servicePct}%`, amount]
+            );
+        }
+    }
+}
+
+async function syncSystemLines(orderId: number): Promise<void> {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await syncSystemLinesInTx(client, orderId);
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.warn('[order] righe di sistema non aggiornate:', (err as any)?.message ?? err);
+    } finally {
+        client.release();
+    }
+}
+
+// Storno di una riga già inviata. Da SENT in poi non si cancella: si storna,
+// con motivazione, e resta a bilancio come scarto.
+app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        if (reason.length < 3) {
+            return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE order_items
+             SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP,
+                 voided_by_user_id = $2, void_reason = $3
+             WHERE id = $1 AND status <> 'VOIDED'
+             RETURNING *`,
+            [id, req.user?.userId ?? null, reason.slice(0, 300)]
+        );
+        if (upd.rows.length === 0) {
+            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1`, [id]);
+            if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+            return res.status(409).json({ error: 'Riga già stornata' });
+        }
+        const item = upd.rows[0];
+
+        await syncSystemLines(item.order_id);
+        const view = await loadOrderView(item.order_id);
+        const sync = await resyncBillForOrder(item.order_id);
+
+        try {
+            // La cucina deve vedere sparire la riga dal monitor: continuare a
+            // cucinare un piatto stornato è spreco puro.
+            socketService?.broadcastToStation(item.station_id, 'orderItem:voided', {
+                id: item.id, order_id: item.order_id, reason: item.void_reason,
+            });
+            socketService?.broadcastToAll('orderItem:voided', {
+                id: item.id, order_id: item.order_id, station_id: item.station_id, reason: item.void_reason,
+            });
+            socketService?.broadcastToAll('order:updated', view.order);
+        } catch (_) {}
+
+        LogService.logActivity(
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.ORDER, item.order_id,
+            `Storno · ${item.qty}× ${item.name_snapshot}`,
+            {
+                order_item_id: item.id,
+                amount_cents: lineTotalCents(item),
+                previous_status: item.status,
+                reason: item.void_reason,
+            }
+        ).catch(() => {});
+
+        res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
+    } catch (err: any) {
+        console.error('POST /orders/items/:id/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Sconto sulla comanda, con motivazione obbligatoria e traccia di chi l'ha
+// concesso. Passa da `orders:void`, non da `orders:take`: regalare soldi non
+// è la stessa cosa che prendere una comanda.
+app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const clear = req.body?.discount_type == null;
+        let type: string | null = null;
+        let value: number | null = null;
+        let reason: string | null = null;
+
+        if (!clear) {
+            type = req.body.discount_type;
+            if (type !== 'PERCENT' && type !== 'AMOUNT') {
+                return res.status(400).json({ error: "discount_type deve essere PERCENT o AMOUNT" });
+            }
+            value = Number(req.body.discount_value);
+            if (!Number.isFinite(value) || value <= 0) {
+                return res.status(400).json({ error: 'discount_value deve essere > 0' });
+            }
+            if (type === 'PERCENT' && value > 100) {
+                return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
+            }
+            const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+            if (raw.length < 3) {
+                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
+            }
+            reason = raw.slice(0, 300);
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE orders
+             SET discount_type = $2, discount_value = $3, discount_reason = $4,
+                 discount_by_user_id = $5
+             WHERE id = $1 AND status = 'OPEN'
+             RETURNING *`,
+            [id, type, value, reason, clear ? null : (req.user?.userId ?? null)]
+        );
+        if (upd.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata o non aperta' });
+
+        const view = await loadOrderView(id);
+        const sync = await resyncBillForOrder(id);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+
+        LogService.logActivity(
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.ORDER, id,
+            clear ? 'Sconto rimosso' : `Sconto ${type === 'PERCENT' ? `${value}%` : `${value} €`}`,
+            { discount_type: type, discount_value: value, reason, total_after_cents: view.total_cents }
+        ).catch(() => {});
+
+        res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
+    } catch (err: any) {
+        console.error('POST /orders/:id/discount error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Sposta la comanda su un altro tavolo, portandosi dietro il conto. Se ci
+// sono già quote pagate il trasferimento è permesso ma loggato: i soldi
+// restano attaccati al conto, non al tavolo.
+app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        const id = parseInt(req.params.id, 10);
+        const targetId = Number(req.body?.table_id);
+        if (!Number.isFinite(id) || !Number.isFinite(targetId)) {
+            client.release();
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        await client.query('BEGIN');
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [id]);
+        if (ord.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+        const order = ord.rows[0];
+        if (order.status !== 'OPEN') {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda non è aperta', status: order.status });
+        }
+        if (order.table_id === targetId) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda è già su questo tavolo' });
+        }
+
+        const tbl = await client.query(`SELECT id, name FROM tables WHERE id = $1`, [targetId]);
+        if (tbl.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Tavolo di destinazione non trovato' });
+        }
+        const busy = await client.query(
+            `SELECT id FROM orders WHERE table_id = $1 AND status = 'OPEN' AND id <> $2 LIMIT 1`,
+            [targetId, id]
+        );
+        if (busy.rows.length > 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({
+                error: 'Il tavolo di destinazione ha già una comanda aperta',
+                existing_order_id: busy.rows[0].id,
+            });
+        }
+
+        // Il legame con la prenotazione si spezza: la prenotazione resta sul
+        // vecchio tavolo, la comanda no. Tenerlo darebbe un conto agganciato
+        // a una prenotazione che sta altrove.
+        await client.query(
+            `UPDATE orders SET table_id = $2, reservation_id = NULL WHERE id = $1`,
+            [id, targetId]
+        );
+        let paidCents = 0;
+        if (order.table_bill_id) {
+            const paid = await client.query(
+                `SELECT COALESCE(SUM(amount_cents),0)::int AS n FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status = 'PAID'`,
+                [order.table_bill_id]
+            );
+            paidCents = paid.rows[0].n;
+            await client.query(
+                `UPDATE table_bills SET table_id = $2, reservation_id = NULL WHERE id = $1`,
+                [order.table_bill_id, targetId]
+            );
+        }
+        await client.query('COMMIT');
+        client.release();
+
+        const view = await loadOrderView(id);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+
+        LogService.logActivity(
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.ORDER, id,
+            `Trasferimento al tavolo ${tbl.rows[0].name}`,
+            { from_table_id: order.table_id, to_table_id: targetId, paid_cents: paidCents }
+        ).catch(() => {});
+
+        res.json({ ...view, paid_cents_moved: paidCents });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/transfer error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });

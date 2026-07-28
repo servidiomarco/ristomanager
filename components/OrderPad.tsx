@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, Check, ChevronDown, Clock, Loader2, Minus, Plus, Receipt, Send,
-  Trash2, TriangleAlert, Users, Utensils, X,
+  ArrowLeft, ArrowRightLeft, Ban, Check, ChevronDown, Clock, Loader2, Minus,
+  Percent, Plus, Receipt, Send, Trash2, TriangleAlert, Users, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
 import { ArrivalStatus, ReservationStatus } from '../types';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
+  voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem,
 } from '../services/ordersApiService';
 
@@ -69,6 +70,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const [flash, setFlash] = useState<string | null>(null);
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
   const [closing, setClosing] = useState(false);
+  const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
+  const [discountOpen, setDiscountOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -269,6 +273,43 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     }
   };
 
+  const doVoid = async (item: OrderItem, reason: string) => {
+    setBusy(true); setError(null);
+    try {
+      setOrder(await voidItem(item.id, reason));
+      setVoidTarget(null);
+      setFlash(`Stornato: ${item.qty}× ${item.name_snapshot}`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
+    } finally { setBusy(false); }
+  };
+
+  const doDiscount = async (payload: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null) => {
+    if (!order) return;
+    setBusy(true); setError(null);
+    try {
+      setOrder(await setOrderDiscount(order.order.id, payload));
+      setDiscountOpen(false);
+      setFlash(payload ? 'Sconto applicato' : 'Sconto rimosso');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+    } finally { setBusy(false); }
+  };
+
+  const doTransfer = async (targetId: number) => {
+    if (!order) return;
+    setBusy(true); setError(null);
+    try {
+      const moved = await transferOrder(order.order.id, targetId);
+      setOrder(moved);
+      setTableId(targetId);
+      setTransferOpen(false);
+      setFlash(`Comanda spostata sul tavolo ${tables.find(t => t.id === targetId)?.name ?? targetId}`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Trasferimento non riuscito');
+    } finally { setBusy(false); }
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -395,6 +436,46 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         </div>
       )}
 
+      {/* Righe già in cucina: da qui si stornano, con motivazione */}
+      {order.items.some(i => i.status !== 'DRAFT' && i.line_kind !== 'COVER' && i.line_kind !== 'SERVICE') && (
+        <details className="px-4 pt-2 shrink-0">
+          <summary className="text-xs uppercase tracking-wide text-slate-500 cursor-pointer">
+            Già ordinato ({order.items.filter(i => i.status !== 'DRAFT' && i.status !== 'VOIDED').length})
+          </summary>
+          <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+            {order.items.filter(i => i.status !== 'DRAFT').map(i => (
+              <div key={i.id} className="flex items-center gap-2 text-sm">
+                <span className={`flex-1 truncate ${i.status === 'VOIDED' ? 'line-through text-slate-400' : ''}`}>
+                  {i.qty}× {i.name_snapshot}
+                  {i.line_kind !== 'DISH' && <span className="text-xs text-slate-400"> · automatico</span>}
+                </span>
+                <span className="text-xs text-slate-500 tabular-nums">{euro(i.line_total_cents ?? 0)}</span>
+                {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
+                  <button onClick={() => setVoidTarget(i)} title="Storna"
+                          className="p-1 text-rose-600"><Ban size={14} /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          {order.discount_cents > 0 && (
+            <div className="mt-2 text-sm flex justify-between text-emerald-700 dark:text-emerald-300">
+              <span>Sconto{order.order.discount_reason ? ` · ${order.order.discount_reason}` : ''}</span>
+              <span>−{euro(order.discount_cents)}</span>
+            </div>
+          )}
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => setDiscountOpen(true)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1">
+              <Percent size={12} /> Sconto
+            </button>
+            <button onClick={() => setTransferOpen(true)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1">
+              <ArrowRightLeft size={12} /> Sposta tavolo
+            </button>
+          </div>
+        </details>
+      )}
+
       {/* Catalogo */}
       <div className="px-4 pt-3 shrink-0 flex gap-2 overflow-x-auto pb-2">
         {categories.map(c => (
@@ -493,6 +574,48 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         </div>
       )}
 
+      {voidTarget && (
+        <ReasonDialog
+          title={`Storna ${voidTarget.qty}× ${voidTarget.name_snapshot}`}
+          hint="La riga resta a bilancio come scarto, con chi l'ha stornata e perché."
+          confirmLabel="Storna"
+          busy={busy}
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={reason => doVoid(voidTarget, reason)}
+        />
+      )}
+
+      {discountOpen && order && (
+        <DiscountDialog
+          currentReason={order.order.discount_reason ?? null}
+          hasDiscount={order.discount_cents > 0}
+          busy={busy}
+          onCancel={() => setDiscountOpen(false)}
+          onClear={() => doDiscount(null)}
+          onConfirm={doDiscount}
+        />
+      )}
+
+      {transferOpen && order && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             onClick={() => setTransferOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold mb-1">Sposta su quale tavolo?</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Comanda e conto si spostano insieme. Le quote già pagate restano attaccate al conto.
+            </p>
+            <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
+              {tables.filter(t => t.id !== tableId).map(t => (
+                <button key={t.id} onClick={() => doTransfer(t.id)} disabled={busy}
+                        className="py-3 rounded-xl border border-slate-300 dark:border-slate-600 font-semibold disabled:opacity-40">
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {variantFor && (
         <VariantSheet
           dish={variantFor}
@@ -577,6 +700,104 @@ const VariantSheet: React.FC<{
                 className="w-full py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold disabled:opacity-40">
           {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : 'Aggiungi'}
         </button>
+      </div>
+    </div>
+  );
+};
+
+// Dialogo con motivazione obbligatoria. Usato per gli storni: senza un motivo
+// scritto, a fine mese lo scarto è un ammanco che nessuno sa spiegare.
+const ReasonDialog: React.FC<{
+  title: string;
+  hint: string;
+  confirmLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}> = ({ title, hint, confirmLabel, busy, onCancel, onConfirm }) => {
+  const [reason, setReason] = useState('');
+  const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <h2 className="font-semibold mb-1">{title}</h2>
+        <p className="text-xs text-slate-500 mb-3">{hint}</p>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {PRESETS.map(pr => (
+            <button key={pr} onClick={() => setReason(pr)}
+                    className={`text-xs px-2 py-1 rounded-lg border ${reason === pr ? 'border-slate-900 dark:border-white' : 'border-slate-300 dark:border-slate-600'}`}>
+              {pr}
+            </button>
+          ))}
+        </div>
+        <input value={reason} onChange={e => setReason(e.target.value)} autoFocus
+               placeholder="Motivazione"
+               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
+            Annulla
+          </button>
+          <button onClick={() => onConfirm(reason.trim())} disabled={busy || reason.trim().length < 3}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-semibold disabled:opacity-40">
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DiscountDialog: React.FC<{
+  currentReason: string | null;
+  hasDiscount: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onClear: () => void;
+  onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
+}> = ({ currentReason, hasDiscount, busy, onCancel, onClear, onConfirm }) => {
+  const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
+  const [value, setValue] = useState('');
+  const [reason, setReason] = useState(currentReason ?? '');
+  const num = Number(value.replace(',', '.'));
+  const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100) && reason.trim().length >= 3;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <h2 className="font-semibold mb-1">Sconto sulla comanda</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio.
+        </p>
+        <div className="flex gap-2 mb-3">
+          {(['PERCENT', 'AMOUNT'] as const).map(t => (
+            <button key={t} onClick={() => setType(t)}
+                    className={`flex-1 py-2 rounded-lg border ${type === t ? 'border-slate-900 dark:border-white font-semibold' : 'border-slate-300 dark:border-slate-600'}`}>
+              {t === 'PERCENT' ? 'Percentuale' : 'Importo €'}
+            </button>
+          ))}
+        </div>
+        <input value={value} onChange={e => setValue(e.target.value)} inputMode="decimal" autoFocus
+               placeholder={type === 'PERCENT' ? '10' : '5,00'}
+               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
+        <input value={reason} onChange={e => setReason(e.target.value)}
+               placeholder="Motivazione (obbligatoria)"
+               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
+        <div className="flex gap-2">
+          {hasDiscount && (
+            <button onClick={onClear} disabled={busy}
+                    className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm">
+              Rimuovi
+            </button>
+          )}
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
+            Annulla
+          </button>
+          <button onClick={() => onConfirm({ discount_type: type, discount_value: num, reason: reason.trim() })}
+                  disabled={busy || !valid}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold disabled:opacity-40">
+            Applica
+          </button>
+        </div>
       </div>
     </div>
   );

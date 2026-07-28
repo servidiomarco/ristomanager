@@ -300,3 +300,24 @@ export const updateOrder = async (
     headers: getHeaders(),
     body: JSON.stringify(payload),
   });
+
+// --- Storni, sconti, trasferimenti -------------------------------------------
+
+/** Storno di una riga già inviata: la motivazione è obbligatoria. */
+export const voidItem = async (itemId: number, reason: string): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}/void`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ reason }),
+  });
+
+export const setOrderDiscount = async (
+  orderId: number,
+  payload: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null,
+): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/discount`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify(payload ?? {}),
+  });
+
+export const transferOrder = async (orderId: number, tableId: number): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/transfer`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ table_id: tableId }),
+  });
