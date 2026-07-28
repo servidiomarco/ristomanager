@@ -1246,16 +1246,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             }
         }
 
-        const reservationLabel = (() => {
-            try {
-                const dt = new Date(created.reservation_time);
-                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                return `${date} ${time}`;
-            } catch {
-                return created.reservation_time;
-            }
-        })();
+        const reservationLabel = reservationPushLabel(asUtcInstant(created.reservation_time));
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
@@ -1445,16 +1436,7 @@ app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
             }
         }
 
-        const reservationLabel = (() => {
-            try {
-                const dt = new Date(cancelled.reservation_time);
-                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                return `${date} ${time}`;
-            } catch {
-                return cancelled.reservation_time;
-            }
-        })();
+        const reservationLabel = reservationPushLabel(asUtcInstant(cancelled.reservation_time));
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
@@ -1711,16 +1693,7 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
             }
         }
 
-        const reservationLabel = (() => {
-            try {
-                const dt = new Date(after.reservation_time);
-                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                return `${date} ${time}`;
-            } catch {
-                return after.reservation_time;
-            }
-        })();
+        const reservationLabel = reservationPushLabel(asUtcInstant(after.reservation_time));
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
@@ -2352,16 +2325,9 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
 
-        const reservationLabel = (() => {
-            try {
-                const dt = new Date(reservation_time);
-                const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-                const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                return `${date} ${time}`;
-            } catch {
-                return reservation_time;
-            }
-        })();
+        // reservation_time here is the client's naive Rome wall-clock string:
+        // no asUtcInstant, the naive branch reads it verbatim (see fix #85).
+        const reservationLabel = reservationPushLabel(reservation_time);
         pushSendToRoles(
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
@@ -2510,16 +2476,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // Skip if it was already CANCELLED — avoids duplicate notifications on
         // saves that don't change the status.
         if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
-            const reservationLabel = (() => {
-                try {
-                    const dt = new Date(updatedReservation.reservation_time);
-                    const time = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-                    const date = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-                    return `${date} ${time}`;
-                } catch {
-                    return updatedReservation.reservation_time;
-                }
-            })();
+            const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time));
             pushSendToRoles(
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
@@ -10541,6 +10498,28 @@ function formatBookingDateTime(reservationTime: string | Date): { dateLabel: str
         hour: '2-digit', minute: '2-digit', hour12: false,
     });
     return { dateLabel, timeLabel };
+}
+
+// Compact "29 lug 13:30" label for reservation push notifications, always
+// rendered in Europe/Rome (Railway runs Node with TZ=UTC, so the bare
+// toLocale* calls previously showed the UTC hour — 13:30 became 11:30).
+// Same naive-string contract as formatBookingDateTime: a string without
+// Z/offset is Rome wall-clock (client input) and is read verbatim; DB-sourced
+// values must pass through asUtcInstant at the call site.
+function reservationPushLabel(reservationTime: string | Date): string {
+    if (typeof reservationTime === 'string') {
+        const m = reservationTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+        const isNaive = !!m && !/Z$/.test(reservationTime) && !/[+-]\d{2}:?\d{2}$/.test(reservationTime);
+        if (isNaive && m) {
+            const MONTHS = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+            return `${m[3]} ${MONTHS[Number(m[2]) - 1] ?? m[2]} ${m[4]}:${m[5]}`;
+        }
+    }
+    const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
+    if (Number.isNaN(dt.getTime())) return String(reservationTime);
+    const date = dt.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: 'short' });
+    const time = dt.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
+    return `${date} ${time}`;
 }
 
 // Booking-request acknowledgement email — sent immediately when a customer
