@@ -14715,6 +14715,35 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
     }
 });
 
+// Catalogo di supporto al palmare: listini, partite e varianti in una sola
+// chiamata. Il palmare lo carica all'apertura e non lo riscarica per ogni
+// piatto — in sala la latenza si nota.
+//
+// Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
+app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (_req, res) => {
+    try {
+        const [lists, stations, groups, mods, links] = await Promise.all([
+            queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE is_active ORDER BY sort_order, id`),
+            queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE is_active ORDER BY sort_order, id`),
+            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups ORDER BY sort_order, id`),
+            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, is_active, sort_order FROM modifiers WHERE is_active ORDER BY sort_order, id`),
+            queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups`),
+        ]);
+        res.json({
+            price_lists: lists.rows,
+            stations: stations.rows,
+            modifier_groups: groups.rows.map((g: any) => ({
+                ...g,
+                modifiers: mods.rows.filter((m: any) => m.group_id === g.id),
+            })),
+            dish_modifier_groups: links.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /menu/catalogue error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(res))) return;

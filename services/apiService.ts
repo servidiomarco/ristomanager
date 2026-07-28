@@ -753,6 +753,7 @@ export interface FeatureFlags {
   voice_agent_enabled: boolean;
   voice_bookings_suspended: boolean;
   pay_at_table_enabled: boolean;
+  table_orders_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {

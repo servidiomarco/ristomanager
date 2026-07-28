@@ -1,0 +1,495 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft, Check, ChevronDown, Clock, Loader2, Minus, Plus, Send, Trash2,
+  TriangleAlert, Utensils, X,
+} from 'lucide-react';
+import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
+import { ArrivalStatus, ReservationStatus } from '../types';
+import {
+  ordersApiService, getMenuCatalogue, newIdempotencyKey,
+  type MenuCatalogue, type NewOrderItem,
+} from '../services/ordersApiService';
+
+// ---------------------------------------------------------------------------
+// Palmare cameriere — la comanda si compone qui e parte con un tocco.
+//
+// Pensato per una mano sola, in piedi, con poca luce: bersagli grandi, niente
+// interazioni fini, lo stato di ogni uscita scritto a lettere invece che
+// affidato al colore.
+//
+// Il carrello resta locale finché non si preme INVIA: il cameriere si corregge
+// senza generare rumore in cucina, e il servizio parte con una sola chiamata
+// di rete invece di una per ogni piatto — che su un WiFi di sala è la
+// differenza fra usarlo e tornare al blocchetto.
+// ---------------------------------------------------------------------------
+
+interface OrderPadProps {
+  dishes: Dish[];
+  tables: Table[];
+  reservations: Reservation[];
+}
+
+interface CartLine {
+  key: string;
+  dish: Dish;
+  qty: number;
+  course_no: number;
+  modifier_ids: number[];
+  modifier_labels: string[];
+  modifier_delta_cents: number;
+  note?: string;
+}
+
+const euro = (cents: number): string =>
+  (cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+
+const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
+const courseLabel = (n: number): string => `${ORDINALS[n] ?? `${n}ª`} uscita`;
+
+// Etichetta parlante per lo stato dell'uscita. Il cameriere deve sapere a
+// colpo d'occhio se la sua seconda uscita è partita o è ferma al passe:
+// altrimenti la ripropone, e in cucina arriva doppia.
+const COURSE_BADGE: Record<string, { text: string; cls: string }> = {
+  QUEUED:  { text: '⏸ al passe',  cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' },
+  FIRED:   { text: '✓ in cucina', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200' },
+  READY:   { text: '● pronta',    cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' },
+  SERVED:  { text: 'servita',     cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
+  PENDING: { text: 'in bozza',    cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
+};
+
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations }) => {
+  const [tableId, setTableId] = useState<number | null>(null);
+  const [order, setOrder] = useState<OrderWithItems | null>(null);
+  const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [course, setCourse] = useState(1);
+  const [category, setCategory] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [variantFor, setVariantFor] = useState<Dish | null>(null);
+  const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
+  }, []);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 3500);
+    return () => clearTimeout(t);
+  }, [flash]);
+
+  const categories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const d of dishes) if (d.category) seen.add(d.category);
+    return [...seen].sort();
+  }, [dishes]);
+
+  useEffect(() => {
+    if (category === null && categories.length > 0) setCategory(categories[0]);
+  }, [categories, category]);
+
+  // Varianti disponibili per un piatto, risolte dal catalogo.
+  const groupsForDish = useCallback((dishId: number) => {
+    if (!catalogue) return [];
+    const ids = catalogue.dish_modifier_groups.filter(l => l.dish_id === dishId).map(l => l.group_id);
+    return catalogue.modifier_groups.filter(g => ids.includes(g.id));
+  }, [catalogue]);
+
+  // La prenotazione del tavolo: nome e allergeni arrivano dal CRM senza
+  // che nessuno li ridigiti. È il pezzo che un POS esterno non può fare.
+  const reservation = useMemo(() => {
+    if (!tableId) return null;
+    return reservations.find(r =>
+      r.table_id === tableId
+      && r.reservation_status !== ReservationStatus.CANCELLED
+      && r.arrival_status !== ArrivalStatus.DEPARTED
+    ) ?? null;
+  }, [reservations, tableId]);
+
+  const loadTable = useCallback(async (id: number) => {
+    setBusy(true); setError(null);
+    try {
+      let view = await ordersApiService.getOrderByTable(id);
+      if (!view) {
+        const res = reservations.find(r => r.table_id === id && r.reservation_status !== ReservationStatus.CANCELLED);
+        // I coperti arrivano dalla prenotazione; per un walk-in la stima
+        // migliore sono i posti del tavolo. Uno è quasi sempre sbagliato, e
+        // il numero conta: alimenterà lo split equo del conto (PR 6).
+        const covers = res?.guests ?? tables.find(t => t.id === id)?.seats;
+        view = await ordersApiService.openOrder(
+          { table_id: id, reservation_id: res?.id, covers },
+          newIdempotencyKey(),
+        );
+      }
+      setOrder(view);
+      setTableId(id);
+      setCart([]);
+      // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
+      // non deve ricordarsi a che punto era.
+      const maxSent = view.courses.filter(c => c.status !== 'PENDING').map(c => c.course_no);
+      setCourse(maxSent.length ? Math.max(...maxSent) + 1 : 1);
+    } catch (err: any) {
+      setError(err?.message ?? 'Impossibile aprire la comanda');
+    } finally {
+      setBusy(false);
+    }
+  }, [reservations, tables]);
+
+  // Segna quali tavoli hanno già una comanda aperta, così il cameriere sceglie
+  // consapevolmente invece di scoprirlo dopo.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const found = new Set<number>();
+      await Promise.all(tables.slice(0, 60).map(async t => {
+        try { if (await ordersApiService.getOrderByTable(t.id)) found.add(t.id); } catch { /* ignora */ }
+      }));
+      if (!cancelled) setOpenTables(found);
+    })();
+    return () => { cancelled = true; };
+  }, [tables]);
+
+  const addToCart = (dish: Dish, modifierIds: number[] = []) => {
+    const groups = groupsForDish(dish.id);
+    const all = groups.flatMap(g => g.modifiers);
+    const chosen = all.filter(m => modifierIds.includes(m.id));
+    const delta = chosen.reduce((s, m) => s + m.price_delta_cents, 0);
+    const key = `${dish.id}|${course}|${[...modifierIds].sort().join(',')}`;
+    setCart(prev => {
+      const at = prev.findIndex(l => l.key === key);
+      if (at >= 0) {
+        const next = [...prev];
+        next[at] = { ...next[at], qty: next[at].qty + 1 };
+        return next;
+      }
+      return [...prev, {
+        key, dish, qty: 1, course_no: course,
+        modifier_ids: modifierIds,
+        modifier_labels: chosen.map(m => m.name),
+        modifier_delta_cents: delta,
+      }];
+    });
+  };
+
+  const onDishTap = (dish: Dish) => {
+    // Se il piatto ha varianti le chiediamo: «al sangue» o «ben cotta» non è
+    // un dettaglio che si aggiusta a voce dopo.
+    if (groupsForDish(dish.id).length > 0) setVariantFor(dish);
+    else addToCart(dish);
+  };
+
+  const bumpCart = (key: string, delta: number) => {
+    setCart(prev => prev.flatMap(l => {
+      if (l.key !== key) return [l];
+      const qty = l.qty + delta;
+      return qty <= 0 ? [] : [{ ...l, qty }];
+    }));
+  };
+
+  const cartTotal = cart.reduce(
+    (s, l) => s + (Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents) * l.qty, 0
+  );
+
+  // INVIA: crea le righe e le propone, in due chiamate consecutive con la
+  // stessa chiave di idempotenza. Se la seconda fallisce le righe restano in
+  // bozza sul server — recuperabili, mai perse.
+  const submit = async () => {
+    if (!order || cart.length === 0 || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const payload: NewOrderItem[] = cart.map(l => ({
+        dish_id: l.dish.id,
+        qty: l.qty,
+        course_no: l.course_no,
+        modifier_ids: l.modifier_ids,
+        note: l.note ?? null,
+      }));
+      const key = newIdempotencyKey();
+      await ordersApiService.addItems(order.order.id, payload, key);
+      const sent = await ordersApiService.send(order.order.id, undefined, key);
+      setOrder(sent);
+      setCart([]);
+      setCourse(c => c + 1);
+      const fired = sent.fired_courses.length;
+      const queued = sent.queued_courses.length;
+      setFlash(
+        fired && queued ? `Uscita in cucina; ${queued === 1 ? "un'altra è" : `${queued} sono`} in attesa al passe`
+        : fired ? 'Comanda in cucina'
+        : 'Proposta al passe — in attesa di lancio'
+      );
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const recall = async (courseNo: number) => {
+    if (!order || busy) return;
+    setBusy(true); setError(null);
+    try {
+      setOrder(await ordersApiService.recallCourse(order.order.id, courseNo));
+      setFlash(`${courseLabel(courseNo)} richiamata: torna in bozza`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Richiamo non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------------- selezione tavolo ----------------
+  if (!tableId || !order) {
+    return (
+      <div className="p-4 lg:p-8 max-w-3xl mx-auto">
+        <h1 className="text-2xl font-semibold mb-1">Comande</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+          Scegli il tavolo per aprire o riprendere la comanda.
+        </p>
+        {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+          {tables.map(t => (
+            <button
+              key={t.id}
+              onClick={() => loadTable(t.id)}
+              disabled={busy}
+              className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition
+                ${openTables.has(t.id)
+                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
+                disabled:opacity-50`}
+            >
+              <span className="text-xl font-semibold">{t.name}</span>
+              <span className="text-[11px] text-slate-500">{t.seats} cop.</span>
+              {openTables.has(t.id) && (
+                <span className="text-[10px] font-medium text-sky-700 dark:text-sky-300">comanda aperta</span>
+              )}
+            </button>
+          ))}
+        </div>
+        {busy && <div className="mt-6 flex items-center gap-2 text-slate-500"><Loader2 size={16} className="animate-spin" /> Apertura…</div>}
+      </div>
+    );
+  }
+
+  const table = tables.find(t => t.id === tableId);
+  const allergens = reservation?.customer_dietary_notes?.trim();
+  const visibleDishes = dishes.filter(d => (category ? d.category === category : true));
+
+  return (
+    <div className="flex flex-col h-full max-h-screen">
+      {/* Testata: chi è al tavolo e cosa non può mangiare */}
+      <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
+        <div className="flex items-center gap-3">
+          <button onClick={() => { setTableId(null); setOrder(null); setCart([]); }}
+                  className="p-2 -ml-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="min-w-0">
+            <div className="font-semibold truncate">
+              Tav. {table?.name} · {order.order.covers} cop.
+              {reservation ? ` · ${reservation.customer_name}` : ''}
+            </div>
+            <div className="text-xs text-slate-500">
+              Totale comanda {euro(order.total_cents)}
+            </div>
+          </div>
+        </div>
+        {allergens && (
+          <div className="mt-2 flex items-start gap-2 text-sm px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+            <span>{allergens}</span>
+          </div>
+        )}
+      </header>
+
+      {flash && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 text-sm flex items-center gap-2">
+          <Check size={16} /> {flash}
+        </div>
+      )}
+      {error && <div className="px-4 pt-3"><ErrorBar message={error} onDismiss={() => setError(null)} /></div>}
+
+      {/* Uscite già mandate, con lo stato scritto in chiaro */}
+      {order.courses.some(c => c.status !== 'PENDING') && (
+        <div className="px-4 pt-3 flex flex-wrap gap-2 shrink-0">
+          {order.courses.filter(c => c.status !== 'PENDING').map(c => {
+            const badge = COURSE_BADGE[c.status] ?? COURSE_BADGE.PENDING;
+            return (
+              <div key={c.course_no} className={`px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-2 ${badge.cls}`}>
+                <span>{courseLabel(c.course_no)} · {badge.text}</span>
+                {c.status === 'QUEUED' && (
+                  <button onClick={() => recall(c.course_no)} disabled={busy}
+                          title="Richiama: torna in bozza"
+                          className="underline decoration-dotted hover:opacity-70">richiama</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Catalogo */}
+      <div className="px-4 pt-3 shrink-0 flex gap-2 overflow-x-auto pb-2">
+        {categories.map(c => (
+          <button key={c} onClick={() => setCategory(c)}
+                  className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap border
+                    ${category === c ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900'
+                                     : 'border-slate-300 dark:border-slate-600'}`}>
+            {c}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+          {visibleDishes.map(d => (
+            <button key={d.id} onClick={() => onDishTap(d)}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-left hover:border-slate-400 active:scale-[0.99] transition">
+              <span className="font-medium truncate">{d.name}</span>
+              <span className="text-sm text-slate-500 shrink-0">
+                {euro(Math.round(Number(d.price) * 100))}
+                {groupsForDish(d.id).length > 0 && <ChevronDown size={14} className="inline ml-1" />}
+              </span>
+            </button>
+          ))}
+          {visibleDishes.length === 0 && (
+            <p className="text-sm text-slate-500 py-8 text-center col-span-full">Nessun piatto in questa categoria.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Carrello: l'uscita in composizione */}
+      <div className="border-t border-slate-200 dark:border-slate-700 shrink-0 bg-white dark:bg-slate-900">
+        <div className="px-4 pt-3 flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Sto componendo</span>
+          <select value={course} onChange={e => setCourse(Number(e.target.value))}
+                  className="text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent px-2 py-1">
+            {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{courseLabel(n)}</option>)}
+          </select>
+        </div>
+
+        <div className="px-4 py-2 max-h-48 overflow-y-auto">
+          {cart.length === 0 ? (
+            <p className="text-sm text-slate-400 py-3">Tocca un piatto per aggiungerlo.</p>
+          ) : cart.map(l => (
+            <div key={l.key} className="flex items-center gap-3 py-1.5">
+              <span className="text-xs text-slate-400 w-10 shrink-0">{ORDINALS[l.course_no] ?? l.course_no}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm truncate">{l.dish.name}</div>
+                {l.modifier_labels.length > 0 && (
+                  <div className="text-xs text-slate-500 truncate">↳ {l.modifier_labels.join(', ')}</div>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => bumpCart(l.key, -1)} className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600"><Minus size={14} /></button>
+                <span className="w-6 text-center text-sm font-medium">{l.qty}</span>
+                <button onClick={() => bumpCart(l.key, +1)} className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600"><Plus size={14} /></button>
+                <button onClick={() => setCart(prev => prev.filter(x => x.key !== l.key))} className="p-1.5 ml-1 rounded-lg text-rose-600"><Trash2 size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-4 py-3 flex items-center gap-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex-1">
+            <div className="text-xs text-slate-500">Da inviare</div>
+            <div className="text-lg font-semibold">{euro(cartTotal)}</div>
+          </div>
+          <button onClick={submit} disabled={busy || cart.length === 0}
+                  className="px-6 py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold flex items-center gap-2 disabled:opacity-40">
+            {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            INVIA
+          </button>
+        </div>
+      </div>
+
+      {variantFor && (
+        <VariantSheet
+          dish={variantFor}
+          groups={groupsForDish(variantFor.id)}
+          onCancel={() => setVariantFor(null)}
+          onConfirm={ids => { addToCart(variantFor, ids); setVariantFor(null); }}
+        />
+      )}
+    </div>
+  );
+};
+
+const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ message, onDismiss }) => (
+  <div className="px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200 text-sm flex items-start gap-2">
+    <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+    <span className="flex-1">{message}</span>
+    <button onClick={onDismiss} className="shrink-0"><X size={16} /></button>
+  </div>
+);
+
+// Foglio varianti. I gruppi con max_select = 1 sono a scelta singola
+// (cottura), gli altri multipla (aggiunte).
+const VariantSheet: React.FC<{
+  dish: Dish;
+  groups: MenuCatalogue['modifier_groups'];
+  onCancel: () => void;
+  onConfirm: (ids: number[]) => void;
+}> = ({ dish, groups, onCancel, onConfirm }) => {
+  const [selected, setSelected] = useState<number[]>([]);
+
+  const toggle = (groupId: number, modId: number, single: boolean) => {
+    setSelected(prev => {
+      const group = groups.find(g => g.id === groupId);
+      const siblings = group ? group.modifiers.map(m => m.id) : [];
+      if (prev.includes(modId)) return prev.filter(x => x !== modId);
+      const cleaned = single ? prev.filter(x => !siblings.includes(x)) : prev;
+      return [...cleaned, modId];
+    });
+  };
+
+  const missing = groups.filter(g => g.min_select > 0
+    && g.modifiers.filter(m => selected.includes(m.id)).length < g.min_select);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={onCancel}>
+      <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl p-4 max-h-[80vh] overflow-y-auto"
+           onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3">
+          <Utensils size={18} />
+          <h2 className="font-semibold flex-1">{dish.name}</h2>
+          <button onClick={onCancel} className="p-1"><X size={18} /></button>
+        </div>
+
+        {groups.map(g => {
+          const single = g.max_select <= 1;
+          return (
+            <div key={g.id} className="mb-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+                {g.name}{g.min_select > 0 && <span className="text-rose-500"> · obbligatorio</span>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {g.modifiers.map(m => (
+                  <button key={m.id} onClick={() => toggle(g.id, m.id, single)}
+                          className={`px-3 py-2 rounded-xl border text-sm
+                            ${selected.includes(m.id)
+                              ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
+                              : 'border-slate-300 dark:border-slate-600'}`}>
+                    {m.name}
+                    {m.price_delta_cents !== 0 && (
+                      <span className="ml-1 opacity-70">
+                        {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        <button onClick={() => onConfirm(selected)} disabled={missing.length > 0}
+                className="w-full py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold disabled:opacity-40">
+          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : 'Aggiungi'}
+        </button>
+      </div>
+    </div>
+  );
+};

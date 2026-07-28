@@ -12,6 +12,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.DASHBOARD]: 'dashboard:view',
   [ViewState.FLOOR_PLAN]: 'floorplan:view',
   [ViewState.MENU]: 'menu:view',
+  [ViewState.COMANDE]: 'orders:take',
   [ViewState.RESERVATIONS]: 'reservations:view',
   [ViewState.RECEPTION]: 'reception:view',
   [ViewState.ATTIVITA]: 'dashboard:view',

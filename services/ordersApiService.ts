@@ -1,0 +1,160 @@
+import { authApiService } from './authApiService';
+import { socketClient } from './socketClient';
+import type { OrderWithItems } from '../types';
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
+
+export interface OpenOrderPayload {
+  table_id?: number;
+  reservation_id?: number;
+  covers?: number;
+  price_list_id?: number;
+  notes?: string;
+}
+
+export interface NewOrderItem {
+  dish_id: number;
+  qty?: number;
+  course_no?: number;
+  seat_no?: number | null;
+  note?: string | null;
+  modifier_ids?: number[];
+  station_id?: number | null;
+}
+
+export interface PatchOrderItemPayload {
+  qty?: number;
+  course_no?: number;
+  seat_no?: number | null;
+  note?: string | null;
+  station_id?: number | null;
+}
+
+export interface SendOrderResult extends OrderWithItems {
+  fire_mode: 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+  fired_courses: number[];
+  queued_courses: number[];
+}
+
+const getHeaders = (idempotencyKey?: string): HeadersInit => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const socketId = socketClient.getSocket()?.id;
+  if (socketId) headers['X-Socket-ID'] = socketId;
+  const token = authApiService.getAccessToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Il palmare in sala perde il WiFi a metà richiesta e ritenta: senza chiave
+  // il tavolo si ritroverebbe l'ordine doppio.
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  return headers;
+};
+
+const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
+  const response = await fetch(url, options);
+  if (response.status === 401 && !retried) {
+    const refreshed = await authApiService.refreshToken();
+    if (refreshed) {
+      const newHeaders = { ...options.headers } as Record<string, string>;
+      newHeaders['Authorization'] = `Bearer ${refreshed.accessToken}`;
+      return fetchWithAuth(url, { ...options, headers: newHeaders }, true);
+    }
+  }
+  return response;
+};
+
+const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
+  const response = await fetchWithAuth(url, options);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    const err: any = new Error(errorData.error || `Request failed with status ${response.status}`);
+    err.status = response.status;
+    err.data = errorData;
+    throw err;
+  }
+  return response.json();
+};
+
+// Chiave di idempotenza per un invio: stabile finché la richiesta è la stessa,
+// così un ritentativo dopo un timeout non duplica nulla.
+export const newIdempotencyKey = (): string =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+class OrdersApiService {
+  /** 404 → nessuna comanda aperta sul tavolo. */
+  async getOrderByTable(tableId: number): Promise<OrderWithItems | null> {
+    try {
+      return await apiRequest<OrderWithItems>(`${API_URL}/tables/${tableId}/order`, {
+        headers: getHeaders(),
+      });
+    } catch (err: any) {
+      if (err?.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async getOrder(orderId: number): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}`, { headers: getHeaders() });
+  }
+
+  async openOrder(payload: OpenOrderPayload, idempotencyKey?: string): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders`, {
+      method: 'POST',
+      headers: getHeaders(idempotencyKey),
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addItems(orderId: number, items: NewOrderItem[], idempotencyKey?: string): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/items`, {
+      method: 'POST',
+      headers: getHeaders(idempotencyKey),
+      body: JSON.stringify({ items }),
+    });
+  }
+
+  async patchItem(itemId: number, payload: PatchOrderItemPayload): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteItem(itemId: number): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+  }
+
+  /** Invio: la sala propone. Il lancio dipende da `course_fire_mode`. */
+  async send(orderId: number, courseNo?: number, idempotencyKey?: string): Promise<SendOrderResult> {
+    return apiRequest<SendOrderResult>(`${API_URL}/orders/${orderId}/send`, {
+      method: 'POST',
+      headers: getHeaders(idempotencyKey),
+      body: JSON.stringify(courseNo != null ? { course_no: courseNo } : {}),
+    });
+  }
+
+  /** Richiama un'uscita proposta ma non ancora lanciata dal passe. */
+  async recallCourse(orderId: number, courseNo: number): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/courses/${courseNo}/recall`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+}
+
+export const ordersApiService = new OrdersApiService();
+
+export interface MenuCatalogue {
+  price_lists: { id: number; name: string; is_default: boolean; sort_order: number }[];
+  stations: { id: number; name: string; color: string | null; sort_order: number }[];
+  modifier_groups: {
+    id: number; name: string; min_select: number; max_select: number; sort_order: number;
+    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number }[];
+  }[];
+  dish_modifier_groups: { dish_id: number; group_id: number }[];
+}
+
+export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
+  apiRequest<MenuCatalogue>(`${API_URL}/menu/catalogue`, { headers: getHeaders() });
