@@ -14910,8 +14910,10 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         client.release();
 
         const view = await loadOrderView(orderId);
+        // Se la comanda è già agganciata a un conto, il totale lo segue.
+        const sync = await resyncBillForOrder(orderId);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
-        res.status(201).json(view);
+        res.status(201).json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
         client.release();
@@ -14973,8 +14975,9 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
         );
 
         const view = await loadOrderView(upd.rows[0].order_id);
+        const sync = await resyncBillForOrder(upd.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
-        res.json(view);
+        res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         console.error('PATCH /orders/items/:id error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -14998,8 +15001,9 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
         await queryWithRetry(`DELETE FROM order_items WHERE id = $1`, [id]);
 
         const view = await loadOrderView(cur.rows[0].order_id);
+        const sync = await resyncBillForOrder(cur.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
-        res.json(view);
+        res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         console.error('DELETE /orders/items/:id error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -15574,6 +15578,428 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
         res.json({ ok: true, table_name: tableName });
     } catch (err: any) {
         console.error('POST /orders/:id/courses/:n/call error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Ponte comanda → conto (PR 6) -------------------------------------------
+// `table_bills.total_cents` smette di essere un numero digitato dal cameriere
+// e diventa la somma delle righe non stornate. È la parte delicata del piano,
+// perché tocca il pay-at-table già in produzione.
+
+class BillSyncError extends Error {
+    constructor(message: string, readonly detail: Record<string, any>) {
+        super(message);
+    }
+}
+
+// Snapshot delle righe per `table_bills.items`: è il campo che la pagina
+// pubblica userà per mostrare il dettaglio invece del solo totale, e che
+// sblocca lo split per riga (PR 8).
+async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
+    const rows = await client.query(
+        `SELECT oi.id, oi.name_snapshot, oi.qty, oi.unit_price_cents, oi.modifiers,
+                oi.course_no, d.category
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         LEFT JOIN dishes d ON d.id = oi.dish_id
+         WHERE o.table_bill_id = $1 AND oi.status <> 'VOIDED'
+         ORDER BY oi.course_no, oi.id`,
+        [billId]
+    );
+    return rows.rows.map((r: any) => {
+        const mods: any[] = Array.isArray(r.modifiers) ? r.modifiers : [];
+        const delta = mods.reduce((s, m) => s + Number(m?.price_delta_cents || 0), 0);
+        return {
+            order_item_id: r.id,
+            name: mods.length > 0 ? `${r.name_snapshot} (${mods.map(m => m.name).join(', ')})` : r.name_snapshot,
+            qty: Number(r.qty),
+            unit_price_cents: Number(r.unit_price_cents) + delta,
+            category: r.category ?? null,
+            course_no: r.course_no,
+        };
+    });
+}
+
+// Riallinea il conto alle righe. Da chiamare dentro una transazione che ha
+// già il lock sul bill.
+//
+// Il conflitto vero: il totale può SCENDERE (uno storno) sotto quanto gli
+// ospiti hanno già impegnato. Il trigger esistente protegge dal caso opposto
+// (split che sfondano il totale) ma non da questo.
+async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
+    const billRs = await client.query(
+        `SELECT id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
+        [billId]
+    );
+    if (billRs.rowCount === 0) throw new BillSyncError('Conto non trovato', { bill_id: billId });
+    const bill = billRs.rows[0];
+    if (!['OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL'].includes(bill.status)) {
+        throw new BillSyncError('Il conto non è più modificabile', { status: bill.status });
+    }
+
+    const totalRs = await client.query(
+        `SELECT COALESCE(SUM(
+                    (oi.unit_price_cents + COALESCE((
+                        SELECT SUM((m->>'price_delta_cents')::int)
+                        FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                    ), 0)) * oi.qty
+                ), 0)::int AS total
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         WHERE o.table_bill_id = $1 AND oi.status <> 'VOIDED'`,
+        [billId]
+    );
+    const newTotal: number = totalRs.rows[0].total;
+
+    const splitsRs = await client.query(
+        `SELECT id, amount_cents, status, claimed_at
+         FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')
+         ORDER BY claimed_at DESC`,
+        [billId]
+    );
+    const paid = splitsRs.rows.filter((s: any) => s.status === 'PAID')
+                              .reduce((n: number, s: any) => n + s.amount_cents, 0);
+    const claimed = splitsRs.rows.filter((s: any) => s.status === 'CLAIMED')
+                                 .reduce((n: number, s: any) => n + s.amount_cents, 0);
+
+    // Sotto il già pagato non si scende: la strada corretta è il rimborso
+    // Revolut, che esiste già ed è tracciato.
+    if (newTotal < paid) {
+        throw new BillSyncError(
+            'Il nuovo totale è inferiore a quanto già incassato: serve un rimborso',
+            { new_total_cents: newTotal, paid_cents: paid, bill_id: billId }
+        );
+    }
+
+    // Fra il pagato e l'impegnato: rilasciamo i claim non pagati più recenti
+    // finché il totale rientra. Gli ospiti vedono il residuo aggiornarsi.
+    const released: number[] = [];
+    if (newTotal < paid + claimed) {
+        let excess = paid + claimed - newTotal;
+        for (const s of splitsRs.rows.filter((r: any) => r.status === 'CLAIMED')) {
+            if (excess <= 0) break;
+            await client.query(
+                `UPDATE table_bill_splits
+                 SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status = 'CLAIMED'`,
+                [s.id]
+            );
+            released.push(s.id);
+            excess -= s.amount_cents;
+        }
+    }
+
+    // total_cents ha un CHECK > 0: una comanda svuotata non può azzerare il
+    // conto. Teniamo il minimo tecnico di 1 centesimo e lasciamo che sia il
+    // cameriere ad annullare il conto, che è la decisione giusta comunque.
+    const items = await billItemsSnapshot(client, billId);
+    const upd = await client.query(
+        `UPDATE table_bills
+         SET total_cents = GREATEST($2, 1), items = $3::jsonb
+         WHERE id = $1
+         RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                   items, status, share_token, opened_at, closed_at,
+                   opened_by_user_id, closed_by_user_id, external_ref,
+                   cash_settled_cents, tip_cents, notes`,
+        [billId, newTotal, JSON.stringify(items)]
+    );
+    return { bill: upd.rows[0], released_split_ids: released, computed_total_cents: newTotal };
+}
+
+// Riallineamento fuori transazione, usato dopo ogni mutazione di riga. Non
+// deve mai far fallire l'operazione sulla comanda: se il conto non si può
+// aggiornare lo segnaliamo, ma la riga resta com'è.
+async function resyncBillForOrder(orderId: number): Promise<{ warning?: string } | null> {
+    const o = await queryWithRetry(`SELECT table_bill_id FROM orders WHERE id = $1`, [orderId]);
+    const billId = o.rows[0]?.table_bill_id;
+    if (!billId) return null;
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await syncBillTotalInTx(client, billId);
+        await client.query('COMMIT');
+        try { socketService?.broadcastToAll('bill:updated', result.bill); } catch (_) {}
+        return null;
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (err instanceof BillSyncError) {
+            console.warn(`[bill-sync] conto ${billId} non riallineato:`, err.message, err.detail);
+            return { warning: err.message };
+        }
+        console.error('[bill-sync] errore:', err);
+        return { warning: 'Conto non riallineato' };
+    } finally {
+        client.release();
+    }
+}
+
+// Coperti modificabili dopo l'apertura: per un walk-in il numero iniziale è
+// una stima dai posti del tavolo, e alimenta lo split equo del conto.
+app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const sets: string[] = [];
+        const vals: any[] = [];
+        const push = (col: string, v: any) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
+
+        if (req.body?.covers != null) {
+            const c = Math.round(Number(req.body.covers));
+            if (!Number.isFinite(c) || c <= 0) return res.status(400).json({ error: 'covers deve essere > 0' });
+            push('covers', c);
+        }
+        if (req.body?.notes !== undefined) {
+            push('notes', typeof req.body.notes === 'string' ? req.body.notes.slice(0, 500) : null);
+        }
+        if (sets.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
+
+        vals.push(id);
+        const upd = await queryWithRetry(
+            `UPDATE orders SET ${sets.join(', ')} WHERE id = $${vals.length} AND status = 'OPEN' RETURNING *`,
+            vals
+        );
+        if (upd.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata o non aperta' });
+
+        // I coperti viaggiano anche sul conto: è il divisore dello split equo.
+        if (upd.rows[0].table_bill_id && req.body?.covers != null) {
+            await queryWithRetry(
+                `UPDATE table_bills SET covers = $2 WHERE id = $1`,
+                [upd.rows[0].table_bill_id, upd.rows[0].covers]
+            );
+        }
+
+        const view = await loadOrderView(id);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        res.json(view);
+    } catch (err: any) {
+        console.error('PATCH /orders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Chiude la comanda e apre (o aggiorna) il conto al tavolo, già valorizzato.
+// È il punto in cui il gestionale di sala consegna il lavoro al pay-at-table
+// esistente: da qui in poi valgono le regole del conto, non quelle della
+// comanda.
+app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        const orderId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        await client.query('BEGIN');
+        const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        if (ordRs.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+        const order = ordRs.rows[0];
+        if (order.status !== 'OPEN') {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda non è aperta', status: order.status });
+        }
+
+        // Righe mai lanciate: chiudere la comanda lasciandole in bozza
+        // significherebbe farle sparire senza che nessuno le abbia mai viste.
+        const pending = await client.query(
+            `SELECT COUNT(*)::int AS n FROM order_items
+             WHERE order_id = $1 AND status IN ('DRAFT','QUEUED')`,
+            [orderId]
+        );
+        if (pending.rows[0].n > 0 && !req.body?.discard_pending) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({
+                error: 'Ci sono righe non ancora inviate in cucina',
+                pending_items: pending.rows[0].n,
+                hint: 'Invia o elimina le righe in bozza, oppure richiama con discard_pending: true',
+            });
+        }
+        if (pending.rows[0].n > 0) {
+            await client.query(
+                `DELETE FROM order_items WHERE order_id = $1 AND status IN ('DRAFT','QUEUED')`,
+                [orderId]
+            );
+        }
+
+        // Quanto c'è davvero da pagare. Va calcolato PRIMA di creare il conto:
+        // una comanda annullata in blocco, o chiusa dopo aver scartato le
+        // bozze, non deve generare un conto da un centesimo con tanto di QR
+        // pagabile — che è quello che succedeva col minimo tecnico imposto
+        // dal CHECK su total_cents.
+        const billableRs = await client.query(
+            `SELECT COALESCE(SUM(
+                        (oi.unit_price_cents + COALESCE((
+                            SELECT SUM((m->>'price_delta_cents')::int)
+                            FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                        ), 0)) * oi.qty
+                    ), 0)::int AS total
+             FROM order_items oi
+             WHERE oi.order_id = $1 AND oi.status <> 'VOIDED'`,
+            [orderId]
+        );
+        const billableCents: number = billableRs.rows[0].total;
+
+        if (billableCents === 0 && !order.table_bill_id) {
+            await client.query(
+                `UPDATE orders
+                 SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = $2
+                 WHERE id = $1`,
+                [orderId, req.user?.userId ?? null]
+            );
+            await client.query('COMMIT');
+            client.release();
+            try { socketService?.broadcastToAll('order:updated', { ...order, status: 'CLOSED' }); } catch (_) {}
+            return res.json({
+                order_id: orderId,
+                bill: null,
+                released_split_ids: [],
+                message: 'Comanda chiusa senza conto: nessuna riga da pagare.',
+            });
+        }
+
+        let billId: number | null = order.table_bill_id;
+        if (!billId) {
+            // Un conto attivo può esistere già (aperto a mano dal pay-at-table
+            // prima che il modulo comande fosse acceso): lo riusiamo invece di
+            // crearne un secondo, che l'indice unico rifiuterebbe comunque.
+            const existing = await client.query(
+                `SELECT id FROM table_bills
+                 WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+                   AND ((reservation_id = $1 AND $1 IS NOT NULL)
+                     OR (table_id = $2 AND $2 IS NOT NULL AND reservation_id IS NULL))
+                 ORDER BY opened_at DESC LIMIT 1`,
+                [order.reservation_id, order.table_id]
+            );
+            if (existing.rows.length > 0) {
+                billId = existing.rows[0].id;
+            } else {
+                const shareToken = crypto.randomBytes(24).toString('base64url');
+                const ins = await client.query(
+                    `INSERT INTO table_bills
+                        (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
+                     VALUES ($1, $2, 1, $3, $4, $5)
+                     RETURNING id`,
+                    [order.reservation_id, order.table_id, order.covers, shareToken, req.user?.userId ?? null]
+                );
+                billId = ins.rows[0].id;
+            }
+            await client.query(`UPDATE orders SET table_bill_id = $2 WHERE id = $1`, [orderId, billId]);
+        }
+
+        let synced;
+        try {
+            synced = await syncBillTotalInTx(client, billId!);
+        } catch (err: any) {
+            await client.query('ROLLBACK'); client.release();
+            if (err instanceof BillSyncError) {
+                return res.status(409).json({ error: err.message, ...err.detail });
+            }
+            throw err;
+        }
+
+        await client.query(
+            `UPDATE orders
+             SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = $2
+             WHERE id = $1`,
+            [orderId, req.user?.userId ?? null]
+        );
+        await client.query('COMMIT');
+        client.release();
+
+        try {
+            socketService?.broadcastToAll('bill:updated', synced.bill);
+            socketService?.broadcastToAll('order:updated', { ...order, status: 'CLOSED', table_bill_id: billId });
+        } catch (_) {}
+
+        LogService.logActivity(
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.ORDER, orderId,
+            `Comanda chiusa · tavolo ${order.table_id ?? '—'}`,
+            { bill_id: billId, total_cents: synced.bill.total_cents, discarded_pending: pending.rows[0].n }
+        ).catch(() => {});
+
+        res.json({
+            order_id: orderId,
+            bill: synced.bill,
+            released_split_ids: synced.released_split_ids,
+        });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Conto su un tavolo senza prenotazione. Gemello di POST /reservations/:id/bill
+// per i walk-in, che finora non avevano percorso: `table_bills.reservation_id`
+// era già nullable, mancava solo l'ingresso.
+app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
+            });
+        }
+        const tableId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
+
+        const tbl = await queryWithRetry(`SELECT id, seats FROM tables WHERE id = $1`, [tableId]);
+        if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
+
+        const totalCents = Number(req.body?.total_cents);
+        if (!Number.isFinite(totalCents) || totalCents <= 0) {
+            return res.status(400).json({ error: 'total_cents deve essere un intero positivo' });
+        }
+        const requested = req.body?.covers != null ? Number(req.body.covers) : NaN;
+        const covers = Number.isFinite(requested) && requested > 0
+            ? Math.round(requested)
+            : Math.max(1, Number(tbl.rows[0].seats) || 1);
+
+        const shareToken = crypto.randomBytes(24).toString('base64url');
+        let inserted;
+        try {
+            inserted = await queryWithRetry(
+                `INSERT INTO table_bills
+                    (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
+                 VALUES (NULL, $1, $2, $3, $4, $5)
+                 RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                           items, status, share_token, opened_at, closed_at,
+                           opened_by_user_id, closed_by_user_id, external_ref,
+                           cash_settled_cents, tip_cents, notes`,
+                [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null]
+            );
+        } catch (err: any) {
+            // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.
+            if (err?.code === '23505') {
+                const existing = await queryWithRetry(
+                    `SELECT id, status FROM table_bills
+                     WHERE table_id = $1 AND reservation_id IS NULL
+                       AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+                     LIMIT 1`,
+                    [tableId]
+                );
+                return res.status(409).json({
+                    error: 'Il tavolo ha già un conto attivo',
+                    existing_bill_id: existing.rows[0]?.id,
+                    existing_bill_status: existing.rows[0]?.status,
+                });
+            }
+            throw err;
+        }
+
+        const bill = inserted.rows[0];
+        try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
+        res.status(201).json({ bill, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: bill.total_cents });
+    } catch (err: any) {
+        console.error('POST /tables/:id/bill error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });

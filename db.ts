@@ -2295,6 +2295,37 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ON CONFLICT (key) DO NOTHING;
         `);
 
+        // ============================================
+        // GESTIONALE DI SALA — PR 6: ponte comanda → conto
+        // ============================================
+        // Da qui in avanti `table_bills.total_cents` è un valore derivato
+        // dalle righe di comanda, non un numero digitato dal cameriere.
+
+        // Un conto attivo per tavolo/prenotazione, garantito dal database.
+        // Sostituisce il controllo applicativo in POST /reservations/:id/bill,
+        // che lasciava aperta la race fra due camerieri che aprono il conto
+        // sullo stesso tavolo nello stesso istante.
+        //
+        // NOT VALID: eventuali righe storiche con entrambi gli ancoraggi NULL
+        // (table_id azzerato da un ON DELETE SET NULL) non devono far fallire
+        // la migrazione — il vincolo vale sulle scritture nuove.
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'table_bills_anchor_present'
+                ) THEN
+                    ALTER TABLE table_bills ADD CONSTRAINT table_bills_anchor_present
+                        CHECK (reservation_id IS NOT NULL OR table_id IS NOT NULL) NOT VALID;
+                END IF;
+            END $$;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active
+                ON table_bills(COALESCE(reservation_id, -table_id))
+                WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL');
+        `);
+
         // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
         // AUTO_FIRST: la prima uscita continua a partire da sola, dalla
         // seconda in poi decide il passe. Prima di questa PR non esisteva
