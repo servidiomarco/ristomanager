@@ -2025,6 +2025,160 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             `);
         }
 
+        // ============================================
+        // GESTIONALE DI SALA — PR 1: listini, varianti, partite
+        // ============================================
+        // Fondamenta dello schema comande (vedi docs/gestionale-sala-plan.md).
+        // Questa PR crea solo strutture e fa il backfill dei prezzi: nessun
+        // endpoint le legge ancora, nessuna UI le mostra. Il CRM si comporta
+        // esattamente come prima.
+        //
+        // Tutto il blocco sta in coda a createSchema di proposito: le comande
+        // arriveranno a toccare `dishes` da più punti, e tenerle raggruppate
+        // qui riduce la superficie di conflitto quando si lavora in parallelo
+        // su questo file.
+
+        // --- Listini -----------------------------------------------------
+        // `dishes.price` è un prezzo unico. I listini servono a differenziare
+        // sala / asporto / eventi e a cambiare i prezzi stagionali senza
+        // riscrivere lo storico: i conti chiusi conservano lo snapshot del
+        // prezzo, non un riferimento al listino.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS menu_price_lists (
+                id          SERIAL PRIMARY KEY,
+                name        VARCHAR(100) NOT NULL,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Un solo listino di default, garantito dall'indice parziale.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_single_default
+                ON menu_price_lists(is_default) WHERE is_default;
+        `);
+        // Nome univoco case-insensitive: rende i seed idempotenti senza
+        // guardie applicative e blocca il doppione da errore di battitura.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_name
+                ON menu_price_lists(LOWER(name));
+        `);
+        await client.query(`
+            INSERT INTO menu_price_lists (name, is_default, sort_order)
+            VALUES ('Sala', TRUE, 0)
+            ON CONFLICT DO NOTHING;
+        `);
+
+        // Prezzo per (piatto, listino), in centesimi interi. Da qui in avanti
+        // gli importi nuovi sono sempre INTEGER: `dishes.price` resta
+        // DECIMAL per compatibilità, ma la conversione avviene solo qui.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS dish_prices (
+                dish_id       INTEGER NOT NULL REFERENCES dishes(id) ON DELETE CASCADE,
+                price_list_id INTEGER NOT NULL REFERENCES menu_price_lists(id) ON DELETE CASCADE,
+                price_cents   INTEGER NOT NULL CHECK (price_cents >= 0),
+                PRIMARY KEY (dish_id, price_list_id)
+            );
+        `);
+        // Backfill dal prezzo attuale verso il listino di default. Idempotente
+        // due volte: ON CONFLICT copre il riavvio, e la SELECT prende anche i
+        // piatti creati dopo questa migrazione ma prima che la UI dei listini
+        // esista (PR 2+), così nessun piatto resta senza prezzo.
+        //
+        // GREATEST(0, ...) evita che un prezzo negativo già in tabella faccia
+        // fallire il CHECK: un dato assurdo non deve impedire il boot dell'app.
+        await client.query(`
+            INSERT INTO dish_prices (dish_id, price_list_id, price_cents)
+            SELECT d.id, pl.id, GREATEST(0, ROUND(d.price * 100))::int
+            FROM dishes d
+            CROSS JOIN menu_price_lists pl
+            WHERE pl.is_default
+            ON CONFLICT (dish_id, price_list_id) DO NOTHING;
+        `);
+
+        // --- Varianti ----------------------------------------------------
+        // «Senza cipolla», «al sangue», «+ bufala € 2». I gruppi sono
+        // riusabili fra piatti (un solo gruppo "Cottura" per tutte le carni).
+        // Sulla riga di comanda i modificatori verranno snapshottati in JSONB
+        // (PR 2), non referenziati: cambiare il prezzo di un modificatore non
+        // deve muovere i conti già emessi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS modifier_groups (
+                id          SERIAL PRIMARY KEY,
+                name        VARCHAR(100) NOT NULL,
+                min_select  INTEGER NOT NULL DEFAULT 0 CHECK (min_select >= 0),
+                max_select  INTEGER NOT NULL DEFAULT 1 CHECK (max_select >= 1),
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (max_select >= min_select)
+            );
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS modifiers (
+                id                SERIAL PRIMARY KEY,
+                group_id          INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+                name              VARCHAR(100) NOT NULL,
+                price_delta_cents INTEGER NOT NULL DEFAULT 0,
+                is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order        INTEGER NOT NULL DEFAULT 0
+            );
+        `);
+        // price_delta_cents senza CHECK: può essere negativo (uno sconto per
+        // il piatto servito senza un ingrediente costoso).
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_modifiers_group ON modifiers(group_id, sort_order);
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS dish_modifier_groups (
+                dish_id  INTEGER NOT NULL REFERENCES dishes(id) ON DELETE CASCADE,
+                group_id INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+                PRIMARY KEY (dish_id, group_id)
+            );
+        `);
+
+        // --- Partite di preparazione -------------------------------------
+        // Una riga per postazione di cucina, ognuna col proprio monitor KDS
+        // (PR 4). La cucina di riferimento ne ha tre.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS stations (
+                id         SERIAL PRIMARY KEY,
+                name       VARCHAR(50) NOT NULL,
+                color      VARCHAR(20),
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Stesso motivo dei listini: senza indice univoco il seed sotto
+        // duplicherebbe le partite a ogni riavvio del server.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_stations_name ON stations(LOWER(name));
+        `);
+        await client.query(`
+            INSERT INTO stations (name, color, sort_order) VALUES
+                ('Antipasti', 'emerald', 1),
+                ('Primi',     'amber',   2),
+                ('Griglia',   'rose',    3)
+            ON CONFLICT DO NOTHING;
+        `);
+
+        // Partita di destinazione del piatto. NULL = nessuna partita
+        // assegnata: la riga finirà sul monitor del passe invece di sparire.
+        await client.query(`
+            ALTER TABLE dishes ADD COLUMN IF NOT EXISTS station_id INTEGER
+                REFERENCES stations(id) ON DELETE SET NULL;
+        `);
+        // Tempo di preparazione tipico. Alimenta il lancio scaglionato delle
+        // uscite (PR 5): senza, in una cucina multi-partita gli antipasti
+        // arrivano al passe dieci minuti prima della griglia. NULL viene
+        // trattato come 0 — comportamento identico a un KDS non scaglionato,
+        // così il campo si può popolare piatto per piatto senza fretta.
+        await client.query(`
+            ALTER TABLE dishes ADD COLUMN IF NOT EXISTS prep_minutes INTEGER
+                CHECK (prep_minutes IS NULL OR prep_minutes >= 0);
+        `);
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {
