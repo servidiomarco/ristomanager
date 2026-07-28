@@ -12527,8 +12527,8 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled'];
 
 async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -12549,6 +12549,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // being configured and the QR link being physically distributed at the
     // table. Owner opts in from Settings once ready.
     pay_at_table_enabled: false,
+    // Off by default: il modulo comande resta spento finché non c'è una UI
+    // che lo usi (PR 3). Gli endpoint esistono ma rispondono 403.
+    table_orders_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (_req, res) => {
@@ -14490,6 +14493,610 @@ app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'
         });
     } catch (err: any) {
         res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
+    }
+});
+
+// ============================================
+// GESTIONALE DI SALA — COMANDE (PR 2)
+// ============================================
+// La comanda dice cosa si sta preparando, il conto (`table_bills`) quanto si
+// deve. Due domini separati: il ponte fra i due arriva nella PR 6, qui i
+// totali sono solo calcolati e restituiti, nessun conto viene toccato.
+//
+// Piano completo: docs/gestionale-sala-plan.md
+
+type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+
+// Come vengono lanciate le uscite. Default prudente ad AUTO_ALL: finché la
+// vista passe non esiste (PR 5) nessuno può lanciare a mano, e un default
+// diverso lascerebbe le uscite ferme in QUEUED senza che nessuno se ne accorga.
+async function getCourseFireMode(): Promise<CourseFireModeValue> {
+    try {
+        const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE key = 'course_fire_mode'`);
+        const v = r.rows[0]?.text_value;
+        if (v === 'AUTO_FIRST' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
+        return 'AUTO_ALL';
+    } catch (err) {
+        console.error('[orders] lettura course_fire_mode fallita, uso AUTO_ALL:', err);
+        return 'AUTO_ALL';
+    }
+}
+
+const ordersEnabledGuard = async (res: any): Promise<boolean> => {
+    if (await getFeatureFlag('table_orders_enabled', false)) return true;
+    res.status(403).json({
+        error: 'feature_disabled',
+        message: 'Il modulo comande è disattivato. Attivalo da Impostazioni.',
+    });
+    return false;
+};
+
+// Totale riga = (prezzo unitario + Σ varianti) * quantità. Il client non lo
+// calcola mai: il palmare è un tablet in mano a chiunque passi in sala.
+const lineTotalCents = (row: any): number => {
+    const mods: any[] = Array.isArray(row.modifiers) ? row.modifiers : [];
+    const delta = mods.reduce((sum, m) => sum + Number(m?.price_delta_cents || 0), 0);
+    return (Number(row.unit_price_cents) + delta) * Number(row.qty);
+};
+
+// Stato dell'uscita derivato dalle righe, mai materializzato: due fonti di
+// verità divergono al primo storno a metà preparazione.
+const deriveCourseStatus = (items: any[]): string => {
+    const live = items.filter(i => i.status !== 'VOIDED');
+    if (live.length === 0) return 'PENDING';
+    if (live.every(i => i.status === 'SERVED')) return 'SERVED';
+    if (live.every(i => i.status === 'READY' || i.status === 'SERVED')) return 'READY';
+    if (live.some(i => i.fired_at)) return 'FIRED';
+    if (live.some(i => i.queued_at)) return 'QUEUED';
+    return 'PENDING';
+};
+
+// Vista completa della comanda: righe, uscite e totali già sommati.
+async function loadOrderView(orderId: number): Promise<any | null> {
+    const o = await queryWithRetry(`SELECT * FROM orders WHERE id = $1`, [orderId]);
+    if (o.rows.length === 0) return null;
+    const it = await queryWithRetry(
+        `SELECT * FROM order_items WHERE order_id = $1 ORDER BY course_no, id`,
+        [orderId]
+    );
+    const items = it.rows.map(r => ({ ...r, line_total_cents: lineTotalCents(r) }));
+
+    const byCourse = new Map<number, any[]>();
+    for (const i of items) {
+        if (!byCourse.has(i.course_no)) byCourse.set(i.course_no, []);
+        byCourse.get(i.course_no)!.push(i);
+    }
+    const courses = [...byCourse.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([course_no, list]) => ({
+            course_no,
+            status: deriveCourseStatus(list),
+            items: list,
+            total_cents: list.filter(i => i.status !== 'VOIDED')
+                             .reduce((s, i) => s + i.line_total_cents, 0),
+        }));
+
+    const total_cents = items.filter(i => i.status !== 'VOIDED')
+                             .reduce((s, i) => s + i.line_total_cents, 0);
+    const voided_cents = items.filter(i => i.status === 'VOIDED')
+                              .reduce((s, i) => s + i.line_total_cents, 0);
+
+    return { order: o.rows[0], items, courses, total_cents, voided_cents };
+}
+
+// Lancio di un'uscita: QUEUED → SENT con lo scaglionamento per partita.
+// station_start_at = adesso + (prep massimo dell'uscita − prep della riga),
+// così la griglia parte subito e i primi partono dopo, e arrivano insieme.
+// Le righe senza prep_minutes valgono 0 e partono subito — comportamento
+// identico a un KDS non scaglionato, che è ciò che serve finché il campo non
+// è popolato.
+async function fireCourseInTx(client: any, orderId: number, courseNo: number): Promise<any[]> {
+    const upd = await client.query(
+        `WITH prep AS (
+             SELECT oi.id, COALESCE(d.prep_minutes, 0) AS p
+             FROM order_items oi
+             LEFT JOIN dishes d ON d.id = oi.dish_id
+             WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'QUEUED'
+         ), mx AS (
+             SELECT COALESCE(MAX(p), 0) AS m FROM prep
+         )
+         UPDATE order_items oi
+         SET status = 'SENT',
+             fired_at = CURRENT_TIMESTAMP,
+             station_start_at = CURRENT_TIMESTAMP
+                 + make_interval(mins => (SELECT m FROM mx) - prep.p)
+         FROM prep, mx
+         WHERE oi.id = prep.id
+         RETURNING oi.*`,
+        [orderId, courseNo]
+    );
+    return upd.rows;
+}
+
+// Apre una comanda. Idempotente rispetto all'header Idempotency-Key: il
+// palmare in sala perde il WiFi a metà richiesta e ritenta, e senza chiave il
+// tavolo si ritroverebbe due comande.
+//
+// Se il tavolo ha già una comanda aperta la restituisce invece di fallire:
+// due camerieri sullo stesso tavolo devono scrivere sulla stessa comanda.
+app.post('/orders', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+
+        const idemKey = typeof req.headers['idempotency-key'] === 'string'
+            ? (req.headers['idempotency-key'] as string).slice(0, 80)
+            : null;
+        if (idemKey) {
+            const prev = await queryWithRetry(`SELECT id FROM orders WHERE idempotency_key = $1`, [idemKey]);
+            if (prev.rows.length > 0) {
+                return res.json({ ...(await loadOrderView(prev.rows[0].id)), replayed: true });
+            }
+        }
+
+        let reservationId = req.body?.reservation_id != null ? Number(req.body.reservation_id) : null;
+        let tableId = req.body?.table_id != null ? Number(req.body.table_id) : null;
+        if (reservationId != null && !Number.isFinite(reservationId)) {
+            return res.status(400).json({ error: 'reservation_id non valido' });
+        }
+        if (tableId != null && !Number.isFinite(tableId)) {
+            return res.status(400).json({ error: 'table_id non valido' });
+        }
+        if (reservationId == null && tableId == null) {
+            return res.status(400).json({ error: 'Serve reservation_id oppure table_id' });
+        }
+
+        // Dalla prenotazione ereditiamo tavolo e coperti, così il cameriere
+        // non li ridigita (e non li sbaglia).
+        let covers = req.body?.covers != null ? Number(req.body.covers) : NaN;
+        if (reservationId != null) {
+            const r = await queryWithRetry(
+                `SELECT id, table_id, guests FROM reservations WHERE id = $1`, [reservationId]
+            );
+            if (r.rows.length === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
+            if (tableId == null) tableId = r.rows[0].table_id ?? null;
+            if (!Number.isFinite(covers)) covers = Number(r.rows[0].guests);
+        }
+        if (!Number.isFinite(covers) || covers <= 0) covers = 1;
+
+        let priceListId = req.body?.price_list_id != null ? Number(req.body.price_list_id) : null;
+        if (priceListId == null) {
+            const pl = await queryWithRetry(`SELECT id FROM menu_price_lists WHERE is_default LIMIT 1`);
+            priceListId = pl.rows[0]?.id ?? null;
+        }
+
+        const orderType = req.body?.order_type === 'TAKEAWAY' ? 'TAKEAWAY' : 'DINE_IN';
+        const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
+
+        let created: any;
+        try {
+            const ins = await queryWithRetry(
+                `INSERT INTO orders
+                    (reservation_id, table_id, order_type, price_list_id, covers, notes,
+                     opened_by_user_id, idempotency_key)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING *`,
+                [reservationId, tableId, orderType, priceListId, Math.round(covers), notes,
+                 req.user?.userId ?? null, idemKey]
+            );
+            created = ins.rows[0];
+        } catch (err: any) {
+            // 23505 = violazione di unicità. Sui due indici parziali significa
+            // "comanda già aperta qui": la restituiamo invece di far fallire il
+            // cameriere, che è il comportamento utile in sala.
+            if (err?.code === '23505') {
+                const existing = await queryWithRetry(
+                    `SELECT id FROM orders
+                     WHERE status = 'OPEN'
+                       AND ((table_id = $1 AND $1 IS NOT NULL)
+                         OR (reservation_id = $2 AND $2 IS NOT NULL))
+                     LIMIT 1`,
+                    [tableId, reservationId]
+                );
+                if (existing.rows.length > 0) {
+                    return res.json({ ...(await loadOrderView(existing.rows[0].id)), reused: true });
+                }
+            }
+            throw err;
+        }
+
+        try { socketService?.broadcastToAll('order:created', created); } catch (_) {}
+
+        LogService.logActivity(
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.CREATE, ResourceType.ORDER, created.id,
+            `Comanda tavolo ${tableId ?? '—'}`,
+            { reservation_id: reservationId, table_id: tableId, covers: created.covers }
+        ).catch(() => {});
+
+        res.status(201).json(await loadOrderView(created.id));
+    } catch (err: any) {
+        console.error('POST /orders error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const view = await loadOrderView(id);
+        if (!view) return res.status(404).json({ error: 'Comanda non trovata' });
+        res.json(view);
+    } catch (err: any) {
+        console.error('GET /orders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Comanda aperta su un tavolo — l'ingresso naturale del palmare: il cameriere
+// tocca il tavolo sulla mappa, non conosce l'id della comanda.
+app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const tableId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(
+            `SELECT id FROM orders WHERE table_id = $1 AND status = 'OPEN' LIMIT 1`, [tableId]
+        );
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Nessuna comanda aperta su questo tavolo' });
+        res.json(await loadOrderView(r.rows[0].id));
+    } catch (err: any) {
+        console.error('GET /tables/:id/order error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Aggiunge righe in DRAFT. Batch, perché il cameriere compone il carrello
+// offline e lo manda in una volta sola.
+//
+// Prezzo e varianti vengono risolti QUI e congelati sulla riga: rinominare un
+// piatto o ritoccare il listino domani non deve muovere le comande di stasera.
+app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+
+        const orderId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        const incoming = Array.isArray(req.body?.items) ? req.body.items : null;
+        if (!incoming || incoming.length === 0) {
+            client.release();
+            return res.status(400).json({ error: 'items deve essere un array non vuoto' });
+        }
+        if (incoming.length > 100) {
+            client.release();
+            return res.status(400).json({ error: 'Massimo 100 righe per richiesta' });
+        }
+
+        const batchKey = typeof req.headers['idempotency-key'] === 'string'
+            ? (req.headers['idempotency-key'] as string).slice(0, 60)
+            : null;
+
+        await client.query('BEGIN');
+
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        if (ord.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+        if (ord.rows[0].status !== 'OPEN') {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda non è aperta', status: ord.rows[0].status });
+        }
+        const priceListId: number | null = ord.rows[0].price_list_id;
+
+        for (let i = 0; i < incoming.length; i++) {
+            const raw = incoming[i];
+            const dishId = Number(raw?.dish_id);
+            if (!Number.isFinite(dishId)) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(400).json({ error: `items[${i}].dish_id mancante o non valido` });
+            }
+            const qty = raw?.qty != null ? Math.round(Number(raw.qty)) : 1;
+            if (!Number.isFinite(qty) || qty <= 0) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(400).json({ error: `items[${i}].qty deve essere > 0` });
+            }
+            const courseNo = raw?.course_no != null ? Math.round(Number(raw.course_no)) : 1;
+            if (!Number.isFinite(courseNo) || courseNo <= 0) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(400).json({ error: `items[${i}].course_no deve essere > 0` });
+            }
+            const seatNo = raw?.seat_no != null ? Math.round(Number(raw.seat_no)) : null;
+
+            const dish = await client.query(
+                `SELECT id, name, price, station_id FROM dishes WHERE id = $1`, [dishId]
+            );
+            if (dish.rows.length === 0) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(404).json({ error: `Piatto ${dishId} non trovato` });
+            }
+
+            // Prezzo dal listino della comanda; se manca la riga di listino si
+            // ricade sul prezzo di anagrafica, così un piatto nuovo non blocca
+            // il servizio mentre qualcuno sistema i listini.
+            let unitPrice: number | null = null;
+            if (priceListId != null) {
+                const p = await client.query(
+                    `SELECT price_cents FROM dish_prices WHERE dish_id = $1 AND price_list_id = $2`,
+                    [dishId, priceListId]
+                );
+                if (p.rows.length > 0) unitPrice = Number(p.rows[0].price_cents);
+            }
+            if (unitPrice == null) unitPrice = Math.max(0, Math.round(Number(dish.rows[0].price) * 100));
+
+            // Varianti: accettiamo solo quelle collegate al piatto, altrimenti
+            // un client sbagliato potrebbe attaccare "al sangue" a un tiramisù.
+            const modifierIds: number[] = Array.isArray(raw?.modifier_ids)
+                ? raw.modifier_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+                : [];
+            let modifiers: any[] | null = null;
+            if (modifierIds.length > 0) {
+                const mres = await client.query(
+                    `SELECT m.id, m.name, m.price_delta_cents
+                     FROM modifiers m
+                     JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id
+                     WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.is_active`,
+                    [modifierIds, dishId]
+                );
+                if (mres.rows.length !== modifierIds.length) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({
+                        error: `items[${i}]: una o più varianti non sono valide per questo piatto`,
+                        richieste: modifierIds,
+                        ammesse: mres.rows.map((r: any) => r.id),
+                    });
+                }
+                modifiers = mres.rows.map((r: any) => ({
+                    id: r.id, name: r.name, price_delta_cents: Number(r.price_delta_cents),
+                }));
+            }
+
+            // La partita viene copiata sulla riga, non risolta via join a
+            // runtime: riassegnare un piatto a un'altra partita non deve
+            // spostare ciò che è già in preparazione.
+            const stationId = raw?.station_id != null ? Number(raw.station_id) : dish.rows[0].station_id;
+
+            const itemKey = typeof raw?.idempotency_key === 'string'
+                ? raw.idempotency_key.slice(0, 80)
+                : (batchKey ? `${batchKey}:${i}` : null);
+
+            await client.query(
+                `INSERT INTO order_items
+                    (order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
+                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
+                 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
+                 ON CONFLICT (idempotency_key) DO NOTHING`,
+                [orderId, dishId, dish.rows[0].name, unitPrice,
+                 modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
+                 Number.isFinite(stationId) ? stationId : null,
+                 typeof raw?.note === 'string' ? raw.note.slice(0, 300) : null,
+                 req.user?.userId ?? null, itemKey]
+            );
+        }
+
+        await client.query('COMMIT');
+        client.release();
+
+        const view = await loadOrderView(orderId);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        res.status(201).json(view);
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/items error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Modifica una riga. Solo in DRAFT: dopo l'invio la cucina l'ha vista e
+// l'unica strada onesta è lo storno, che lascia traccia.
+app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const cur = await queryWithRetry(`SELECT * FROM order_items WHERE id = $1`, [id]);
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+        if (cur.rows[0].status !== 'DRAFT') {
+            return res.status(409).json({
+                error: 'Riga già inviata: si può solo stornare',
+                status: cur.rows[0].status,
+            });
+        }
+
+        const sets: string[] = [];
+        const vals: any[] = [];
+        const push = (col: string, v: any) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
+
+        if (req.body?.qty != null) {
+            const q = Math.round(Number(req.body.qty));
+            if (!Number.isFinite(q) || q <= 0) return res.status(400).json({ error: 'qty deve essere > 0' });
+            push('qty', q);
+        }
+        if (req.body?.course_no != null) {
+            const c = Math.round(Number(req.body.course_no));
+            if (!Number.isFinite(c) || c <= 0) return res.status(400).json({ error: 'course_no deve essere > 0' });
+            push('course_no', c);
+        }
+        if (req.body?.seat_no !== undefined) {
+            const s = req.body.seat_no == null ? null : Math.round(Number(req.body.seat_no));
+            if (s != null && (!Number.isFinite(s) || s <= 0)) return res.status(400).json({ error: 'seat_no deve essere > 0' });
+            push('seat_no', s);
+        }
+        if (req.body?.note !== undefined) {
+            push('note', typeof req.body.note === 'string' ? req.body.note.slice(0, 300) : null);
+        }
+        if (req.body?.station_id !== undefined) {
+            const st = req.body.station_id == null ? null : Number(req.body.station_id);
+            if (st != null && !Number.isFinite(st)) return res.status(400).json({ error: 'station_id non valido' });
+            push('station_id', st);
+        }
+        if (sets.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
+
+        vals.push(id);
+        const upd = await queryWithRetry(
+            `UPDATE order_items SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING order_id`,
+            vals
+        );
+
+        const view = await loadOrderView(upd.rows[0].order_id);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        res.json(view);
+    } catch (err: any) {
+        console.error('PATCH /orders/items/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const cur = await queryWithRetry(`SELECT order_id, status FROM order_items WHERE id = $1`, [id]);
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+        if (cur.rows[0].status !== 'DRAFT') {
+            return res.status(409).json({
+                error: 'Riga già inviata: si può solo stornare',
+                status: cur.rows[0].status,
+            });
+        }
+        await queryWithRetry(`DELETE FROM order_items WHERE id = $1`, [id]);
+
+        const view = await loadOrderView(cur.rows[0].order_id);
+        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        res.json(view);
+    } catch (err: any) {
+        console.error('DELETE /orders/items/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Invio: la sala propone (DRAFT → QUEUED), poi il lancio avviene secondo
+// `course_fire_mode`. La prima uscita non ha niente da coordinare — il tavolo
+// si è appena seduto — quindi in AUTO_FIRST parte da sola; dalla seconda in poi
+// decide il passe, che è l'unico a vedere la sala.
+app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+
+        const orderId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        const onlyCourse = req.body?.course_no != null ? Math.round(Number(req.body.course_no)) : null;
+        if (onlyCourse != null && (!Number.isFinite(onlyCourse) || onlyCourse <= 0)) {
+            client.release();
+            return res.status(400).json({ error: 'course_no deve essere > 0' });
+        }
+
+        const mode = await getCourseFireMode();
+        await client.query('BEGIN');
+
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        if (ord.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+        if (ord.rows[0].status !== 'OPEN') {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda non è aperta', status: ord.rows[0].status });
+        }
+
+        const queued = await client.query(
+            `UPDATE order_items
+             SET status = 'QUEUED', queued_at = CURRENT_TIMESTAMP
+             WHERE order_id = $1 AND status = 'DRAFT'
+               AND ($2::int IS NULL OR course_no = $2)
+             RETURNING id, course_no`,
+            [orderId, onlyCourse]
+        );
+        if (queued.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'Nessuna riga in bozza da inviare' });
+        }
+
+        const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
+        const toFire = mode === 'AUTO_ALL' ? proposedCourses
+                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
+                     : [];
+        const fired: number[] = [];
+        for (const c of toFire) {
+            const rows = await fireCourseInTx(client, orderId, c);
+            if (rows.length > 0) fired.push(c);
+        }
+
+        await client.query('COMMIT');
+        client.release();
+
+        const view = await loadOrderView(orderId);
+        const stillQueued = proposedCourses.filter(c => !fired.includes(c));
+        try {
+            // Il passe riceve ciò che attende di essere lanciato, i monitor di
+            // partita solo ciò che è stato lanciato davvero.
+            for (const c of stillQueued) {
+                socketService?.broadcastToAll('course:queued', {
+                    order_id: orderId, course_no: c, table_id: view.order.table_id,
+                    items: view.items.filter((i: any) => i.course_no === c && i.status === 'QUEUED'),
+                });
+            }
+            for (const c of fired) {
+                socketService?.broadcastToAll('course:fired', {
+                    order_id: orderId, course_no: c, table_id: view.order.table_id,
+                    items: view.items.filter((i: any) => i.course_no === c && i.status === 'SENT'),
+                });
+            }
+            socketService?.broadcastToAll('order:updated', view.order);
+        } catch (_) {}
+
+        res.json({ ...view, fire_mode: mode, fired_courses: fired, queued_courses: stillQueued });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/send error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Richiama un'uscita proposta ma non ancora lanciata: torna in DRAFT e il
+// cameriere la corregge. In cucina non l'ha vista nessuno, quindi non serve
+// uno storno e non resta traccia.
+app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE order_items
+             SET status = 'DRAFT', queued_at = NULL
+             WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
+             RETURNING id`,
+            [orderId, courseNo]
+        );
+        if (upd.rows.length === 0) {
+            return res.status(409).json({
+                error: 'Nessuna riga richiamabile: l\'uscita non è in attesa oppure è già stata lanciata',
+            });
+        }
+
+        const view = await loadOrderView(orderId);
+        try {
+            socketService?.broadcastToAll('course:recalled', { order_id: orderId, course_no: courseNo });
+            socketService?.broadcastToAll('order:updated', view.order);
+        } catch (_) {}
+        res.json(view);
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/recall error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 

@@ -38,7 +38,12 @@ const PERMISSION_LABELS: Record<string, string> = {
   'users:view': 'Visualizza',
   'users:full': 'Gestione completa',
   'reports:view': 'Visualizza',
-  'reports:full': 'Modifica'
+  'reports:full': 'Modifica',
+  'orders:view': 'Visualizza comande',
+  'orders:take': 'Prende e invia comande',
+  'orders:kds': 'Monitor di partita',
+  'orders:expedite': 'Passe — lancia le uscite',
+  'orders:void': 'Storna righe inviate'
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';

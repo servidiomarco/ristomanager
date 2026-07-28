@@ -2179,6 +2179,148 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 CHECK (prep_minutes IS NULL OR prep_minutes >= 0);
         `);
 
+        // ============================================
+        // GESTIONALE DI SALA — PR 2: comande
+        // ============================================
+        // Una `orders` per conto aperto al tavolo, N `order_items` per riga
+        // ordinata. La comanda dice *cosa si sta preparando*; il conto
+        // (`table_bills`) dice *quanto si deve*. Restano due macchine a stati
+        // separate: il ponte fra le due arriva nella PR 6.
+
+        // `reservation_id` è nullable perché i walk-in non hanno prenotazione,
+        // `table_id` perché una prenotazione può non avere ancora un tavolo
+        // assegnato. Il CHECK impedisce la comanda orfana di entrambi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS orders (
+                id                 SERIAL PRIMARY KEY,
+                reservation_id     INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                table_id           INTEGER REFERENCES tables(id) ON DELETE SET NULL,
+                table_bill_id      INTEGER REFERENCES table_bills(id) ON DELETE SET NULL,
+                order_type         VARCHAR(20) NOT NULL DEFAULT 'DINE_IN',
+                price_list_id      INTEGER REFERENCES menu_price_lists(id) ON DELETE SET NULL,
+                covers             INTEGER NOT NULL DEFAULT 1 CHECK (covers > 0),
+                status             VARCHAR(20) NOT NULL DEFAULT 'OPEN'
+                                   CHECK (status IN ('OPEN','CLOSED','VOIDED')),
+                opened_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                closed_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                opened_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                closed_at          TIMESTAMPTZ,
+                notes              TEXT,
+                idempotency_key    VARCHAR(80) UNIQUE,
+                CHECK (reservation_id IS NOT NULL OR table_id IS NOT NULL)
+            );
+        `);
+        // Una sola comanda aperta per tavolo e per prenotazione. È il vincolo
+        // che rende sicuri due camerieri sullo stesso tavolo: entrambi
+        // scrivono sulla stessa comanda invece di crearne due, e il socket li
+        // riallinea. Strutturale e non applicativo, così la race fra due
+        // richieste simultanee la perde il database e non i clienti.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_table
+                ON orders(table_id) WHERE status = 'OPEN' AND table_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_reservation
+                ON orders(reservation_id) WHERE status = 'OPEN' AND reservation_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_orders_bill ON orders(table_bill_id)
+                WHERE table_bill_id IS NOT NULL;
+        `);
+
+        // La riga di comanda porta lo *snapshot* di nome, prezzo e varianti:
+        // rinominare un piatto o ritoccarne il prezzo non deve muovere le
+        // comande in corso, né i conti già emessi.
+        //
+        // I tre istanti sono distinti e non intercambiabili:
+        //   queued_at        → la sala ha proposto
+        //   fired_at         → il passe ha lanciato l'uscita
+        //   station_start_at → quando QUESTA partita deve iniziare
+        //   started_at       → quando ha iniziato davvero
+        // Il lancio scaglionato (PR 5) calcola station_start_at; qui la
+        // colonna esiste già così la PR 5 non dovrà migrare dati vivi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS order_items (
+                id                 SERIAL PRIMARY KEY,
+                order_id           INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                dish_id            INTEGER REFERENCES dishes(id) ON DELETE SET NULL,
+                name_snapshot      VARCHAR(255) NOT NULL,
+                unit_price_cents   INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+                modifiers          JSONB,
+                qty                INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+                course_no          INTEGER NOT NULL DEFAULT 1 CHECK (course_no > 0),
+                seat_no            INTEGER CHECK (seat_no IS NULL OR seat_no > 0),
+                station_id         INTEGER REFERENCES stations(id) ON DELETE SET NULL,
+                status             VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
+                                   CHECK (status IN ('DRAFT','QUEUED','SENT','PREPARING','READY','SERVED','VOIDED')),
+                note               TEXT,
+                queued_at          TIMESTAMPTZ,
+                fired_at           TIMESTAMPTZ,
+                station_start_at   TIMESTAMPTZ,
+                started_at         TIMESTAMPTZ,
+                ready_at           TIMESTAMPTZ,
+                served_at          TIMESTAMPTZ,
+                voided_at          TIMESTAMPTZ,
+                voided_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                void_reason        TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                idempotency_key    VARCHAR(80) UNIQUE
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id, course_no);
+        `);
+        // Coda del monitor di partita (PR 4): solo le righe lavorabili.
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_order_items_kds
+                ON order_items(station_id, status)
+                WHERE status IN ('SENT','PREPARING','READY');
+        `);
+
+        // Modalità di lancio delle uscite. Seed su AUTO_ALL — obbligatorio
+        // finché la vista passe non esiste (PR 5): senza qualcuno che possa
+        // lanciarle a mano, le uscite oltre la prima resterebbero bloccate in
+        // QUEUED e in cucina non arriverebbe nulla. Si passa ad AUTO_FIRST
+        // nello stesso deploy che porta online il passe.
+        await client.query(`
+            INSERT INTO app_settings (key, text_value) VALUES
+                ('course_fire_mode', 'AUTO_ALL')
+            ON CONFLICT (key) DO NOTHING;
+        `);
+        // Il modulo comande resta spento finché non c'è una UI che lo usi.
+        await client.query(`
+            INSERT INTO app_settings (key, value) VALUES
+                ('table_orders_enabled', false)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
+        // Permessi del modulo comande sui database esistenti. A runtime la
+        // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
+        // auth/permissions.ts: senza queste righe gli endpoint rispondono 403
+        // anche all'OWNER. Deve restare allineato a quel file.
+        //
+        // `orders:expedite` è separato da `orders:kds` di proposito: lanciare
+        // un'uscita tocca tutte le partite, lavorare la propria coda no.
+        const orderPermissions: [string, string][] = [
+            ['OWNER', 'orders:view'], ['OWNER', 'orders:take'], ['OWNER', 'orders:kds'],
+            ['OWNER', 'orders:expedite'], ['OWNER', 'orders:void'],
+            ['GENERAL_MANAGER', 'orders:view'], ['GENERAL_MANAGER', 'orders:take'],
+            ['GENERAL_MANAGER', 'orders:kds'], ['GENERAL_MANAGER', 'orders:expedite'],
+            ['GENERAL_MANAGER', 'orders:void'],
+            ['MANAGER', 'orders:view'], ['MANAGER', 'orders:take'],
+            ['MANAGER', 'orders:expedite'], ['MANAGER', 'orders:void'],
+            ['RECEPTION', 'orders:view'],
+            ['WAITER', 'orders:view'], ['WAITER', 'orders:take'],
+            ['KITCHEN', 'orders:view'], ['KITCHEN', 'orders:kds'], ['KITCHEN', 'orders:expedite'],
+        ];
+        for (const [role, permission] of orderPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
+        }
+
         await client.query('COMMIT');
         console.log('Database schema created or already exists.');
     } catch (e) {

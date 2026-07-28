@@ -30,7 +30,16 @@ export type Permission =
   | 'voice_calls:view'
   | 'reception:view'
   | 'payments:view'
-  | 'payments:full';
+  | 'payments:full'
+  // Gestionale di sala — vedi docs/gestionale-sala-plan.md.
+  // `expedite` è separato da `kds` di proposito: lanciare un'uscita è una
+  // decisione di coordinamento che tocca tutte le partite, mentre `kds`
+  // autorizza solo a lavorare la propria coda.
+  | 'orders:view'
+  | 'orders:take'
+  | 'orders:kds'
+  | 'orders:expedite'
+  | 'orders:void';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -63,7 +72,12 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'voice_calls:view',
     'reception:view',
     'payments:view',
-    'payments:full'
+    'payments:full',
+    'orders:view',
+    'orders:take',
+    'orders:kds',
+    'orders:expedite',
+    'orders:void'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -89,7 +103,12 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'voice_calls:view',
     'reception:view',
     'payments:view',
-    'payments:full'
+    'payments:full',
+    'orders:view',
+    'orders:take',
+    'orders:kds',
+    'orders:expedite',
+    'orders:void'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -111,7 +130,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:full',
     'voice_calls:view',
     'reception:view',
-    'payments:view'
+    'payments:view',
+    'orders:view',
+    'orders:take',
+    'orders:expedite',
+    'orders:void'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -123,7 +146,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'customers:full',
     'reception:view',
     'voice_calls:view',
-    'payments:view'
+    'payments:view',
+    'orders:view'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -133,13 +157,18 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'customers:view',
     'inventory:view',
-    'reception:view'
+    'reception:view',
+    'orders:view',
+    'orders:take'
   ],
   [UserRole.KITCHEN]: [
     'menu:view',
     'reservations:view',
     'inventory:view',
-    'inventory:full'
+    'inventory:full',
+    'orders:view',
+    'orders:kds',
+    'orders:expedite'
   ]
 };
 

@@ -326,6 +326,133 @@ export interface TableBillWithSplits {
   residual_cents: number;
 }
 
+// ============================================
+// GESTIONALE DI SALA — comande
+// ============================================
+// La comanda dice cosa si sta preparando, il conto (TableBill) quanto si
+// deve. Due macchine a stati separate — vedi docs/gestionale-sala-plan.md.
+
+export interface Station {
+  id: number;
+  name: string;
+  color?: string | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export interface MenuPriceList {
+  id: number;
+  name: string;
+  is_default: boolean;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export interface ModifierGroup {
+  id: number;
+  name: string;
+  min_select: number;
+  max_select: number;
+  sort_order: number;
+}
+
+export interface Modifier {
+  id: number;
+  group_id: number;
+  name: string;
+  price_delta_cents: number;
+  is_active: boolean;
+  sort_order: number;
+}
+
+// Snapshot del modificatore sulla riga: il prezzo di ieri non si muove se
+// domani il listino cambia.
+export interface OrderItemModifier {
+  id?: number | null;
+  name: string;
+  price_delta_cents: number;
+}
+
+export type OrderStatus = 'OPEN' | 'CLOSED' | 'VOIDED';
+
+// DRAFT   → il cameriere sta componendo, solo lui la vede
+// QUEUED  → la sala ha proposto, la vede solo il passe
+// SENT    → il passe ha lanciato, la vede la partita
+// PREPARING / READY → la lavora il cuoco di partita
+// SERVED  → la sala l'ha ritirata
+// VOIDED  → stornata (richiede motivazione da SENT in poi)
+export type OrderItemStatus =
+  | 'DRAFT' | 'QUEUED' | 'SENT' | 'PREPARING' | 'READY' | 'SERVED' | 'VOIDED';
+
+// Stato dell'uscita: derivato dalle righe, mai materializzato.
+export type CourseStatus = 'PENDING' | 'QUEUED' | 'FIRED' | 'READY' | 'SERVED';
+
+// Come vengono lanciate le uscite. AUTO_ALL finché il passe non esiste,
+// AUTO_FIRST a regime, MANUAL per i banchetti.
+export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+
+export interface OrderItem {
+  id: number;
+  order_id: number;
+  dish_id: number | null;
+  name_snapshot: string;
+  unit_price_cents: number;
+  modifiers: OrderItemModifier[] | null;
+  qty: number;
+  course_no: number;
+  seat_no?: number | null;
+  station_id: number | null;
+  status: OrderItemStatus;
+  note?: string | null;
+  queued_at?: string | null;
+  fired_at?: string | null;
+  station_start_at?: string | null;
+  started_at?: string | null;
+  ready_at?: string | null;
+  served_at?: string | null;
+  voided_at?: string | null;
+  voided_by_user_id?: number | null;
+  void_reason?: string | null;
+  created_by_user_id?: number | null;
+  created_at?: string;
+  /** (unit_price_cents + Σ modifiers) * qty. Calcolato server-side. */
+  line_total_cents?: number;
+}
+
+export interface Order {
+  id: number;
+  reservation_id: number | null;
+  table_id: number | null;
+  table_bill_id: number | null;
+  order_type: 'DINE_IN' | 'TAKEAWAY';
+  price_list_id: number | null;
+  covers: number;
+  status: OrderStatus;
+  opened_by_user_id?: number | null;
+  closed_by_user_id?: number | null;
+  opened_at?: string;
+  closed_at?: string | null;
+  notes?: string | null;
+}
+
+export interface OrderCourse {
+  course_no: number;
+  status: CourseStatus;
+  items: OrderItem[];
+  total_cents: number;
+}
+
+// Risposta di GET /orders/:id — i totali sono calcolati dal server così la
+// UI non li ri-deriva (e non può sbagliarli).
+export interface OrderWithItems {
+  order: Order;
+  items: OrderItem[];
+  courses: OrderCourse[];
+  /** Somma delle righe non stornate. */
+  total_cents: number;
+  voided_cents: number;
+}
+
 export interface Notification {
   id: string;
   title: string;
@@ -455,6 +582,7 @@ export enum ResourceType {
   STAFF_SHIFT = 'STAFF_SHIFT',
   STAFF_TIME_OFF = 'STAFF_TIME_OFF',
   CUSTOMER = 'CUSTOMER',
+  ORDER = 'ORDER',
   SETTINGS = 'SETTINGS'
 }
 
