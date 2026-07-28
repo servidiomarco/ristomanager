@@ -8,8 +8,9 @@ import { ArrivalStatus, ReservationStatus } from '../types';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   voidItem, setOrderDiscount, transferOrder,
-  type MenuCatalogue, type NewOrderItem,
+  type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
+import { BillSheet } from './OpenBillsPanel';
 
 // ---------------------------------------------------------------------------
 // Palmare cameriere — la comanda si compone qui e parte con un tocco.
@@ -73,6 +74,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  // Il conto appena aperto: il QR va mostrato subito, non cercato altrove
+  // mentre il tavolo aspetta.
+  const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -255,9 +259,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     try {
       const res = await closeOrder(order.order.id, discardPending);
       setClosing(false);
-      setFlash(res.bill
-        ? `Conto aperto: ${euro(res.bill.total_cents)} su ${order.order.covers} coperti`
-        : 'Comanda chiusa: non c\'era nulla da pagare');
+      if (res.bill) setJustClosed(res.bill);
+      else setFlash('Comanda chiusa: non c\'era nulla da pagare');
       setTableId(null); setOrder(null); setCart([]);
     } catch (err: any) {
       const data = err?.data;
@@ -332,6 +335,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           Scegli il tavolo per aprire o riprendere la comanda.
         </p>
         {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+        {justClosed && (
+          <BillSheet
+            bill={{
+              id: justClosed.id,
+              table_name: tables.find(t => t.id === justClosed.table_id)?.name ?? null,
+              total_cents: justClosed.total_cents,
+              covers: justClosed.covers,
+              share_token: justClosed.share_token,
+              items: justClosed.items,
+            }}
+            onClose={() => setJustClosed(null)}
+          />
+        )}
         {/* La conferma di chiusura arriva qui: dopo aver aperto il conto si
             torna alla scelta tavolo, e senza questo il cameriere non saprebbe
             se il conto è stato creato davvero. */}

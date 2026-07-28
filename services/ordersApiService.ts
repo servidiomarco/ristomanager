@@ -273,6 +273,7 @@ export interface CloseOrderResult {
   /** null quando non c'era nulla da pagare: comanda chiusa senza conto. */
   bill: null | {
     id: number;
+    table_id: number | null;
     total_cents: number;
     covers: number;
     share_token: string | null;

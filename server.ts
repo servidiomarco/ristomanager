@@ -16527,6 +16527,48 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
     }
 });
 
+// --- Conti aperti (PR 9) ----------------------------------------------------
+// L'interfaccia del conto è sempre vissuta dentro il dettaglio prenotazione,
+// quindi un conto walk-in — creato correttamente dal modulo comande — non era
+// raggiungibile da nessuna schermata: niente QR, niente chiusura. Questo
+// endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
+app.get('/bills/open', authenticate, requirePermission('payments:view'), async (_req, res) => {
+    try {
+        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+            return res.json({ bills: [] });
+        }
+
+        const rows = await queryWithRetry(
+            `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
+                    b.currency, b.items, b.status, b.share_token, b.opened_at,
+                    b.cash_settled_cents, b.tip_cents,
+                    t.name AS table_name,
+                    r.customer_name,
+                    COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID'), 0)::int AS paid_cents,
+                    COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'CLAIMED'), 0)::int AS claimed_cents,
+                    COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
+                    (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id
+             LEFT JOIN reservations r ON r.id = b.reservation_id
+             LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
+             WHERE b.status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+             GROUP BY b.id, t.name, r.customer_name
+             ORDER BY b.opened_at DESC`
+        );
+
+        res.json({
+            bills: rows.rows.map((b: any) => ({
+                ...b,
+                residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents),
+            })),
+        });
+    } catch (err: any) {
+        console.error('GET /bills/open error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 const startServer = async () => {
     try {
         // Start HTTP server
