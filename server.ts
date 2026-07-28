@@ -15304,6 +15304,280 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
     }
 });
 
+// --- Passe / chef d'expédition (PR 5) ---------------------------------------
+// L'unico punto in cui qualcuno vede l'uscita intera. Con tre partite senza
+// questa vista lavorano alla cieca l'una rispetto all'altra e la
+// sincronizzazione torna a essere un fatto di urla.
+
+// Soglia oltre la quale una riga pronta che aspetta le altre partite viene
+// segnalata: il piatto sta morendo sotto la lampada.
+const KDS_LAMP_ALERT_SECONDS = 4 * 60;
+// Soglia oltre la quale un'uscita proposta e mai lanciata diventa un allarme.
+// È il rischio strutturale del modello proponi/lancia: una proposta che
+// nessuno lancia è un tavolo che non mangia, e nessun altro se ne accorge.
+const PASSE_QUEUED_ALERT_SECONDS = 5 * 60;
+
+// Tutte le uscite vive, con lo stato di ogni partita. Il passe si iscrive a
+// tutte le partite: è l'unico a vedere l'insieme.
+app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), async (_req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+
+        const rows = await queryWithRetry(
+            `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
+                    oi.status, oi.station_id, oi.queued_at, oi.fired_at,
+                    oi.station_start_at, oi.ready_at,
+                    o.table_id, t.name AS table_name, r.customer_name
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id
+             WHERE o.status = 'OPEN'
+               AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
+             ORDER BY oi.course_no, oi.id`
+        );
+
+        const nowMs = Date.now();
+        const byCourse = new Map<string, any>();
+        for (const it of rows.rows) {
+            const key = `${it.order_id}:${it.course_no}`;
+            if (!byCourse.has(key)) {
+                byCourse.set(key, {
+                    order_id: it.order_id,
+                    course_no: it.course_no,
+                    table_id: it.table_id,
+                    table_name: it.table_name,
+                    customer_name: it.customer_name,
+                    items: [],
+                });
+            }
+            byCourse.get(key).items.push(it);
+        }
+
+        const courses = [...byCourse.values()].map(c => {
+            const items: any[] = c.items;
+            const queuedOnly = items.every(i => i.status === 'QUEUED');
+            const allReady = items.every(i => i.status === 'READY');
+            const status = queuedOnly ? 'QUEUED' : allReady ? 'READY' : 'FIRED';
+
+            // Una riga per partita coinvolta: sono i pallini del monitor.
+            const stations = [...new Set(items.map(i => i.station_id))].map(sid => {
+                const mine = items.filter(i => i.station_id === sid);
+                return {
+                    station_id: sid,
+                    ready: mine.every(i => i.status === 'READY'),
+                    items: mine.length,
+                };
+            });
+
+            const waiting = stations.filter(s => !s.ready).map(s => s.station_id);
+            const readyTimes = items.filter(i => i.ready_at)
+                                    .map(i => new Date(i.ready_at).getTime());
+
+            // Quanto sta aspettando il piatto già pronto mentre gli altri
+            // finiscono: se supera la soglia, qualcosa si sta rovinando.
+            const lampWaitS = !allReady && readyTimes.length > 0
+                ? Math.floor((nowMs - Math.min(...readyTimes)) / 1000)
+                : 0;
+
+            const queuedAt = items.map(i => i.queued_at).filter(Boolean).sort()[0] ?? null;
+            const firedAt = items.map(i => i.fired_at).filter(Boolean).sort()[0] ?? null;
+            const ageS = Math.floor((nowMs - new Date(queuedAt ?? firedAt ?? nowMs).getTime()) / 1000);
+
+            return {
+                ...c,
+                status,
+                stations,
+                waiting_station_ids: waiting,
+                queued_at: queuedAt,
+                fired_at: firedAt,
+                age_seconds: Math.max(0, ageS),
+                // Proposta che nessuno lancia da troppo tempo.
+                stale_queued: status === 'QUEUED' && ageS >= PASSE_QUEUED_ALERT_SECONDS,
+                // Una partita ha finito e le altre no, da troppo tempo.
+                lagging: lampWaitS >= KDS_LAMP_ALERT_SECONDS,
+                lamp_wait_seconds: lampWaitS,
+                sync_delta_seconds: readyTimes.length > 1
+                    ? Math.round((Math.max(...readyTimes) - Math.min(...readyTimes)) / 1000)
+                    : 0,
+            };
+        });
+
+        const stations = await queryWithRetry(
+            `SELECT id, name, color, sort_order FROM stations WHERE is_active ORDER BY sort_order, id`
+        );
+
+        res.json({
+            stations: stations.rows,
+            // In corso prima, poi le proposte in attesa: sono le due domande
+            // diverse che si fa il passe — cosa sta uscendo, cosa far partire.
+            courses: courses.sort((a, b) => {
+                if (a.status === 'QUEUED' && b.status !== 'QUEUED') return 1;
+                if (b.status === 'QUEUED' && a.status !== 'QUEUED') return -1;
+                // Dentro ogni blocco: prima ciò che è più urgente.
+                if (a.lagging !== b.lagging) return a.lagging ? -1 : 1;
+                return b.age_seconds - a.age_seconds;
+            }),
+        });
+    } catch (err: any) {
+        console.error('GET /kds/expediter error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Lancia un'uscita proposta: QUEUED → SENT, con il calcolo dello
+// station_start_at per ogni partita. La sala propone, il passe decide quando.
+app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:expedite'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            client.release();
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        await client.query('BEGIN');
+        const fired = await fireCourseInTx(client, orderId, courseNo);
+        if (fired.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: "L'uscita non è in attesa di lancio" });
+        }
+        await client.query('COMMIT');
+        client.release();
+
+        const view = await loadOrderView(orderId);
+        try {
+            socketService?.broadcastToAll('course:fired', {
+                order_id: orderId, course_no: courseNo,
+                table_id: view.order.table_id, items: fired,
+            });
+            for (const st of new Set(fired.map((i: any) => i.station_id))) {
+                socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                    order_id: orderId, course_no: courseNo, table_id: view.order.table_id,
+                    items: fired.filter((i: any) => i.station_id === st),
+                });
+            }
+        } catch (_) {}
+
+        res.json({ order_id: orderId, course_no: courseNo, items: fired });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/courses/:n/fire error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Ri-lancio: ricalcola gli station_start_at da adesso. Serve la sera che una
+// partita accumula venti minuti di ritardo e il calcolo teorico diventa
+// fantascienza — senza, l'unica alternativa è che le altre partite ignorino
+// il monitor, e da lì il sistema è morto.
+app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('orders:expedite'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            client.release();
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        await client.query('BEGIN');
+        // Solo le righe non ancora iniziate: quello che il cuoco ha già in
+        // mano non si tocca, altrimenti gli si sposta il lavoro sotto i piedi.
+        const upd = await client.query(
+            `WITH prep AS (
+                 SELECT oi.id, COALESCE(d.prep_minutes, 0) AS p
+                 FROM order_items oi
+                 LEFT JOIN dishes d ON d.id = oi.dish_id
+                 WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'SENT'
+             ), mx AS (
+                 SELECT COALESCE(MAX(p), 0) AS m FROM prep
+             )
+             UPDATE order_items oi
+             SET fired_at = CURRENT_TIMESTAMP,
+                 station_start_at = CURRENT_TIMESTAMP
+                     + make_interval(mins => (SELECT m FROM mx) - prep.p)
+             FROM prep, mx
+             WHERE oi.id = prep.id
+             RETURNING oi.*`,
+            [orderId, courseNo]
+        );
+        if (upd.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'Nessuna riga da ri-lanciare (già in preparazione o pronta)' });
+        }
+        await client.query('COMMIT');
+        client.release();
+
+        try {
+            for (const st of new Set(upd.rows.map((i: any) => i.station_id))) {
+                socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                    order_id: orderId, course_no: courseNo,
+                    items: upd.rows.filter((i: any) => i.station_id === st),
+                });
+            }
+        } catch (_) {}
+
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/courses/:n/refire error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Chiama la sala: l'uscita è pronta, qualcuno la venga a prendere. Notifica
+// push ai camerieri invece dell'urlo dalla cucina.
+app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:expedite'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const info = await queryWithRetry(
+            `SELECT t.name AS table_name
+             FROM orders o LEFT JOIN tables t ON t.id = o.table_id
+             WHERE o.id = $1`,
+            [orderId]
+        );
+        if (info.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata' });
+        const tableName = info.rows[0].table_name ?? '—';
+
+        try {
+            socketService?.broadcastToAll('course:called', {
+                order_id: orderId, course_no: courseNo, table_name: tableName,
+            });
+        } catch (_) {}
+        // La push è best-effort: se fallisce il monitor mostra comunque
+        // l'uscita pronta, non si perde niente.
+        pushSendToRoles(
+            ['WAITER', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'],
+            {
+                category: 'service',
+                title: `Tavolo ${tableName} — servizio`,
+                body: `${courseNo}ª uscita pronta al passe`,
+                url: `/?view=COMANDE`,
+                tag: `course-${orderId}-${courseNo}`,
+            }
+        ).catch(err => console.warn('[passe] push non inviata:', err?.message ?? err));
+
+        res.json({ ok: true, table_name: tableName });
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/call error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 const startServer = async () => {
     try {
         // Start HTTP server

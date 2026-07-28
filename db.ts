@@ -2295,6 +2295,30 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ON CONFLICT (key) DO NOTHING;
         `);
 
+        // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
+        // AUTO_FIRST: la prima uscita continua a partire da sola, dalla
+        // seconda in poi decide il passe. Prima di questa PR non esisteva
+        // nessuno che potesse lanciarle a mano, quindi AUTO_ALL era
+        // obbligatorio; ora sarebbe il contrario, un lancio automatico che
+        // scavalca il coordinamento.
+        //
+        // Una tantum, tracciata da una chiave marcatore: chi ha scelto
+        // deliberatamente AUTO_ALL o MANUAL dopo il rilascio non se lo vede
+        // riscrivere a ogni riavvio del server.
+        const fireModeMigrated = await client.query(
+            `SELECT 1 FROM app_settings WHERE key = 'course_fire_mode_passe_migrated'`
+        );
+        if (fireModeMigrated.rowCount === 0) {
+            await client.query(`
+                UPDATE app_settings SET text_value = 'AUTO_FIRST'
+                WHERE key = 'course_fire_mode' AND text_value = 'AUTO_ALL';
+            `);
+            await client.query(`
+                INSERT INTO app_settings (key, value) VALUES ('course_fire_mode_passe_migrated', true)
+                ON CONFLICT (key) DO NOTHING;
+            `);
+        }
+
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
         // auth/permissions.ts: senza queste righe gli endpoint rispondono 403

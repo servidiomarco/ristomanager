@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -15,6 +15,7 @@ import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
 import { OrderPad } from './components/OrderPad';
 import { KitchenDisplay } from './components/KitchenDisplay';
+import { ExpediterDisplay } from './components/ExpediterDisplay';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
@@ -125,6 +126,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
   { kind: 'link', label: 'Comande', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
+  { kind: 'link', label: 'Passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
 
   // Comunicazioni
   { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
@@ -2057,6 +2059,12 @@ const App: React.FC = () => {
           </CardErrorBoundary>
         )}
 
+        {view === ViewState.PASSE && (
+          <CardErrorBoundary label="Passe">
+            <ExpediterDisplay />
+          </CardErrorBoundary>
+        )}
+
         {view === ViewState.PAGAMENTI && (
           <PagamentiPage />
         )}
@@ -2122,6 +2130,7 @@ const App: React.FC = () => {
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.COMANDE]: 'Comande',
                       [ViewState.CUCINA]: 'Cucina',
+                      [ViewState.PASSE]: 'Passe',
                       [ViewState.STAFF]: 'Personale',
                       [ViewState.CLIENTI]: 'Clienti',
                       [ViewState.INVENTARIO]: 'Inventario',
