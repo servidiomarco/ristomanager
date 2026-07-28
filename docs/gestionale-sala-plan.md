@@ -161,7 +161,7 @@ ON CONFLICT DO NOTHING;
 ALTER TABLE dishes ADD COLUMN IF NOT EXISTS station_id INTEGER
     REFERENCES stations(id) ON DELETE SET NULL;
 
--- tempo di preparazione tipico, in minuti. Serve al firing scaglionato
+-- tempo di preparazione tipico, in minuti. Serve al lancio scaglionato
 -- (vedi §6): senza questo, in una cucina multi-partita gli antipasti
 -- arrivano al passe dieci minuti prima della griglia.
 ALTER TABLE dishes ADD COLUMN IF NOT EXISTS prep_minutes INTEGER;
@@ -228,9 +228,10 @@ CREATE TABLE IF NOT EXISTS order_items (
     status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     note TEXT,                              -- nota libera al cuoco
 
-    sent_at TIMESTAMPTZ,      -- quando l'uscita è stata lanciata
-    fire_at TIMESTAMPTZ,      -- quando QUESTA partita deve iniziare (§6)
-    started_at TIMESTAMPTZ,
+    queued_at TIMESTAMPTZ,          -- la sala ha proposto
+    fired_at TIMESTAMPTZ,           -- il passe ha lanciato l'uscita
+    station_start_at TIMESTAMPTZ,   -- quando QUESTA partita deve iniziare (§6)
+    started_at TIMESTAMPTZ,         -- quando ha iniziato davvero
     ready_at TIMESTAMPTZ,
     served_at TIMESTAMPTZ,
     voided_at TIMESTAMPTZ,
@@ -251,23 +252,44 @@ a chiunque passi in sala.
 
 ### 5. Macchina a stati della riga
 
+La sala **propone**, il passe **lancia**. Sono due gesti di due persone diverse,
+quindi servono due stati distinti: fra il momento in cui il cameriere manda la
+comanda e quello in cui la cucina inizia a lavorarla c'è un'attesa reale, e se
+non la modelliamo finisce per essere rappresentata male (righe che appaiono in
+cucina prima che qualcuno abbia deciso di farle).
+
 ```
-DRAFT ──invio──> SENT ──presa in carico──> PREPARING ──pronto──> READY ──ritirato──> SERVED
-  │                │                           │                   │
-  │                └───────────────┬───────────┴───────────────────┘
-  └── delete libero                └── VOIDED (richiede motivazione + permesso)
+        sala                    passe                  partita          sala
+         │                        │                       │               │
+DRAFT ─invia─> QUEUED ──lancia──> SENT ─presa in carico─> PREPARING ─> READY ─> SERVED
+  │              │                  │                        │            │
+  │              │                  └──────────┬─────────────┴────────────┘
+  └─ delete      └─ rientro in DRAFT           └── VOIDED (motivazione + permesso)
+     libero         (finché nessuno lavora)
 ```
+
+| Stato | Chi ce lo mette | Chi lo vede |
+|---|---|---|
+| `DRAFT` | cameriere che compone | solo il palmare di chi scrive |
+| `QUEUED` | cameriere che invia | **solo il passe** |
+| `SENT` | passe che lancia (o auto-lancio, vedi §6) | monitor della partita + passe |
+| `PREPARING` / `READY` | cuoco di partita | partita + passe + sala |
+| `SERVED` | cameriere che ritira | tutti |
 
 Regole non negoziabili:
 
-- **`DRAFT` si può cancellare, il resto no.** Finché la riga non è partita per
-  la cucina il cameriere corregge liberamente. Dopo l'invio esiste solo lo
-  storno, che lascia traccia.
-- **Lo storno di una riga oltre `SENT` richiede `orders:void`** e una
+- **`DRAFT` si può cancellare, `QUEUED` si può richiamare, da `SENT` in poi no.**
+  Finché nessuno in cucina ha visto la riga, il cameriere corregge liberamente:
+  `QUEUED → DRAFT` è permesso e non lascia traccia. Dopo il lancio esiste solo
+  lo storno.
+- **Lo storno di una riga da `SENT` in poi richiede `orders:void`** e una
   motivazione non vuota. Finisce in `activity_logs` con un `ResourceType.ORDER`
   nuovo, da aggiungere all'enum in `types.ts`.
 - **Una riga `VOIDED` non concorre al totale** ma resta visibile nel dettaglio
   conto (barrata) e nelle statistiche di scarto.
+- **Il monitor di partita non vede mai `QUEUED`.** È il punto di tutto lo
+  schema: la cucina riceve solo ciò che qualcuno ha deciso di lanciare, e non
+  si riempie di roba futura durante il picco.
 - Il KDS scrive solo `SENT → PREPARING → READY`. Il passaggio a `SERVED` è
   della sala. Nessuna delle due parti può tornare indietro nel flusso senza
   passare da uno storno esplicito.
@@ -290,37 +312,75 @@ Non serve una tabella `order_courses`: l'uscita è il gruppo
 
 | Stato uscita | Derivazione |
 |---|---|
-| `PENDING` | nessuna riga ha `sent_at` |
-| `FIRED` | almeno una riga ha `sent_at`, non tutte `READY` |
+| `PENDING` | nessuna riga ha `queued_at` — la sala non l'ha ancora mandata |
+| `QUEUED` | righe con `queued_at` ma senza `fired_at` → **in attesa al passe** |
+| `FIRED` | almeno una riga ha `fired_at`, non tutte `READY` |
 | `READY` | **tutte** le righe non stornate sono `READY` → il passe chiama la sala |
 | `SERVED` | tutte `SERVED` |
 
 Derivare invece di materializzare evita la classe di bug peggiore: due fonti di
 verità che divergono quando una riga viene stornata a metà preparazione.
 
-#### Firing scaglionato
+#### Chi lancia cosa
 
-Quando il passe lancia l'uscita al tempo `T`, il server calcola per ogni riga:
+**La sala propone, il passe lancia** — con un'eccezione che vale il 70% dei
+lanci di una serata:
+
+| Uscita | Cosa succede all'invio del cameriere |
+|---|---|
+| **1ª** | **si auto-lancia**: `queued_at` e `fired_at` valorizzati insieme, va dritta in cucina |
+| 2ª e successive | resta `QUEUED`, compare sul passe in attesa di `[LANCIA]` |
+
+La prima uscita non ha niente da coordinare — il tavolo si è appena seduto,
+prima parte meglio è — e auto-lanciarla toglie una ventina di tap a servizio al
+passe. Dalla seconda in poi il coordinamento serve davvero: gli antipasti sono
+ancora in tavola e solo chi guarda la sala sa quando far partire i primi.
+
+Il comportamento è una chiave in `app_settings`, non una costante nel codice:
 
 ```
-max_prep = MAX(prep_minutes) fra le righe dell'uscita
-fire_at  = T + (max_prep − prep_minutes della riga)
+course_fire_mode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL'   (text_value)
+```
+
+`AUTO_FIRST` è il valore di esercizio. Gli altri due servono davvero:
+
+- **`AUTO_ALL` è obbligatorio fino alla PR 5.** Finché la vista passe non
+  esiste, nessuno può lanciare le uscite successive e resterebbero bloccate in
+  `QUEUED` per sempre. Le PR 3-4 vanno quindi in produzione con `AUTO_ALL`, e si
+  passa a `AUTO_FIRST` **nello stesso momento** in cui il passe va online. È il
+  tipo di dettaglio che se non è scritto qui si scopre a servizio iniziato.
+- `MANUAL` è la valvola per le sere di banchetto, dove anche la prima uscita va
+  coordinata con i discorsi e i brindisi.
+
+#### Lancio scaglionato
+
+Quando l'uscita viene lanciata al tempo `T` (dal passe o dall'auto-lancio), il
+server calcola per ogni riga:
+
+```
+max_prep         = MAX(prep_minutes) fra le righe dell'uscita
+station_start_at = T + (max_prep − prep_minutes della riga)
 ```
 
 Sull'esempio sopra: `max_prep` = 14 (griglia). La griglia parte subito
-(`fire_at = T`), i primi partono a `T + 6`. Entrambe le partite finiscono
-insieme, la pasta esce al dente.
+(`station_start_at = T`), i primi partono a `T + 6`. Entrambe le partite
+finiscono insieme, la pasta esce al dente.
 
 Il monitor dei Primi mostra quella riga in **due zone distinte**:
 
 - **In arrivo** — riga smorzata, con un countdown «fra 6'». Il cuoco sa cosa
   sta per arrivare e organizza la postazione, ma non inizia.
-- **Da fare** — quando `fire_at <= now` la riga scivola in alto, cambia colore
-  e da lì parte il timer di ritardo.
+- **Da fare** — quando `station_start_at <= now` la riga scivola in alto, cambia
+  colore e da lì parte il timer di ritardo.
 
-Il countdown è calcolato **client-side** dal `fire_at` ricevuto: nessun polling,
-nessun job schedulato lato server. Il monitor ha già l'orario assoluto, deve
-solo sottrarre. `hooks/useNow.ts` esiste già e fa esattamente questo tick.
+Il countdown è calcolato **client-side** dallo `station_start_at` ricevuto:
+nessun polling, nessun job schedulato lato server. Il monitor ha già l'orario
+assoluto, deve solo sottrarre. `hooks/useNow.ts` esiste già e fa questo tick.
+
+Nota sui nomi: `fired_at` (l'uscita è partita), `station_start_at` (quando
+questa partita deve iniziare), `started_at` (quando ha iniziato davvero). Sono
+tre cose diverse e vanno tenute distinte — scriverle come `fire_at`/`fired_at`
+sarebbe una svista in attesa di accadere.
 
 Le righe con `prep_minutes` NULL vengono trattate come `0` — partono subito,
 comportamento identico a un KDS senza scaglionamento. Il campo si popola nel
@@ -329,7 +389,7 @@ tempo, piatto per piatto, senza bloccare il rilascio.
 #### Il capopartita può forzare
 
 Lo scaglionamento è un suggerimento, non una gabbia. Il monitor ha sempre il
-bottone «inizia ora» che ignora il `fire_at` — la sera che la griglia è
+bottone «inizia ora» che ignora lo `station_start_at` — la sera che la griglia è
 indietro di venti minuti, il calcolo teorico è sbagliato e chi è davanti ai
 fuochi lo sa prima del server.
 
@@ -448,10 +508,11 @@ Tutti gli endpoint dietro `authenticate` e dietro il feature flag
 | `POST` | `/orders/:id/items` | `orders:take` | Aggiunge righe in `DRAFT` (batch) |
 | `PATCH` | `/orders/items/:id` | `orders:take` | Modifica qty/note/uscita — solo se `DRAFT` |
 | `DELETE` | `/orders/items/:id` | `orders:take` | Elimina — solo se `DRAFT` |
-| `POST` | `/orders/:id/send` | `orders:take` | `DRAFT → SENT`, opzionale `course_no` per mandare una sola uscita |
-| `POST` | `/orders/:id/courses/:n/fire` | `orders:expedite` | Lancia l'uscita: calcola `fire_at` per tutte le partite |
-| `POST` | `/orders/:id/courses/:n/refire` | `orders:expedite` | Ricalcola i `fire_at` da adesso (partita in tilt) |
-| `GET` | `/kds/expediter` | `orders:expedite` | Uscite in corso con lo stato per partita |
+| `POST` | `/orders/:id/send` | `orders:take` | `DRAFT → QUEUED`, opzionale `course_no`. Auto-lancia secondo `course_fire_mode` |
+| `POST` | `/orders/:id/courses/:n/recall` | `orders:take` | `QUEUED → DRAFT`, solo se non ancora lanciata |
+| `POST` | `/orders/:id/courses/:n/fire` | `orders:expedite` | Lancia l'uscita: calcola `station_start_at` per tutte le partite |
+| `POST` | `/orders/:id/courses/:n/refire` | `orders:expedite` | Ricalcola gli `station_start_at` da adesso (partita in tilt) |
+| `GET` | `/kds/expediter` | `orders:expedite` | Uscite `QUEUED` + `FIRED` con lo stato per partita |
 | `POST` | `/orders/items/:id/void` | `orders:void` | Storno con motivazione obbligatoria |
 | `POST` | `/orders/:id/transfer` | `orders:take` | Sposta la comanda su un altro tavolo |
 | `GET` | `/kds/queue` | `orders:kds` | Coda per partita (`?station_id=`) |
@@ -477,7 +538,9 @@ Convenzione `namespace:evento` come il resto (`services/socketService.ts`):
 |---|---|---|
 | `order:created` | `Order` | sala |
 | `order:updated` | `Order` (con totale) | sala, cassa |
-| `order:sent` | `{ order_id, course_no, items[] }` | **KDS** della partita coinvolta + passe |
+| `course:queued` | `{ order_id, course_no, table_id, items[] }` | **solo passe** (la sala ha proposto) |
+| `course:recalled` | `{ order_id, course_no }` | passe (la sala ha ritirato la proposta) |
+| `course:fired` | `{ order_id, course_no, items[] }` (con `station_start_at`) | **monitor** delle partite coinvolte + passe |
 | `orderItem:status` | `{ id, status, station_id, order_id, course_no, ts }` | KDS + passe + sala |
 | `orderItem:voided` | `{ id, order_id, station_id, reason }` | KDS + passe + sala |
 | `course:ready` | `{ order_id, course_no, table_id, sync_delta_s }` | **passe** + sala (la sala va chiamata) |
@@ -566,13 +629,15 @@ Pensato per una mano sola su telefono, in piedi, con poca luce.
 │  Bruschette             8,00│      long-press = varianti
 │  Polpo                 18,00│
 ├─────────────────────────────┤
-│  1ª USCITA                  │
+│  1ª USCITA        ✓ in cucina│  ← auto-lanciata
 │   2× Tagliere         28,00 │
 │   1× Polpo            18,00 │
 │     ↳ senza aglio           │
-│  2ª USCITA            [+]   │
+│  2ª USCITA      ⏸ al passe  │  ← proposta, attende il lancio
+│   2× Tagliata         44,00 │
+│  3ª USCITA            [+]   │
 ├─────────────────────────────┤
-│  Totale 46,00   [ INVIA ]   │
+│  Totale 90,00   [ INVIA ]   │
 └─────────────────────────────┘
 ```
 
@@ -586,6 +651,12 @@ Dettagli che decidono se il cameriere lo usa o torna al blocchetto:
   uscita è un tap, non un nuovo giro di comanda.
 - Il carrello resta in `DRAFT` locale finché non si preme INVIA: il cameriere
   può correggersi senza generare rumore in cucina.
+- **Ogni uscita mostra il proprio stato in chiaro**: `✓ in cucina` (lanciata),
+  `⏸ al passe` (proposta, in attesa), niente (ancora in bozza). Il cameriere
+  deve sapere a colpo d'occhio se la sua seconda uscita è partita o è ferma —
+  altrimenti la ripropone, e in cucina arriva doppia.
+- Un'uscita `⏸ al passe` si può **richiamare** con uno swipe: torna in `DRAFT`
+  e si corregge. Da `✓ in cucina` in poi serve lo storno.
 
 ### B. Monitor di partita — `components/KitchenDisplay.tsx`
 
@@ -593,7 +664,7 @@ Dettagli che decidono se il cameriere lo usa o torna al blocchetto:
 `station_id`. Il monitor mostra *solo* le righe della sua partita: il cuoco
 della Griglia non deve leggere i primi per trovare la propria tagliata.
 
-A colonne, per tavolo/uscita, ordinate per `fire_at`. Nessuna interazione fine:
+A colonne, per tavolo/uscita, ordinate per `station_start_at`. Nessuna interazione fine:
 si usa con le mani sporche, i target di tap sono grandi.
 
 ```
@@ -616,11 +687,11 @@ si usa con le mani sporche, i target di tap sono grandi.
 └──────────────────────────────────────────┘
 ```
 
-- **Due zone**: «da fare» (`fire_at <= now`) e «in arrivo» col countdown. È il
+- **Due zone**: «da fare» (`station_start_at <= now`) e «in arrivo» col countdown. È il
   firing scaglionato di §6 reso visibile — il cuoco sa cosa bolle in pentola
   senza iniziare troppo presto.
 - Una colonna per tavolo/uscita, non per riga: il cuoco ragiona per tavolo.
-- Timer dal `fire_at` della riga (non dal `sent_at` dell'uscita), altrimenti la
+- Timer dallo `station_start_at` della riga (non dal `fired_at` dell'uscita), altrimenti la
   partita veloce risulta in ritardo appena parte.
 - **Bordo lampeggiante** quando la riga è pronta ma l'uscita no e sono passati
   più di N minuti: sei tu quello che sta facendo aspettare gli altri.
@@ -641,15 +712,27 @@ rispetto all'altra e la sincronizzazione torna a essere un fatto di urla.
 │ T12 │ 2ª  │  ●     ●     ○  │ manca GRIGLIA  3'   │ ← ambra
 │ T7  │ 1ª  │  ●     ●     ●  │ ▶ PRONTA · CHIAMA   │ ← verde
 │ T3  │ 1ª  │  ○     —     ○  │ in corso  6'        │
-│ T5  │ 2ª  │  —     ○     ○  │ [ LANCIA ]          │ ← non ancora partita
+├─────┼─────┼─────────────────┼─────────────────────┤
+│ IN ATTESA DI LANCIO                               │
+│ T5  │ 2ª  │  —     ○     ○  │ [ LANCIA ]  da 2'   │ ← QUEUED
+│ T9  │ 2ª  │  ○     ○     —  │ [ LANCIA ]  da 7'   │ ← invecchia
 └─────┴─────┴─────────────────┴─────────────────────┘
      ● pronto   ○ in preparazione   — non previsto
 ```
 
+- **Due blocchi**: sopra le uscite in corso, sotto quelle `QUEUED` che la sala
+  ha proposto e aspettano il lancio. Sono le due domande diverse che si fa il
+  passe — «cosa sta uscendo?» e «cosa devo far partire?».
+- **Le uscite in attesa invecchiano visibilmente** («da 7'»). È l'unico modo per
+  evitare il rischio strutturale del modello proponi/lancia: una proposta che
+  nessuno lancia è un tavolo che non mangia, e il sistema non se ne accorgerebbe
+  da solo. Oltre una soglia configurabile la riga passa in rosso e parte una
+  push al responsabile di sala.
 - **Una riga per uscita**, tre pallini: lo stato di sincronia si legge in un
   colpo d'occhio da due metri di distanza.
-- `[LANCIA]` lancia l'uscita: è qui che scatta il calcolo del `fire_at` per le
-  tre partite. La sala propone l'uscita, il passe decide *quando*.
+- `[LANCIA]` fa `QUEUED → FIRED`: è qui che scatta il calcolo dello
+  `station_start_at` per le tre partite. La sala propone, il passe decide
+  *quando*. La prima uscita non compare mai qui — si auto-lancia.
 - `CHIAMA` quando l'uscita è `READY` → notifica push al cameriere del tavolo
   (`pushClient.ts` c'è già). Nessuno deve urlare «servizio».
 - Alert `course:lagging` con il nome della partita che manca — non un generico
@@ -679,9 +762,9 @@ sola, dietro flag, senza rompere niente di esistente.
 |---|---|---|
 | **1** | Migrazioni: listini, varianti, partite. Backfill `dish_prices` dal prezzo attuale. Nessuna UI. | il CRM funziona identico, `dish_prices` popolata |
 | **2** | Tabelle `orders`/`order_items`, CRUD API, ricalcolo totale, idempotenza. Nessuna UI. | test via `curl`, totali corretti con varianti |
-| **3** | `OrderPad.tsx` + flag `table_orders_enabled`. Comanda che si apre, si compila, si invia. | un tavolo reale a servizio chiuso |
+| **3** | `OrderPad.tsx` + flag `table_orders_enabled`. Comanda che si apre, si compila, si invia. `course_fire_mode = AUTO_ALL`. | un tavolo reale a servizio chiuso |
 | **4** | `KitchenDisplay.tsx` + eventi socket + `subscribe:station` + binding partita. Le tre partite vedono le proprie code. | tre tablet affiancati, uno per partita |
-| **5** | **Coordinamento**: `fire_at` scaglionato, stato uscita derivato, `course:ready`/`course:lagging`, `ExpediterDisplay.tsx`. | un'uscita mista che arriva sincronizzata |
+| **5** | **Coordinamento**: stato `QUEUED`, `station_start_at` scaglionato, `course:ready`/`course:lagging`, `ExpediterDisplay.tsx`. Si passa a `AUTO_FIRST`. | un'uscita mista che arriva sincronizzata |
 | **6** | Ponte al conto: `POST /orders/:id/close`, `total_cents` derivato, `items` popolato, endpoint walk-in, indice unico bill attivo. | conto che si apre già valorizzato |
 | **7** | Storni con motivazione, sconti, trasferimento tavolo, coperti/servizio, audit completo. | prova gli scenari sporchi |
 | **8** | Split `per_item` sulla pagina pubblica (ora che `items` c'è), statistiche `sync_delta` e tempi per partita. | — |
@@ -694,6 +777,14 @@ chiuso con il blocchetto di carta come rete di sicurezza per almeno tre servizi.
 meglio dei foglietti, ma la sincronia resta manuale. Con tre partite il vero
 salto è la PR 5 — è lì che il sistema inizia a fare un lavoro che a voce non si
 riesce a fare. Non fermarsi alla 4 pensando di aver finito.
+
+**Il passaggio `AUTO_ALL` → `AUTO_FIRST` è l'unico momento delicato del
+rilascio.** Fino alla PR 4 tutte le uscite si auto-lanciano, perché non esiste
+ancora nessuno che possa lanciarle a mano; dalla PR 5 solo la prima. Vanno fatti
+insieme, nello stesso deploy: se si passa a `AUTO_FIRST` prima che il passe sia
+online, le uscite dalla seconda in poi restano ferme in `QUEUED` e in cucina non
+arriva niente — a sala piena. Il valore sta in `app_settings`, quindi il
+rollback è una riga di SQL, ma è meglio non doverlo scoprire.
 
 Un'annotazione operativa: `prep_minutes` va popolato prima di attivare la PR 5,
 altrimenti lo scaglionamento non ha dati e si comporta come se non ci fosse
@@ -737,8 +828,8 @@ entro la PR 6.
 8. **Riavvio del server a metà servizio.** Tutto lo stato è in Postgres, niente
    in memoria. Il KDS si ricostruisce da `GET /kds/queue` alla riconnessione.
 9. **Una partita va in tilt.** La Griglia accumula venti minuti di ritardo e il
-   `fire_at` calcolato diventa fantascienza. Il passe deve poter **ri-lanciare**
-   un'uscita già lanciata, ricalcolando i `fire_at` da adesso: `POST
+   `station_start_at` calcolato diventa fantascienza. Il passe deve poter
+   **ri-lanciare** un'uscita già lanciata, ricalcolandoli da adesso: `POST
    /orders/:id/courses/:n/refire`. Senza, l'unica alternativa è che le altre
    partite ignorino il monitor — e da lì il sistema è morto.
 10. **Un monitor di partita si spegne.** Tablet scarico, WiFi caduto. Le righe
@@ -747,7 +838,14 @@ entro la PR 6.
     (`PATCH /orders/items/:id` con `station_id`). Il passe è anche il
     rilevatore di guasti: se una colonna non si muove da dieci minuti,
     qualcosa è rotto.
-11. **Piatto che tocca due partite.** Il tagliere misto con la parte calda dalla
+11. **Il passe si dimentica un'uscita.** È il rischio strutturale che il modello
+    proponi/lancia introduce e che il lancio automatico non aveva: una proposta
+    che nessuno lancia è invisibile a tutti tranne che al passe. Mitigazione a
+    tre livelli: le uscite `QUEUED` invecchiano a vista sul passe, oltre soglia
+    diventano rosse con push al responsabile di sala, e il palmare del cameriere
+    mostra `⏸ al passe` così chi ha preso il tavolo può accorgersene. Nessuno dei
+    tre da solo basta.
+12. **Piatto che tocca due partite.** Il tagliere misto con la parte calda dalla
     Griglia. Con `station_id` singolo si sceglie la partita dominante e si usa
     la nota di riga per l'altra. Se il caso diventa frequente serve una riga per
     partita con un `parent_item_id` — è un'estensione pulita, ma non prima di
@@ -757,29 +855,24 @@ entro la PR 6.
 
 ## Decisioni aperte
 
-**Chiuso**: *un monitor unico o uno per partita?* → **uno per partita**. La
-cucina ha tre postazioni (Antipasti, Primi, Griglia), quindi tre monitor più il
-passe. È la ragione per cui esistono §6 e la vista B2.
+**Chiuse:**
+
+- *Un monitor unico o uno per partita?* → **uno per partita**. Tre postazioni
+  (Antipasti, Primi, Griglia), quindi tre monitor più il passe. È la ragione per
+  cui esistono §6 e la vista B2.
+- *Chi lancia le uscite?* → **la sala propone, il passe lancia**. Da qui lo
+  stato `QUEUED` in §5 e il blocco «in attesa di lancio» sul passe.
+- *La prima uscita si auto-lancia?* → **sì**. `course_fire_mode = AUTO_FIRST`.
 
 Da chiudere prima della PR 3-4, perché toccano la UI:
 
-1. **Chi lancia le uscite, il passe o la sala?** Il piano assume il passe (la
-   sala *propone* mandando la comanda, il passe *lancia*). L'alternativa è che
-   il lancio sia automatico all'invio della comanda, col passe che interviene
-   solo per posticipare. La prima è più corretta in una brigata strutturata, la
-   seconda ha meno attrito quando il passe è occupato ai fuochi. Serve sapere se
-   c'è sempre qualcuno fisso al passe durante il servizio.
-2. **La prima uscita si lancia da sola?** Quasi sempre sì — appena il tavolo
-   ordina, gli antipasti partono. Se confermi, la 1ª uscita si auto-lancia
-   all'invio e il passe gestisce manualmente solo dalla 2ª in poi. Toglie una
-   ventina di tap a servizio.
-3. **`seat_no` (chi ha ordinato cosa) serve davvero?** Costa un tap in più per
+1. **`seat_no` (chi ha ordinato cosa) serve davvero?** Costa un tap in più per
    riga al cameriere. Serve solo se volete lo split per persona automatico. La
    colonna la mettiamo comunque (nullable, costo zero); la domanda è se l'UI
    la chiede.
-4. **Coperto: riga o campo del conto?** Come riga è più uniforme e si sconta
+2. **Coperto: riga o campo del conto?** Come riga è più uniforme e si sconta
    con lo stesso codice degli altri sconti. Preferenza per la riga.
-5. **Monitor su tablet o TV?** Con tre partite la risposta cambia per postazione:
+3. **Monitor su tablet o TV?** Con tre partite la risposta cambia per postazione:
    dove il cuoco deve marcare «pronto» serve il tap (tablet), dove serve solo
    leggere basta una TV. Il codice è lo stesso, cambia solo il flag di modalità.
    Da decidere partita per partita, non in blocco.
