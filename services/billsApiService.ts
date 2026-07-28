@@ -116,3 +116,28 @@ class BillsApiService {
 }
 
 export const billsApiService = new BillsApiService();
+
+export interface OpenBillRow {
+  id: number;
+  reservation_id: number | null;
+  table_id: number | null;
+  table_name: string | null;
+  customer_name: string | null;
+  total_cents: number;
+  covers: number;
+  currency: string;
+  items: { name: string; qty: number; unit_price_cents: number }[] | null;
+  status: string;
+  share_token: string | null;
+  opened_at: string;
+  paid_cents: number;
+  claimed_cents: number;
+  residual_cents: number;
+  paid_splits: number;
+  /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
+  open_orders: number;
+}
+
+/** Conti attivi, con e senza prenotazione. */
+export const getOpenBills = async (): Promise<{ bills: OpenBillRow[] }> =>
+  apiRequest<{ bills: OpenBillRow[] }>(`${API_URL}/bills/open`, { headers: getHeaders() });

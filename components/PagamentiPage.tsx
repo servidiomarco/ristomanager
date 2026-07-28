@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
 import { billsApiService } from '../services/billsApiService';
+import { OpenBillsPanel } from './OpenBillsPanel';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonPaymentList } from './SkeletonCards';
 import {
@@ -597,6 +598,13 @@ const PagamentiPage: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
+      {/* Conti al tavolo aperti. Sta qui e non dentro la prenotazione perche'
+          un walk-in un conto ce l'ha lo stesso, e prima non era raggiungibile
+          da nessuna schermata. */}
+      <div className="mb-6 -mx-4 sm:-mx-6 lg:-mx-8 border-b border-[var(--color-line)]">
+        <OpenBillsPanel />
+      </div>
+
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
