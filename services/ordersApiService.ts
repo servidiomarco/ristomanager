@@ -211,3 +211,57 @@ export const setKdsItemStatus = async (
     headers: getHeaders(),
     body: JSON.stringify({ status }),
   });
+
+// --- Passe -------------------------------------------------------------------
+
+export interface ExpediterStationState {
+  station_id: number | null;
+  ready: boolean;
+  items: number;
+}
+
+export interface ExpediterCourse {
+  order_id: number;
+  course_no: number;
+  table_id: number | null;
+  table_name: string | null;
+  customer_name: string | null;
+  status: 'QUEUED' | 'FIRED' | 'READY';
+  stations: ExpediterStationState[];
+  waiting_station_ids: (number | null)[];
+  queued_at: string | null;
+  fired_at: string | null;
+  age_seconds: number;
+  /** Proposta che nessuno lancia da troppo tempo. */
+  stale_queued: boolean;
+  /** Una partita ha finito e le altre no, da troppo tempo. */
+  lagging: boolean;
+  lamp_wait_seconds: number;
+  sync_delta_seconds: number;
+  items: { id: number; name_snapshot: string; qty: number; station_id: number | null; status: string }[];
+}
+
+export interface ExpediterBoard {
+  stations: { id: number; name: string; color: string | null; sort_order: number }[];
+  courses: ExpediterCourse[];
+}
+
+export const getExpediterBoard = async (): Promise<ExpediterBoard> =>
+  apiRequest<ExpediterBoard>(`${API_URL}/kds/expediter`, { headers: getHeaders() });
+
+export const fireCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/fire`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** Ricalcola i tempi di partenza da adesso: la partita è andata in tilt. */
+export const refireCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/refire`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** Chiama la sala a ritirare l'uscita pronta. */
+export const callCourse = async (orderId: number, courseNo: number): Promise<{ table_name: string }> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/call`, {
+    method: 'POST', headers: getHeaders(),
+  });
