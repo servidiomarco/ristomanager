@@ -3707,6 +3707,27 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
             .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
         const residual = Math.max(0, bill.total_cents - claimedCents);
 
+        // Righe del conto e quali sono già prese: sbloccano lo split per
+        // piatto, che è il modo in cui la gente divide davvero il conto
+        // ("io ho preso solo l'antipasto"). Disponibile solo quando il
+        // dettaglio esiste (comanda dal gestionale) e la somma delle righe
+        // coincide col totale: con uno sconto in mezzo, pagare "la propria
+        // riga" addebiterebbe più del dovuto.
+        const claimedItemRows = await queryWithRetry(
+            `SELECT item_ids FROM table_bill_splits
+             WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
+            [bill.id]
+        );
+        const takenItemIds = new Set<number>();
+        for (const r of claimedItemRows.rows) {
+            for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) takenItemIds.add(Number(id));
+        }
+        const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
+        const itemsSum = billItems.reduce(
+            (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
+        );
+        const perItemAvailable = billItems.length > 0 && itemsSum === bill.total_cents;
+
         res.json({
             bill: {
                 total_cents: bill.total_cents,
@@ -3718,6 +3739,16 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
             paid_cents: paidCents,
             claimed_cents: claimedCents,
             residual_cents: residual,
+            per_item_available: perItemAvailable,
+            items: perItemAvailable
+                ? billItems.map((i: any) => ({
+                    id: Number(i.order_item_id),
+                    name: i.name,
+                    qty: Number(i.qty),
+                    total_cents: Number(i.unit_price_cents) * Number(i.qty),
+                    taken: takenItemIds.has(Number(i.order_item_id)),
+                }))
+                : [],
         });
     } catch (err: any) {
         console.error('GET /pay/:token error:', err);
@@ -3781,8 +3812,8 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         }
 
         const kind = String(req.body?.kind || '');
-        if (kind !== 'equal_share' && kind !== 'fixed_amount') {
-            return res.status(400).json({ error: 'kind must be equal_share or fixed_amount' });
+        if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item') {
+            return res.status(400).json({ error: 'kind must be equal_share, fixed_amount or per_item' });
         }
         const rawLabel = typeof req.body?.claimant_label === 'string' ? req.body.claimant_label.trim().slice(0, 40) : '';
         const claimantLabel = rawLabel || null;
@@ -3793,7 +3824,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         // t.name is the REAL table number shown in the room (e.g. "23"), not
         // the internal id — it feeds the payment descriptions below.
         const billRs = await client.query(
-            `SELECT b.id, b.total_cents, b.covers, b.status, b.reservation_id,
+            `SELECT b.id, b.total_cents, b.covers, b.status, b.reservation_id, b.items,
                     t.name AS table_name
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id
@@ -3825,7 +3856,65 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         }
 
         let amount: number;
-        if (kind === 'equal_share') {
+        let claimedItemIds: number[] | null = null;
+        if (kind === 'per_item') {
+            const requested = Array.isArray(req.body?.item_ids)
+                ? req.body.item_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+                : [];
+            if (requested.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'item_ids must be a non-empty array' });
+            }
+            const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
+            const itemsSum = billItems.reduce(
+                (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
+            );
+            // Con uno sconto sul conto la somma delle righe non torna: pagare
+            // "la propria riga" addebiterebbe più del dovuto, quindi lo split
+            // per piatto non è disponibile.
+            if (billItems.length === 0 || itemsSum !== bill.total_cents) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Per-item split not available for this bill' });
+            }
+
+            // Righe già impegnate da altri: due ospiti non possono pagare lo
+            // stesso piatto.
+            const takenRs = await client.query(
+                `SELECT item_ids FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
+                [bill.id]
+            );
+            const taken = new Set<number>();
+            for (const r of takenRs.rows) {
+                for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) taken.add(Number(id));
+            }
+            const conflict = requested.filter((id: number) => taken.has(id));
+            if (conflict.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Some items are already claimed', conflicting_item_ids: conflict });
+            }
+
+            const byId = new Map(billItems.map((i: any) => [Number(i.order_item_id), i]));
+            let sum = 0;
+            for (const id of requested) {
+                const it = byId.get(id);
+                if (!it) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: 'Unknown item', item_id: id });
+                }
+                sum += Number(it.unit_price_cents) * Number(it.qty);
+            }
+            if (sum <= 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'Selected items total zero' });
+            }
+            if (sum > residual) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+            }
+            amount = sum;
+            claimedItemIds = requested;
+        } else if (kind === 'equal_share') {
             const covers = Math.max(1, Number(bill.covers) || 1);
             amount = Math.min(residual, Math.ceil(bill.total_cents / covers));
         } else {
@@ -3849,10 +3938,11 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         try {
             const ins = await client.query(
                 `INSERT INTO table_bill_splits
-                    (table_bill_id, kind, amount_cents, claimant_label, expires_at, status)
-                 VALUES ($1, $2, $3, $4, $5, 'CLAIMED')
+                    (table_bill_id, kind, amount_cents, claimant_label, expires_at, status, item_ids)
+                 VALUES ($1, $2, $3, $4, $5, 'CLAIMED', $6::jsonb)
                  RETURNING id`,
-                [bill.id, kind, amount, claimantLabel, expiresAt.toISOString()]
+                [bill.id, kind, amount, claimantLabel, expiresAt.toISOString(),
+                 claimedItemIds ? JSON.stringify(claimedItemIds) : null]
             );
             splitId = ins.rows[0].id;
         } catch (err: any) {
@@ -16325,6 +16415,114 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         await client.query('ROLLBACK').catch(() => {});
         client.release();
         console.error('POST /orders/:id/transfer error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Statistiche di cucina (PR 8) -------------------------------------------
+// Il delta di sincronia è la metrica che dice se la cucina è coordinata:
+// quanto tempo passa fra la prima riga pronta di un'uscita e l'ultima. Dice
+// dov'è il collo di bottiglia con un numero, invece che con le impressioni
+// del sabato sera.
+app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+
+        const from = typeof req.query.from === 'string' ? req.query.from : null;
+        const to = typeof req.query.to === 'string' ? req.query.to : null;
+
+        // Tempo di preparazione reale per partita: da quando la riga doveva
+        // iniziare a quando è stata dichiarata pronta. Mediana oltre alla
+        // media, perché una sola comanda dimenticata sposta la media e non la
+        // mediana.
+        const perStation = await queryWithRetry(
+            `SELECT s.id AS station_id, s.name AS station_name,
+                    COUNT(*)::int AS righe,
+                    ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at)))))/60.0, 1) AS media_min,
+                    ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (
+                        ORDER BY GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at))))
+                    ))::numeric/60.0, 1) AS mediana_min,
+                    COUNT(*) FILTER (WHERE oi.status = 'VOIDED')::int AS stornate
+             FROM order_items oi
+             LEFT JOIN stations s ON s.id = oi.station_id
+             WHERE oi.ready_at IS NOT NULL AND oi.line_kind = 'DISH'
+               AND ($1::date IS NULL OR oi.fired_at >= $1::date)
+               AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
+             GROUP BY s.id, s.name
+             ORDER BY s.sort_order NULLS LAST, s.id`,
+            [from, to]
+        );
+
+        // Delta di sincronia per uscita completata.
+        const sync = await queryWithRetry(
+            `WITH uscite AS (
+                 SELECT oi.order_id, oi.course_no,
+                        MAX(oi.ready_at) - MIN(oi.ready_at) AS delta,
+                        COUNT(DISTINCT oi.station_id)::int AS partite
+                 FROM order_items oi
+                 WHERE oi.status IN ('READY','SERVED') AND oi.line_kind = 'DISH'
+                   AND oi.ready_at IS NOT NULL
+                   AND ($1::date IS NULL OR oi.fired_at >= $1::date)
+                   AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
+                 GROUP BY oi.order_id, oi.course_no
+                 HAVING COUNT(*) > 1
+             )
+             SELECT COUNT(*)::int AS uscite,
+                    COUNT(*) FILTER (WHERE partite > 1)::int AS uscite_multipartita,
+                    ROUND(AVG(EXTRACT(epoch FROM delta))/60.0, 1) AS delta_medio_min,
+                    ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(epoch FROM delta)))::numeric/60.0, 1) AS delta_mediano_min,
+                    ROUND(MAX(EXTRACT(epoch FROM delta))/60.0, 1) AS delta_massimo_min
+             FROM uscite`,
+            [from, to]
+        );
+
+        // Attesa al passe: quanto restano ferme le proposte prima del lancio.
+        // È il costo del modello proponi/lancia, ed è giusto poterlo misurare.
+        const passe = await queryWithRetry(
+            // GREATEST(0, …): un'attesa negativa non esiste. In esercizio
+            // fired_at segue sempre queued_at, ma un report non deve poter
+            // mostrare un numero senza senso se i dati si disallineano.
+            `SELECT COUNT(*)::int AS uscite,
+                    ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (fired_at - queued_at))))/60.0, 1) AS attesa_media_min,
+                    ROUND(MAX(GREATEST(0, EXTRACT(epoch FROM (fired_at - queued_at))))/60.0, 1) AS attesa_massima_min
+             FROM (
+                 SELECT MIN(queued_at) AS queued_at, MIN(fired_at) AS fired_at
+                 FROM order_items
+                 WHERE queued_at IS NOT NULL AND fired_at IS NOT NULL AND line_kind = 'DISH'
+                   AND ($1::date IS NULL OR fired_at >= $1::date)
+                   AND ($2::date IS NULL OR fired_at < ($2::date + INTERVAL '1 day'))
+                 GROUP BY order_id, course_no
+             ) q`,
+            [from, to]
+        );
+
+        // Scarto: cosa è stato stornato e perché. La motivazione è
+        // obbligatoria dalla PR 7, quindi qui c'è sempre qualcosa da leggere.
+        const scarti = await queryWithRetry(
+            `SELECT oi.void_reason AS motivo, COUNT(*)::int AS righe,
+                    SUM((oi.unit_price_cents + COALESCE((
+                        SELECT SUM((m->>'price_delta_cents')::int)
+                        FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                    ), 0)) * oi.qty)::int AS valore_cents
+             FROM order_items oi
+             WHERE oi.status = 'VOIDED' AND oi.line_kind = 'DISH'
+               AND ($1::date IS NULL OR oi.voided_at >= $1::date)
+               AND ($2::date IS NULL OR oi.voided_at < ($2::date + INTERVAL '1 day'))
+             GROUP BY oi.void_reason
+             ORDER BY valore_cents DESC NULLS LAST
+             LIMIT 10`,
+            [from, to]
+        );
+
+        res.json({
+            from, to,
+            partite: perStation.rows,
+            sincronia: sync.rows[0],
+            passe: passe.rows[0],
+            scarti: scarti.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/kitchen error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
