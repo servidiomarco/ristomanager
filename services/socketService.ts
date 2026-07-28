@@ -82,6 +82,20 @@ export class SocketService {
         console.log(`[${socket.id}] Unsubscribed from room:${roomId}`);
       });
 
+      // Monitor di cucina: ogni schermo ascolta solo la propria partita.
+      // Con tre partite non è un'ottimizzazione ma una necessità — la
+      // Griglia non deve ricevere il traffico degli Antipasti, altrimenti
+      // il monitor diventa illeggibile proprio nel picco del servizio.
+      socket.on('subscribe:station', (stationId: number) => {
+        socket.join(`station:${stationId}`);
+        console.log(`[${socket.id}] Subscribed to station:${stationId}`);
+      });
+
+      socket.on('unsubscribe:station', (stationId: number) => {
+        socket.leave(`station:${stationId}`);
+        console.log(`[${socket.id}] Unsubscribed from station:${stationId}`);
+      });
+
       socket.on('disconnect', () => {
         console.log(`[${new Date().toISOString()}] Client disconnected: ${socket.id}`);
       });
@@ -231,6 +245,14 @@ export class SocketService {
   }
 
   // Generic broadcast method for any event type
+  // Emette alla sola partita indicata. Il passe (PR 5) si iscriverà a tutte.
+  broadcastToStation(stationId: number | null, event: string, data: any) {
+    // Le righe senza partita assegnata finiscono nel canale generico invece
+    // di sparire: un piatto non ancora configurato resta visibile a qualcuno.
+    const room = stationId == null ? 'station:none' : `station:${stationId}`;
+    this.io.to(room).emit(event, data);
+  }
+
   broadcastToAll(event: string, data: any, excludeSocketId?: string) {
     const connectedSockets = this.io.sockets.sockets.size;
     console.log(`📡 broadcastToAll: ${event} to ${connectedSockets} connected clients (excluding: ${excludeSocketId || 'none'})`);

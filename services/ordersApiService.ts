@@ -158,3 +158,56 @@ export interface MenuCatalogue {
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
   apiRequest<MenuCatalogue>(`${API_URL}/menu/catalogue`, { headers: getHeaders() });
+
+// --- Monitor di partita ------------------------------------------------------
+
+export interface KdsItem {
+  id: number;
+  order_id: number;
+  course_no: number;
+  name_snapshot: string;
+  qty: number;
+  modifiers: { name: string; price_delta_cents: number }[] | null;
+  note: string | null;
+  status: 'SENT' | 'PREPARING' | 'READY';
+  station_id: number | null;
+  fired_at: string | null;
+  station_start_at: string | null;
+  started_at: string | null;
+  ready_at: string | null;
+  table_id: number | null;
+  table_name: string | null;
+  customer_name: string | null;
+  reservation_notes: string | null;
+  customer_dietary_notes: string | null;
+}
+
+export interface KdsCourseState {
+  order_id: number;
+  course_no: number;
+  total_items: number;
+  ready_items: number;
+  waiting_station_ids: (number | null)[];
+}
+
+export interface KdsQueue {
+  station_id: number | null;
+  items: KdsItem[];
+  courses: KdsCourseState[];
+}
+
+export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>
+  apiRequest<KdsQueue>(
+    `${API_URL}/kds/queue${stationId != null ? `?station_id=${stationId}` : ''}`,
+    { headers: getHeaders() },
+  );
+
+export const setKdsItemStatus = async (
+  itemId: number,
+  status: 'PREPARING' | 'READY',
+): Promise<{ item: KdsItem; course_ready: boolean; waiting_station_ids: (number | null)[] }> =>
+  apiRequest(`${API_URL}/kds/items/${itemId}/status`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ status }),
+  });
