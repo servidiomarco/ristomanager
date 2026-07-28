@@ -15075,10 +15075,17 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                 });
             }
             for (const c of fired) {
+                const firedItems = view.items.filter((i: any) => i.course_no === c && i.status === 'SENT');
                 socketService?.broadcastToAll('course:fired', {
-                    order_id: orderId, course_no: c, table_id: view.order.table_id,
-                    items: view.items.filter((i: any) => i.course_no === c && i.status === 'SENT'),
+                    order_id: orderId, course_no: c, table_id: view.order.table_id, items: firedItems,
                 });
+                // Ogni monitor riceve solo le righe della propria partita.
+                for (const st of new Set(firedItems.map((i: any) => i.station_id))) {
+                    socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                        order_id: orderId, course_no: c, table_id: view.order.table_id,
+                        items: firedItems.filter((i: any) => i.station_id === st),
+                    });
+                }
             }
             socketService?.broadcastToAll('order:updated', view.order);
         } catch (_) {}
@@ -15125,6 +15132,174 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
         res.json(view);
     } catch (err: any) {
         console.error('POST /orders/:id/courses/:n/recall error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Monitor di partita (PR 4) ----------------------------------------------
+// Ogni schermo di cucina vede solo la propria coda. La riga porta con sé il
+// tavolo, l'uscita e gli allergeni della prenotazione: il cuoco non deve
+// cercare niente altrove.
+
+// Righe lavorabili di una partita. `station_id` assente = coda generica
+// (piatti senza partita assegnata), che è il fallback del passe.
+app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+
+        const raw = req.query.station_id;
+        const stationId = raw != null && raw !== '' ? Number(raw) : null;
+        if (raw != null && raw !== '' && !Number.isFinite(stationId)) {
+            return res.status(400).json({ error: 'station_id non valido' });
+        }
+
+        const rows = await queryWithRetry(
+            `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
+                    oi.modifiers, oi.note, oi.status, oi.station_id,
+                    oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
+                    o.table_id, t.name AS table_name,
+                    r.customer_name, r.notes AS reservation_notes,
+                    c.dietary_notes AS customer_dietary_notes
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id
+             -- Gli allergeni stanno in anagrafica cliente, agganciata per
+             -- telefono normalizzato: stessa lateral join delle prenotazioni.
+             LEFT JOIN LATERAL (
+                 SELECT cc.dietary_notes
+                 FROM customers cc
+                 WHERE r.phone IS NOT NULL AND cc.phone IS NOT NULL
+                   AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                 ORDER BY cc.id ASC
+                 LIMIT 1
+             ) c ON true
+             WHERE oi.status IN ('SENT','PREPARING','READY')
+               AND ($1::int IS NULL OR oi.station_id = $1)
+               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+             ORDER BY oi.station_start_at NULLS FIRST, oi.id`,
+            [stationId]
+        );
+
+        // Lo stato dell'uscita serve al monitor per sapere se sta facendo
+        // aspettare le altre partite: si calcola su TUTTE le righe
+        // dell'uscita, non solo su quelle di questa partita.
+        const keys = [...new Set(rows.rows.map((r: any) => `${r.order_id}:${r.course_no}`))];
+        let siblings: any[] = [];
+        if (keys.length > 0) {
+            const sib = await queryWithRetry(
+                `SELECT order_id, course_no, status, ready_at, station_id
+                 FROM order_items
+                 WHERE status <> 'VOIDED'
+                   AND (order_id, course_no) IN (
+                       SELECT (split_part(k, ':', 1))::int, (split_part(k, ':', 2))::int
+                       FROM unnest($1::text[]) AS k
+                   )`,
+                [keys]
+            );
+            siblings = sib.rows;
+        }
+
+        const courses = keys.map(k => {
+            const [orderId, courseNo] = k.split(':').map(Number);
+            const mine = siblings.filter(s => s.order_id === orderId && s.course_no === courseNo);
+            const pending = mine.filter(s => s.status !== 'READY' && s.status !== 'SERVED');
+            return {
+                order_id: orderId,
+                course_no: courseNo,
+                total_items: mine.length,
+                ready_items: mine.length - pending.length,
+                // Partite che l'uscita sta ancora aspettando: serve a dire al
+                // cuoco se è lui a far aspettare gli altri, o il contrario.
+                waiting_station_ids: [...new Set(pending.map(s => s.station_id))],
+            };
+        });
+
+        res.json({ station_id: stationId, items: rows.rows, courses });
+    } catch (err: any) {
+        console.error('GET /kds/queue error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Avanzamento della riga da parte del cuoco. Solo in avanti: tornare indietro
+// richiede uno storno esplicito, che ha un percorso suo (PR 7).
+app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const next = req.body?.status;
+        if (next !== 'PREPARING' && next !== 'READY') {
+            return res.status(400).json({ error: "status deve essere PREPARING o READY" });
+        }
+        // PREPARING solo da SENT, READY da SENT o PREPARING: il cuoco che
+        // segna pronto senza passare da "in preparazione" è normale sui
+        // piatti veloci e non va ostacolato.
+        const allowedFrom = next === 'PREPARING' ? ['SENT'] : ['SENT', 'PREPARING'];
+
+        const upd = await queryWithRetry(
+            // $2 va castato esplicitamente: senza, Postgres deve dedurne il
+            // tipo sia dalla colonna status sia dal confronto con 'READY' e
+            // rifiuta la query ("inconsistent types deduced for parameter").
+            `UPDATE order_items
+             SET status = $2::varchar,
+                 started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
+                 ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE ready_at END
+             WHERE id = $1 AND status = ANY($3::varchar[])
+             RETURNING *`,
+            [id, next, allowedFrom]
+        );
+        if (upd.rows.length === 0) {
+            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1`, [id]);
+            if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+            return res.status(409).json({
+                error: `Transizione non ammessa da ${cur.rows[0].status} a ${next}`,
+                status: cur.rows[0].status,
+            });
+        }
+        const item = upd.rows[0];
+
+        // L'uscita è pronta solo quando lo sono TUTTE le sue righe, anche
+        // quelle delle altre partite: è il segnale che fa chiamare la sala.
+        const course = await queryWithRetry(
+            `SELECT status, ready_at, station_id FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND status <> 'VOIDED'`,
+            [item.order_id, item.course_no]
+        );
+        const live = course.rows;
+        const pending = live.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
+        const courseReady = live.length > 0 && pending.length === 0;
+
+        try {
+            socketService?.broadcastToStation(item.station_id, 'kds:item', item);
+            socketService?.broadcastToAll('orderItem:status', {
+                id: item.id, status: item.status, station_id: item.station_id,
+                order_id: item.order_id, course_no: item.course_no, ts: new Date().toISOString(),
+            });
+            if (courseReady) {
+                const readyTimes = live.map((r: any) => new Date(r.ready_at).getTime()).filter(Number.isFinite);
+                // Delta di sincronia: quanto tempo è passato fra la prima
+                // riga pronta e l'ultima. È la metrica che dice se la cucina
+                // è coordinata, e finisce nelle statistiche della PR 8.
+                const syncDelta = readyTimes.length > 1
+                    ? Math.round((Math.max(...readyTimes) - Math.min(...readyTimes)) / 1000)
+                    : 0;
+                socketService?.broadcastToAll('course:ready', {
+                    order_id: item.order_id, course_no: item.course_no, sync_delta_s: syncDelta,
+                });
+            }
+        } catch (_) {}
+
+        res.json({
+            item,
+            course_ready: courseReady,
+            waiting_station_ids: [...new Set(pending.map((r: any) => r.station_id))],
+        });
+    } catch (err: any) {
+        console.error('POST /kds/items/:id/status error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
