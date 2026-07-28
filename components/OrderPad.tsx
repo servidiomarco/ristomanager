@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, Check, ChevronDown, Clock, Loader2, Minus, Plus, Send, Trash2,
-  TriangleAlert, Utensils, X,
+  ArrowLeft, Check, ChevronDown, Clock, Loader2, Minus, Plus, Receipt, Send,
+  Trash2, TriangleAlert, Users, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
 import { ArrivalStatus, ReservationStatus } from '../types';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   type MenuCatalogue, type NewOrderItem,
 } from '../services/ordersApiService';
 
@@ -68,6 +68,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
+  const [closing, setClosing] = useState(false);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
 
   useEffect(() => {
     if (!flash) return;
-    const t = setTimeout(() => setFlash(null), 3500);
+    const t = setTimeout(() => setFlash(null), 6000);
     return () => clearTimeout(t);
   }, [flash]);
 
@@ -226,6 +227,48 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     }
   };
 
+  // I coperti sono il divisore dello split equo del conto: se sono sbagliati
+  // ogni ospite paga la quota sbagliata.
+  const changeCovers = async (delta: number) => {
+    if (!order || busy) return;
+    const next = order.order.covers + delta;
+    if (next < 1) return;
+    setBusy(true);
+    try {
+      setOrder(await updateOrder(order.order.id, { covers: next }));
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Coperti non aggiornati');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Chiude la comanda e consegna il totale al conto al tavolo: da qui in poi
+  // valgono le regole del pagamento, non quelle della cucina.
+  const closeAndBill = async (discardPending = false) => {
+    if (!order || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await closeOrder(order.order.id, discardPending);
+      setClosing(false);
+      setFlash(res.bill
+        ? `Conto aperto: ${euro(res.bill.total_cents)} su ${order.order.covers} coperti`
+        : 'Comanda chiusa: non c\'era nulla da pagare');
+      setTableId(null); setOrder(null); setCart([]);
+    } catch (err: any) {
+      const data = err?.data;
+      if (data?.pending_items) {
+        setError(`${data.pending_items} righe non sono ancora andate in cucina. Inviale o confermale come da scartare.`);
+        setClosing(true);
+      } else {
+        setError(data?.error ?? err?.message ?? 'Chiusura non riuscita');
+        setClosing(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -248,6 +291,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           Scegli il tavolo per aprire o riprendere la comanda.
         </p>
         {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+        {/* La conferma di chiusura arriva qui: dopo aver aperto il conto si
+            torna alla scelta tavolo, e senza questo il cameriere non saprebbe
+            se il conto è stato creato davvero. */}
+        {flash && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 text-sm flex items-center gap-2">
+            <Check size={16} /> {flash}
+          </div>
+        )}
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
           {tables.map(t => (
             <button
@@ -286,15 +337,29 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
                   className="p-2 -ml-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
             <ArrowLeft size={20} />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="font-semibold truncate">
-              Tav. {table?.name} · {order.order.covers} cop.
+              Tav. {table?.name}
               {reservation ? ` · ${reservation.customer_name}` : ''}
             </div>
-            <div className="text-xs text-slate-500">
-              Totale comanda {euro(order.total_cents)}
+            <div className="text-xs text-slate-500 flex items-center gap-2">
+              <span>Totale {euro(order.total_cents)}</span>
+              <span className="flex items-center gap-1">
+                <Users size={12} />
+                <button onClick={() => changeCovers(-1)} disabled={busy}
+                        className="px-1.5 rounded border border-slate-300 dark:border-slate-600">−</button>
+                <span className="tabular-nums w-4 text-center">{order.order.covers}</span>
+                <button onClick={() => changeCovers(+1)} disabled={busy}
+                        className="px-1.5 rounded border border-slate-300 dark:border-slate-600">+</button>
+                cop.
+              </span>
             </div>
           </div>
+          <button onClick={() => closeAndBill(false)} disabled={busy}
+                  title="Chiudi la comanda e apri il conto"
+                  className="shrink-0 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm flex items-center gap-1.5">
+            <Receipt size={15} /> Conto
+          </button>
         </div>
         {allergens && (
           <div className="mt-2 flex items-start gap-2 text-sm px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
@@ -404,6 +469,29 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           </button>
         </div>
       </div>
+
+      {closing && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             onClick={() => setClosing(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold mb-2">Righe non inviate</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Ci sono righe che non sono mai arrivate in cucina. Chiudendo ora
+              vengono eliminate e non finiranno sul conto.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setClosing(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
+                Annulla
+              </button>
+              <button onClick={() => closeAndBill(true)} disabled={busy}
+                      className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-semibold">
+                Scarta e chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {variantFor && (
         <VariantSheet

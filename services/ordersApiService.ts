@@ -265,3 +265,38 @@ export const callCourse = async (orderId: number, courseNo: number): Promise<{ t
   apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/call`, {
     method: 'POST', headers: getHeaders(),
   });
+
+// --- Ponte al conto ----------------------------------------------------------
+
+export interface CloseOrderResult {
+  order_id: number;
+  /** null quando non c'era nulla da pagare: comanda chiusa senza conto. */
+  bill: null | {
+    id: number;
+    total_cents: number;
+    covers: number;
+    share_token: string | null;
+    items: { name: string; qty: number; unit_price_cents: number }[] | null;
+  };
+  /** Claim non pagati rilasciati perché il totale è sceso. */
+  released_split_ids: number[];
+  message?: string;
+}
+
+/** Chiude la comanda e apre (o aggiorna) il conto, già valorizzato. */
+export const closeOrder = async (orderId: number, discardPending = false): Promise<CloseOrderResult> =>
+  apiRequest<CloseOrderResult>(`${API_URL}/orders/${orderId}/close`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ discard_pending: discardPending }),
+  });
+
+export const updateOrder = async (
+  orderId: number,
+  payload: { covers?: number; notes?: string | null },
+): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
