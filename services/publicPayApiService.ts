@@ -14,6 +14,15 @@ export interface PublicSplitView {
   status: PublicSplitStatus;
 }
 
+export interface PublicBillItem {
+  id: number;
+  name: string;
+  qty: number;
+  total_cents: number;
+  /** Già presa da un altro ospite: due persone non pagano lo stesso piatto. */
+  taken: boolean;
+}
+
 export interface PublicBillView {
   bill: {
     total_cents: number;
@@ -25,11 +34,16 @@ export interface PublicBillView {
   paid_cents: number;
   claimed_cents: number;
   residual_cents: number;
+  /** Falso quando il dettaglio manca o c'è uno sconto: in quel caso pagare
+   *  "la propria riga" addebiterebbe più del dovuto. */
+  per_item_available?: boolean;
+  items?: PublicBillItem[];
 }
 
 export interface ClaimPayload {
-  kind: 'equal_share' | 'fixed_amount';
+  kind: PublicSplitKind;
   amount_cents?: number;
+  item_ids?: number[];
   claimant_label?: string;
 }
 

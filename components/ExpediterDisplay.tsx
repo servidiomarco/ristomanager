@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
+import { BarChart3, Bell, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
 import {
-  getExpediterBoard, fireCourse, refireCourse, callCourse,
-  type ExpediterBoard, type ExpediterCourse,
+  getExpediterBoard, fireCourse, refireCourse, callCourse, getKitchenReport,
+  type ExpediterBoard, type ExpediterCourse, type KitchenReport,
 } from '../services/ordersApiService';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +33,8 @@ export const ExpediterDisplay: React.FC = () => {
   const [offline, setOffline] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [called, setCalled] = useState<Set<string>>(new Set());
+  const [report, setReport] = useState<KitchenReport | null>(null);
+  const [showReport, setShowReport] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -97,7 +99,18 @@ export const ExpediterDisplay: React.FC = () => {
           {inCorso.length} in corso · {inAttesa.length} da lanciare
         </span>
         {offline && <span className="flex items-center gap-1 text-sm text-amber-600"><WifiOff size={15} /> riconnessione…</span>}
+        <button
+          onClick={() => {
+            const next = !showReport;
+            setShowReport(next);
+            if (next) getKitchenReport().then(setReport).catch(() => setReport(null));
+          }}
+          className="ml-auto text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1.5">
+          <BarChart3 size={14} /> Statistiche
+        </button>
       </header>
+
+      {showReport && <KitchenStats report={report} />}
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         <section>
@@ -241,3 +254,69 @@ const CourseRow: React.FC<{
     </div>
   );
 };
+
+// Il numero che dice se la cucina è coordinata, invece delle impressioni del
+// sabato sera. La mediana accanto alla media: una sola comanda dimenticata
+// sposta la media e non la mediana.
+const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) => {
+  if (!report) {
+    return <div className="px-5 py-3 text-sm text-slate-500 border-b border-slate-200 dark:border-slate-700">Caricamento statistiche…</div>;
+  }
+  const s = report.sincronia;
+  return (
+    <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <Stat label="Uscite completate" value={String(s?.uscite ?? 0)} />
+        <Stat label="Delta di sincronia (mediano)" value={s?.delta_mediano_min != null ? `${s.delta_mediano_min}′` : '—'}
+              hint="fra la prima riga pronta e l'ultima" />
+        <Stat label="Delta peggiore" value={s?.delta_massimo_min != null ? `${s.delta_massimo_min}′` : '—'} />
+        <Stat label="Attesa media al passe" value={report.passe?.attesa_media_min != null ? `${report.passe.attesa_media_min}′` : '—'}
+              hint="fra proposta e lancio" />
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="text-sm w-full">
+          <thead className="text-xs uppercase tracking-wide text-slate-500">
+            <tr><th className="text-left py-1">Partita</th><th className="text-right">Righe</th>
+                <th className="text-right">Media</th><th className="text-right">Mediana</th></tr>
+          </thead>
+          <tbody>
+            {report.partite.map(p => (
+              <tr key={p.station_id ?? 'none'} className="border-t border-slate-200 dark:border-slate-700">
+                <td className="py-1.5">{p.station_name ?? 'Senza partita'}</td>
+                <td className="text-right tabular-nums">{p.righe}</td>
+                <td className="text-right tabular-nums">{p.media_min ?? '—'}′</td>
+                <td className="text-right tabular-nums font-medium">{p.mediana_min ?? '—'}′</td>
+              </tr>
+            ))}
+            {report.partite.length === 0 && (
+              <tr><td colSpan={4} className="py-2 text-slate-400">Nessun dato nel periodo.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {report.scarti.length > 0 && (
+        <div className="mt-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Scarti</div>
+          <ul className="text-sm space-y-0.5">
+            {report.scarti.map((sc, i) => (
+              <li key={i} className="flex justify-between">
+                <span className="text-slate-600 dark:text-slate-300">{sc.motivo ?? 'senza motivazione'} · {sc.righe}</span>
+                <span className="tabular-nums">{(sc.valore_cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
+  <div>
+    <div className="text-2xl font-bold tabular-nums">{value}</div>
+    <div className="text-xs text-slate-500">{label}</div>
+    {hint && <div className="text-[10px] text-slate-400">{hint}</div>}
+  </div>
+);

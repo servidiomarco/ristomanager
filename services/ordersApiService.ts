@@ -300,3 +300,49 @@ export const updateOrder = async (
     headers: getHeaders(),
     body: JSON.stringify(payload),
   });
+
+// --- Storni, sconti, trasferimenti -------------------------------------------
+
+/** Storno di una riga già inviata: la motivazione è obbligatoria. */
+export const voidItem = async (itemId: number, reason: string): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}/void`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ reason }),
+  });
+
+export const setOrderDiscount = async (
+  orderId: number,
+  payload: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null,
+): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/discount`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify(payload ?? {}),
+  });
+
+export const transferOrder = async (orderId: number, tableId: number): Promise<OrderWithItems> =>
+  apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/transfer`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ table_id: tableId }),
+  });
+
+// --- Statistiche di cucina ---------------------------------------------------
+
+export interface KitchenReport {
+  from: string | null;
+  to: string | null;
+  partite: {
+    station_id: number | null; station_name: string | null;
+    righe: number; media_min: string | null; mediana_min: string | null; stornate: number;
+  }[];
+  sincronia: {
+    uscite: number; uscite_multipartita: number;
+    delta_medio_min: string | null; delta_mediano_min: string | null; delta_massimo_min: string | null;
+  };
+  passe: { uscite: number; attesa_media_min: string | null; attesa_massima_min: string | null };
+  scarti: { motivo: string | null; righe: number; valore_cents: number }[];
+}
+
+export const getKitchenReport = async (from?: string, to?: string): Promise<KitchenReport> => {
+  const q = new URLSearchParams();
+  if (from) q.set('from', from);
+  if (to) q.set('to', to);
+  const qs = q.toString();
+  return apiRequest<KitchenReport>(`${API_URL}/reports/kitchen${qs ? `?${qs}` : ''}`, { headers: getHeaders() });
+};

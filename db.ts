@@ -2345,6 +2345,35 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL');
         `);
 
+        // ============================================
+        // GESTIONALE DI SALA — PR 7: storni, sconti, coperti
+        // ============================================
+
+        // Righe di sistema: coperto e servizio non sono piatti e non vanno
+        // mai in cucina, ma pesano sul conto. Distinguerle serve a non
+        // mandarle al KDS e a non contarle nel servizio addebitato.
+        await client.query(`
+            ALTER TABLE order_items ADD COLUMN IF NOT EXISTS line_kind VARCHAR(20)
+                NOT NULL DEFAULT 'DISH'
+                CHECK (line_kind IN ('DISH','COVER','SERVICE'));
+        `);
+
+        // Sconto a livello di comanda, con motivazione: uno sconto senza
+        // motivo scritto è un ammanco che nessuno sa spiegare a fine mese.
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_type VARCHAR(10) CHECK (discount_type IN ('PERCENT','AMOUNT'));`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_value NUMERIC(10,2) CHECK (discount_value IS NULL OR discount_value >= 0);`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_reason TEXT;`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+
+        // Coperto e servizio, spenti di partenza: chi non li applica non deve
+        // ritrovarseli sul conto dopo un aggiornamento.
+        await client.query(`
+            INSERT INTO app_settings (key, int_value) VALUES
+                ('cover_charge_cents', 0),
+                ('service_charge_percent', 0)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
         // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
         // AUTO_FIRST: la prima uscita continua a partire da sola, dalla
         // seconda in poi decide il passe. Prima di questa PR non esisteva
