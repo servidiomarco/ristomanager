@@ -141,6 +141,49 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
     try {
         await client.query('BEGIN');
 
+        // ============================================
+        // TABELLE FONDANTI — devono esistere per prime
+        // ============================================
+        // `users` e `activity_logs` sono referenziate (FK o backfill) da
+        // blocchi che stanno più in basso in questa funzione. Su un database
+        // già popolato non si nota, perché le tabelle ci sono da prima e i
+        // CREATE ... IF NOT EXISTS più avanti sono no-op; su un database
+        // vuoto invece createSchema fallisce e l'app non parte.
+        //
+        // Definirle qui in testa è l'unico ordinamento che regge entrambi i
+        // casi. Le ALTER, gli indici e i seed di queste due tabelle restano
+        // nelle rispettive sezioni più sotto: qui c'è solo la CREATE.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                full_name VARCHAR(255) NOT NULL,
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMPTZ,
+                refresh_token_hash VARCHAR(255)
+            );
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                user_email VARCHAR(255),
+                user_name VARCHAR(255),
+                action VARCHAR(50) NOT NULL,
+                resource_type VARCHAR(50) NOT NULL,
+                resource_id INTEGER,
+                resource_name VARCHAR(255),
+                details JSONB,
+                status VARCHAR(20) DEFAULT 'SUCCESS',
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         await client.query(`
             CREATE TABLE IF NOT EXISTS rooms (
                 id SERIAL PRIMARY KEY,
@@ -656,22 +699,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // ============================================
         // ACTIVITY LOGS TABLE
         // ============================================
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS activity_logs (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                user_email VARCHAR(255),
-                user_name VARCHAR(255),
-                action VARCHAR(50) NOT NULL,
-                resource_type VARCHAR(50) NOT NULL,
-                resource_id INTEGER,
-                resource_name VARCHAR(255),
-                details JSONB,
-                status VARCHAR(20) DEFAULT 'SUCCESS',
-                error_message TEXT,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
+        // La CREATE TABLE sta in testa a createSchema (sezione "tabelle
+        // fondanti"): il backfill di reservations.created_at legge da qui e
+        // gira molto più in alto. Qui restano solo gli indici.
 
         // Create indexes for activity_logs (if not exists)
         await client.query(`
@@ -687,20 +717,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // ============================================
         // USERS TABLE FOR AUTHENTICATION
         // ============================================
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
-                is_active BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMPTZ,
-                refresh_token_hash VARCHAR(255)
-            );
-        `);
+        // La CREATE TABLE sta in testa a createSchema (sezione "tabelle
+        // fondanti"): diverse tabelle più sopra hanno una FK verso users e su
+        // un database vuoto fallirebbero. Qui restano solo ALTER e seed.
 
         // Per-user landing preference: which view to open after login.
         // NULL = fall back to the first accessible view (legacy behavior).
