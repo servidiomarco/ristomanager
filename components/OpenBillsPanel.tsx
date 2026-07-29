@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, Loader2, QrCode, Receipt, X } from 'lucide-react';
+import { Check, Copy, Loader2, QrCode, Receipt, TriangleAlert, X } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
-import { billsApiService, getOpenBills, type OpenBillRow } from '../services/billsApiService';
+import { billsApiService, getOpenBills, type OpenBillRow, type StaleOrderRow } from '../services/billsApiService';
 
 // ---------------------------------------------------------------------------
 // Conti aperti — elenco per tavolo, con e senza prenotazione.
@@ -17,6 +17,8 @@ const euro = (cents: number): string =>
 
 export const OpenBillsPanel: React.FC = () => {
   const [bills, setBills] = useState<OpenBillRow[]>([]);
+  const [stale, setStale] = useState<StaleOrderRow[]>([]);
+  const [service, setService] = useState<{ service_date: string; shift: 'LUNCH' | 'DINNER' } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<OpenBillRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -26,6 +28,8 @@ export const OpenBillsPanel: React.FC = () => {
     try {
       const res = await getOpenBills();
       setBills(res.bills);
+      setStale(res.stale_orders ?? []);
+      setService(res.service ?? null);
       // Il conto aperto si aggiorna mentre lo guardi: rinfreschiamo anche
       // quello selezionato, altrimenti il residuo resta fermo a prima.
       setSelected(prev => (prev ? res.bills.find(b => b.id === prev.id) ?? null : null));
@@ -78,7 +82,41 @@ export const OpenBillsPanel: React.FC = () => {
         <Receipt size={18} />
         <h2 className="text-lg font-semibold">Conti aperti</h2>
         <span className="text-sm text-slate-500">{bills.length}</span>
+        {service && (
+          <span className="text-xs text-slate-400 ml-1">
+            servizio {service.shift === 'LUNCH' ? 'pranzo' : 'cena'} ·{' '}
+            {new Date(`${service.service_date}T12:00:00`).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}
+          </span>
+        )}
       </div>
+
+      {/* Comande rimaste aperte in servizi precedenti. Non compaiono più né in
+          sala né in cucina: se non le mostrassimo qui, un tavolo mai chiuso
+          sparirebbe senza che nessuno se ne accorga. */}
+      {stale.length > 0 && (
+        <div className="mb-4 rounded-xl border-2 border-amber-400 bg-amber-50/60 dark:bg-amber-950/20 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
+            <TriangleAlert size={15} />
+            {stale.length === 1 ? 'Una comanda' : `${stale.length} comande`} di servizi precedenti mai chiusa
+            {stale.length === 1 ? '' : 'e'}
+          </div>
+          <ul className="mt-2 text-sm space-y-1">
+            {stale.map(o => (
+              <li key={o.id} className="flex items-center gap-2">
+                <span className="font-medium">Tav. {o.table_name ?? '—'}</span>
+                <span className="text-slate-500 text-xs">
+                  {new Date(`${o.service_date}T12:00:00`).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}
+                  {' · '}{o.shift === 'LUNCH' ? 'pranzo' : 'cena'}
+                </span>
+                <span className="ml-auto tabular-nums">{euro(o.total_cents)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-amber-800/80 dark:text-amber-200/70">
+            Aprile da <strong>Comande</strong> scegliendo il tavolo nel servizio a cui appartengono, oppure chiudile dal conto se il pagamento è già avvenuto.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="mb-3 px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200 text-sm">
@@ -122,6 +160,12 @@ export const OpenBillsPanel: React.FC = () => {
                 {b.open_orders > 0 && (
                   <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
                     comanda ancora aperta
+                  </div>
+                )}
+                {!b.is_current_service && (
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    {new Date(`${b.service_date}T12:00:00`).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}
+                    {' · '}{b.shift === 'LUNCH' ? 'pranzo' : 'cena'}
                   </div>
                 )}
               </button>
