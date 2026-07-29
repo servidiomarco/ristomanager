@@ -851,6 +851,92 @@ export const updateRevolutIntegration = async (
 };
 
 // ============================================
+// INTEGRATION SETTINGS (SumUp)
+// ============================================
+export type SumUpEnvironment = 'sandbox' | 'production';
+export type PaymentProviderId = 'revolut' | 'sumup';
+
+export interface SumUpIntegrationStatus {
+  // Which credential pair is live. SumUp serves sandbox and production from
+  // the same host, so this selects the key/merchant-code pair rather than a
+  // base URL — both pairs stay saved.
+  environment: SumUpEnvironment;
+  api_base: string;
+  // True when the ACTIVE environment has both a key and a merchant code.
+  configured: boolean;
+  has_api_key: boolean;
+  has_merchant_code: boolean;
+  api_key_last4: string | null;
+  merchant_code: string;
+  production_configured: boolean;
+  sandbox_configured: boolean;
+  production_api_key_last4: string | null;
+  sandbox_api_key_last4: string | null;
+  production_merchant_code: string;
+  sandbox_merchant_code: string;
+  has_callback_secret: boolean;
+  callback_secret_last4: string | null;
+  // Masked form of the URL SumUp calls back on, for a visual sanity check.
+  callback_url: string | null;
+  // Which gateway new payments currently go through.
+  active_provider: PaymentProviderId;
+  is_active_provider: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface SumUpIntegrationUpdate {
+  environment?: SumUpEnvironment;
+  // Production credentials.
+  api_key?: string;
+  merchant_code?: string;
+  // Sandbox credentials.
+  sandbox_api_key?: string;
+  sandbox_merchant_code?: string;
+  callback_secret?: string;
+  // true → route new payments through SumUp, false → back to Revolut.
+  set_active?: boolean;
+}
+
+export const getSumUpIntegration = async (): Promise<SumUpIntegrationStatus> => {
+  return apiRequest<SumUpIntegrationStatus>(`${API_URL}/settings/integrations/sumup`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateSumUpIntegration = async (
+  updates: SumUpIntegrationUpdate
+): Promise<SumUpIntegrationStatus> => {
+  return apiRequest<SumUpIntegrationStatus>(`${API_URL}/settings/integrations/sumup`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+export interface ActivePaymentProvider {
+  provider: PaymentProviderId;
+  providers: PaymentProviderId[];
+  configured: Record<PaymentProviderId, boolean>;
+}
+
+export const getActivePaymentProvider = async (): Promise<ActivePaymentProvider> => {
+  return apiRequest<ActivePaymentProvider>(`${API_URL}/settings/payments/provider`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const setActivePaymentProvider = async (
+  provider: PaymentProviderId
+): Promise<{ provider: PaymentProviderId }> => {
+  return apiRequest<{ provider: PaymentProviderId }>(`${API_URL}/settings/payments/provider`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ provider }),
+  });
+};
+
+// ============================================
 // INTEGRATION SETTINGS (SMTP)
 // ============================================
 export type EmailProvider = 'smtp' | 'resend';
@@ -968,10 +1054,17 @@ export const testImapConnection = async (): Promise<{ success: boolean }> => {
 export interface AutoDepositSettings {
   enabled: boolean;
   min_guests: number;
-  // True when a Revolut API key is stored (env or DB). The toggle can still be
-  // enabled without it, but the deposit link won't actually be generated —
-  // used by the UI to warn the operator.
+  // True when the ACTIVE payment gateway has usable credentials (env or DB).
+  // The toggle can still be enabled without them, but the deposit link won't
+  // actually be generated — used by the UI to warn the operator. The name is
+  // historical (Revolut was the only gateway); `payment_configured` is the
+  // same value under a provider-neutral key.
   revolut_configured: boolean;
+  payment_configured?: boolean;
+  // Which gateway the deposit link will be created with. Absent on backends
+  // predating the SumUp integration.
+  active_provider?: PaymentProviderId;
+  active_provider_label?: string;
 }
 
 export const getAutoDepositSettings = async (): Promise<AutoDepositSettings> => {

@@ -33,6 +33,7 @@ import { ReservationAllergensManager } from './components/ReservationAllergensMa
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
+import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
@@ -2340,6 +2341,9 @@ const App: React.FC = () => {
                 </div>
                 <CardErrorBoundary label="Revolut">
                   <RevolutIntegrationCard showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="SumUp">
+                  <SumUpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Conto al tavolo">
                   <PayAtTableSettingsManager showToast={addToast} />

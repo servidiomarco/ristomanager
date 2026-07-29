@@ -84,13 +84,18 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
     }
     if (!settings) return null;
 
+    // The deposit link is created with whichever gateway is active, so name
+    // that one instead of hardcoding Revolut. Older backends don't send the
+    // label — fall back to the historical wording.
+    const providerLabel = settings.active_provider_label || 'Revolut';
+
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                     <p className="text-[13px] font-medium text-[var(--color-fg)]">Attiva caparra automatica</p>
                     <p className="text-[12px] text-[var(--color-fg-muted)]">
-                        Per le richieste dal modulo /prenota il sistema genera automaticamente un link Revolut (€10/persona) inviato via SMS al cliente.
+                        Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {providerLabel} (€10/persona) inviato via SMS al cliente.
                     </p>
                 </div>
                 <button
@@ -136,7 +141,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                 </p>
                 {!settings.revolut_configured && effectiveEnabled && (
                     <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                        Revolut non è ancora configurato: configura le credenziali in Integrazioni → Revolut Merchant, altrimenti il link non verrà generato.
+                        {providerLabel} non è ancora configurato: configura le credenziali in Integrazioni → {providerLabel}, altrimenti il link non verrà generato.
                     </p>
                 )}
             </div>

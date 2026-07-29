@@ -230,6 +230,12 @@ export type ConfirmationChannel = 'sms' | 'whatsapp';
 
 export type PaymentRequestStatus = 'PENDING' | 'AUTHORISED' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'EXPIRED';
 
+// Gateway that created (and therefore owns) a payment. New payments go to
+// whichever provider is active in Settings; existing rows keep the one
+// recorded here, so a mid-flight order is always handled by the gateway that
+// took it.
+export type PaymentProviderName = 'revolut' | 'sumup';
+
 export interface PaymentRequest {
   id: number;
   reservation_id: number | null;
@@ -237,7 +243,7 @@ export interface PaymentRequest {
   currency: string;
   description: string | null;
   status: PaymentRequestStatus;
-  provider: 'revolut';
+  provider: PaymentProviderName;
   provider_order_id: string | null;
   checkout_url: string | null;
   delivery_channel: ConfirmationChannel | null;
@@ -268,11 +274,11 @@ export type TableBillStatus =
 export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item';
 
 export type SplitStatus =
-  | 'CLAIMED'     // guest reserved the amount, Revolut order pending
-  | 'PAID'        // Revolut confirmed
-  | 'ABANDONED'   // TTL expired or Revolut cancelled/failed
+  | 'CLAIMED'     // guest reserved the amount, gateway order pending
+  | 'PAID'        // gateway confirmed
+  | 'ABANDONED'   // TTL expired or gateway cancelled/failed
   | 'RELEASED'    // guest or waiter voluntarily rilasciato prima del pagamento
-  | 'REFUNDED';   // rimborsato via Revolut dopo il pagamento
+  | 'REFUNDED';   // rimborsato via gateway dopo il pagamento
 
 export interface TableBillItem {
   name: string;

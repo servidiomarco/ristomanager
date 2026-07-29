@@ -24,15 +24,33 @@ import { LogService, ActivityAction, ResourceType } from './activityLogs/logServ
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
 import {
     isRevolutConfigured,
-    createOrder as revolutCreateOrder,
-    cancelOrder as revolutCancelOrder,
-    refundOrder as revolutRefundOrder,
-    getOrder as revolutGetOrder,
     verifyWebhookSignature as verifyRevolutWebhook,
     getRevolutConfigStatus,
     invalidateRevolutConfigCache,
     type RevolutEnvironment,
 } from './services/revolutService.js';
+import {
+    getSumUpConfigStatus,
+    invalidateSumUpConfigCache,
+    getSumUpCallbackSecret,
+    callbackTokenMatches,
+} from './services/sumupService.js';
+import {
+    PAYMENT_PROVIDERS,
+    isPaymentProvider,
+    publicBaseUrl,
+    getActivePaymentProvider,
+    setActivePaymentProvider,
+    isProviderConfigured,
+    isPaymentConfigured,
+    providerLabel,
+    createPaymentOrder,
+    fetchPaymentOrder,
+    cancelPaymentOrder,
+    refundPaymentOrder,
+    transitionMetadata,
+    type PaymentProvider,
+} from './services/paymentProviderService.js';
 import {
     isSmtpConfigured,
     getSmtpConfigStatus,
@@ -3466,15 +3484,15 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
 });
 
 // PR 6 — rimborso di una quota. Copre due casi:
-//   a) split PAID normale: refund Revolut, split → REFUNDED, e se il conto
-//      era SETTLED riapre (OPEN) per l'importo rimborsato;
+//   a) split PAID normale: refund sul gateway, split → REFUNDED, e se il
+//      conto era SETTLED riapre (OPEN) per l'importo rimborsato;
 //   b) overpayment (split ABANDONED ma pagamento COMPLETED, il caso del
-//      checkout completato dopo la scadenza del claim): refund Revolut e
-//      marcatura REFUNDED, il conto non si tocca perché la quota non
+//      checkout completato dopo la scadenza del claim): refund sul gateway
+//      e marcatura REFUNDED, il conto non si tocca perché la quota non
 //      contribuiva al saldo.
-// Il refund parte PRIMA della scrittura DB: se Revolut fallisce non
-// cambiamo nulla; se la scrittura fallisse dopo, i log Revolut restano la
-// fonte di verità e un retry dell'endpoint è idempotente lato nostro
+// Il refund parte PRIMA della scrittura DB: se il gateway fallisce non
+// cambiamo nulla; se la scrittura fallisse dopo, i log del gateway restano
+// la fonte di verità e un retry dell'endpoint è idempotente lato nostro
 // (lo split non è più in stato rimborsabile).
 app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
@@ -3500,11 +3518,14 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         if (!refundablePaid && !refundableOverpaid) {
             return res.status(409).json({ error: `La quota non è rimborsabile (stato ${row.split_status})` });
         }
-        if (row.provider !== 'revolut' || !row.provider_order_id) {
-            return res.status(409).json({ error: 'Nessun ordine Revolut collegato alla quota' });
+        if (!isPaymentProvider(row.provider) || !row.provider_order_id) {
+            return res.status(409).json({ error: 'Nessun ordine di pagamento collegato alla quota' });
         }
 
-        await revolutRefundOrder(
+        // Refund through the provider that took the money, not the one that
+        // happens to be active now.
+        await refundPaymentOrder(
+            row.provider,
             row.provider_order_id,
             row.amount_cents,
             row.currency || 'EUR',
@@ -3826,42 +3847,43 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
 
         await client.query('COMMIT');
 
-        // Create the Revolut order AFTER commit — if the API call fails
+        // Create the gateway order AFTER commit — if the API call fails
         // the split stays CLAIMED and the reconcile job will abandon it
         // once expires_at passes, freeing the capacity.
         let checkoutUrl: string | null = null;
         let paymentRequestId: number | null = null;
         try {
-            if (!(await isRevolutConfigured())) {
-                throw new Error('Revolut not configured');
+            if (!(await isPaymentConfigured())) {
+                throw new Error(`${providerLabel(await getActivePaymentProvider())} not configured`);
             }
-            const order = await revolutCreateOrder({
+            const order = await createPaymentOrder({
                 amount,
                 currency: 'EUR',
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
-                merchant_order_ext_ref: `bill_split:${splitId}`,
-                // Back to the bill page after checkout (Revolut Pay, Apple
-                // Pay, card — all of them), so the guest sees the progress
-                // bar advance instead of landing on the provider default.
-                redirect_url: `${payAtTableBaseUrl()}/pay/${token}`,
+                reference: `bill_split:${splitId}`,
+                // Back to the bill page after checkout (whatever method the
+                // guest picked), so they see the progress bar advance
+                // instead of landing on the provider default.
+                redirectUrl: `${payAtTableBaseUrl()}/pay/${token}`,
             });
-            checkoutUrl = order.checkout_url;
+            checkoutUrl = order.checkoutUrl;
 
             const prIns = await queryWithRetry(
                 `INSERT INTO payment_requests
                     (reservation_id, amount_cents, currency, description, status, provider,
                      provider_order_id, checkout_url, table_bill_split_id, metadata)
-                 VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7, $8)
+                 VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id`,
                 [
                     bill.reservation_id || null,
                     amount,
                     `Conto ${billLabel}`,
-                    (order.state || 'PENDING').toUpperCase(),
+                    order.status,
+                    order.provider,
                     order.id,
-                    order.checkout_url,
+                    order.checkoutUrl,
                     splitId,
-                    JSON.stringify({ revolut_token: order.token || null, bill_split_id: splitId }),
+                    JSON.stringify({ ...order.metadata, bill_split_id: splitId }),
                 ]
             );
             paymentRequestId = prIns.rows[0].id;
@@ -3871,7 +3893,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 [paymentRequestId, splitId]
             );
         } catch (err: any) {
-            console.error('[pay] revolut order creation failed for split', splitId, err?.message || err);
+            console.error('[pay] payment order creation failed for split', splitId, err?.message || err);
             // Non-fatal for the API response: the client gets the split
             // but no checkout_url — the UI can offer "riprova" via a new
             // claim after release.
@@ -4365,10 +4387,10 @@ function formatEuroMinor(cents: number): string {
 // Base URL where the SPA is served (the pay-at-table page lives at
 // {base}/pay/{token}). Read from CRM_APP_BASE_URL first so it can be
 // pointed at a preview/dev deploy; falls back to the production domain
-// so the flow works out of the box.
+// so the flow works out of the box. Defined in paymentProviderService
+// because the gateway modules build redirect/callback URLs from it too.
 function payAtTableBaseUrl(): string {
-    const raw = (process.env.CRM_APP_BASE_URL || 'https://crm.vecchiofrantoio.com').trim();
-    return raw.replace(/\/+$/, '');
+    return publicBaseUrl();
 }
 
 // Message sent to the guest when the waiter forwards the pay-at-table
@@ -4660,8 +4682,9 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
 // after) mirrors reservation confirmations exactly.
 app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        if (!(await isRevolutConfigured())) {
-            return res.status(503).json({ error: 'Revolut non è configurato (API key mancante)' });
+        if (!(await isPaymentConfigured())) {
+            const active = await getActivePaymentProvider();
+            return res.status(503).json({ error: `${providerLabel(active)} non è configurato (credenziali mancanti)` });
         }
 
         const { reservation_id, amount, description } = req.body ?? {};
@@ -4683,34 +4706,35 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const reservation = resvResult.rows[0];
         if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
 
-        // Create the Revolut order first — if the API call fails we don't
-        // want to persist a half-baked row. `merchant_order_ext_ref` is how
-        // the webhook will correlate the event back to our reservation.
+        // Create the gateway order first — if the API call fails we don't
+        // want to persist a half-baked row. The `reference` is how the
+        // webhook will correlate the event back to our reservation.
         const orderDescription = (typeof description === 'string' && description.trim())
             ? description.trim()
             : `Prenotazione #${reservation.id} - ${reservation.guests} persone`;
-        const order = await revolutCreateOrder({
+        const order = await createPaymentOrder({
             amount: amountCents,
             currency: 'EUR',
             description: orderDescription,
-            merchant_order_ext_ref: `reservation:${reservation.id}`,
+            reference: `reservation:${reservation.id}`,
         });
 
         const inserted = await queryWithRetry(
             `INSERT INTO payment_requests
                 (reservation_id, amount_cents, currency, description, status, provider,
                  provider_order_id, checkout_url, created_by_user_id, metadata)
-             VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7, $8)
+             VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
              RETURNING *`,
             [
                 reservation.id,
                 amountCents,
                 orderDescription,
-                (order.state || 'PENDING').toUpperCase(),
+                order.status,
+                order.provider,
                 order.id,
-                order.checkout_url,
+                order.checkoutUrl,
                 req.user?.userId ?? null,
-                JSON.stringify({ revolut_token: order.token || null }),
+                JSON.stringify(order.metadata),
             ]
         );
         const paymentRequest = inserted.rows[0];
@@ -4718,7 +4742,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         // Fire-and-forget delivery: same channel policy as booking
         // confirmations. Failures update delivery_error but don't fail the
         // API call — the operator can still copy the link from the UI.
-        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkout_url, orderDescription);
+        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription);
         sendBookingConfirmation(reservation.phone, message, reservation.id).then(async (delivery) => {
             try {
                 await queryWithRetry(
@@ -4764,10 +4788,10 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
     }
 });
 
-// Propagate a Revolut order transition down to the table_bill_splits row
+// Propagate a payment order transition down to the table_bill_splits row
 // (and, on full payment, to the parent bill). Idempotent: the CLAIMED
 // guard on UPDATE means replaying an already-PAID split is a no-op.
-// Kept separate from applyRevolutOrderTransition so the split logic can
+// Kept separate from applyPaymentOrderTransition so the split logic can
 // evolve without touching the deposit flow.
 async function applyBillSplitTransition(
     splitId: number,
@@ -4878,16 +4902,25 @@ async function applyBillSplitTransition(
     }
 }
 
-// Shared side-effect pipeline for a Revolut order state change. Called by
-// both the webhook receiver (real-time push from Revolut) and the manual
-// reconcile endpoint (poll GET /api/orders/{id} when a webhook was missed).
+// Shared side-effect pipeline for a payment order state change, in the
+// provider-neutral ORDER_* vocabulary (see services/paymentProviderService.ts
+// — SumUp's PAID/FAILED/EXPIRED are normalised onto it before they get here).
+// Called by both webhook receivers and the manual reconcile endpoint.
 // Idempotent: gated on `completed_at` under a row-level lock so replaying an
 // already-processed transition is a no-op — customer confirmation fires only
 // on the FIRST ORDER_COMPLETED, no matter how many times we're called.
-type RevolutTransitionResult =
+//
+// `extraMetadata` is merged into payment_requests.metadata when present; it
+// carries provider details we only learn at transition time (the SumUp
+// transaction id, which later refunds are keyed on).
+type PaymentTransitionResult =
     | { status: 'applied'; row: any; isFirstCompletion: boolean }
     | { status: 'ignored'; reason: string };
-async function applyRevolutOrderTransition(orderId: string, event: string): Promise<RevolutTransitionResult> {
+async function applyPaymentOrderTransition(
+    orderId: string,
+    event: string,
+    extraMetadata?: Record<string, unknown> | null
+): Promise<PaymentTransitionResult> {
     let nextStatus: string | null = null;
     let markCompleted = false;
     switch (event) {
@@ -4906,7 +4939,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
             nextStatus = 'FAILED';
             break;
         default:
-            console.log('[Revolut] unhandled event:', event);
+            console.log('[payments] unhandled event:', event);
             return { status: 'ignored', reason: event };
     }
 
@@ -4922,7 +4955,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
         );
         if (before.rowCount === 0) {
             await client.query('ROLLBACK');
-            console.warn('[Revolut] transition: no payment_request found for order_id', orderId);
+            console.warn('[payments] transition: no payment_request found for order_id', orderId);
             return { status: 'ignored', reason: 'unknown order' };
         }
         wasCompleted = before.rows[0].completed_at !== null;
@@ -4930,10 +4963,17 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
             `UPDATE payment_requests
              SET status = $1,
                  completed_at = CASE WHEN $2 AND completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                 metadata = CASE WHEN $3::jsonb IS NULL THEN metadata
+                                 ELSE COALESCE(metadata, '{}'::jsonb) || $3::jsonb END,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $3
+             WHERE id = $4
              RETURNING *`,
-            [nextStatus, markCompleted, before.rows[0].id]
+            [
+                nextStatus,
+                markCompleted,
+                extraMetadata && Object.keys(extraMetadata).length > 0 ? JSON.stringify(extraMetadata) : null,
+                before.rows[0].id,
+            ]
         );
         row = updated.rows[0];
         await client.query('COMMIT');
@@ -4945,7 +4985,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
     }
 
     try { socketService?.broadcastToAll('paymentRequest:updated', row); }
-    catch (err) { console.warn('[Revolut] socket broadcast failed:', (err as any)?.message || err); }
+    catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
     const isFirstCompletion = markCompleted && !wasCompleted;
     const billSplitId: number | null = row.table_bill_split_id ?? null;
@@ -4958,7 +4998,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
         try {
             await applyBillSplitTransition(billSplitId, event, isFirstCompletion);
         } catch (err: any) {
-            console.error('[Revolut] bill split transition failed for split', billSplitId, err?.message || err);
+            console.error('[payments] bill split transition failed for split', billSplitId, err?.message || err);
         }
     }
 
@@ -4974,7 +5014,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
             url: row.reservation_id ? `/?view=RESERVATIONS&reservationId=${row.reservation_id}` : `/?view=RESERVATIONS`,
             tag: `payment-${row.id}`,
         }, { excludeUserId: null }).catch(err => {
-            console.warn('[Revolut] push send failed:', err?.message || err);
+            console.warn('[payments] push send failed:', err?.message || err);
         });
     }
 
@@ -5001,7 +5041,7 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
                     );
                     if (upd.rows[0] && socketService) {
                         try { socketService.broadcastReservationUpdated(upd.rows[0]); }
-                        catch (err) { console.warn('[Revolut] reservation broadcast failed:', err); }
+                        catch (err) { console.warn('[payments] reservation broadcast failed:', err); }
                     }
                 }
 
@@ -5026,25 +5066,12 @@ async function applyRevolutOrderTransition(orderId: string, event: string): Prom
                     });
                 }
             } catch (err: any) {
-                console.error('[Revolut] deposit confirmation flow failed:', err?.message || err);
+                console.error('[payments] deposit confirmation flow failed:', err?.message || err);
             }
         })();
     }
 
     return { status: 'applied', row, isFirstCompletion };
-}
-
-// Map a Revolut order `state` (returned by GET /api/orders/{id}) to the
-// webhook-style event vocabulary consumed by applyRevolutOrderTransition.
-function revolutStateToEvent(state: string): string | null {
-    switch ((state || '').toUpperCase()) {
-        case 'COMPLETED': return 'ORDER_COMPLETED';
-        case 'AUTHORISED': return 'ORDER_AUTHORISED';
-        case 'CANCELLED': return 'ORDER_CANCELLED';
-        case 'FAILED': return 'ORDER_PAYMENT_FAILED';
-        case 'DECLINED': return 'ORDER_PAYMENT_DECLINED';
-        default: return null;
-    }
 }
 
 // Revolut webhook receiver. HMAC signature is validated against the raw
@@ -5069,7 +5096,7 @@ app.post('/webhook/revolut', async (req, res) => {
             return res.status(200).json({ ok: true, ignored: 'missing order_id' });
         }
 
-        const result = await applyRevolutOrderTransition(orderId, event);
+        const result = await applyPaymentOrderTransition(orderId, event);
         if (result.status === 'ignored') return res.status(200).json({ ok: true, ignored: result.reason });
         return res.status(200).json({ ok: true });
     } catch (err: any) {
@@ -5078,10 +5105,69 @@ app.post('/webhook/revolut', async (req, res) => {
     }
 });
 
-// Manual reconciliation: poll Revolut for the current state of the order
+// SumUp callback receiver. SumUp pings the `return_url` we register on each
+// checkout when its status changes, but — unlike Revolut — that request is
+// NOT signed, so nothing in the body can be trusted. Two defences:
+//
+//  1. the URL carries an opaque token only we and SumUp know, compared in
+//     constant time (cheap filter against random internet traffic);
+//  2. the body is used solely to learn WHICH checkout moved. The status is
+//     then re-read from SumUp's API, so a forged payload can at worst make
+//     us re-check a checkout, never mark one paid.
+//
+// Idempotent for the same reason the Revolut receiver is: we key on
+// provider_order_id and gate first-completion side-effects on completed_at.
+app.post('/webhook/sumup/:token', async (req, res) => {
+    try {
+        const expected = await getSumUpCallbackSecret();
+        if (!callbackTokenMatches(req.params.token, expected)) {
+            console.warn('[SumUp] callback rejected: token mismatch');
+            return res.status(401).json({ error: 'invalid token' });
+        }
+
+        // SumUp has shipped a few payload shapes over the years (and wraps
+        // the resource under `payload`/`data` in some of them), so probe the
+        // plausible spots rather than pinning one.
+        const body = req.body || {};
+        const checkoutId: string | undefined =
+            body.id || body.checkout_id ||
+            body.payload?.id || body.payload?.checkout_id ||
+            body.data?.id || body.data?.checkout_id;
+        if (!checkoutId) {
+            console.warn('[SumUp] callback missing checkout id, body keys=', Object.keys(body));
+            return res.status(200).json({ ok: true, ignored: 'missing checkout id' });
+        }
+
+        // Answer SumUp before doing the work: the status re-read plus the
+        // downstream confirmation flow (WhatsApp/SMS) can take seconds, and a
+        // slow 200 just earns us a retry storm. Failures are logged and the
+        // reconcile paths (manual button, bill-split job) remain the backstop.
+        res.status(200).json({ ok: true });
+
+        try {
+            const fetched = await fetchPaymentOrder('sumup', checkoutId);
+            if (!fetched.event) {
+                console.log('[SumUp] callback: checkout', checkoutId, 'still', fetched.state, '— nothing to apply');
+                return;
+            }
+            await applyPaymentOrderTransition(
+                checkoutId,
+                fetched.event,
+                transitionMetadata('sumup', fetched.raw)
+            );
+        } catch (err: any) {
+            console.error('[SumUp] callback processing failed for checkout', checkoutId, err?.message || err);
+        }
+    } catch (err: any) {
+        console.error('POST /webhook/sumup error:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Manual reconciliation: poll the gateway for the current state of the order
 // associated with a payment_request and apply the corresponding transition.
 // Used when a webhook was missed — e.g. an order created before the webhook
-// endpoint existed, or a delivery Revolut permanently gave up on. Same
+// endpoint existed, or a delivery the provider permanently gave up on. Same
 // side-effects as the real webhook (broadcast + push + deposit confirmation)
 // so the UI reflects reality after one click.
 app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:full'), async (req, res) => {
@@ -5096,43 +5182,63 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
         if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Payment not found' });
         const payment = paymentRes.rows[0];
 
-        if (payment.provider !== 'revolut') {
+        // Reconcile through the provider that created the order, so a
+        // payment opened before an operator switched gateways still resolves.
+        if (!isPaymentProvider(payment.provider)) {
             return res.status(400).json({ error: `Reconcile non supportato per provider ${payment.provider}` });
         }
+        const provider: PaymentProvider = payment.provider;
+        const label = providerLabel(provider);
         if (!payment.provider_order_id) {
             return res.status(400).json({ error: 'Nessun order ID associato al pagamento' });
         }
-        if (!(await isRevolutConfigured())) {
-            return res.status(503).json({ error: 'Revolut non è configurato (API key mancante)' });
+        if (!(await isProviderConfigured(provider))) {
+            return res.status(503).json({ error: `${label} non è configurato (credenziali mancanti)` });
         }
 
-        let order;
+        let fetched;
         try {
-            order = await revolutGetOrder(payment.provider_order_id);
+            fetched = await fetchPaymentOrder(provider, payment.provider_order_id);
         } catch (err: any) {
-            console.error('[payments] reconcile getOrder failed:', err?.message || err);
-            return res.status(502).json({ error: 'Revolut getOrder fallita', detail: err?.message || String(err) });
+            console.error('[payments] reconcile fetch failed:', err?.message || err);
+            return res.status(502).json({ error: `Lettura ordine ${label} fallita`, detail: err?.message || String(err) });
         }
 
-        const event = revolutStateToEvent(String(order.state || ''));
-        if (!event) {
+        if (!fetched.event) {
             return res.status(200).json({
                 ok: true,
                 changed: false,
-                revolut_state: order.state,
-                message: `Stato Revolut "${order.state}" non richiede aggiornamenti`,
+                provider,
+                provider_state: fetched.state,
+                revolut_state: fetched.state,
+                message: `Stato ${label} "${fetched.state}" non richiede aggiornamenti`,
             });
         }
 
-        const result = await applyRevolutOrderTransition(payment.provider_order_id, event);
+        const result = await applyPaymentOrderTransition(
+            payment.provider_order_id,
+            fetched.event,
+            transitionMetadata(provider, fetched.raw)
+        );
         if (result.status === 'ignored') {
-            return res.status(200).json({ ok: true, changed: false, ignored: result.reason, revolut_state: order.state });
+            return res.status(200).json({
+                ok: true,
+                changed: false,
+                ignored: result.reason,
+                provider,
+                provider_state: fetched.state,
+                revolut_state: fetched.state,
+            });
         }
 
         return res.status(200).json({
             ok: true,
             changed: true,
-            revolut_state: order.state,
+            provider,
+            provider_state: fetched.state,
+            // Kept alongside provider_state so older clients that read
+            // `revolut_state` keep rendering the reconcile result.
+            revolut_state: fetched.state,
             first_completion: result.isFirstCompletion,
             payment_request: result.row,
         });
@@ -6206,7 +6312,7 @@ async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise
 }
 
 // Pay-at-table reconcile: every 60s scans CLAIMED splits whose 5-min TTL
-// has elapsed and either (a) polls Revolut to see if a webhook was
+// has elapsed and either (a) polls the gateway to see if a webhook was
 // dropped, (b) marks the split ABANDONED so its capacity is released.
 // Runs in-process because we're already single-instance on Railway; if
 // that changes, wrap the loop with an advisory lock so only one node
@@ -6216,7 +6322,7 @@ const startBillSplitReconcileScheduler = () => {
         try {
             const stale = await queryWithRetry(
                 `SELECT s.id AS split_id, s.payment_request_id,
-                        pr.provider_order_id
+                        pr.provider, pr.provider_order_id
                  FROM table_bill_splits s
                  LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
                  WHERE s.status = 'CLAIMED'
@@ -6228,16 +6334,18 @@ const startBillSplitReconcileScheduler = () => {
 
             for (const row of stale.rows) {
                 const orderId: string | null = row.provider_order_id || null;
+                // Talk to the provider that created this order, whatever is
+                // active now.
+                const provider: PaymentProvider = isPaymentProvider(row.provider) ? row.provider : 'revolut';
                 let handled = false;
 
-                // Recover missed webhook: ask Revolut what state the
+                // Recover missed webhook: ask the gateway what state the
                 // order is really in and reapply the transition.
                 if (orderId) {
                     try {
-                        const order = await revolutGetOrder(orderId);
-                        const evt = revolutStateToEvent(order.state);
-                        if (evt) {
-                            await applyRevolutOrderTransition(orderId, evt);
+                        const fetched = await fetchPaymentOrder(provider, orderId);
+                        if (fetched.event) {
+                            await applyPaymentOrderTransition(orderId, fetched.event, transitionMetadata(provider, fetched.raw));
                             handled = true;
                         } else {
                             // Order still payable (PENDING/AUTHORISED-ish).
@@ -6246,20 +6354,19 @@ const startBillSplitReconcileScheduler = () => {
                             // guest pay a share someone else re-claims →
                             // double incasso (successo davvero, conto #12).
                             try {
-                                await revolutCancelOrder(orderId);
-                                await applyRevolutOrderTransition(orderId, 'ORDER_CANCELLED');
+                                await cancelPaymentOrder(provider, orderId);
+                                await applyPaymentOrderTransition(orderId, 'ORDER_CANCELLED');
                                 handled = true;
                             } catch (cancelErr: any) {
                                 // Cancel refused: maybe it completed in the
                                 // race window. Re-read and apply the truth;
-                                // if Revolut is unreachable keep the claim —
-                                // next tick retries. NEVER free capacity
-                                // while a payable order is out there.
+                                // if the gateway is unreachable keep the
+                                // claim — next tick retries. NEVER free
+                                // capacity while a payable order is out there.
                                 try {
-                                    const fresh = await revolutGetOrder(orderId);
-                                    const freshEvt = revolutStateToEvent(fresh.state);
-                                    if (freshEvt) {
-                                        await applyRevolutOrderTransition(orderId, freshEvt);
+                                    const fresh = await fetchPaymentOrder(provider, orderId);
+                                    if (fresh.event) {
+                                        await applyPaymentOrderTransition(orderId, fresh.event, transitionMetadata(provider, fresh.raw));
                                     } else {
                                         console.warn('[bill-reconcile] cancel failed, order still', fresh.state, '— will retry split', row.split_id);
                                     }
@@ -6270,15 +6377,15 @@ const startBillSplitReconcileScheduler = () => {
                             }
                         }
                     } catch (err: any) {
-                        // Revolut unreachable: keep the claim and retry next
+                        // Gateway unreachable: keep the claim and retry next
                         // tick rather than abandoning with a live checkout.
-                        console.warn('[bill-reconcile] getOrder failed for split', row.split_id, err?.message || err);
+                        console.warn('[bill-reconcile] order lookup failed for split', row.split_id, err?.message || err);
                         handled = true;
                     }
                 }
 
-                // Fallback: only for splits with NO linked order (Revolut
-                // createOrder had failed at claim time) — nothing payable
+                // Fallback: only for splits with NO linked order (order
+                // creation had failed at claim time) — nothing payable
                 // exists, so freeing the capacity is safe.
                 if (!handled) {
                     const upd = await queryWithRetry(
@@ -10311,9 +10418,21 @@ function buildTableBillLinkTemplate(
 // carry ONLY the trailing token, not the full URL. Returns undefined when
 // the token can't be parsed (e.g. sandbox / unrecognised host) so the
 // dispatcher can fall back to SMS instead of shipping a broken WA link.
+//
+// Because the host lives in the template and not in the variable, this MUST
+// reject any checkout URL that isn't Revolut's: a SumUp link
+// (checkout.sumup.com/pay/<id>) has the same path shape, and blindly lifting
+// its token would produce a button pointing at checkout.revolut.com with a
+// SumUp id — a dead link. Returning null instead degrades to SMS with the
+// full URL, which is exactly the fallback described above.
+const REVOLUT_CHECKOUT_HOSTS = new Set([
+    'checkout.revolut.com',
+    'sandbox-checkout.revolut.com',
+]);
 function extractRevolutCheckoutToken(checkoutUrl: string): string | null {
     try {
         const u = new URL(checkoutUrl);
+        if (!REVOLUT_CHECKOUT_HOSTS.has(u.hostname.toLowerCase())) return null;
         const match = u.pathname.match(/\/pay\/([^\/?#]+)/);
         return match ? match[1] : null;
     } catch {
@@ -13155,6 +13274,236 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
 });
 
 // ============================================
+// INTEGRATION SETTINGS (SumUp)
+// ============================================
+// Same contract as the Revolut endpoints above — GET returns a masked
+// snapshot, PUT takes partial updates and treats an empty string as "clear
+// back to the env fallback" — with one addition: SumUp credentials are stored
+// per environment (production uses api_key + sumup_merchant_code, sandbox
+// uses its own pair), because SumUp serves both from the same host and tells
+// them apart by the key. `environment` picks which pair is live, so an
+// operator can keep sandbox credentials around and flip back to test.
+app.get('/settings/integrations/sumup', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const status = await getSumUpConfigStatus();
+        const activeProvider = await getActivePaymentProvider();
+
+        // Same defensive read as the Revolut card: on a brand-new deploy the
+        // schema-init may not have created the table yet, and the card should
+        // still render off the env fallbacks.
+        let updatedAt: string | null = null;
+        let updatedByEmail: string | null = null;
+        try {
+            const meta = await queryWithRetry(
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'sumup'`
+            );
+            const row = meta.rows[0];
+            if (row) {
+                updatedAt = row.updated_at ?? null;
+                if (row.updated_by_user_id) {
+                    const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1`, [row.updated_by_user_id]);
+                    updatedByEmail = u.rows[0]?.email ?? null;
+                }
+            }
+        } catch (metaErr: any) {
+            console.warn('[SumUp] integration_settings metadata unavailable:', metaErr?.message || metaErr);
+        }
+
+        res.json({
+            ...status,
+            active_provider: activeProvider,
+            is_active_provider: activeProvider === 'sumup',
+            // The URL SumUp calls back on. Shown read-only in the card so the
+            // operator can sanity-check it against CRM_APP_BASE_URL; the
+            // token itself is never rendered.
+            callback_url: status.has_callback_secret ? `${publicBaseUrl()}/webhook/sumup/•••` : null,
+            updated_at: updatedAt,
+            updated_by: updatedByEmail,
+        });
+    } catch (err: any) {
+        console.error('GET /settings/integrations/sumup error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/integrations/sumup', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const updates: Record<string, string | null> = {};
+
+        if (body.environment !== undefined) {
+            if (body.environment !== 'sandbox' && body.environment !== 'production') {
+                return res.status(400).json({ error: 'invalid_environment' });
+            }
+            updates.environment = body.environment;
+        }
+
+        // Empty string clears the DB value (falling back to env); undefined
+        // means "leave alone"; null behaves like empty string.
+        const nullableString = (v: unknown): string | null | undefined => {
+            if (v === undefined) return undefined;
+            if (v === null) return null;
+            if (typeof v !== 'string') return undefined;
+            const trimmed = v.trim();
+            return trimmed === '' ? null : trimmed;
+        };
+
+        const fieldMap: Array<[string, string]> = [
+            ['api_key', 'api_key'],                                   // production secret key
+            ['merchant_code', 'sumup_merchant_code'],                 // production merchant code
+            ['sandbox_api_key', 'sumup_sandbox_api_key'],
+            ['sandbox_merchant_code', 'sumup_sandbox_merchant_code'],
+            ['callback_secret', 'webhook_secret'],
+        ];
+        for (const [bodyKey, column] of fieldMap) {
+            const value = nullableString(body[bodyKey]);
+            if (value !== undefined) updates[column] = value;
+        }
+
+        // Switching the active gateway is part of the same card, but it lives
+        // in app_settings rather than on this row — handle it separately so a
+        // provider-only save doesn't trip the "no updates" guard.
+        let providerChange: PaymentProvider | null = null;
+        if (body.set_active !== undefined) {
+            if (typeof body.set_active !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_set_active' });
+            }
+            providerChange = body.set_active ? 'sumup' : 'revolut';
+        }
+
+        if (Object.keys(updates).length === 0 && providerChange === null) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+
+        // The callback token is ours to mint — SumUp doesn't hand one out —
+        // so generate it the first time credentials are saved rather than
+        // asking the operator to invent a secret. Without it we can't
+        // register a return_url and payments would only settle on reconcile.
+        if (Object.keys(updates).length > 0 && updates.webhook_secret === undefined) {
+            const existing = await getSumUpConfigStatus();
+            if (!existing.has_callback_secret) {
+                updates.webhook_secret = crypto.randomBytes(24).toString('hex');
+            }
+        }
+
+        if (Object.keys(updates).length > 0) {
+            // UPSERT so the first save works before the row exists; on
+            // conflict only the columns we were asked to change are touched.
+            const providedCols = Object.keys(updates);
+            const providedVals = providedCols.map(c => updates[c]);
+            const userId = req.user?.userId ?? null;
+
+            const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+            const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
+            const insertValues = ['sumup', ...providedVals, userId, new Date()];
+
+            const updateSet = [
+                ...providedCols.map((c, i) => `${c} = $${i + 2}`),
+                `updated_by_user_id = $${providedCols.length + 2}`,
+                `updated_at = CURRENT_TIMESTAMP`,
+            ].join(', ');
+
+            await queryWithRetry(
+                `INSERT INTO integration_settings (${insertCols.join(', ')})
+                 VALUES (${insertPlaceholders})
+                 ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+                insertValues
+            );
+            invalidateSumUpConfigCache();
+        }
+
+        if (providerChange) {
+            // Refuse to route live payments at a gateway that can't take
+            // them — the failure would otherwise only show up on the guest's
+            // checkout link.
+            if (!(await isProviderConfigured(providerChange))) {
+                return res.status(400).json({
+                    error: `${providerLabel(providerChange)} non è configurato: completa le credenziali prima di attivarlo`,
+                });
+            }
+            await setActivePaymentProvider(providerChange);
+        }
+
+        if (req.user) {
+            const what = providerChange
+                ? `provider attivo: ${providerLabel(providerChange)}`
+                : (updates.environment || 'campi credenziali');
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                undefined,
+                `Integrazione SumUp aggiornata (${what})`
+            );
+        }
+
+        const status = await getSumUpConfigStatus();
+        const activeProvider = await getActivePaymentProvider();
+        res.json({
+            ...status,
+            active_provider: activeProvider,
+            is_active_provider: activeProvider === 'sumup',
+            callback_url: status.has_callback_secret ? `${publicBaseUrl()}/webhook/sumup/•••` : null,
+            updated_at: new Date().toISOString(),
+            updated_by: req.user?.email ?? null,
+        });
+    } catch (err: any) {
+        console.error('PUT /settings/integrations/sumup error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Which gateway new payments are created with. Split out from the two
+// integration cards so either of them (and any future provider) can read and
+// flip it without knowing about the other.
+app.get('/settings/payments/provider', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        const active = await getActivePaymentProvider();
+        const configured: Record<string, boolean> = {};
+        for (const provider of PAYMENT_PROVIDERS) {
+            configured[provider] = await isProviderConfigured(provider);
+        }
+        res.json({ provider: active, providers: PAYMENT_PROVIDERS, configured });
+    } catch (err: any) {
+        console.error('GET /settings/payments/provider error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/settings/payments/provider', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const provider = req.body?.provider;
+        if (!isPaymentProvider(provider)) {
+            return res.status(400).json({ error: 'invalid_provider' });
+        }
+        if (!(await isProviderConfigured(provider))) {
+            return res.status(400).json({
+                error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
+            });
+        }
+        await setActivePaymentProvider(provider);
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.SETTINGS,
+                undefined,
+                `Provider pagamenti attivo: ${providerLabel(provider)}`
+            );
+        }
+        res.json({ provider });
+    } catch (err: any) {
+        console.error('PUT /settings/payments/provider error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
 // INTEGRATION SETTINGS (SMTP / email)
 // ============================================
 // Same shape as the Revolut endpoints above: GET returns a masked snapshot,
@@ -13498,14 +13847,18 @@ app.post('/settings/integrations/imap/test', authenticate, requirePermission('se
 // ============================================
 // AUTO-DEPOSIT POLICY (public web bookings)
 // ============================================
-// Stored on the Revolut integration row (both concerns share credentials);
+// Stored on the Revolut integration row (historically the only gateway);
 // exposed here as a dedicated endpoint so the Settings UI can surface the
-// feature under "Opzioni prenotazioni" rather than buried in the Revolut card.
+// feature under "Opzioni prenotazioni" rather than buried in an integration
+// card. The policy is provider-independent — the deposit link is created with
+// whichever gateway is active — so readiness is reported for that one, under
+// the original `revolut_configured` key so existing clients keep working.
 // GET is auth-only so any operator can read the current policy; PUT requires
 // settings:full because the setting affects customer-facing charges.
 app.get('/settings/auto-deposit', authenticate, async (_req, res) => {
     try {
-        const revolutConfigured = await isRevolutConfigured();
+        const activeProvider = await getActivePaymentProvider();
+        const paymentConfigured = await isProviderConfigured(activeProvider);
         const row = await queryWithRetry(
             `SELECT auto_deposit_enabled, auto_deposit_min_guests
                FROM integration_settings WHERE provider = 'revolut'`
@@ -13516,7 +13869,10 @@ app.get('/settings/auto-deposit', authenticate, async (_req, res) => {
             min_guests: Number.isInteger(Number(r?.auto_deposit_min_guests))
                 ? Number(r.auto_deposit_min_guests)
                 : 9,
-            revolut_configured: revolutConfigured,
+            revolut_configured: paymentConfigured,
+            payment_configured: paymentConfigured,
+            active_provider: activeProvider,
+            active_provider_label: providerLabel(activeProvider),
         });
     } catch (err: any) {
         console.error('GET /settings/auto-deposit error:', err);
@@ -13574,7 +13930,8 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
             );
         }
 
-        const revolutConfigured = await isRevolutConfigured();
+        const activeProvider = await getActivePaymentProvider();
+        const paymentConfigured = await isProviderConfigured(activeProvider);
         const after = await queryWithRetry(
             `SELECT auto_deposit_enabled, auto_deposit_min_guests
                FROM integration_settings WHERE provider = 'revolut'`
@@ -13585,7 +13942,10 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
             min_guests: Number.isInteger(Number(r.auto_deposit_min_guests))
                 ? Number(r.auto_deposit_min_guests)
                 : 9,
-            revolut_configured: revolutConfigured,
+            revolut_configured: paymentConfigured,
+            payment_configured: paymentConfigured,
+            active_provider: activeProvider,
+            active_provider_label: providerLabel(activeProvider),
         });
     } catch (err: any) {
         console.error('PUT /settings/auto-deposit error:', err);
@@ -14041,10 +14401,12 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 
         // Large web bookings require a €10/person deposit before the table
         // is guaranteed. The enabled toggle and guest threshold live on the
-        // Revolut integration row (Settings → Integrazioni → Revolut). We
-        // create the order synchronously so we can include the checkout link
-        // in the ack. On any Revolut failure we silently degrade to the plain
-        // "richiesta ricevuta" flow — staff will then confirm manually.
+        // Revolut integration row (Settings → Integrazioni → Revolut) — the
+        // policy is shared, the charge itself goes through whichever gateway
+        // is active. We create the order synchronously so we can include the
+        // checkout link in the ack. On any gateway failure we silently
+        // degrade to the plain "richiesta ricevuta" flow — staff will then
+        // confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
         let autoDepositEnabled = false;
@@ -14062,33 +14424,34 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         } catch (err) {
             console.warn('[public-booking] auto-deposit config lookup failed:', (err as any)?.message || err);
         }
-        if (autoDepositEnabled && guestsNum >= autoDepositMinGuests && (await isRevolutConfigured())) {
+        if (autoDepositEnabled && guestsNum >= autoDepositMinGuests && (await isPaymentConfigured())) {
             depositAmountCents = guestsNum * 1000; // €10 per person, in cents
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
-                const order = await revolutCreateOrder({
+                const order = await createPaymentOrder({
                     amount: depositAmountCents,
                     currency: 'EUR',
                     description: orderDescription,
-                    merchant_order_ext_ref: `reservation:${created.id}`,
+                    reference: `reservation:${created.id}`,
                 });
                 const insertedPayment = await queryWithRetry(
                     `INSERT INTO payment_requests
                         (reservation_id, amount_cents, currency, description, status, provider,
                          provider_order_id, checkout_url, metadata)
-                     VALUES ($1, $2, 'EUR', $3, $4, 'revolut', $5, $6, $7)
+                     VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
                      RETURNING *`,
                     [
                         created.id,
                         depositAmountCents,
                         orderDescription,
-                        (order.state || 'PENDING').toUpperCase(),
+                        order.status,
+                        order.provider,
                         order.id,
-                        order.checkout_url,
-                        JSON.stringify({ revolut_token: order.token || null, source: 'public_booking_auto_deposit' }),
+                        order.checkoutUrl,
+                        JSON.stringify({ ...order.metadata, source: 'public_booking_auto_deposit' }),
                     ]
                 );
-                depositCheckoutUrl = order.checkout_url;
+                depositCheckoutUrl = order.checkoutUrl;
                 try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
                 catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
             } catch (err: any) {

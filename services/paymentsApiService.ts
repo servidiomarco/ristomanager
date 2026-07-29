@@ -92,6 +92,11 @@ export interface PaymentMessagesResponse {
 export interface PaymentReconcileResponse {
   ok: boolean;
   changed: boolean;
+  // Gateway that owns the reconciled order, and its raw state. `revolut_state`
+  // is the original field name, kept as an alias of `provider_state` so
+  // existing call sites keep working whichever gateway answered.
+  provider?: string;
+  provider_state?: string;
   revolut_state?: string;
   first_completion?: boolean;
   ignored?: string;

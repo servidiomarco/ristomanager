@@ -1763,6 +1763,32 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 ADD COLUMN IF NOT EXISTS imap_enabled       BOOLEAN NOT NULL DEFAULT FALSE,
                 ADD COLUMN IF NOT EXISTS imap_last_seen_uid BIGINT;
         `);
+        // SumUp Online Payments. Unlike Revolut, SumUp serves sandbox and
+        // production from the same host (https://api.sumup.com) and decides
+        // the environment from the API key you send, so `environment` on the
+        // row selects a CREDENTIAL PAIR instead of a base URL. That lets the
+        // operator keep both sets saved and flip between them without
+        // retyping: production reuses the shared `api_key` column plus
+        // `sumup_merchant_code`, sandbox gets its own two columns.
+        // `webhook_secret` holds the opaque token we embed in the return_url
+        // registered on each checkout (see services/sumupService.ts). Rows
+        // with provider <> 'sumup' leave all of these NULL.
+        await client.query(`
+            ALTER TABLE integration_settings
+                ADD COLUMN IF NOT EXISTS sumup_merchant_code         TEXT,
+                ADD COLUMN IF NOT EXISTS sumup_sandbox_api_key       TEXT,
+                ADD COLUMN IF NOT EXISTS sumup_sandbox_merchant_code TEXT;
+        `);
+        // Which gateway new payments are created with. Existing payments keep
+        // being handled by the provider recorded on their payment_requests
+        // row, so switching this never strands an in-flight checkout. Seeded
+        // to 'revolut' so installs upgrading into this migration behave
+        // exactly as they did before.
+        await client.query(`
+            INSERT INTO app_settings (key, text_value) VALUES
+                ('active_payment_provider', 'revolut')
+            ON CONFLICT (key) DO NOTHING;
+        `);
 
         // ============================================
         // OUTBOUND MESSAGES LOG (SMS / WhatsApp)
