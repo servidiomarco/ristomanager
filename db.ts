@@ -2032,6 +2032,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_dev_board_cards_column ON dev_board_cards(column_key, position);
         `);
+        // Etichette stile Trello: chiavi di una palette fissa definita in
+        // DevelopmentPage.tsx, non testo libero — il colore è il significato.
+        await client.query(`
+            ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS labels TEXT[] NOT NULL DEFAULT '{}';
+        `);
         const existingDevCardCount = await client.query(`SELECT COUNT(*)::int AS n FROM dev_board_cards;`);
         if (existingDevCardCount.rows[0]?.n === 0) {
             await client.query(`

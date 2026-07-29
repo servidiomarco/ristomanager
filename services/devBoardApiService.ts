@@ -5,12 +5,17 @@ const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production
 
 export type DevBoardColumnKey = 'in_progress' | 'review' | 'nice_to_have' | 'paused' | 'done';
 
+/** Chiavi della palette etichette — la lista autorevole è LABELS in
+ *  DevelopmentPage.tsx, il server sanitizza sulla stessa lista. */
+export type DevBoardLabelKey = 'comande' | 'prenotazioni' | 'pagamenti' | 'stampa' | 'bug' | 'infra';
+
 export interface DevBoardCard {
   id: number;
   title: string;
   description: string | null;
   column_key: DevBoardColumnKey;
   position: number;
+  labels: DevBoardLabelKey[];
   created_at: string;
   updated_at: string;
 }
@@ -84,6 +89,7 @@ export const createDevBoardCard = (input: {
   title: string;
   description?: string | null;
   column_key: DevBoardColumnKey;
+  labels?: DevBoardLabelKey[];
 }): Promise<DevBoardCard> =>
   apiRequest(`${API_URL}/dev-board/cards`, {
     method: 'POST',
@@ -95,6 +101,7 @@ export const updateDevBoardCard = (id: number, input: {
   title: string;
   description?: string | null;
   column_key?: DevBoardColumnKey;
+  labels?: DevBoardLabelKey[];
 }): Promise<DevBoardCard> =>
   apiRequest(`${API_URL}/dev-board/cards/${id}`, {
     method: 'PUT',

@@ -8584,11 +8584,18 @@ const requireDevBoardAdmin = (req: any, res: any, next: any) => {
 };
 
 const DEV_BOARD_COLUMNS = ['in_progress', 'review', 'nice_to_have', 'paused', 'done'];
+// Palette chiusa, allineata a LABELS in DevelopmentPage.tsx: chiavi libere a
+// DB renderebbero chip senza colore né nome sulla board.
+const DEV_BOARD_LABELS = ['comande', 'prenotazioni', 'pagamenti', 'stampa', 'bug', 'infra'];
+const sanitizeDevBoardLabels = (input: any): string[] | null =>
+    Array.isArray(input)
+        ? [...new Set(input.filter((l: any) => DEV_BOARD_LABELS.includes(l)))]
+        : null;
 
 app.get('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            `SELECT id, title, description, column_key, position, created_at, updated_at
+            `SELECT id, title, description, column_key, position, labels, created_at, updated_at
              FROM dev_board_cards
              ORDER BY column_key, position, id`
         );
@@ -8606,11 +8613,12 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
             return res.status(400).json({ error: 'Titolo obbligatorio' });
         }
         const column = DEV_BOARD_COLUMNS.includes(column_key) ? column_key : 'in_progress';
+        const labels = sanitizeDevBoardLabels(req.body?.labels) ?? [];
         const result = await queryWithRetry(
-            `INSERT INTO dev_board_cards (title, description, column_key, position)
-             VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3))
-             RETURNING id, title, description, column_key, position, created_at, updated_at`,
-            [String(title).trim(), description ? String(description).trim() || null : null, column]
+            `INSERT INTO dev_board_cards (title, description, column_key, position, labels)
+             VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3), $4)
+             RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
+            [String(title).trim(), description ? String(description).trim() || null : null, column, labels]
         );
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
@@ -8632,6 +8640,7 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
             return res.status(400).json({ error: 'Colonna non valida' });
         }
         // Cambio colonna da edit → la card va in coda alla colonna di arrivo.
+        const labels = sanitizeDevBoardLabels(req.body?.labels);
         const result = await queryWithRetry(
             `UPDATE dev_board_cards SET
                 title = $1,
@@ -8640,10 +8649,11 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
                     THEN (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar)
                     ELSE position END,
                 column_key = COALESCE($3::varchar, column_key),
+                labels = COALESCE($5::text[], labels),
                 updated_at = NOW()
              WHERE id = $4
-             RETURNING id, title, description, column_key, position, created_at, updated_at`,
-            [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id]
+             RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
+            [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id, labels]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Card non trovata' });

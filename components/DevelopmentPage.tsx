@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { Kanban, Plus, X, Trash2, Loader2, GripVertical, RefreshCw } from 'lucide-react';
 import {
-  DevBoardCard, DevBoardColumnKey,
+  DevBoardCard, DevBoardColumnKey, DevBoardLabelKey,
   getDevBoardCards, createDevBoardCard, updateDevBoardCard, moveDevBoardCard, deleteDevBoardCard,
 } from '../services/devBoardApiService';
 import { socketClient } from '../services/socketClient';
@@ -23,6 +23,25 @@ const COLUMNS: ColumnMeta[] = [
   { key: 'done',         label: 'Fatte',          hint: 'Implementate e in produzione',       dotClass: 'bg-emerald-500', headerClass: 'text-emerald-700 dark:text-emerald-300' },
 ];
 
+// Etichette stile Trello: palette chiusa, il colore È il significato. Il
+// server sanitizza sulla stessa lista (DEV_BOARD_LABELS in server.ts).
+interface LabelMeta {
+  key: DevBoardLabelKey;
+  name: string;
+  chipClass: string;
+}
+
+const LABELS: LabelMeta[] = [
+  { key: 'comande',      name: 'Comande',      chipClass: 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300' },
+  { key: 'prenotazioni', name: 'Prenotazioni', chipClass: 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300' },
+  { key: 'pagamenti',    name: 'Pagamenti',    chipClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300' },
+  { key: 'stampa',       name: 'Stampa',       chipClass: 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300' },
+  { key: 'bug',          name: 'Bug',          chipClass: 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300' },
+  { key: 'infra',        name: 'Infra',        chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300' },
+];
+
+const labelMeta = (key: DevBoardLabelKey): LabelMeta | undefined => LABELS.find(l => l.key === key);
+
 const formatCardDate = (iso: string): string => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
@@ -34,6 +53,7 @@ interface EditDraft {
   title: string;
   description: string;
   column_key: DevBoardColumnKey;
+  labels: DevBoardLabelKey[];
 }
 
 export const DevelopmentPage: React.FC = () => {
@@ -129,6 +149,7 @@ export const DevelopmentPage: React.FC = () => {
           title,
           description: editDraft.description.trim() || null,
           column_key: editDraft.column_key,
+          labels: editDraft.labels,
         });
         setCards(prev => [...prev, created]);
       } else {
@@ -136,6 +157,7 @@ export const DevelopmentPage: React.FC = () => {
           title,
           description: editDraft.description.trim() || null,
           column_key: editDraft.column_key,
+          labels: editDraft.labels,
         });
         setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
       }
@@ -273,7 +295,7 @@ export const DevelopmentPage: React.FC = () => {
                       onDragEnd={() => { setDraggingId(null); setDropHint(null); }}
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropHint({ column: col.key, index: hoverIndex(e, i) }); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(col.key, hoverIndex(e, i)); }}
-                      onClick={() => setEditDraft({ id: card.id, title: card.title, description: card.description || '', column_key: card.column_key })}
+                      onClick={() => setEditDraft({ id: card.id, title: card.title, description: card.description || '', column_key: card.column_key, labels: card.labels ?? [] })}
                       className={`group rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5 cursor-pointer shadow-sm hover:border-[var(--color-fg)]/30 transition-colors ${
                         draggingId === card.id ? 'opacity-40' : ''
                       }`}
@@ -281,6 +303,18 @@ export const DevelopmentPage: React.FC = () => {
                       <div className="flex items-start gap-2">
                         <GripVertical className="h-3.5 w-3.5 mt-0.5 flex-none text-[var(--color-fg-subtle)] opacity-0 group-hover:opacity-100 cursor-grab" />
                         <div className="min-w-0 flex-1">
+                          {(card.labels?.length ?? 0) > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {card.labels.map(key => {
+                                const meta = labelMeta(key);
+                                return meta ? (
+                                  <span key={key} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none ${meta.chipClass}`}>
+                                    {meta.name}
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          )}
                           <p className="text-sm font-medium text-[var(--color-fg)] leading-snug break-words">{card.title}</p>
                           {card.description && (
                             <p className="mt-1 text-xs text-[var(--color-fg-muted)] leading-snug line-clamp-3 whitespace-pre-line">{card.description}</p>
@@ -402,6 +436,29 @@ export const DevelopmentPage: React.FC = () => {
                       <span className="truncate">{col.label}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--color-fg-muted)] mb-1.5 block">Etichette</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {LABELS.map(l => {
+                    const active = editDraft.labels.includes(l.key);
+                    return (
+                      <button
+                        key={l.key}
+                        type="button"
+                        onClick={() => setEditDraft(d => d ? {
+                          ...d,
+                          labels: active ? d.labels.filter(k => k !== l.key) : [...d.labels, l.key],
+                        } : d)}
+                        className={`px-2.5 h-8 rounded-lg text-xs font-semibold transition-all ${l.chipClass} ${
+                          active ? 'ring-2 ring-[var(--color-fg)]/40' : 'opacity-45 hover:opacity-100'
+                        }`}
+                      >
+                        {l.name}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2 pt-1">
