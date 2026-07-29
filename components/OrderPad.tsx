@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
 import { ArrivalStatus, ReservationStatus } from '../types';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   voidItem, setOrderDiscount, transferOrder,
@@ -106,23 +107,32 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
 
-  // La prenotazione del tavolo: nome e allergeni arrivano dal CRM senza
-  // che nessuno li ridigiti. È il pezzo che un POS esterno non può fare.
-  const reservation = useMemo(() => {
-    if (!tableId) return null;
-    return reservations.find(r =>
-      r.table_id === tableId
+  // La prenotazione di OGGI per un tavolo: nome e allergeni arrivano dal CRM
+  // senza che nessuno li ridigiti. È il pezzo che un POS esterno non può fare.
+  // Il filtro sul giorno (in Europe/Rome) serve perché /reservations restituisce
+  // tutto lo storico: senza, una prenotazione di ieri mai marcata come partita
+  // ricomparirebbe in testata sulla comanda di stasera.
+  const todayRome = getRomeDatePart(new Date());
+  const reservationForTable = useCallback((id: number): Reservation | null =>
+    reservations.find(r =>
+      r.table_id === id
+      && getRomeDatePart(r.reservation_time) === todayRome
       && r.reservation_status !== ReservationStatus.CANCELLED
       && r.arrival_status !== ArrivalStatus.DEPARTED
-    ) ?? null;
-  }, [reservations, tableId]);
+    ) ?? null,
+  [reservations, todayRome]);
+
+  const reservation = useMemo(
+    () => (tableId ? reservationForTable(tableId) : null),
+    [reservationForTable, tableId]
+  );
 
   const loadTable = useCallback(async (id: number) => {
     setBusy(true); setError(null);
     try {
       let view = await ordersApiService.getOrderByTable(id);
       if (!view) {
-        const res = reservations.find(r => r.table_id === id && r.reservation_status !== ReservationStatus.CANCELLED);
+        const res = reservationForTable(id);
         // I coperti arrivano dalla prenotazione; per un walk-in la stima
         // migliore sono i posti del tavolo. Uno è quasi sempre sbagliato, e
         // il numero conta: alimenterà lo split equo del conto (PR 6).
@@ -144,7 +154,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     } finally {
       setBusy(false);
     }
-  }, [reservations, tables]);
+  }, [reservationForTable, tables]);
 
   // Segna quali tavoli hanno già una comanda aperta, così il cameriere sceglie
   // consapevolmente invece di scoprirlo dopo.
@@ -357,7 +367,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           </div>
         )}
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-          {tables.map(t => (
+          {tables.map(t => {
+            const res = reservationForTable(t.id);
+            return (
             <button
               key={t.id}
               onClick={() => loadTable(t.id)}
@@ -365,16 +377,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
               className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition
                 ${openTables.has(t.id)
                   ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
+                  : res
+                    ? 'border-amber-400 bg-amber-50/60 dark:border-amber-600 dark:bg-amber-950/30 hover:border-amber-500'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
                 disabled:opacity-50`}
             >
               <span className="text-xl font-semibold">{t.name}</span>
               <span className="text-[11px] text-slate-500">{t.seats} cop.</span>
+              {res && (
+                <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 truncate max-w-full px-1">
+                  {getRomeTimePart(res.reservation_time)} · {res.customer_name}
+                </span>
+              )}
               {openTables.has(t.id) && (
                 <span className="text-[10px] font-medium text-sky-700 dark:text-sky-300">comanda aperta</span>
               )}
             </button>
-          ))}
+            );
+          })}
         </div>
         {busy && <div className="mt-6 flex items-center gap-2 text-slate-500"><Loader2 size={16} className="animate-spin" /> Apertura…</div>}
       </div>
