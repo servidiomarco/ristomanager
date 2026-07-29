@@ -16748,9 +16748,11 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             total_cents: Number(i.unit_price_cents ?? 0) * Number(i.qty ?? 1),
         }));
 
+        const printer = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
+            ? String(req.body.printer) : 'preconti';
         const ins = await queryWithRetry(
-            `INSERT INTO print_jobs (kind, payload, created_by_user_id)
-             VALUES ('PRECONTO', $1, $2) RETURNING id`,
+            `INSERT INTO print_jobs (kind, payload, printer, created_by_user_id)
+             VALUES ('PRECONTO', $1, $3, $2) RETURNING id`,
             [JSON.stringify({
                 bill_id: bill.id,
                 table_name: bill.table_name ?? null,
@@ -16758,7 +16760,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 total_cents: bill.total_cents,
                 items,
                 share_url: shareUrl,
-            }), req.user?.userId ?? null]
+            }), req.user?.userId ?? null, printer]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
     } catch (err: any) {
@@ -16770,7 +16772,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
     try {
         const rows = await queryWithRetry(
-            `SELECT id, kind, payload, attempts FROM print_jobs
+            `SELECT id, kind, payload, printer, attempts FROM print_jobs
              WHERE status = 'PENDING' ORDER BY id LIMIT 10`
         );
         res.json({ jobs: rows.rows });

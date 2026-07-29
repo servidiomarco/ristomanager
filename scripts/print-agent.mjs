@@ -8,20 +8,32 @@
 // arenare come FAILED dopo 20 tentativi invece di bloccare la coda.
 //
 // Uso:
-//   PRINT_AGENT_TOKEN=... node scripts/print-agent.mjs
+//   PRINT_AGENT_TOKEN=... PRINTERS='preconti=192.168.1.50:9100,cucina=192.168.1.30:9100' \
+//     node scripts/print-agent.mjs
 // Env:
 //   API_URL           default http://localhost:3005
 //   PRINT_AGENT_TOKEN obbligatorio, deve combaciare con quello del backend
-//   PRINTER_IP        default 192.168.1.50
-//   PRINTER_PORT      default 9100
+//   PRINTERS          mappa nome=ip[:porta] separata da virgole; ogni job
+//                     porta il nome della sua stampante di destinazione
+//   PRINTER_IP/PORT   legacy: se PRINTERS manca, diventa la voce 'preconti'
 //   POLL_MS           default 2500
 import net from 'net';
 
 const API_URL = process.env.API_URL || 'http://localhost:3005';
 const TOKEN = process.env.PRINT_AGENT_TOKEN;
-const PRINTER_IP = process.env.PRINTER_IP || '192.168.1.50';
-const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const POLL_MS = Number(process.env.POLL_MS || 2500);
+
+const PRINTERS = new Map();
+for (const entry of (process.env.PRINTERS || '').split(',').map(s => s.trim()).filter(Boolean)) {
+  const m = entry.match(/^([a-z0-9_-]+)=([0-9.]+)(?::(\d+))?$/i);
+  if (m) PRINTERS.set(m[1], { host: m[2], port: Number(m[3] || 9100) });
+}
+if (PRINTERS.size === 0) {
+  PRINTERS.set('preconti', {
+    host: process.env.PRINTER_IP || '192.168.1.50',
+    port: Number(process.env.PRINTER_PORT || 9100),
+  });
+}
 
 if (!TOKEN) {
   console.error('PRINT_AGENT_TOKEN mancante');
@@ -97,8 +109,8 @@ function renderPreconto(p) {
 // ---------------------------------------------------------------------------
 // Stampante e API
 // ---------------------------------------------------------------------------
-const sendToPrinter = payload => new Promise((resolve, reject) => {
-  const sock = net.createConnection({ host: PRINTER_IP, port: PRINTER_PORT, timeout: 5000 }, () => {
+const sendToPrinter = ({ host, port }, payload) => new Promise((resolve, reject) => {
+  const sock = net.createConnection({ host, port, timeout: 5000 }, () => {
     sock.write(payload, err => (err ? reject(err) : sock.end()));
   });
   sock.on('timeout', () => { sock.destroy(); reject(new Error('timeout stampante')); });
@@ -119,6 +131,33 @@ const api = async (path, options = {}) => {
 // Loop
 // ---------------------------------------------------------------------------
 let apiDown = false;
+const warnedUnknown = new Set();
+
+// Lavora la coda di UNA stampante: si ferma al primo errore di connessione
+// (i job restano in coda e si ritenta al giro dopo), ma non tocca le code
+// delle altre stampanti.
+async function drainPrinter(name, dest, jobs) {
+  for (const job of jobs) {
+    let rendered;
+    try {
+      rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload) : null;
+      if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
+    } catch (err) {
+      log(`job ${job.id} [${name}]: payload non stampabile (${err.message})`);
+      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
+      continue;
+    }
+    try {
+      await sendToPrinter(dest, rendered);
+      log(`job ${job.id} [${name}]: stampato (${rendered.length} byte)`);
+      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: true }) });
+    } catch (err) {
+      log(`job ${job.id} [${name}]: stampante non raggiungibile (${err.message}), ritento`);
+      return;
+    }
+  }
+}
+
 async function tick() {
   let jobs;
   try {
@@ -129,29 +168,26 @@ async function tick() {
     return;
   }
 
+  // Raggruppa per stampante: ogni destinazione ha la sua coda indipendente,
+  // una termica spenta in cucina non blocca i preconti al banco.
+  const byPrinter = new Map();
   for (const job of jobs) {
-    let rendered;
-    try {
-      rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload) : null;
-      if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
-    } catch (err) {
-      log(`job ${job.id}: payload non stampabile (${err.message})`);
-      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
+    const name = job.printer || 'preconti';
+    if (!PRINTERS.has(name)) {
+      // Mappatura assente: il job resta in coda (niente ack) e uscirà appena
+      // l'operatore aggiunge la voce a PRINTERS. Avvisa una volta sola.
+      if (!warnedUnknown.has(name)) {
+        warnedUnknown.add(name);
+        log(`stampante '${name}' non in PRINTERS: job in attesa di mappatura`);
+      }
       continue;
     }
-    try {
-      await sendToPrinter(rendered);
-      log(`job ${job.id}: stampato (${rendered.length} byte)`);
-      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: true }) });
-    } catch (err) {
-      // Stampante giù: niente ack, il job resta in coda e si ritenta al
-      // prossimo giro. Inutile provare anche i job successivi ora.
-      log(`job ${job.id}: stampante non raggiungibile (${err.message}), ritento`);
-      break;
-    }
+    if (!byPrinter.has(name)) byPrinter.set(name, []);
+    byPrinter.get(name).push(job);
   }
+  await Promise.all([...byPrinter.entries()].map(([name, list]) => drainPrinter(name, PRINTERS.get(name), list)));
 }
 
-log(`print-agent avviato: backend ${API_URL}, stampante ${PRINTER_IP}:${PRINTER_PORT}, poll ${POLL_MS}ms`);
+log(`print-agent avviato: backend ${API_URL}, stampanti [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}], poll ${POLL_MS}ms`);
 setInterval(tick, POLL_MS);
 tick();

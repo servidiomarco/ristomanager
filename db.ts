@@ -2482,6 +2482,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE INDEX IF NOT EXISTS idx_print_jobs_pending
                 ON print_jobs(id) WHERE status = 'PENDING';
         `);
+        // Stampante di destinazione come NOME logico ('preconti', 'cucina',
+        // 'bar'…), mai IP: la mappa nome→indirizzo vive nell'env dell'agente,
+        // così si sposta una stampante senza toccare né DB né deploy.
+        await client.query(`
+            ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS
+                printer VARCHAR(30) NOT NULL DEFAULT 'preconti';
+        `);
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
