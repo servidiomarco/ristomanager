@@ -16694,6 +16694,110 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
     }
 });
 
+// --- Stampa preconti (Ditron PRP-300 via agente locale) ---------------------
+// Il backend può stare in cloud, la termica sta in sala: in mezzo c'è una
+// coda a DB. Il palmare accoda (POST /print-jobs), l'agente sulla LAN del
+// ristorante ritira e conferma (endpoint /print-agent/*, autenticati con un
+// token condiviso via env — l'agente è un processo, non un utente).
+const printAgentAuth = (req: any, res: any, next: any) => {
+    const expected = process.env.PRINT_AGENT_TOKEN;
+    if (!expected) {
+        return res.status(503).json({ error: 'print_agent_not_configured' });
+    }
+    if (req.headers['x-print-agent-token'] !== expected) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        const billId = Number(req.body?.bill_id);
+        if (!Number.isFinite(billId)) return res.status(400).json({ error: 'bill_id non valido' });
+
+        const b = await queryWithRetry(
+            `SELECT b.*, t.name AS table_name FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id
+             WHERE b.id = $1`,
+            [billId]
+        );
+        if (b.rows.length === 0) return res.status(404).json({ error: 'Conto non trovato' });
+        const bill = b.rows[0];
+
+        // L'origin per l'URL nel QR arriva dal client: è l'unico che sa da che
+        // host è servita la SPA (in LAN è un IP, in prod il dominio). Il path
+        // però lo componiamo noi dal token a DB — del body ci fidiamo solo
+        // dell'origine, mai di un URL intero.
+        const rawOrigin = typeof req.body?.origin === 'string' ? req.body.origin : '';
+        const origin = /^https?:\/\/[a-z0-9.\-:\[\]]+$/i.test(rawOrigin) ? rawOrigin : null;
+        const shareUrl = bill.share_token && origin ? `${origin}/pay/${bill.share_token}` : null;
+
+        const items = (Array.isArray(bill.items) ? bill.items : []).map((i: any) => ({
+            name: String(i.name ?? ''),
+            qty: Number(i.qty ?? 1),
+            total_cents: Number(i.unit_price_cents ?? 0) * Number(i.qty ?? 1),
+        }));
+
+        const ins = await queryWithRetry(
+            `INSERT INTO print_jobs (kind, payload, created_by_user_id)
+             VALUES ('PRECONTO', $1, $2) RETURNING id`,
+            [JSON.stringify({
+                bill_id: bill.id,
+                table_name: bill.table_name ?? null,
+                covers: bill.covers,
+                total_cents: bill.total_cents,
+                items,
+                share_url: shareUrl,
+            }), req.user?.userId ?? null]
+        );
+        res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
+    } catch (err: any) {
+        console.error('POST /print-jobs error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
+    try {
+        const rows = await queryWithRetry(
+            `SELECT id, kind, payload, attempts FROM print_jobs
+             WHERE status = 'PENDING' ORDER BY id LIMIT 10`
+        );
+        res.json({ jobs: rows.rows });
+    } catch (err: any) {
+        console.error('GET /print-agent/jobs error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        if (req.body?.ok) {
+            await queryWithRetry(
+                `UPDATE print_jobs SET status = 'PRINTED', printed_at = CURRENT_TIMESTAMP, error = NULL
+                 WHERE id = $1`, [id]
+            );
+        } else {
+            // Dopo troppi tentativi il job si arena come FAILED invece di
+            // bloccare per sempre la testa della coda (es. payload malformato).
+            await queryWithRetry(
+                `UPDATE print_jobs
+                 SET attempts = attempts + 1,
+                     error = $2,
+                     status = CASE WHEN attempts + 1 >= 20 THEN 'FAILED' ELSE 'PENDING' END
+                 WHERE id = $1`,
+                [id, String(req.body?.error ?? 'errore sconosciuto').slice(0, 500)]
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /print-agent/jobs/:id/ack error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 const startServer = async () => {
     try {
         // Start HTTP server

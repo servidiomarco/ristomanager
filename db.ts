@@ -2451,6 +2451,33 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             `);
         }
 
+        // ============================================
+        // STAMPA — coda preconti per l'agente locale
+        // ============================================
+        // Il backend (in cloud) non può raggiungere la termica in sala:
+        // accoda qui, e un agente sulla LAN del ristorante ritira i job e
+        // li inoltra in ESC/POS (scripts/print-agent.mjs). Il payload è uno
+        // snapshot completo del documento: il conto è immutabile una volta
+        // emesso, e l'agente non deve fare altre query per stampare.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS print_jobs (
+                id SERIAL PRIMARY KEY,
+                kind VARCHAR(20) NOT NULL,
+                payload JSONB NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+                    CHECK (status IN ('PENDING','PRINTED','FAILED')),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                printed_at TIMESTAMPTZ
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_print_jobs_pending
+                ON print_jobs(id) WHERE status = 'PENDING';
+        `);
+
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
         // auth/permissions.ts: senza queste righe gli endpoint rispondono 403

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, Loader2, QrCode, Receipt, TriangleAlert, X } from 'lucide-react';
+import { Check, Copy, Loader2, Printer, QrCode, Receipt, TriangleAlert, X } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
-import { billsApiService, getOpenBills, type OpenBillRow, type StaleOrderRow } from '../services/billsApiService';
+import { billsApiService, getOpenBills, printBill, type OpenBillRow, type StaleOrderRow } from '../services/billsApiService';
 
 // ---------------------------------------------------------------------------
 // Conti aperti — elenco per tavolo, con e senza prenotazione.
@@ -191,6 +191,7 @@ export const BillSheet: React.FC<{
   onSettle?: () => void;
 }> = ({ bill, busy, onClose, onSettle }) => {
   const [copied, setCopied] = useState(false);
+  const [printState, setPrintState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const url = bill.share_token ? `${window.location.origin}/pay/${bill.share_token}` : null;
 
   const copy = async () => {
@@ -200,6 +201,21 @@ export const BillSheet: React.FC<{
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch { /* clipboard negata: resta il QR, che è il canale principale */ }
+  };
+
+  const print = async () => {
+    if (printState === 'sending') return;
+    setPrintState('sending');
+    try {
+      await printBill(bill.id);
+      // "accodato", non "stampato": la conferma vera è il rumore della
+      // termica. Se l'agente è giù il job resta in coda ed esce al rientro.
+      setPrintState('sent');
+      setTimeout(() => setPrintState('idle'), 3000);
+    } catch {
+      setPrintState('error');
+      setTimeout(() => setPrintState('idle'), 4000);
+    }
   };
 
   return (
@@ -225,10 +241,19 @@ export const BillSheet: React.FC<{
               <p className="text-xs text-slate-500 text-center">
                 L'ospite inquadra e paga la sua parte.
               </p>
-              <button onClick={copy}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1.5">
-                {copied ? <><Check size={13} /> link copiato</> : <><Copy size={13} /> copia link</>}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={copy}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1.5">
+                  {copied ? <><Check size={13} /> link copiato</> : <><Copy size={13} /> copia link</>}
+                </button>
+                <button onClick={print} disabled={printState === 'sending'}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1.5 disabled:opacity-50">
+                  {printState === 'sending' ? <><Loader2 size={13} className="animate-spin" /> invio…</>
+                    : printState === 'sent' ? <><Check size={13} /> in stampa</>
+                    : printState === 'error' ? <><X size={13} /> stampa fallita</>
+                    : <><Printer size={13} /> stampa preconto</>}
+                </button>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-slate-500 flex items-center gap-2">
