@@ -345,6 +345,16 @@ export function normalizeItalianPhone(input: string): string {
 }
 
 /**
+ * Last 10 digits of a phone number — the suffix shared by "+39 366 1234567",
+ * "3661234567" and "0039366…". Lookups on `reservations.phone` must use this
+ * (never string equality): the staff types numbers in local format, the
+ * caller id arrives in E.164, and the two never compare equal verbatim.
+ */
+export function lastTenDigits(input: string): string {
+    return String(input ?? '').replace(/\D/g, '').slice(-10);
+}
+
+/**
  * Pre-render an Italian-language digit-by-digit readback for a phone number.
  *
  * ElevenLabs voice models are unreliable at speaking digit sequences: even
@@ -777,7 +787,8 @@ export type CancelVoiceReservationOutput =
  * audit trail (and the link in voice_calls) is preserved.
  *
  * Matching rules:
- *   - Phone is normalized to E.164 (+39…) before comparing.
+ *   - Phone matches on last-10-digits (same rule as findCustomerByPhone):
+ *     the row may hold the number as typed by the staff, without +39.
  *   - Only non-cancelled reservations for the given date are considered.
  *   - If `time` is provided it must match exactly (HH:MM); otherwise we
  *     require a single non-cancelled booking on that date.
@@ -787,13 +798,13 @@ export type CancelVoiceReservationOutput =
 export async function cancelVoiceReservation(
     input: CancelVoiceReservationInput
 ): Promise<CancelVoiceReservationOutput> {
-    const phone = normalizeItalianPhone(input.phone);
+    const last10 = lastTenDigits(input.phone);
 
-    const params: any[] = [phone, input.date];
+    const params: any[] = [last10, input.date];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests
         FROM reservations
-        WHERE phone = $1
+        WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
           AND DATE(reservation_time) = $2::date
           AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
     `;
@@ -811,11 +822,11 @@ export async function cancelVoiceReservation(
         // cancel something we already cancelled (common after a dashboard test
         // or a duplicate call). Same filters as above but allowing the
         // CANCELLED status, so we can tell the caller it's already done.
-        const cancelledParams: any[] = [phone, input.date];
+        const cancelledParams: any[] = [last10, input.date];
         let cancelledSql = `
             SELECT id, customer_name, reservation_time, shift, guests
             FROM reservations
-            WHERE phone = $1
+            WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
               AND DATE(reservation_time) = $2::date
               AND COALESCE(reservation_status, 'CONFIRMED') = 'CANCELLED'
         `;
@@ -929,16 +940,16 @@ export type ModifyVoiceReservationOutput =
 export async function modifyVoiceReservation(
     input: ModifyVoiceReservationInput
 ): Promise<ModifyVoiceReservationOutput> {
-    const phone = normalizeItalianPhone(input.phone);
+    const last10 = lastTenDigits(input.phone);
 
     // 1) Locate the reservation. Same rules as cancel.
-    const params: any[] = [phone, input.date];
+    const params: any[] = [last10, input.date];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
                COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
                notes, children
         FROM reservations
-        WHERE phone = $1
+        WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
           AND DATE(reservation_time) = $2::date
     `;
     if (input.time) {
