@@ -14595,6 +14595,46 @@ app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'
 //
 // Piano completo: docs/gestionale-sala-plan.md
 
+// Il servizio corrente: data + turno. La data di servizio NON è la data
+// solare — una cena che finisce all'una di notte appartiene ancora al giorno
+// prima, e una comanda aperta a mezzanotte e mezza non deve saltare al giorno
+// dopo mentre il tavolo è ancora seduto.
+//
+// Il giorno di servizio comincia alle 05:00 Europe/Rome; il turno cambia alle
+// 17:00, come il resto del CRM.
+const SERVICE_DAY_START_HOUR = 5;
+const DINNER_START_HOUR = 17;
+
+interface CurrentService { service_date: string; shift: 'LUNCH' | 'DINNER' }
+
+function resolveService(at: Date = new Date()): CurrentService {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Rome',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23',
+    }).formatToParts(at);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const hour = Number(get('hour'));
+    let date = `${get('year')}-${get('month')}-${get('day')}`;
+
+    if (hour < SERVICE_DAY_START_HOUR) {
+        // Notte fonda: siamo ancora nella cena di ieri.
+        const d = new Date(`${date}T12:00:00Z`);
+        d.setUTCDate(d.getUTCDate() - 1);
+        date = d.toISOString().slice(0, 10);
+        return { service_date: date, shift: 'DINNER' };
+    }
+    return { service_date: date, shift: hour < DINNER_START_HOUR ? 'LUNCH' : 'DINNER' };
+}
+
+// Le viste di servizio accettano un override esplicito (utile per guardare un
+// turno passato); senza parametri rispondono sempre sul servizio in corso.
+function serviceFromQuery(query: any): CurrentService {
+    const d = typeof query?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.date) ? query.date : null;
+    const sh = query?.shift === 'LUNCH' || query?.shift === 'DINNER' ? query.shift : null;
+    const now = resolveService();
+    return { service_date: d ?? now.service_date, shift: sh ?? now.shift };
+}
+
 type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
 
 // Come vengono lanciate le uscite. Default prudente ad AUTO_ALL: finché la
@@ -14775,6 +14815,9 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
             priceListId = pl.rows[0]?.id ?? null;
         }
 
+        // Il servizio si stampa all'apertura e non si tocca più: una comanda
+        // iniziata a pranzo resta del pranzo anche se si chiude alle 17:30.
+        const service = resolveService();
         const orderType = req.body?.order_type === 'TAKEAWAY' ? 'TAKEAWAY' : 'DINE_IN';
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
@@ -14783,11 +14826,11 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
             const ins = await queryWithRetry(
                 `INSERT INTO orders
                     (reservation_id, table_id, order_type, price_list_id, covers, notes,
-                     opened_by_user_id, idempotency_key)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     opened_by_user_id, idempotency_key, service_date, shift)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING *`,
                 [reservationId, tableId, orderType, priceListId, Math.round(covers), notes,
-                 req.user?.userId ?? null, idemKey]
+                 req.user?.userId ?? null, idemKey, service.service_date, service.shift]
             );
             created = ins.rows[0];
         } catch (err: any) {
@@ -14798,10 +14841,11 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
                 const existing = await queryWithRetry(
                     `SELECT id FROM orders
                      WHERE status = 'OPEN'
-                       AND ((table_id = $1 AND $1 IS NOT NULL)
+                       AND ((table_id = $1 AND $1 IS NOT NULL
+                             AND service_date = $3 AND shift = $4)
                          OR (reservation_id = $2 AND $2 IS NOT NULL))
                      LIMIT 1`,
-                    [tableId, reservationId]
+                    [tableId, reservationId, service.service_date, service.shift]
                 );
                 if (existing.rows.length > 0) {
                     return res.json({ ...(await loadOrderView(existing.rows[0].id)), reused: true });
@@ -14876,8 +14920,15 @@ app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), asy
         if (!(await ordersEnabledGuard(res))) return;
         const tableId = parseInt(req.params.id, 10);
         if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
+        // Solo il servizio in corso: una comanda dimenticata a pranzo non deve
+        // riaprirsi da sola quando il tavolo si risiede a cena.
+        const service = serviceFromQuery(req.query);
         const r = await queryWithRetry(
-            `SELECT id FROM orders WHERE table_id = $1 AND status = 'OPEN' LIMIT 1`, [tableId]
+            `SELECT id FROM orders
+             WHERE table_id = $1 AND status = 'OPEN'
+               AND service_date = $2 AND shift = $3
+             LIMIT 1`,
+            [tableId, service.service_date, service.shift]
         );
         if (r.rows.length === 0) return res.status(404).json({ error: 'Nessuna comanda aperta su questo tavolo' });
         res.json(await loadOrderView(r.rows[0].id));
@@ -15271,6 +15322,10 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             return res.status(400).json({ error: 'station_id non valido' });
         }
 
+        // Il monitor vede solo il servizio in corso: le righe rimaste appese a
+        // un turno precedente sono un problema di chi chiude i conti, non del
+        // cuoco che sta lavorando adesso.
+        const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.modifiers, oi.note, oi.status, oi.station_id,
@@ -15293,10 +15348,11 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                  LIMIT 1
              ) c ON true
              WHERE oi.status IN ('SENT','PREPARING','READY')
+               AND o.service_date = $2 AND o.shift = $3
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
              ORDER BY oi.station_start_at NULLS FIRST, oi.id`,
-            [stationId]
+            [stationId, service.service_date, service.shift]
         );
 
         // Lo stato dell'uscita serve al monitor per sapere se sta facendo
@@ -15333,7 +15389,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             };
         });
 
-        res.json({ station_id: stationId, items: rows.rows, courses });
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -15437,10 +15493,11 @@ const PASSE_QUEUED_ALERT_SECONDS = 5 * 60;
 
 // Tutte le uscite vive, con lo stato di ogni partita. Il passe si iscrive a
 // tutte le partite: è l'unico a vedere l'insieme.
-app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), async (_req, res) => {
+app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), async (_req: any, res) => {
     try {
         if (!(await ordersEnabledGuard(res))) return;
 
+        const service = serviceFromQuery(_req.query);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
@@ -15451,8 +15508,10 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
              LEFT JOIN tables t ON t.id = o.table_id
              LEFT JOIN reservations r ON r.id = o.reservation_id
              WHERE o.status = 'OPEN'
+               AND o.service_date = $1 AND o.shift = $2
                AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
-             ORDER BY oi.course_no, oi.id`
+             ORDER BY oi.course_no, oi.id`,
+            [service.service_date, service.shift]
         );
 
         const nowMs = Date.now();
@@ -15526,6 +15585,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
         );
 
         res.json({
+            ...service,
             stations: stations.rows,
             // In corso prima, poi le proposte in attesa: sono le due domande
             // diverse che si fa il passe — cosa sta uscendo, cosa far partire.
@@ -16538,12 +16598,27 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             return res.json({ bills: [] });
         }
 
+        const service = resolveService();
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at,
                     b.cash_settled_cents, b.tip_cents,
                     t.name AS table_name,
                     r.customer_name,
+                    -- Il servizio del conto arriva dalla comanda; per un conto
+                    -- aperto a mano (senza comanda) si deduce dall'orario con
+                    -- la stessa regola del giorno di servizio.
+                    COALESCE(
+                        (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
+                             THEN ((b.opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
+                             ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END
+                    ) AS service_date,
+                    COALESCE(
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                             THEN 'LUNCH' ELSE 'DINNER' END
+                    ) AS shift,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID'), 0)::int AS paid_cents,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'CLAIMED'), 0)::int AS claimed_cents,
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
@@ -16557,10 +16632,47 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              ORDER BY b.opened_at DESC`
         );
 
+        // Comande rimaste aperte in servizi precedenti: non compaiono più in
+        // sala né in cucina, quindi devono comparire qui — altrimenti un
+        // tavolo mai chiuso sparisce senza che nessuno se ne accorga.
+        const stale = await queryWithRetry(
+            `SELECT o.id, o.table_id, t.name AS table_name, o.service_date, o.shift,
+                    o.covers, o.opened_at,
+                    COALESCE(SUM(
+                        (oi.unit_price_cents + COALESCE((
+                            SELECT SUM((m->>'price_delta_cents')::int)
+                            FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                        ), 0)) * oi.qty
+                    ) FILTER (WHERE oi.status <> 'VOIDED'), 0)::int AS total_cents
+             FROM orders o
+             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN order_items oi ON oi.order_id = o.id
+             WHERE o.status = 'OPEN'
+               AND (o.service_date, o.shift) IS DISTINCT FROM ($1::date, $2::varchar)
+             GROUP BY o.id, t.name
+             ORDER BY o.service_date DESC, o.opened_at DESC`,
+            [service.service_date, service.shift]
+        );
+
         res.json({
+            service,
             bills: rows.rows.map((b: any) => ({
                 ...b,
+                service_date: b.service_date instanceof Date
+                    ? b.service_date.toISOString().slice(0, 10)
+                    : b.service_date,
+                is_current_service:
+                    String(b.service_date instanceof Date
+                        ? b.service_date.toISOString().slice(0, 10)
+                        : b.service_date) === service.service_date
+                    && b.shift === service.shift,
                 residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents),
+            })),
+            stale_orders: stale.rows.map((o: any) => ({
+                ...o,
+                service_date: o.service_date instanceof Date
+                    ? o.service_date.toISOString().slice(0, 10)
+                    : o.service_date,
             })),
         });
     } catch (err: any) {

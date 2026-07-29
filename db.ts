@@ -2327,6 +2327,59 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // ============================================
+        // GESTIONALE DI SALA — PR 10: servizio (data + turno)
+        // ============================================
+        // Senza queste due colonne una comanda aperta a pranzo resta in mezzo
+        // alla cena, e una di ieri compare oggi: il resto del CRM ragiona per
+        // data e turno, le comande devono farlo anche loro.
+        //
+        // La "data di servizio" non è la data solare: una cena che finisce
+        // all'una di notte appartiene ancora al giorno prima. Il giorno di
+        // servizio comincia alle 05:00 Europe/Rome.
+        await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_date DATE;
+        `);
+        await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift VARCHAR(10)
+                CHECK (shift IS NULL OR shift IN ('LUNCH','DINNER'));
+        `);
+        // Backfill dalle comande già esistenti, con la stessa regola.
+        await client.query(`
+            UPDATE orders SET
+                service_date = (
+                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) < 5
+                         THEN ((opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
+                         ELSE (opened_at AT TIME ZONE 'Europe/Rome')::date
+                    END
+                ),
+                shift = (
+                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                         THEN 'LUNCH' ELSE 'DINNER'
+                    END
+                )
+            WHERE service_date IS NULL OR shift IS NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_orders_service
+                ON orders(service_date, shift, status);
+        `);
+
+        // L'unicità della comanda aperta vale DENTRO il servizio: una comanda
+        // dimenticata a pranzo non deve impedire di aprirne una a cena sullo
+        // stesso tavolo. Gli indici della PR 2 vanno sostituiti.
+        await client.query(`DROP INDEX IF EXISTS idx_orders_one_open_per_table;`);
+        await client.query(`DROP INDEX IF EXISTS idx_orders_one_open_per_reservation;`);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_table_service
+                ON orders(table_id, service_date, shift)
+                WHERE status = 'OPEN' AND table_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_reservation
+                ON orders(reservation_id) WHERE status = 'OPEN' AND reservation_id IS NOT NULL;
+        `);
+
+        // ============================================
         // GESTIONALE DI SALA — PR 7: storni, sconti, coperti
         // ============================================
 

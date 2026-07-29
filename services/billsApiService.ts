@@ -136,8 +136,26 @@ export interface OpenBillRow {
   paid_splits: number;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
   open_orders: number;
+  service_date: string;
+  shift: 'LUNCH' | 'DINNER';
+  is_current_service: boolean;
 }
 
-/** Conti attivi, con e senza prenotazione. */
-export const getOpenBills = async (): Promise<{ bills: OpenBillRow[] }> =>
-  apiRequest<{ bills: OpenBillRow[] }>(`${API_URL}/bills/open`, { headers: getHeaders() });
+/** Comanda rimasta aperta in un servizio precedente. */
+export interface StaleOrderRow {
+  id: number;
+  table_id: number | null;
+  table_name: string | null;
+  service_date: string;
+  shift: 'LUNCH' | 'DINNER';
+  covers: number;
+  opened_at: string;
+  total_cents: number;
+}
+
+/** Conti attivi, con e senza prenotazione, più le comande rimaste appese. */
+export const getOpenBills = async (): Promise<{
+  service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
+  bills: OpenBillRow[];
+  stale_orders: StaleOrderRow[];
+}> => apiRequest(`${API_URL}/bills/open`, { headers: getHeaders() });
