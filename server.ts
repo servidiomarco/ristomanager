@@ -13257,6 +13257,10 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
         for (const row of result.rows) {
             flags[row.key] = Boolean(row.value);
         }
+        // Le voci di menu legate ai flag (Comande/Cucina/Passe) si aggiornano
+        // in tempo reale su tutti i dispositivi connessi, incluso chi ha
+        // premuto l'interruttore.
+        try { socketService?.broadcastToAll('features:updated', flags); } catch (_) {}
         res.json(flags);
     } catch (err) {
         console.error('Error updating feature flags:', err);

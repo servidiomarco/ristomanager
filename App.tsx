@@ -86,6 +86,7 @@ import {
   deleteBanquetMenu,
   createTableMerge,
   deleteTableMerge,
+  getFeatureFlags,
 } from './services/apiService';
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,10 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
+// Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
+// (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
+const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
+
 const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
@@ -163,6 +168,46 @@ const App: React.FC = () => {
   // session. Reset on logout so the next login re-applies it.
   const appliedPreferredLandingRef = useRef(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Modulo Sala & Cucina: governa la visibilità di Comande/Cucina/Passe in
+  // sidebar. Si aggiorna in tempo reale via socket quando qualcuno tocca
+  // l'interruttore in Impostazioni.
+  const [tableOrdersEnabled, setTableOrdersEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) { setTableOrdersEnabled(null); return; }
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setTableOrdersEnabled(f.table_orders_enabled === true); })
+      .catch(() => { /* flag non leggibile: le voci restano nascoste */ });
+
+    const onFlags = (flags: any) => {
+      if (flags && typeof flags.table_orders_enabled === 'boolean') {
+        setTableOrdersEnabled(flags.table_orders_enabled);
+      }
+    };
+    let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attachedSocket === s) return;
+      if (attachedSocket) attachedSocket.off('features:updated', onFlags);
+      attachedSocket = s;
+      if (attachedSocket) attachedSocket.on('features:updated', onFlags);
+    };
+    attach(socketClient.getSocket());
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
+    return () => {
+      cancelled = true;
+      unsubSocket();
+      if (attachedSocket) attachedSocket.off('features:updated', onFlags);
+    };
+  }, [isAuthenticated]);
+
+  // Se il modulo viene spento mentre sei su una sua vista, si torna alla
+  // Dashboard: restare su una pagina che la sidebar non offre più disorienta.
+  useEffect(() => {
+    // Solo a flag noto: al boot è null e un deep-link su Cucina/Passe non
+    // deve rimbalzare in Dashboard prima che la risposta arrivi.
+    if (tableOrdersEnabled === false && SALA_VIEWS.includes(view)) setView(ViewState.DASHBOARD);
+  }, [tableOrdersEnabled, view]);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
@@ -1428,9 +1473,11 @@ const App: React.FC = () => {
 
   // Capability gate for a nav item — drives which items show across every surface
   // so all permission tiers stay consistent. The theme toggle is always available.
+
   const canSeeNavItem = (item: NavItem): boolean => {
     if (item.kind === 'theme') return true;
     if (item.requiresUserManagement) return canManageUsers();
+    if (item.view !== undefined && SALA_VIEWS.includes(item.view) && tableOrdersEnabled !== true) return false;
     return item.view !== undefined && canAccessView(item.view);
   };
 
