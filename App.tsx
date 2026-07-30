@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -1332,6 +1332,15 @@ const App: React.FC = () => {
     }
   };
 
+  // Silent local patch — used when a server call already produced a
+  // definitive row (e.g. /reservations/:id/confirm-email echoes the promoted
+  // CONFIRMED row back). Guarantees the originating client's card reflects
+  // the change even if the socket:updated broadcast is dropped, without
+  // firing a second PUT the way handleUpdateReservation would.
+  const handlePatchReservationLocal = useCallback((patched: Reservation) => {
+    setReservations(prev => prev.map(r => r.id === patched.id ? patched : r));
+  }, []);
+
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>): Promise<Reservation> => {
     try {
       const returnedRes = await createReservation(newRes);
@@ -1880,6 +1889,7 @@ const App: React.FC = () => {
             tables={tables}
             rooms={rooms}
             onUpdateReservation={handleUpdateReservation}
+            onPatchReservationLocal={handlePatchReservationLocal}
             onAddReservation={handleAddReservation}
             onDeleteReservation={handleDeleteReservation}
             onMergeTables={handleMergeTables}
@@ -1908,6 +1918,7 @@ const App: React.FC = () => {
                 tables={tables}
                 rooms={rooms}
                 onUpdateReservation={handleUpdateReservation}
+                onPatchReservationLocal={handlePatchReservationLocal}
                 onAddReservation={handleAddReservation}
                 onDeleteReservation={handleDeleteReservation}
                 onMergeTables={handleMergeTables}
