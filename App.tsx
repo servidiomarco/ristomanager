@@ -35,6 +35,7 @@ import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
+import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
@@ -2385,6 +2386,9 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Conto al tavolo">
                   <PayAtTableSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Sala & Cucina">
+                  <SalaCucinaSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
