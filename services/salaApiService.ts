@@ -102,3 +102,33 @@ export const testPrinter = (id: number): Promise<{ id: number; status: string }>
   apiRequest(`${API_URL}/sala/printers/${id}/test`, {
     method: 'POST', headers: getHeaders(),
   });
+
+export interface SalaProfile {
+  id: number;
+  name: string;
+  updated_at: string;
+}
+
+export const getSalaProfiles = (): Promise<{ profiles: SalaProfile[]; active_profile: string | null }> =>
+  apiRequest(`${API_URL}/sala/profiles`, { headers: getHeaders() });
+
+/** Salva il setup corrente (fire mode + partite + stampanti) come profilo. */
+export const createSalaProfile = (name: string): Promise<SalaProfile> =>
+  apiRequest(`${API_URL}/sala/profiles`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ name }),
+  });
+
+/** Sovrascrive lo snapshot del profilo con il setup corrente. */
+export const updateSalaProfile = (id: number): Promise<SalaProfile> =>
+  apiRequest(`${API_URL}/sala/profiles/${id}`, { method: 'PUT', headers: getHeaders() });
+
+/** Applica il profilo (upsert per nome, non distruttivo) e lo marca attivo. */
+export const activateSalaProfile = (id: number): Promise<{ ok: true; active_profile: string }> =>
+  apiRequest(`${API_URL}/sala/profiles/${id}/activate`, { method: 'POST', headers: getHeaders() });
+
+/** Toglie il marcatore di profilo attivo; la configurazione corrente resta. */
+export const detachSalaProfile = (): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/sala/profiles/detach`, { method: 'POST', headers: getHeaders() });
+
+export const deleteSalaProfile = (id: number): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/sala/profiles/${id}`, { method: 'DELETE', headers: getHeaders() });

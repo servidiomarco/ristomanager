@@ -2541,6 +2541,40 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // Profili di configurazione Sala & Cucina: uno snapshot con nome di
+        // fire mode + partite + stampanti. Il modulo resta generico; il
+        // ristorante specifico è un profilo che si attiva (o si scollega)
+        // da Impostazioni. Il profilo attivo è solo un marcatore in
+        // app_settings: scollegarlo non tocca la configurazione corrente.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS sala_profiles (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(60) NOT NULL UNIQUE,
+                payload JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Il profilo del Vecchio Frantoio, censito ma NON applicato: la
+        // configurazione entra in vigore solo quando qualcuno preme "attiva"
+        // da Impostazioni. Idempotente: se esiste, non si tocca.
+        await client.query(`
+            INSERT INTO sala_profiles (name, payload) VALUES ('Vecchio Frantoio', $1)
+            ON CONFLICT (name) DO NOTHING;
+        `, [JSON.stringify({
+            fire_mode: 'AUTO_FIRST',
+            stations: [
+                { name: 'Antipasti', color: 'emerald', printer: 'antipasti', is_active: true },
+                { name: 'Primi',     color: 'amber',   printer: null,        is_active: true },
+                { name: 'Griglia',   color: 'rose',    printer: null,        is_active: true },
+            ],
+            printers: [
+                { name: 'preconti',  host: '192.168.1.50',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'Ditron PRP-300 al banco' },
+                { name: 'antipasti', host: '192.168.1.30',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'centro Antipasti' },
+                { name: 'bar',       host: '192.168.1.200', port: 9100, kind: 'THERMAL', is_active: true, notes: 'Bar' },
+                { name: 'fiscale',   host: '192.168.1.201', port: 9100, kind: 'FISCAL',  is_active: true, notes: 'Epson TM-T800F — gestita dal Passepartout' },
+            ],
+        })]);
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in

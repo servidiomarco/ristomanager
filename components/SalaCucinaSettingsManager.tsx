@@ -4,7 +4,9 @@ import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/a
 import {
   getSalaConfig, setFireMode, createStation, updateStation,
   createPrinter, updatePrinter, deletePrinter, testPrinter,
-  type SalaConfig, type FireMode,
+  getSalaProfiles, createSalaProfile, updateSalaProfile,
+  activateSalaProfile, detachSalaProfile, deleteSalaProfile,
+  type SalaConfig, type FireMode, type SalaProfile,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -31,15 +33,20 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const [testingId, setTestingId] = useState<number | null>(null);
   const [newStation, setNewStation] = useState('');
   const [newPrinter, setNewPrinter] = useState({ name: '', host: '', port: '9100' });
+  const [profiles, setProfiles] = useState<SalaProfile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<string | null>(null);
+  const [newProfile, setNewProfile] = useState('');
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
 
   const reload = useCallback(async () => {
     try {
-      const [f, c] = await Promise.all([getFeatureFlags(), getSalaConfig()]);
+      const [f, c, p] = await Promise.all([getFeatureFlags(), getSalaConfig(), getSalaProfiles()]);
       setFlags(f);
       setConfig(c);
+      setProfiles(p.profiles);
+      setActiveProfile(p.active_profile);
     } catch (err: any) {
       showToastRef.current(err?.message || 'Errore nel caricamento', 'error');
     } finally {
@@ -123,6 +130,63 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       </summary>
 
       <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-5">
+        {/* ---- Profilo di configurazione ---- */}
+        <section>
+          <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">
+            Profilo di configurazione
+          </h5>
+          <div className="rounded-md border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+            {profiles.map(pr => {
+              const isActive = activeProfile === pr.name;
+              return (
+                <div key={pr.id} className="flex items-center gap-3 px-3 py-2">
+                  <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--color-fg)] truncate">
+                    {pr.name}
+                    {isActive && <span className="ml-2 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">attivo</span>}
+                  </span>
+                  {isActive ? (
+                    <button type="button" disabled={!canEdit || saving}
+                      onClick={() => act(() => detachSalaProfile(), `Profilo "${pr.name}" scollegato — la configurazione resta`)}
+                      className="text-[12px] px-2 py-1 rounded-md border border-[var(--color-line)] disabled:opacity-50">
+                      scollega
+                    </button>
+                  ) : (
+                    <button type="button" disabled={!canEdit || saving}
+                      onClick={() => act(() => activateSalaProfile(pr.id), `Profilo "${pr.name}" applicato`)}
+                      className="text-[12px] px-2.5 py-1 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] disabled:opacity-50">
+                      attiva
+                    </button>
+                  )}
+                  <button type="button" disabled={!canEdit || saving} title="Sovrascrive il profilo col setup corrente"
+                    onClick={() => act(() => updateSalaProfile(pr.id), `Profilo "${pr.name}" aggiornato col setup corrente`)}
+                    className="text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50">
+                    aggiorna
+                  </button>
+                  <button type="button" disabled={!canEdit || saving} aria-label={`Elimina profilo ${pr.name}`}
+                    onClick={() => act(() => deleteSalaProfile(pr.id), 'Profilo eliminato')}
+                    className="text-rose-600 disabled:opacity-50"><Trash2 size={14} /></button>
+                </div>
+              );
+            })}
+            {canEdit && (
+              <div className="flex items-center gap-2 px-3 py-2">
+                <input value={newProfile} onChange={e => setNewProfile(e.target.value)}
+                  placeholder="Salva il setup corrente come…"
+                  className="flex-1 text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5" />
+                <button type="button" disabled={!newProfile.trim() || saving}
+                  onClick={() => act(() => createSalaProfile(newProfile.trim()), 'Profilo salvato').then(() => setNewProfile(''))}
+                  className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--color-line)] flex items-center gap-1 disabled:opacity-50">
+                  <Plus size={13} /> Salva
+                </button>
+              </div>
+            )}
+          </div>
+          <p className="text-[12px] text-[var(--color-fg-muted)] mt-1.5">
+            Un profilo è uno snapshot di modalità di lancio, partite e stampanti. "Attiva" lo applica
+            in blocco; "scollega" toglie solo il legame, senza toccare la configurazione corrente.
+          </p>
+        </section>
+
         {/* ---- Lancio uscite ---- */}
         <section>
           <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">

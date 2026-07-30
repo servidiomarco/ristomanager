@@ -17426,6 +17426,159 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
     }
 });
 
+// --- Profili di configurazione Sala & Cucina --------------------------------
+// Uno snapshot con nome (fire mode + partite + stampanti) che si attiva in
+// blocco. L'attivazione fa UPSERT per nome — non cancella ciò che c'è in più:
+// un profilo è una base da applicare, non una sincronizzazione distruttiva.
+// "Scollega" rimuove solo il marcatore: la configurazione corrente resta.
+
+const salaSnapshot = async (): Promise<any> => {
+    const [fireMode, stations, printers] = await Promise.all([
+        getCourseFireMode(),
+        queryWithRetry(`SELECT name, color, printer, is_active FROM stations ORDER BY sort_order, id`),
+        queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers ORDER BY id`),
+    ]);
+    return { fire_mode: fireMode, stations: stations.rows, printers: printers.rows };
+};
+
+const getActiveSalaProfile = async (): Promise<string | null> => {
+    const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE key = 'sala_active_profile'`);
+    return r.rows[0]?.text_value ?? null;
+};
+
+app.get('/sala/profiles', authenticate, async (_req, res) => {
+    try {
+        const [rows, active] = await Promise.all([
+            queryWithRetry(`SELECT id, name, updated_at FROM sala_profiles ORDER BY name`),
+            getActiveSalaProfile(),
+        ]);
+        res.json({ profiles: rows.rows, active_profile: active });
+    } catch (err: any) {
+        console.error('GET /sala/profiles error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/sala/profiles', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 60) return res.status(400).json({ error: 'Nome non valido' });
+        const ins = await queryWithRetry(
+            `INSERT INTO sala_profiles (name, payload) VALUES ($1, $2) RETURNING id, name, updated_at`,
+            [name, JSON.stringify(await salaSnapshot())]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già un profilo con questo nome' });
+        console.error('POST /sala/profiles error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// "Aggiorna": sovrascrive lo snapshot del profilo con il setup corrente.
+app.put('/sala/profiles/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const upd = await queryWithRetry(
+            `UPDATE sala_profiles SET payload = $2, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 RETURNING id, name, updated_at`,
+            [id, JSON.stringify(await salaSnapshot())]
+        );
+        if (upd.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
+        res.json(upd.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /sala/profiles/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/sala/profiles/:id/activate', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+        const p = await queryWithRetry(`SELECT name, payload FROM sala_profiles WHERE id = $1`, [id]);
+        if (p.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Profilo non trovato' }); }
+        const { name, payload } = p.rows[0];
+
+        await client.query('BEGIN');
+        if (payload?.fire_mode && ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'].includes(payload.fire_mode)) {
+            await client.query(
+                `INSERT INTO app_settings (key, text_value) VALUES ('course_fire_mode', $1)
+                 ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
+                [payload.fire_mode]
+            );
+        }
+        for (const pr of Array.isArray(payload?.printers) ? payload.printers : []) {
+            if (!PRINTER_NAME_RE.test(String(pr?.name ?? ''))) continue;
+            await client.query(
+                `INSERT INTO printers (name, host, port, kind, is_active, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (name) DO UPDATE SET
+                    host = EXCLUDED.host, port = EXCLUDED.port, kind = EXCLUDED.kind,
+                    is_active = EXCLUDED.is_active, notes = EXCLUDED.notes`,
+                [pr.name, String(pr.host ?? ''), Number(pr.port) || 9100,
+                 pr.kind === 'FISCAL' ? 'FISCAL' : 'THERMAL', pr.is_active !== false,
+                 pr.notes ?? null]
+            );
+        }
+        for (const st of Array.isArray(payload?.stations) ? payload.stations : []) {
+            const stName = String(st?.name ?? '').trim();
+            if (!stName) continue;
+            await client.query(
+                `INSERT INTO stations (name, color, sort_order, printer, is_active)
+                 VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations), $3, $4)
+                 ON CONFLICT (lower(name)) DO UPDATE SET
+                    color = EXCLUDED.color, printer = EXCLUDED.printer, is_active = EXCLUDED.is_active`,
+                [stName, st.color ?? null,
+                 st.printer != null && PRINTER_NAME_RE.test(String(st.printer)) ? st.printer : null,
+                 st.is_active !== false]
+            );
+        }
+        await client.query(
+            `INSERT INTO app_settings (key, text_value) VALUES ('sala_active_profile', $1)
+             ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
+            [name]
+        );
+        await client.query('COMMIT');
+        res.json({ ok: true, active_profile: name });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('POST /sala/profiles/:id/activate error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/sala/profiles/detach', authenticate, requirePermission('settings:full'), async (_req, res) => {
+    try {
+        await queryWithRetry(`DELETE FROM app_settings WHERE key = 'sala_active_profile'`);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /sala/profiles/detach error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const del = await queryWithRetry(`DELETE FROM sala_profiles WHERE id = $1 RETURNING name`, [id]);
+        if (del.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
+        await queryWithRetry(
+            `DELETE FROM app_settings WHERE key = 'sala_active_profile' AND text_value = $1`,
+            [del.rows[0].name]
+        );
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /sala/profiles/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 const startServer = async () => {
     try {
         // Start HTTP server
