@@ -2521,6 +2521,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             ALTER TABLE stations ADD COLUMN IF NOT EXISTS printer VARCHAR(30);
         `);
+        // Registro stampanti gestito da Impostazioni → Sala & Cucina. Il nome
+        // è la chiave logica usata da print_jobs.printer e stations.printer;
+        // l'agente scarica la mappa nome→host dal backend, così aggiungere o
+        // spostare una termica è un form, non un riavvio. kind=FISCAL è solo
+        // anagrafica (Fase 2): mai bersaglio di job.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS printers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(30) NOT NULL UNIQUE
+                    CHECK (name ~ '^[a-z0-9_-]+$'),
+                host VARCHAR(64) NOT NULL,
+                port INTEGER NOT NULL DEFAULT 9100
+                    CHECK (port BETWEEN 1 AND 65535),
+                kind VARCHAR(20) NOT NULL DEFAULT 'THERMAL'
+                    CHECK (kind IN ('THERMAL','FISCAL')),
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in

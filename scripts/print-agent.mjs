@@ -23,16 +23,39 @@ const API_URL = process.env.API_URL || 'http://localhost:3005';
 const TOKEN = process.env.PRINT_AGENT_TOKEN;
 const POLL_MS = Number(process.env.POLL_MS || 2500);
 
+// Mappa di partenza dall'env: serve solo finché il backend non risponde.
+// La fonte di verità è il registro a DB (Impostazioni → Sala & Cucina),
+// scaricato via /print-agent/config a ogni poll.
 const PRINTERS = new Map();
 for (const entry of (process.env.PRINTERS || '').split(',').map(s => s.trim()).filter(Boolean)) {
   const m = entry.match(/^([a-z0-9_-]+)=([0-9.]+)(?::(\d+))?$/i);
   if (m) PRINTERS.set(m[1], { host: m[2], port: Number(m[3] || 9100) });
 }
-if (PRINTERS.size === 0) {
+if (PRINTERS.size === 0 && process.env.PRINTER_IP) {
   PRINTERS.set('preconti', {
-    host: process.env.PRINTER_IP || '192.168.1.50',
+    host: process.env.PRINTER_IP,
     port: Number(process.env.PRINTER_PORT || 9100),
   });
+}
+
+// Sostituisce la mappa con quella del backend. Se il registro è vuoto si
+// tiene l'env: un backend appena migrato senza stampanti censite non deve
+// spegnere un agente che stava già stampando.
+function applyConfig(cfg) {
+  const list = Array.isArray(cfg?.printers) ? cfg.printers : [];
+  if (list.length === 0) return;
+  const next = new Map(list.map(p => [p.name, { host: p.host, port: Number(p.port || 9100) }]));
+  const changed = next.size !== PRINTERS.size
+    || [...next.entries()].some(([n, d]) => {
+      const cur = PRINTERS.get(n);
+      return !cur || cur.host !== d.host || cur.port !== d.port;
+    });
+  if (changed) {
+    PRINTERS.clear();
+    for (const [n, d] of next) PRINTERS.set(n, d);
+    warnedUnknown.clear();
+    log(`mappa stampanti aggiornata dal backend: [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}]`);
+  }
 }
 
 if (!TOKEN) {
@@ -141,6 +164,26 @@ function renderComanda(p) {
   return Buffer.from(bytes);
 }
 
+// Pagina di prova dal bottone "Stampa prova" in Impostazioni.
+function renderTest(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s, 'latin1'));
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);
+  push(ESC, 0x61, 1);
+  push(GS, 0x21, 0x11);
+  text('PROVA STAMPA\n');
+  push(GS, 0x21, 0x00);
+  text(`stampante: ${p.printer_name ?? '-'}\n${p.host ?? ''}:${p.port ?? ''}\n`);
+  const now = new Date();
+  text(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} - RistoManager\n`);
+  text('\nse leggi questo, la configurazione\ne\' corretta.\n\n\n');
+  push(GS, 0x56, 0x42, 0x00);
+  return Buffer.from(bytes);
+}
+
 // ---------------------------------------------------------------------------
 // Stampante e API
 // ---------------------------------------------------------------------------
@@ -177,6 +220,7 @@ async function drainPrinter(name, dest, jobs) {
     try {
       rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload)
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
+               : job.kind === 'TEST' ? renderTest(job.payload)
                : null;
       if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
     } catch (err) {
@@ -198,6 +242,7 @@ async function drainPrinter(name, dest, jobs) {
 async function tick() {
   let jobs;
   try {
+    applyConfig(await api('/print-agent/config').catch(() => null));
     ({ jobs } = await api('/print-agent/jobs'));
     if (apiDown) { apiDown = false; log('backend di nuovo raggiungibile'); }
   } catch (err) {

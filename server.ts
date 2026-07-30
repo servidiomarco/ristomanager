@@ -17102,6 +17102,11 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
 // coda a DB. Il palmare accoda (POST /print-jobs), l'agente sulla LAN del
 // ristorante ritira e conferma (endpoint /print-agent/*, autenticati con un
 // token condiviso via env — l'agente è un processo, non un utente).
+// Heartbeat dell'agente: l'ultimo poll visto, tenuto in memoria (una sola
+// istanza backend). Impostazioni lo mostra come online/offline, così un
+// Raspberry spento si scopre PRIMA del servizio, non alla prima comanda persa.
+let printAgentLastSeen: number | null = null;
+
 const printAgentAuth = (req: any, res: any, next: any) => {
     const expected = process.env.PRINT_AGENT_TOKEN;
     if (!expected) {
@@ -17110,6 +17115,7 @@ const printAgentAuth = (req: any, res: any, next: any) => {
     if (req.headers['x-print-agent-token'] !== expected) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    printAgentLastSeen = Date.now();
     next();
 };
 
@@ -17162,6 +17168,22 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
     }
 });
 
+// La mappa nome→indirizzo per l'agente, dal registro a DB. L'agente la
+// scarica a ogni poll: aggiungere una termica da Impostazioni diventa
+// effettivo in un paio di secondi, senza toccare l'agente.
+app.get('/print-agent/config', printAgentAuth, async (_req, res) => {
+    try {
+        const rows = await queryWithRetry(
+            `SELECT name, host, port FROM printers
+             WHERE kind = 'THERMAL' AND is_active ORDER BY name`
+        );
+        res.json({ printers: rows.rows });
+    } catch (err: any) {
+        console.error('GET /print-agent/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
     try {
         const rows = await queryWithRetry(
@@ -17199,6 +17221,207 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
         res.json({ ok: true });
     } catch (err: any) {
         console.error('POST /print-agent/jobs/:id/ack error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// --- Impostazioni → Sala & Cucina -------------------------------------------
+// Configurazione operativa del modulo comande: fire mode, partite (con la
+// scelta schermo/stampante) e registro stampanti. Letture per chiunque entri
+// in Impostazioni, scritture solo per chi ha settings:full.
+
+const PRINTER_NAME_RE = /^[a-z0-9_-]{1,30}$/;
+const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'];
+
+app.get('/sala/config', authenticate, async (_req, res) => {
+    try {
+        const [fireMode, stations, printers, jobs] = await Promise.all([
+            getCourseFireMode(),
+            queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations ORDER BY sort_order, id`),
+            queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers ORDER BY kind, name`),
+            queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
+        ]);
+        const jobCount = (s: string) => jobs.rows.find((r: any) => r.status === s)?.n ?? 0;
+        res.json({
+            fire_mode: fireMode,
+            stations: stations.rows,
+            printers: printers.rows,
+            agent: {
+                online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
+                last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
+            },
+            pending_jobs: jobCount('PENDING'),
+            failed_jobs: jobCount('FAILED'),
+        });
+    } catch (err: any) {
+        console.error('GET /sala/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/sala/fire-mode', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const mode = String(req.body?.mode ?? '');
+        if (!FIRE_MODES.includes(mode)) return res.status(400).json({ error: 'Fire mode non valido' });
+        await queryWithRetry(
+            `INSERT INTO app_settings (key, text_value) VALUES ('course_fire_mode', $1)
+             ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
+            [mode]
+        );
+        res.json({ fire_mode: mode });
+    } catch (err: any) {
+        console.error('PUT /sala/fire-mode error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Partite: niente DELETE — una partita con storico di comande si disattiva,
+// non si cancella (le statistiche di cucina la referenziano per sempre).
+app.post('/sala/stations', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 50) return res.status(400).json({ error: 'Nome non valido' });
+        const printer = req.body?.printer != null ? String(req.body.printer) : null;
+        if (printer !== null && !PRINTER_NAME_RE.test(printer)) return res.status(400).json({ error: 'Stampante non valida' });
+        const ins = await queryWithRetry(
+            `INSERT INTO stations (name, color, sort_order, printer)
+             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations), $3)
+             RETURNING id, name, color, sort_order, is_active, printer`,
+            [name, req.body?.color ?? null, printer]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già una partita con questo nome' });
+        console.error('POST /sala/stations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/sala/stations/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const name = req.body?.name != null ? String(req.body.name).trim() : null;
+        if (name !== null && (!name || name.length > 50)) return res.status(400).json({ error: 'Nome non valido' });
+        // printer: assente = non toccare; null esplicito = solo schermo.
+        const touchPrinter = 'printer' in (req.body ?? {});
+        const printer = touchPrinter && req.body.printer != null ? String(req.body.printer) : null;
+        if (touchPrinter && printer !== null && !PRINTER_NAME_RE.test(printer)) {
+            return res.status(400).json({ error: 'Stampante non valida' });
+        }
+        const upd = await queryWithRetry(
+            `UPDATE stations SET
+                name = COALESCE($2, name),
+                color = COALESCE($3, color),
+                is_active = COALESCE($4, is_active),
+                printer = CASE WHEN $5 THEN $6 ELSE printer END
+             WHERE id = $1
+             RETURNING id, name, color, sort_order, is_active, printer`,
+            [id, name, req.body?.color ?? null,
+             typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
+             touchPrinter, printer]
+        );
+        if (upd.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
+        res.json(upd.rows[0]);
+    } catch (err: any) {
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già una partita con questo nome' });
+        console.error('PUT /sala/stations/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/sala/printers', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim().toLowerCase();
+        const host = String(req.body?.host ?? '').trim();
+        const port = req.body?.port != null ? Number(req.body.port) : 9100;
+        const kind = req.body?.kind === 'FISCAL' ? 'FISCAL' : 'THERMAL';
+        if (!PRINTER_NAME_RE.test(name)) return res.status(400).json({ error: 'Nome non valido: minuscole, numeri, - e _' });
+        if (!/^[a-z0-9.\-]+$/i.test(host)) return res.status(400).json({ error: 'Indirizzo non valido' });
+        if (!Number.isInteger(port) || port < 1 || port > 65535) return res.status(400).json({ error: 'Porta non valida' });
+        const ins = await queryWithRetry(
+            `INSERT INTO printers (name, host, port, kind, notes)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, name, host, port, kind, is_active, notes`,
+            [name, host, port, kind, req.body?.notes ? String(req.body.notes).slice(0, 300) : null]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già una stampante con questo nome' });
+        console.error('POST /sala/printers error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/sala/printers/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const host = req.body?.host != null ? String(req.body.host).trim() : null;
+        if (host !== null && !/^[a-z0-9.\-]+$/i.test(host)) return res.status(400).json({ error: 'Indirizzo non valido' });
+        const port = req.body?.port != null ? Number(req.body.port) : null;
+        if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) return res.status(400).json({ error: 'Porta non valida' });
+        const upd = await queryWithRetry(
+            `UPDATE printers SET
+                host = COALESCE($2, host),
+                port = COALESCE($3, port),
+                is_active = COALESCE($4, is_active),
+                notes = COALESCE($5, notes)
+             WHERE id = $1
+             RETURNING id, name, host, port, kind, is_active, notes`,
+            [id, host, port,
+             typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
+             req.body?.notes != null ? String(req.body.notes).slice(0, 300) : null]
+        );
+        if (upd.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
+        res.json(upd.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /sala/printers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/sala/printers/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const p = await queryWithRetry(`SELECT name FROM printers WHERE id = $1`, [id]);
+        if (p.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
+        // Una stampante referenziata da una partita non si elimina: la partita
+        // resterebbe a puntare un nome fantasma e i job si accoderebbero nel vuoto.
+        const used = await queryWithRetry(`SELECT name FROM stations WHERE printer = $1 LIMIT 1`, [p.rows[0].name]);
+        if (used.rows.length > 0) {
+            return res.status(409).json({
+                error: `Usata dalla partita "${used.rows[0].name}": togli prima l'assegnazione.`,
+            });
+        }
+        await queryWithRetry(`DELETE FROM printers WHERE id = $1`, [id]);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /sala/printers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Pagina di prova sulla termica scelta: chiude il giro "l'ho configurata
+// bene?" senza aspettare la prima comanda vera.
+app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const p = await queryWithRetry(`SELECT name, host, port, kind, is_active FROM printers WHERE id = $1`, [id]);
+        if (p.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
+        if (p.rows[0].kind !== 'THERMAL') return res.status(400).json({ error: 'La stampante fiscale non accetta stampe di prova (Fase 2)' });
+        if (!p.rows[0].is_active) return res.status(400).json({ error: 'Stampante disattivata' });
+        const ins = await queryWithRetry(
+            `INSERT INTO print_jobs (kind, payload, printer, created_by_user_id)
+             VALUES ('TEST', $1, $2, $3) RETURNING id`,
+            [JSON.stringify({ printer_name: p.rows[0].name, host: p.rows[0].host, port: p.rows[0].port }),
+             p.rows[0].name, req.user?.userId ?? null]
+        );
+        res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
+    } catch (err: any) {
+        console.error('POST /sala/printers/:id/test error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
