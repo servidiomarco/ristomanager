@@ -149,6 +149,20 @@ class SocketClient {
       console.log(`📍 Unsubscribed from room ${roomId}`);
     }
   }
+
+  // Monitor di cucina: lo schermo ascolta solo la propria partita.
+  subscribeToStation(stationId: number) {
+    if (this.socket?.connected) {
+      this.socket.emit('subscribe:station', stationId);
+      console.log(`🍳 Subscribed to station ${stationId}`);
+    }
+  }
+
+  unsubscribeFromStation(stationId: number) {
+    if (this.socket?.connected) {
+      this.socket.emit('unsubscribe:station', stationId);
+    }
+  }
 }
 
 // Export singleton instance

@@ -15,7 +15,7 @@ interface Props {
   token: string;
 }
 
-type Mode = 'menu' | 'equal' | 'fixed' | 'claimed' | 'error';
+type Mode = 'menu' | 'equal' | 'fixed' | 'items' | 'claimed' | 'error';
 
 export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const [bill, setBill] = useState<PublicBillView | null>(null);
@@ -27,6 +27,9 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [claim, setClaim] = useState<ClaimResponse | null>(null);
+  // Righe scelte per lo split per piatto: è così che la gente divide davvero
+  // il conto — «io ho preso solo l'antipasto».
+  const [pickedItems, setPickedItems] = useState<number[]>([]);
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -58,13 +61,22 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
 
   const handleEqualShare = () => { setMode('equal'); setErrorMsg(null); };
   const handleFixedAmount = () => { setMode('fixed'); setErrorMsg(null); };
+  const handlePerItem = () => { setMode('items'); setErrorMsg(null); setPickedItems([]); };
   const handleBack = () => { setMode('menu'); setErrorMsg(null); };
 
-  const submitClaim = async (kind: 'equal_share' | 'fixed_amount') => {
+  const submitClaim = async (kind: 'equal_share' | 'fixed_amount' | 'per_item') => {
     setSubmitting(true);
     setErrorMsg(null);
     try {
       const payload: any = { kind, claimant_label: claimantLabel.trim() || undefined };
+      if (kind === 'per_item') {
+        if (pickedItems.length === 0) {
+          setErrorMsg('Scegli almeno un piatto');
+          setSubmitting(false);
+          return;
+        }
+        payload.item_ids = pickedItems;
+      }
       if (kind === 'fixed_amount') {
         const euros = Number(String(fixedAmountInput).replace(',', '.'));
         if (!Number.isFinite(euros) || euros <= 0) {
@@ -209,12 +221,88 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             >
               La mia parte · € {formatEur(equalShareCents)}
             </button>
+            {bill.per_item_available && (bill.items ?? []).some(i => !i.taken) && (
+              <button
+                type="button"
+                onClick={handlePerItem}
+                className="w-full h-14 rounded-xl bg-white border border-slate-300 text-slate-800 font-semibold text-base hover:bg-slate-50 active:scale-[0.99] transition"
+              >
+                Pago quello che ho preso
+              </button>
+            )}
             <button
               type="button"
               onClick={handleFixedAmount}
               className="w-full h-14 rounded-xl bg-white border border-slate-300 text-slate-800 font-semibold text-base hover:bg-slate-50 active:scale-[0.99] transition"
             >
               Un importo diverso
+            </button>
+          </div>
+        )}
+
+        {mode === 'items' && (
+          <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4 space-y-3">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
+            >
+              ← Torna indietro
+            </button>
+            <div className="text-sm font-semibold">Cosa hai preso?</div>
+            <ul className="divide-y divide-slate-100 -mx-1">
+              {(bill.items ?? []).map(it => {
+                const picked = pickedItems.includes(it.id);
+                return (
+                  <li key={it.id}>
+                    <button
+                      type="button"
+                      disabled={it.taken}
+                      onClick={() => setPickedItems(prev =>
+                        prev.includes(it.id) ? prev.filter(x => x !== it.id) : [...prev, it.id])}
+                      className={`w-full flex items-center gap-3 px-1 py-3 text-left transition
+                        ${it.taken ? 'opacity-40 cursor-not-allowed' : ''}
+                        ${picked ? 'bg-sky-50' : ''}`}
+                    >
+                      <span className={`h-5 w-5 shrink-0 rounded border flex items-center justify-center
+                        ${picked ? 'bg-sky-600 border-sky-600 text-white' : 'border-slate-300'}`}>
+                        {picked ? '✓' : ''}
+                      </span>
+                      <span className="flex-1 text-sm">
+                        {it.qty}× {it.name}
+                        {it.taken && <span className="block text-[11px] text-slate-500">già pagato da un altro</span>}
+                      </span>
+                      <span className="text-sm tabular-nums">€ {formatEur(it.total_cents)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex items-baseline justify-between border-t border-slate-100 pt-3">
+              <span className="text-xs text-slate-500">La tua quota</span>
+              <span className="text-xl font-bold tabular-nums">
+                € {formatEur((bill.items ?? []).filter(i => pickedItems.includes(i.id))
+                             .reduce((n, i) => n + i.total_cents, 0))}
+              </span>
+            </div>
+            <div>
+              <label className="text-xs text-slate-600 font-medium">Nome (opzionale)</label>
+              <input
+                type="text"
+                placeholder="Es. Marco"
+                value={claimantLabel}
+                onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
+                className="mt-1 w-full h-11 px-3 rounded-lg border border-slate-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => submitClaim('per_item')}
+              disabled={submitting || pickedItems.length === 0}
+              className="w-full h-12 rounded-xl bg-sky-600 text-white font-semibold hover:bg-sky-700 active:scale-[0.99] transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Continua al pagamento
             </button>
           </div>
         )}

@@ -133,6 +133,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         // Managed from its own settings section (PayAtTableSettingsManager),
         // not from the booking-channels list; label kept here for type safety.
         pay_at_table_enabled: { title: 'Conto al tavolo', on: 'attivo', off: 'disattivato' },
+        // Idem: gestito dalla sezione Comande, etichetta qui per type safety.
+        table_orders_enabled: { title: 'Comande', on: 'attive', off: 'disattivate' },
     };
 
     const toggle = async (key: FlagKey) => {

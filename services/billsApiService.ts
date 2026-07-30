@@ -116,3 +116,56 @@ class BillsApiService {
 }
 
 export const billsApiService = new BillsApiService();
+
+export interface OpenBillRow {
+  id: number;
+  reservation_id: number | null;
+  table_id: number | null;
+  table_name: string | null;
+  customer_name: string | null;
+  total_cents: number;
+  covers: number;
+  currency: string;
+  items: { name: string; qty: number; unit_price_cents: number }[] | null;
+  status: string;
+  share_token: string | null;
+  opened_at: string;
+  paid_cents: number;
+  claimed_cents: number;
+  residual_cents: number;
+  paid_splits: number;
+  /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
+  open_orders: number;
+  service_date: string;
+  shift: 'LUNCH' | 'DINNER';
+  is_current_service: boolean;
+}
+
+/** Comanda rimasta aperta in un servizio precedente. */
+export interface StaleOrderRow {
+  id: number;
+  table_id: number | null;
+  table_name: string | null;
+  service_date: string;
+  shift: 'LUNCH' | 'DINNER';
+  covers: number;
+  opened_at: string;
+  total_cents: number;
+}
+
+/** Conti attivi, con e senza prenotazione, più le comande rimaste appese. */
+export const getOpenBills = async (): Promise<{
+  service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
+  bills: OpenBillRow[];
+  stale_orders: StaleOrderRow[];
+}> => apiRequest(`${API_URL}/bills/open`, { headers: getHeaders() });
+
+/** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
+ *  server per comporre l'URL del QR: solo il client sa da che host è servita
+ *  la SPA (IP in LAN, dominio in produzione). */
+export const printBill = async (billId: number): Promise<{ id: number; status: string }> =>
+  apiRequest<{ id: number; status: string }>(`${API_URL}/print-jobs`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ bill_id: billId, origin: window.location.origin }),
+  });

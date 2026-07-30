@@ -141,6 +141,49 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
     try {
         await client.query('BEGIN');
 
+        // ============================================
+        // TABELLE FONDANTI — devono esistere per prime
+        // ============================================
+        // `users` e `activity_logs` sono referenziate (FK o backfill) da
+        // blocchi che stanno più in basso in questa funzione. Su un database
+        // già popolato non si nota, perché le tabelle ci sono da prima e i
+        // CREATE ... IF NOT EXISTS più avanti sono no-op; su un database
+        // vuoto invece createSchema fallisce e l'app non parte.
+        //
+        // Definirle qui in testa è l'unico ordinamento che regge entrambi i
+        // casi. Le ALTER, gli indici e i seed di queste due tabelle restano
+        // nelle rispettive sezioni più sotto: qui c'è solo la CREATE.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                full_name VARCHAR(255) NOT NULL,
+                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMPTZ,
+                refresh_token_hash VARCHAR(255)
+            );
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                user_email VARCHAR(255),
+                user_name VARCHAR(255),
+                action VARCHAR(50) NOT NULL,
+                resource_type VARCHAR(50) NOT NULL,
+                resource_id INTEGER,
+                resource_name VARCHAR(255),
+                details JSONB,
+                status VARCHAR(20) DEFAULT 'SUCCESS',
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         await client.query(`
             CREATE TABLE IF NOT EXISTS rooms (
                 id SERIAL PRIMARY KEY,
@@ -656,22 +699,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // ============================================
         // ACTIVITY LOGS TABLE
         // ============================================
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS activity_logs (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                user_email VARCHAR(255),
-                user_name VARCHAR(255),
-                action VARCHAR(50) NOT NULL,
-                resource_type VARCHAR(50) NOT NULL,
-                resource_id INTEGER,
-                resource_name VARCHAR(255),
-                details JSONB,
-                status VARCHAR(20) DEFAULT 'SUCCESS',
-                error_message TEXT,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
+        // La CREATE TABLE sta in testa a createSchema (sezione "tabelle
+        // fondanti"): il backfill di reservations.created_at legge da qui e
+        // gira molto più in alto. Qui restano solo gli indici.
 
         // Create indexes for activity_logs (if not exists)
         await client.query(`
@@ -687,20 +717,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // ============================================
         // USERS TABLE FOR AUTHENTICATION
         // ============================================
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                full_name VARCHAR(255) NOT NULL,
-                role VARCHAR(50) NOT NULL CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN')),
-                is_active BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMPTZ,
-                refresh_token_hash VARCHAR(255)
-            );
-        `);
+        // La CREATE TABLE sta in testa a createSchema (sezione "tabelle
+        // fondanti"): diverse tabelle più sopra hanno una FK verso users e su
+        // un database vuoto fallirebbero. Qui restano solo ALTER e seed.
 
         // Per-user landing preference: which view to open after login.
         // NULL = fall back to the first accessible view (legacy behavior).
@@ -2039,6 +2058,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_dev_board_cards_column ON dev_board_cards(column_key, position);
         `);
+        // Etichette stile Trello: chiavi di una palette fissa definita in
+        // DevelopmentPage.tsx, non testo libero — il colore è il significato.
+        await client.query(`
+            ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS labels TEXT[] NOT NULL DEFAULT '{}';
+        `);
         const existingDevCardCount = await client.query(`SELECT COUNT(*)::int AS n FROM dev_board_cards;`);
         if (existingDevCardCount.rows[0]?.n === 0) {
             await client.query(`
@@ -2049,6 +2073,479 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     ('Popup tavolo scaduto + coerenza stati timed', 'Prompt "Tavolo ancora occupato?" e board lista/modal allineati sullo stato derivato.', 'done', 1),
                     ('Template WhatsApp via Twilio', '5/5 template Utility approvati e collegati; SMS resta fallback automatico.', 'done', 2);
             `);
+        }
+
+        // ============================================
+        // GESTIONALE DI SALA — PR 1: listini, varianti, partite
+        // ============================================
+        // Fondamenta dello schema comande (vedi docs/gestionale-sala-plan.md).
+        // Questa PR crea solo strutture e fa il backfill dei prezzi: nessun
+        // endpoint le legge ancora, nessuna UI le mostra. Il CRM si comporta
+        // esattamente come prima.
+        //
+        // Tutto il blocco sta in coda a createSchema di proposito: le comande
+        // arriveranno a toccare `dishes` da più punti, e tenerle raggruppate
+        // qui riduce la superficie di conflitto quando si lavora in parallelo
+        // su questo file.
+
+        // --- Listini -----------------------------------------------------
+        // `dishes.price` è un prezzo unico. I listini servono a differenziare
+        // sala / asporto / eventi e a cambiare i prezzi stagionali senza
+        // riscrivere lo storico: i conti chiusi conservano lo snapshot del
+        // prezzo, non un riferimento al listino.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS menu_price_lists (
+                id          SERIAL PRIMARY KEY,
+                name        VARCHAR(100) NOT NULL,
+                is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Un solo listino di default, garantito dall'indice parziale.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_single_default
+                ON menu_price_lists(is_default) WHERE is_default;
+        `);
+        // Nome univoco case-insensitive: rende i seed idempotenti senza
+        // guardie applicative e blocca il doppione da errore di battitura.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_name
+                ON menu_price_lists(LOWER(name));
+        `);
+        await client.query(`
+            INSERT INTO menu_price_lists (name, is_default, sort_order)
+            VALUES ('Sala', TRUE, 0)
+            ON CONFLICT DO NOTHING;
+        `);
+
+        // Prezzo per (piatto, listino), in centesimi interi. Da qui in avanti
+        // gli importi nuovi sono sempre INTEGER: `dishes.price` resta
+        // DECIMAL per compatibilità, ma la conversione avviene solo qui.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS dish_prices (
+                dish_id       INTEGER NOT NULL REFERENCES dishes(id) ON DELETE CASCADE,
+                price_list_id INTEGER NOT NULL REFERENCES menu_price_lists(id) ON DELETE CASCADE,
+                price_cents   INTEGER NOT NULL CHECK (price_cents >= 0),
+                PRIMARY KEY (dish_id, price_list_id)
+            );
+        `);
+        // Backfill dal prezzo attuale verso il listino di default. Idempotente
+        // due volte: ON CONFLICT copre il riavvio, e la SELECT prende anche i
+        // piatti creati dopo questa migrazione ma prima che la UI dei listini
+        // esista (PR 2+), così nessun piatto resta senza prezzo.
+        //
+        // GREATEST(0, ...) evita che un prezzo negativo già in tabella faccia
+        // fallire il CHECK: un dato assurdo non deve impedire il boot dell'app.
+        await client.query(`
+            INSERT INTO dish_prices (dish_id, price_list_id, price_cents)
+            SELECT d.id, pl.id, GREATEST(0, ROUND(d.price * 100))::int
+            FROM dishes d
+            CROSS JOIN menu_price_lists pl
+            WHERE pl.is_default
+            ON CONFLICT (dish_id, price_list_id) DO NOTHING;
+        `);
+
+        // --- Varianti ----------------------------------------------------
+        // «Senza cipolla», «al sangue», «+ bufala € 2». I gruppi sono
+        // riusabili fra piatti (un solo gruppo "Cottura" per tutte le carni).
+        // Sulla riga di comanda i modificatori verranno snapshottati in JSONB
+        // (PR 2), non referenziati: cambiare il prezzo di un modificatore non
+        // deve muovere i conti già emessi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS modifier_groups (
+                id          SERIAL PRIMARY KEY,
+                name        VARCHAR(100) NOT NULL,
+                min_select  INTEGER NOT NULL DEFAULT 0 CHECK (min_select >= 0),
+                max_select  INTEGER NOT NULL DEFAULT 1 CHECK (max_select >= 1),
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK (max_select >= min_select)
+            );
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS modifiers (
+                id                SERIAL PRIMARY KEY,
+                group_id          INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+                name              VARCHAR(100) NOT NULL,
+                price_delta_cents INTEGER NOT NULL DEFAULT 0,
+                is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order        INTEGER NOT NULL DEFAULT 0
+            );
+        `);
+        // price_delta_cents senza CHECK: può essere negativo (uno sconto per
+        // il piatto servito senza un ingrediente costoso).
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_modifiers_group ON modifiers(group_id, sort_order);
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS dish_modifier_groups (
+                dish_id  INTEGER NOT NULL REFERENCES dishes(id) ON DELETE CASCADE,
+                group_id INTEGER NOT NULL REFERENCES modifier_groups(id) ON DELETE CASCADE,
+                PRIMARY KEY (dish_id, group_id)
+            );
+        `);
+
+        // --- Partite di preparazione -------------------------------------
+        // Una riga per postazione di cucina, ognuna col proprio monitor KDS
+        // (PR 4). La cucina di riferimento ne ha tre.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS stations (
+                id         SERIAL PRIMARY KEY,
+                name       VARCHAR(50) NOT NULL,
+                color      VARCHAR(20),
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        // Stesso motivo dei listini: senza indice univoco il seed sotto
+        // duplicherebbe le partite a ogni riavvio del server.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_stations_name ON stations(LOWER(name));
+        `);
+        await client.query(`
+            INSERT INTO stations (name, color, sort_order) VALUES
+                ('Antipasti', 'emerald', 1),
+                ('Primi',     'amber',   2),
+                ('Griglia',   'rose',    3)
+            ON CONFLICT DO NOTHING;
+        `);
+
+        // Partita di destinazione del piatto. NULL = nessuna partita
+        // assegnata: la riga finirà sul monitor del passe invece di sparire.
+        await client.query(`
+            ALTER TABLE dishes ADD COLUMN IF NOT EXISTS station_id INTEGER
+                REFERENCES stations(id) ON DELETE SET NULL;
+        `);
+        // Tempo di preparazione tipico. Alimenta il lancio scaglionato delle
+        // uscite (PR 5): senza, in una cucina multi-partita gli antipasti
+        // arrivano al passe dieci minuti prima della griglia. NULL viene
+        // trattato come 0 — comportamento identico a un KDS non scaglionato,
+        // così il campo si può popolare piatto per piatto senza fretta.
+        await client.query(`
+            ALTER TABLE dishes ADD COLUMN IF NOT EXISTS prep_minutes INTEGER
+                CHECK (prep_minutes IS NULL OR prep_minutes >= 0);
+        `);
+
+        // ============================================
+        // GESTIONALE DI SALA — PR 2: comande
+        // ============================================
+        // Una `orders` per conto aperto al tavolo, N `order_items` per riga
+        // ordinata. La comanda dice *cosa si sta preparando*; il conto
+        // (`table_bills`) dice *quanto si deve*. Restano due macchine a stati
+        // separate: il ponte fra le due arriva nella PR 6.
+
+        // `reservation_id` è nullable perché i walk-in non hanno prenotazione,
+        // `table_id` perché una prenotazione può non avere ancora un tavolo
+        // assegnato. Il CHECK impedisce la comanda orfana di entrambi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS orders (
+                id                 SERIAL PRIMARY KEY,
+                reservation_id     INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                table_id           INTEGER REFERENCES tables(id) ON DELETE SET NULL,
+                table_bill_id      INTEGER REFERENCES table_bills(id) ON DELETE SET NULL,
+                order_type         VARCHAR(20) NOT NULL DEFAULT 'DINE_IN',
+                price_list_id      INTEGER REFERENCES menu_price_lists(id) ON DELETE SET NULL,
+                covers             INTEGER NOT NULL DEFAULT 1 CHECK (covers > 0),
+                status             VARCHAR(20) NOT NULL DEFAULT 'OPEN'
+                                   CHECK (status IN ('OPEN','CLOSED','VOIDED')),
+                opened_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                closed_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                opened_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                closed_at          TIMESTAMPTZ,
+                notes              TEXT,
+                idempotency_key    VARCHAR(80) UNIQUE,
+                CHECK (reservation_id IS NOT NULL OR table_id IS NOT NULL)
+            );
+        `);
+        // Una sola comanda aperta per tavolo e per prenotazione. È il vincolo
+        // che rende sicuri due camerieri sullo stesso tavolo: entrambi
+        // scrivono sulla stessa comanda invece di crearne due, e il socket li
+        // riallinea. Strutturale e non applicativo, così la race fra due
+        // richieste simultanee la perde il database e non i clienti.
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_table
+                ON orders(table_id) WHERE status = 'OPEN' AND table_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_reservation
+                ON orders(reservation_id) WHERE status = 'OPEN' AND reservation_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_orders_bill ON orders(table_bill_id)
+                WHERE table_bill_id IS NOT NULL;
+        `);
+
+        // La riga di comanda porta lo *snapshot* di nome, prezzo e varianti:
+        // rinominare un piatto o ritoccarne il prezzo non deve muovere le
+        // comande in corso, né i conti già emessi.
+        //
+        // I tre istanti sono distinti e non intercambiabili:
+        //   queued_at        → la sala ha proposto
+        //   fired_at         → il passe ha lanciato l'uscita
+        //   station_start_at → quando QUESTA partita deve iniziare
+        //   started_at       → quando ha iniziato davvero
+        // Il lancio scaglionato (PR 5) calcola station_start_at; qui la
+        // colonna esiste già così la PR 5 non dovrà migrare dati vivi.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS order_items (
+                id                 SERIAL PRIMARY KEY,
+                order_id           INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                dish_id            INTEGER REFERENCES dishes(id) ON DELETE SET NULL,
+                name_snapshot      VARCHAR(255) NOT NULL,
+                unit_price_cents   INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+                modifiers          JSONB,
+                qty                INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+                course_no          INTEGER NOT NULL DEFAULT 1 CHECK (course_no > 0),
+                seat_no            INTEGER CHECK (seat_no IS NULL OR seat_no > 0),
+                station_id         INTEGER REFERENCES stations(id) ON DELETE SET NULL,
+                status             VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
+                                   CHECK (status IN ('DRAFT','QUEUED','SENT','PREPARING','READY','SERVED','VOIDED')),
+                note               TEXT,
+                queued_at          TIMESTAMPTZ,
+                fired_at           TIMESTAMPTZ,
+                station_start_at   TIMESTAMPTZ,
+                started_at         TIMESTAMPTZ,
+                ready_at           TIMESTAMPTZ,
+                served_at          TIMESTAMPTZ,
+                voided_at          TIMESTAMPTZ,
+                voided_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                void_reason        TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                idempotency_key    VARCHAR(80) UNIQUE
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id, course_no);
+        `);
+        // Coda del monitor di partita (PR 4): solo le righe lavorabili.
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_order_items_kds
+                ON order_items(station_id, status)
+                WHERE status IN ('SENT','PREPARING','READY');
+        `);
+
+        // Modalità di lancio delle uscite. Seed su AUTO_ALL — obbligatorio
+        // finché la vista passe non esiste (PR 5): senza qualcuno che possa
+        // lanciarle a mano, le uscite oltre la prima resterebbero bloccate in
+        // QUEUED e in cucina non arriverebbe nulla. Si passa ad AUTO_FIRST
+        // nello stesso deploy che porta online il passe.
+        await client.query(`
+            INSERT INTO app_settings (key, text_value) VALUES
+                ('course_fire_mode', 'AUTO_ALL')
+            ON CONFLICT (key) DO NOTHING;
+        `);
+        // Il modulo comande resta spento finché non c'è una UI che lo usi.
+        await client.query(`
+            INSERT INTO app_settings (key, value) VALUES
+                ('table_orders_enabled', false)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
+        // ============================================
+        // GESTIONALE DI SALA — PR 6: ponte comanda → conto
+        // ============================================
+        // Da qui in avanti `table_bills.total_cents` è un valore derivato
+        // dalle righe di comanda, non un numero digitato dal cameriere.
+
+        // Un conto attivo per tavolo/prenotazione, garantito dal database.
+        // Sostituisce il controllo applicativo in POST /reservations/:id/bill,
+        // che lasciava aperta la race fra due camerieri che aprono il conto
+        // sullo stesso tavolo nello stesso istante.
+        //
+        // NOT VALID: eventuali righe storiche con entrambi gli ancoraggi NULL
+        // (table_id azzerato da un ON DELETE SET NULL) non devono far fallire
+        // la migrazione — il vincolo vale sulle scritture nuove.
+        await client.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'table_bills_anchor_present'
+                ) THEN
+                    ALTER TABLE table_bills ADD CONSTRAINT table_bills_anchor_present
+                        CHECK (reservation_id IS NOT NULL OR table_id IS NOT NULL) NOT VALID;
+                END IF;
+            END $$;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active
+                ON table_bills(COALESCE(reservation_id, -table_id))
+                WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL');
+        `);
+
+        // ============================================
+        // GESTIONALE DI SALA — PR 10: servizio (data + turno)
+        // ============================================
+        // Senza queste due colonne una comanda aperta a pranzo resta in mezzo
+        // alla cena, e una di ieri compare oggi: il resto del CRM ragiona per
+        // data e turno, le comande devono farlo anche loro.
+        //
+        // La "data di servizio" non è la data solare: una cena che finisce
+        // all'una di notte appartiene ancora al giorno prima. Il giorno di
+        // servizio comincia alle 05:00 Europe/Rome.
+        await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_date DATE;
+        `);
+        await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift VARCHAR(10)
+                CHECK (shift IS NULL OR shift IN ('LUNCH','DINNER'));
+        `);
+        // Backfill dalle comande già esistenti, con la stessa regola.
+        await client.query(`
+            UPDATE orders SET
+                service_date = (
+                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) < 5
+                         THEN ((opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
+                         ELSE (opened_at AT TIME ZONE 'Europe/Rome')::date
+                    END
+                ),
+                shift = (
+                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                         THEN 'LUNCH' ELSE 'DINNER'
+                    END
+                )
+            WHERE service_date IS NULL OR shift IS NULL;
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_orders_service
+                ON orders(service_date, shift, status);
+        `);
+
+        // L'unicità della comanda aperta vale DENTRO il servizio: una comanda
+        // dimenticata a pranzo non deve impedire di aprirne una a cena sullo
+        // stesso tavolo. Gli indici della PR 2 vanno sostituiti.
+        await client.query(`DROP INDEX IF EXISTS idx_orders_one_open_per_table;`);
+        await client.query(`DROP INDEX IF EXISTS idx_orders_one_open_per_reservation;`);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_table_service
+                ON orders(table_id, service_date, shift)
+                WHERE status = 'OPEN' AND table_id IS NOT NULL;
+        `);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_reservation
+                ON orders(reservation_id) WHERE status = 'OPEN' AND reservation_id IS NOT NULL;
+        `);
+
+        // ============================================
+        // GESTIONALE DI SALA — PR 7: storni, sconti, coperti
+        // ============================================
+
+        // Righe di sistema: coperto e servizio non sono piatti e non vanno
+        // mai in cucina, ma pesano sul conto. Distinguerle serve a non
+        // mandarle al KDS e a non contarle nel servizio addebitato.
+        await client.query(`
+            ALTER TABLE order_items ADD COLUMN IF NOT EXISTS line_kind VARCHAR(20)
+                NOT NULL DEFAULT 'DISH'
+                CHECK (line_kind IN ('DISH','COVER','SERVICE'));
+        `);
+
+        // Sconto a livello di comanda, con motivazione: uno sconto senza
+        // motivo scritto è un ammanco che nessuno sa spiegare a fine mese.
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_type VARCHAR(10) CHECK (discount_type IN ('PERCENT','AMOUNT'));`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_value NUMERIC(10,2) CHECK (discount_value IS NULL OR discount_value >= 0);`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_reason TEXT;`);
+        await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;`);
+
+        // Coperto e servizio, spenti di partenza: chi non li applica non deve
+        // ritrovarseli sul conto dopo un aggiornamento.
+        await client.query(`
+            INSERT INTO app_settings (key, int_value) VALUES
+                ('cover_charge_cents', 0),
+                ('service_charge_percent', 0)
+            ON CONFLICT (key) DO NOTHING;
+        `);
+
+        // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
+        // AUTO_FIRST: la prima uscita continua a partire da sola, dalla
+        // seconda in poi decide il passe. Prima di questa PR non esisteva
+        // nessuno che potesse lanciarle a mano, quindi AUTO_ALL era
+        // obbligatorio; ora sarebbe il contrario, un lancio automatico che
+        // scavalca il coordinamento.
+        //
+        // Una tantum, tracciata da una chiave marcatore: chi ha scelto
+        // deliberatamente AUTO_ALL o MANUAL dopo il rilascio non se lo vede
+        // riscrivere a ogni riavvio del server.
+        const fireModeMigrated = await client.query(
+            `SELECT 1 FROM app_settings WHERE key = 'course_fire_mode_passe_migrated'`
+        );
+        if (fireModeMigrated.rowCount === 0) {
+            await client.query(`
+                UPDATE app_settings SET text_value = 'AUTO_FIRST'
+                WHERE key = 'course_fire_mode' AND text_value = 'AUTO_ALL';
+            `);
+            await client.query(`
+                INSERT INTO app_settings (key, value) VALUES ('course_fire_mode_passe_migrated', true)
+                ON CONFLICT (key) DO NOTHING;
+            `);
+        }
+
+        // ============================================
+        // STAMPA — coda preconti per l'agente locale
+        // ============================================
+        // Il backend (in cloud) non può raggiungere la termica in sala:
+        // accoda qui, e un agente sulla LAN del ristorante ritira i job e
+        // li inoltra in ESC/POS (scripts/print-agent.mjs). Il payload è uno
+        // snapshot completo del documento: il conto è immutabile una volta
+        // emesso, e l'agente non deve fare altre query per stampare.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS print_jobs (
+                id SERIAL PRIMARY KEY,
+                kind VARCHAR(20) NOT NULL,
+                payload JSONB NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+                    CHECK (status IN ('PENDING','PRINTED','FAILED')),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                printed_at TIMESTAMPTZ
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_print_jobs_pending
+                ON print_jobs(id) WHERE status = 'PENDING';
+        `);
+        // Stampante di destinazione come NOME logico ('preconti', 'cucina',
+        // 'bar'…), mai IP: la mappa nome→indirizzo vive nell'env dell'agente,
+        // così si sposta una stampante senza toccare né DB né deploy.
+        await client.query(`
+            ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS
+                printer VARCHAR(30) NOT NULL DEFAULT 'preconti';
+        `);
+        // Ogni partita può avere la sua termica: al lancio di un'uscita le
+        // righe della partita escono dalla stampante del suo centro. NULL =
+        // solo monitor KDS, nessuna carta.
+        await client.query(`
+            ALTER TABLE stations ADD COLUMN IF NOT EXISTS printer VARCHAR(30);
+        `);
+
+        // Permessi del modulo comande sui database esistenti. A runtime la
+        // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
+        // auth/permissions.ts: senza queste righe gli endpoint rispondono 403
+        // anche all'OWNER. Deve restare allineato a quel file.
+        //
+        // `orders:expedite` è separato da `orders:kds` di proposito: lanciare
+        // un'uscita tocca tutte le partite, lavorare la propria coda no.
+        const orderPermissions: [string, string][] = [
+            ['OWNER', 'orders:view'], ['OWNER', 'orders:take'], ['OWNER', 'orders:kds'],
+            ['OWNER', 'orders:expedite'], ['OWNER', 'orders:void'],
+            ['GENERAL_MANAGER', 'orders:view'], ['GENERAL_MANAGER', 'orders:take'],
+            ['GENERAL_MANAGER', 'orders:kds'], ['GENERAL_MANAGER', 'orders:expedite'],
+            ['GENERAL_MANAGER', 'orders:void'],
+            ['MANAGER', 'orders:view'], ['MANAGER', 'orders:take'],
+            ['MANAGER', 'orders:expedite'], ['MANAGER', 'orders:void'],
+            ['RECEPTION', 'orders:view'],
+            ['WAITER', 'orders:view'], ['WAITER', 'orders:take'],
+            ['KITCHEN', 'orders:view'], ['KITCHEN', 'orders:kds'], ['KITCHEN', 'orders:expedite'],
+        ];
+        for (const [role, permission] of orderPermissions) {
+            await client.query(
+                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                [role, permission]
+            );
         }
 
         await client.query('COMMIT');

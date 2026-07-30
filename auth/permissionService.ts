@@ -19,7 +19,8 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Report', permissions: ['reports:view', 'reports:full'] },
   { feature: 'Log Attività', permissions: ['logs:view', 'logs:full'] },
   { feature: 'Conversazioni', permissions: ['voice_calls:view'] },
-  { feature: 'Pagamenti', permissions: ['payments:view', 'payments:full'] }
+  { feature: 'Pagamenti', permissions: ['payments:view', 'payments:full'] },
+  { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] }
 ];
 
 // Last-known-good permissions cache. We deliberately keep stale entries
