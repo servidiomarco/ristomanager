@@ -2760,7 +2760,13 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 // terminal state like CANCELLED/DECLINED — we never resurrect those).
 // Returns true when a status change actually happened, so the caller
 // can include it in the response and toast the operator accordingly.
-async function promoteReservationIfPending(reservationId: number): Promise<boolean> {
+// Returns the promoted row when the flip happened, null otherwise. Callers use
+// the row to echo the fresh CONFIRMED state back in the HTTP response so the
+// originating client patches its cache immediately — the socket broadcast is
+// still fired for other clients but isn't the sole source of truth for the
+// caller anymore (mobile Safari on shaky wifi was dropping the event
+// occasionally, leaving the card stuck on "Da confermare").
+async function promoteReservationIfPending(reservationId: number): Promise<any | null> {
     try {
         const upd = await queryWithRetry(
             `UPDATE reservations
@@ -2770,16 +2776,16 @@ async function promoteReservationIfPending(reservationId: number): Promise<boole
              RETURNING *`,
             [reservationId]
         );
-        if (upd.rows.length === 0) return false;
+        if (upd.rows.length === 0) return null;
         // Live views listen on this event to update badges/status pills.
         if (socketService) {
             try { socketService.broadcastReservationUpdated(upd.rows[0]); }
             catch (err) { console.warn('[confirm] broadcast failed:', (err as any)?.message || err); }
         }
-        return true;
+        return upd.rows[0];
     } catch (err) {
         console.warn('[confirm] promoteReservationIfPending failed:', (err as any)?.message || err);
-        return false;
+        return null;
     }
 }
 
@@ -2866,7 +2872,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             success: true,
             message: `Confirmation sent via ${label}`,
             channel: outcome.channel,
-            status_changed: promoted,
+            status_changed: !!promoted,
+            reservation: promoted || undefined,
         });
     } catch (err: any) {
         console.error('Error sending confirmation:', err);
@@ -2956,7 +2963,13 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         // customer just received a "you're booked" email, so the CRM must
         // stop showing "Da confermare".
         const promoted = await promoteReservationIfPending(reservation.id);
-        res.json({ success: true, message: 'Confirmation sent via Email', channel: 'email', status_changed: promoted });
+        res.json({
+            success: true,
+            message: 'Confirmation sent via Email',
+            channel: 'email',
+            status_changed: !!promoted,
+            reservation: promoted || undefined,
+        });
     } catch (err: any) {
         console.error('Error sending email confirmation:', err);
         res.status(500).json({ error: err?.message || 'Failed to send email confirmation' });

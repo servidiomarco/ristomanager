@@ -390,6 +390,9 @@ interface ReservationListProps {
   tables: Table[];
   rooms: Room[];
   onUpdateReservation: (r: Reservation) => void;
+  // Silent local patch (no PUT). Used to reflect server-side promotions
+  // that the socket broadcast might miss on the originating client.
+  onPatchReservationLocal?: (r: Reservation) => void;
   onAddReservation: (r: Omit<Reservation, 'id'>) => Promise<Reservation>;
   onDeleteReservation: (id: number) => void;
   onMergeTables: (tableIds: number[], date: string, shift: Shift) => Promise<void>;
@@ -430,6 +433,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   tables,
   rooms,
   onUpdateReservation,
+  onPatchReservationLocal,
   onAddReservation,
   onDeleteReservation,
   onMergeTables,
@@ -2384,6 +2388,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               setSendingConfirmation('email');
               const result = await sendEmailConfirmation(target.id);
               showToast(buildToast('email', !!result.status_changed), 'success');
+              // Patch local state from the response so the card flips off
+              // "Da confermare" even if the socket:updated broadcast is
+              // dropped (was happening on tablets with flaky wifi).
+              if (result.reservation && onPatchReservationLocal) {
+                  onPatchReservationLocal(result.reservation);
+              }
               setConfirmationPicker(null);
               if (fromSave) setIsFormOpen(false);
               else await refreshOutboundTimeline(target.id);
@@ -2410,6 +2420,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const result = await sendWhatsAppConfirmation(target.id, channel);
           const label = channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
           showToast(buildToast(label, !!result.status_changed), 'success');
+          // Same defensive patch as the email branch — see comment above.
+          if (result.reservation && onPatchReservationLocal) {
+              onPatchReservationLocal(result.reservation);
+          }
           setConfirmationPicker(null);
           if (fromSave) setIsFormOpen(false);
           else await refreshOutboundTimeline(target.id);

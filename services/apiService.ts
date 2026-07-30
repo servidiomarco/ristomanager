@@ -636,11 +636,16 @@ export const postInventoryMovement = async (move: {
 // `status_changed` is true when the backend flipped the reservation from
 // PENDING to CONFIRMED as part of this confirmation send. The UI uses it to
 // contextualise the toast ("Prenotazione confermata e SMS inviato").
+// `reservation` echoes back the freshly promoted row so the originating
+// client can patch its cache without relying on the socket broadcast
+// (mobile Safari on shaky wifi was dropping the event, leaving the card
+// stuck on "Da confermare" even after the send succeeded).
 export interface ConfirmationSendResult {
   success: boolean;
   message: string;
   channel?: string;
   status_changed?: boolean;
+  reservation?: Reservation;
 }
 
 export const sendWhatsAppConfirmation = async (
