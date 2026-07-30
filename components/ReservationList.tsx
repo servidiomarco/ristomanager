@@ -2492,8 +2492,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!formData.customer_name || !formData.reservation_time) return;
-      if (!formData.phone || !formData.phone.trim()) {
-          showToast('Il numero di telefono è obbligatorio.', 'error');
+      // Almeno un canale di contatto è richiesto (telefono OPPURE email).
+      // Le prenotazioni web arrivano spesso con sola email — non forziamo il
+      // telefono quando l'email è già presente.
+      const hasPhone = !!(formData.phone && formData.phone.trim());
+      const hasEmail = !!(formData.email && formData.email.trim());
+      if (!hasPhone && !hasEmail) {
+          showToast('Inserisci un contatto (telefono o email).', 'error');
           return;
       }
       if (isSavingReservation) return;
@@ -4633,11 +4638,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Phone & Email */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Telefono <span className="text-rose-600">*</span></label>
+                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">
+                                        Telefono
+                                        {!(formData.email && formData.email.trim()) && <span className="text-rose-600"> *</span>}
+                                    </label>
                                     <div className="relative">
                                         <input
                                             type="tel"
-                                            required
+                                            required={!(formData.email && formData.email.trim())}
                                             className={`w-full rounded-md border border-[var(--color-line)] py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors ${formData.phone ? 'pl-3 pr-10' : 'px-3'}`}
                                             value={formData.phone || ''}
                                             onChange={e => {
