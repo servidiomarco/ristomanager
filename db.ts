@@ -2489,6 +2489,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS
                 printer VARCHAR(30) NOT NULL DEFAULT 'preconti';
         `);
+        // Ogni partita può avere la sua termica: al lancio di un'uscita le
+        // righe della partita escono dalla stampante del suo centro. NULL =
+        // solo monitor KDS, nessuna carta.
+        await client.query(`
+            ALTER TABLE stations ADD COLUMN IF NOT EXISTS printer VARCHAR(30);
+        `);
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in

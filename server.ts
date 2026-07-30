@@ -14784,7 +14784,58 @@ async function fireCourseInTx(client: any, orderId: number, courseNo: number): P
          RETURNING oi.*`,
         [orderId, courseNo]
     );
+    if (upd.rows.length > 0) {
+        await enqueueCoursePrintsInTx(client, orderId, courseNo, upd.rows);
+    }
     return upd.rows;
+}
+
+// Al lancio, oltre ai monitor KDS, la carta: le righe di ogni partita escono
+// dalla termica del suo centro (stations.printer). Stessa transazione del
+// lancio — o l'uscita parte con le sue stampe accodate, o non parte affatto.
+// Partite senza stampante (printer NULL) restano solo a schermo. Best-effort
+// NON è questo: un errore qui annulla il lancio, ed è voluto — un'uscita
+// lanciata di cui la cucina non sa niente è il caso peggiore.
+async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: number, firedRows: any[]): Promise<void> {
+    const ctx = await client.query(
+        `SELECT o.covers, t.name AS table_name
+         FROM orders o LEFT JOIN tables t ON t.id = o.table_id
+         WHERE o.id = $1`,
+        [orderId]
+    );
+    const tableName = ctx.rows[0]?.table_name ?? null;
+    const covers = ctx.rows[0]?.covers ?? null;
+
+    const stationIds = [...new Set(firedRows.map(r => r.station_id).filter((s: any) => s != null))];
+    if (stationIds.length === 0) return;
+    const st = await client.query(
+        `SELECT id, name, printer FROM stations WHERE id = ANY($1::int[]) AND printer IS NOT NULL`,
+        [stationIds]
+    );
+
+    for (const station of st.rows) {
+        const items = firedRows
+            .filter(r => r.station_id === station.id)
+            .map(r => ({
+                qty: Number(r.qty),
+                name: r.name_snapshot,
+                modifiers: (Array.isArray(r.modifiers) ? r.modifiers : []).map((m: any) => m?.name).filter(Boolean),
+                note: r.note ?? null,
+            }));
+        if (items.length === 0) continue;
+        await client.query(
+            `INSERT INTO print_jobs (kind, payload, printer)
+             VALUES ('COMANDA', $1, $2)`,
+            [JSON.stringify({
+                order_id: orderId,
+                course_no: courseNo,
+                table_name: tableName,
+                covers,
+                station_name: station.name,
+                items,
+            }), station.printer]
+        );
+    }
 }
 
 // Apre una comanda. Idempotente rispetto all'header Idempotency-Key: il

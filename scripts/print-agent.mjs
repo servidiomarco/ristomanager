@@ -106,6 +106,41 @@ function renderPreconto(p) {
   return Buffer.from(bytes);
 }
 
+// Comanda di partita: cosa preparare, niente prezzi. Caratteri grandi e
+// quantità in evidenza — si legge da in piedi, col vapore in mezzo.
+function renderComanda(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s, 'latin1'));
+
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);        // doppia battuta
+  push(ESC, 0x61, 1);        // center
+  push(GS, 0x21, 0x11);      // double w+h
+  text(`TAV ${p.table_name ?? '-'}\n`);
+  push(GS, 0x21, 0x01);      // solo double height
+  text(`${p.course_no}a USCITA - ${(p.station_name ?? '').toUpperCase()}\n`);
+  push(GS, 0x21, 0x00);
+  const now = new Date();
+  text(`${p.covers ?? '-'} coperti - ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x61, 0);        // left
+
+  push(GS, 0x21, 0x01);      // righe piatto a doppia altezza
+  for (const i of p.items ?? []) {
+    text(`${i.qty} x ${i.name}\n`);
+    push(GS, 0x21, 0x00);
+    for (const m of i.modifiers ?? []) text(`    + ${m}\n`);
+    if (i.note) text(`    ** ${i.note}\n`);
+    push(GS, 0x21, 0x01);
+  }
+  push(GS, 0x21, 0x00);
+  text('\n\n');
+  push(GS, 0x56, 0x42, 0x00);
+  return Buffer.from(bytes);
+}
+
 // ---------------------------------------------------------------------------
 // Stampante e API
 // ---------------------------------------------------------------------------
@@ -140,7 +175,9 @@ async function drainPrinter(name, dest, jobs) {
   for (const job of jobs) {
     let rendered;
     try {
-      rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload) : null;
+      rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload)
+               : job.kind === 'COMANDA' ? renderComanda(job.payload)
+               : null;
       if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
     } catch (err) {
       log(`job ${job.id} [${name}]: payload non stampabile (${err.message})`);
