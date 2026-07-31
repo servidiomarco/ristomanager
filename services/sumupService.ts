@@ -361,6 +361,33 @@ export function extractTransactionId(checkout: SumUpCheckout): string | null {
 // Takes the CHECKOUT id (that's what we persist as provider_order_id) and
 // resolves the transaction itself, so callers keep one identifier throughout.
 // `amountMinor` may be a partial refund; we only ever refund whole splits.
+// SumUp reports refund problems as RFC 9457 objects whose top-level `detail`
+// is often just "Refund failed." — the actionable part lives in an `errors`
+// array (code / detail / reason, plus max_refundable_amount for amount
+// problems). Flatten it so the operator sees the real reason.
+function describeSumUpProblem(body: any): string {
+    if (!body || typeof body !== 'object') return '';
+    const parts: string[] = [];
+    const top = body.detail || body.message || body.error_message || '';
+    const errors = Array.isArray(body.errors) ? body.errors : [];
+    for (const e of errors) {
+        if (!e || typeof e !== 'object') continue;
+        const piece = e.detail || e.reason || e.code;
+        if (!piece) continue;
+        parts.push(
+            e.max_refundable_amount !== undefined
+                ? `${piece} (massimo rimborsabile: ${e.max_refundable_amount})`
+                : String(piece)
+        );
+    }
+    // Prefer the specific errors; keep the generic line only if it adds
+    // something (i.e. there were no structured errors). Trailing full stops
+    // are stripped because callers punctuate the sentence themselves — SumUp's
+    // "Refund failed." would otherwise read as "Refund failed.. Le cause…".
+    const text = parts.length ? parts.join('; ') : String(top || '');
+    return text.trim().replace(/\.+$/, '');
+}
+
 export async function refundCheckout(
     checkoutId: string,
     amountMinor: number,
@@ -369,7 +396,13 @@ export async function refundCheckout(
     // Transaction id captured when the payment completed. Preferred over a
     // fresh lookup: an older checkout may no longer expose its transactions,
     // and it saves a round-trip.
-    knownTransactionId?: string | null
+    knownTransactionId?: string | null,
+    // When true (our only case today: we always refund a payment in full) the
+    // `amount` field is omitted. SumUp documents an absent amount as "refund
+    // the transaction in full", which avoids its amount validation entirely —
+    // sending an explicit figure can trip INVALID_AMOUNT / amount_too_high if
+    // SumUp's refundable total differs by even a cent from our record.
+    fullRefund: boolean = true
 ): Promise<any> {
     const config = await requireConfig();
 
@@ -392,7 +425,7 @@ export async function refundCheckout(
         return await sumupFetch(
             config,
             `/v1.0/merchants/${encodeURIComponent(config.merchantCode)}/payments/${encodeURIComponent(transactionId)}/refunds`,
-            { method: 'POST', body: { amount: minorToMajor(amountMinor) } }
+            { method: 'POST', body: fullRefund ? {} : { amount: minorToMajor(amountMinor) } }
         );
     } catch (err: any) {
         // Keep the untranslated response in the server log: the friendly
@@ -402,19 +435,17 @@ export async function refundCheckout(
             merchant_code: config.merchantCode,
             environment: config.environment,
             transaction_id: transactionId,
-            body: err?.body,
+            body: JSON.stringify(err?.body),
         });
         // Translate the failure modes SumUp documents into something an
         // operator can act on, instead of surfacing a raw JSON blob.
         const status = err?.status;
-        const detail = typeof err?.body === 'object'
-            ? (err.body.detail || err.body.message || err.body.error_message || '')
-            : '';
+        const reason = describeSumUpProblem(err?.body);
+        const suffix = reason ? ` (${reason})` : '';
         if (status === 403) {
             throw new Error(
                 'SumUp ha rifiutato il rimborso: la chiave API non ha i permessi per rimborsare. '
-                + 'Abilita i rimborsi per questa chiave nella dashboard SumUp.'
-                + (detail ? ` (${detail})` : '')
+                + `Abilita i rimborsi per questa chiave nella dashboard SumUp.${suffix}`
             );
         }
         if (status === 404) {
@@ -423,10 +454,23 @@ export async function refundCheckout(
                 + 'Controlla che l\'ambiente attivo (sandbox/produzione) sia quello in cui è stato incassato il pagamento.'
             );
         }
+        // 422 is the one SumUp uses when the payment processor itself refuses.
+        // Its two documented causes are a SumUp balance too low to fund the
+        // refund and a transaction not (yet) refundable — neither is fixable
+        // from here, so say which they are instead of "riprova".
+        if (status === 422) {
+            throw new Error(
+                `SumUp non ha potuto eseguire il rimborso${reason ? `: ${reason}.` : '.'} `
+                + 'Le cause tipiche sono due: saldo SumUp insufficiente a coprire il rimborso '
+                + '(gli incassi devono prima essere accreditati), oppure transazione non ancora '
+                + 'rimborsabile. Controlla il saldo su me.sumup.com e riprova quando l\'incasso è accreditato.'
+            );
+        }
         if (status === 400 || status === 409) {
             throw new Error(
-                `SumUp ha rifiutato il rimborso${detail ? `: ${detail}` : ''}. `
-                + 'Un pagamento appena incassato può non essere ancora rimborsabile: riprova più tardi.'
+                `SumUp ha rifiutato il rimborso${reason ? `: ${reason}` : ''}. `
+                + 'La transazione non è rimborsabile nel suo stato attuale: '
+                + 'un incasso non ancora accreditato può diventarlo più tardi.'
             );
         }
         throw err;
