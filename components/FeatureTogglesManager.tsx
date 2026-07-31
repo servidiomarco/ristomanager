@@ -695,28 +695,29 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                         <div className="min-w-0">
                             <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Limiti di occupazione per sala</h4>
                             <p className="text-[12px] text-[var(--color-fg-muted)] truncate">
-                                Quota massima di tavoli o coperti che agente vocale e prenotazioni web possono riempire in ogni sala.
+                                Quota di tavoli o coperti oltre la quale le prenotazioni automatiche passano dallo staff.
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <span className={`text-[11px] font-medium uppercase tracking-wide ${capsDraft.length > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
-                            {capsDraft.length > 0 ? `${capsDraft.length} attivi` : 'Nessun limite'}
+                            {capsDraft.length > 0 ? `${capsDraft.length} ${capsDraft.length === 1 ? 'attivo' : 'attivi'}` : 'Nessun limite'}
                         </span>
                         <ChevronDown className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
                     </div>
                 </summary>
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-3">
                     <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">
-                        Riserva una quota di ogni sala ai canali gestiti da voi. Quando l'occupazione della sala raggiunge la
-                        percentuale impostata, l'agente telefonico e il modulo /prenota smettono di proporre quella sala per
-                        quel turno — esempio: con il 70% sulla sala Macine, appena Macine tocca il 70% le prenotazioni
-                        automatiche vengono dirottate altrove. Lo staff continua a prenotare senza limiti dal gestionale.
+                        Riserva una quota di ogni sala ai canali gestiti da voi. Esempio con il 70% sulla sala Macine: finché
+                        Macine sta sotto il 70%, le prenotazioni web di quella sala vengono confermate subito con il tavolo
+                        assegnato in automatico; appena tocca il 70% le nuove richieste restano da confermare a mano e
+                        l'agente telefonico smette di proporre la sala. Lo staff continua a prenotare senza limiti dal
+                        gestionale.
                     </p>
                     <p className="text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
-                        <strong className="text-[var(--color-fg-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato
-                        conta come occupato). <strong className="text-[var(--color-fg-muted)]">Coperti</strong>: ospiti prenotati sul totale dei posti.
-                        Le richieste web ancora senza tavolo pesano sulla sala che il cliente ha scelto.
+                        <strong className="text-[var(--color-fg-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato o
+                        tenuto da un banchetto conta come occupato). <strong className="text-[var(--color-fg-muted)]">Coperti</strong>: ospiti prenotati
+                        sul totale dei posti. Le richieste web ancora senza tavolo pesano sulla sala che il cliente ha scelto.
                     </p>
 
                     {occupancy.length === 0 ? (
@@ -776,7 +777,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                                         {cap && (
                                             <div className="flex flex-wrap items-center gap-2 mt-3">
-                                                <span className="text-[12px] text-[var(--color-fg-muted)]">Stop oltre il</span>
+                                                <span className="text-[12px] text-[var(--color-fg-muted)]">Limite</span>
                                                 <input
                                                     type="number"
                                                     min={1}

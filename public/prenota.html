@@ -300,8 +300,8 @@
                 <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5 ring-1 ring-emerald-200">
                     <svg class="w-10 h-10 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
                 </div>
-                <h2 class="serif text-3xl text-stone-900 mb-2">Richiesta ricevuta</h2>
-                <p class="text-stone-600 leading-relaxed">
+                <h2 id="confirmTitle" class="serif text-3xl text-stone-900 mb-2">Richiesta ricevuta</h2>
+                <p id="confirmText" class="text-stone-600 leading-relaxed">
                     Grazie! Ti contatteremo via telefono, WhatsApp o email per confermare la prenotazione.
                 </p>
                 <p id="confirmRecap" class="text-sm text-stone-500 mt-4"></p>
@@ -752,11 +752,19 @@
                 submitBtn.textContent = 'Invia richiesta';
                 return;
             }
-            // Success
+            // Success. Il backend conferma subito quando la sala è ancora
+            // sotto il proprio limite di occupazione e c'è un tavolo libero;
+            // altrimenti la richiesta passa dallo staff.
+            if (data.confirmed) {
+                const confirmTitle = $('confirmTitle');
+                const confirmText = $('confirmText');
+                if (confirmTitle) confirmTitle.textContent = 'Prenotazione confermata';
+                if (confirmText) confirmText.textContent = 'Grazie! Ti aspettiamo. Riceverai la conferma anche via WhatsApp, SMS o email.';
+            }
             const dateLabel = new Date(state.date + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-            const roomLabel = state.roomId && Array.isArray(state.rooms)
+            const roomLabel = data.room || (state.roomId && Array.isArray(state.rooms)
                 ? (state.rooms.find(r => r.id === state.roomId)?.name || '')
-                : '';
+                : '');
             const parts = [
                 `${state.guests} ${state.guests === 1 ? 'persona' : 'persone'}`,
                 dateLabel,

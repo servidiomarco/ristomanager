@@ -73,10 +73,10 @@ export interface RoomOccupancy {
 /**
  * Occupazione di ogni sala per un dato (data, turno).
  *
- * Un tavolo conta come occupato quando ha una prenotazione viva oppure è
- * coinvolto in un accorpamento del turno (in entrambi i casi non è più
- * assegnabile). I coperti invece sommano gli ospiti delle prenotazioni: un
- * tavolo da 6 preso da 2 persone pesa 2 coperti ma 1 tavolo.
+ * Un tavolo conta come occupato quando ha una prenotazione viva, è coinvolto
+ * in un accorpamento del turno o è tenuto da un banchetto (in tutti i casi
+ * non è più assegnabile). I coperti invece sommano gli ospiti delle
+ * prenotazioni: un tavolo da 6 preso da 2 persone pesa 2 coperti ma 1 tavolo.
  *
  * Le richieste web ancora senza tavolo ("Sala richiesta: X." nelle note,
  * scritta da POST /public/reservations) pesano sulla sala richiesta come 1
@@ -104,7 +104,15 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
             GROUP BY room_id
         ),
         occupied AS (
-            SELECT a.room_id, COUNT(*)::int AS tables_used
+            SELECT a.room_id,
+                   COUNT(*)::int AS tables_used,
+                   -- Posti sottratti al servizio da un banchetto: il banchetto
+                   -- non ha una prenotazione per tavolo da cui sommare gli
+                   -- ospiti, quindi pesa per i posti che tiene fermi.
+                   COALESCE(SUM(CASE WHEN EXISTS (
+                       SELECT 1 FROM banquet_menus b
+                       WHERE b.event_date = $1 AND b.shift = $2 AND a.id = ANY(b.table_ids)
+                   ) THEN a.seats ELSE 0 END), 0)::int AS banquet_seats
             FROM active a
             WHERE EXISTS (
                     SELECT 1 FROM reservations res
@@ -117,6 +125,10 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
                     SELECT 1 FROM table_merges tm
                     WHERE tm.date = $1 AND tm.shift = $2
                       AND (tm.primary_id = a.id OR a.id = ANY(tm.merged_ids))
+                  )
+               OR EXISTS (
+                    SELECT 1 FROM banquet_menus b
+                    WHERE b.event_date = $1 AND b.shift = $2 AND a.id = ANY(b.table_ids)
                   )
             GROUP BY a.room_id
         ),
@@ -154,6 +166,7 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
                COALESCE(o.tables_used, 0)
                  + COALESCE(q.tables_requested, 0)  AS used_tables,
                COALESCE(v.seats_used, 0)
+                 + COALESCE(o.banquet_seats, 0)
                  + COALESCE(q.seats_requested, 0)   AS used_seats,
                EXISTS (
                    SELECT 1 FROM room_closed_overrides rc
@@ -218,22 +231,76 @@ export async function getCappedRoomIds(date: string, shift: Shift): Promise<numb
     }
 }
 
-/**
- * True quando ogni sala aperta e dotata di tavoli ha raggiunto il proprio cap.
- * Usata dal canale web per rifiutare anche le richieste senza preferenza di
- * sala: senza questo controllo basterebbe scegliere "Nessuna preferenza" per
- * aggirare i limiti.
- */
-export async function areAllRoomsAtCap(date: string, shift: Shift): Promise<boolean> {
-    try {
-        const caps = await getRoomOccupancyCaps();
-        if (caps.length === 0) return false;
-        const occupancy = await computeRoomOccupancy(date, shift);
-        const bookable = occupancy.filter(o => !o.is_closed && !o.closed_for_shift && o.capacity_tables > 0);
-        if (bookable.length === 0) return false;
-        return bookable.every(o => o.at_cap);
-    } catch (err) {
-        console.error('[room-occupancy] failed to evaluate global cap state:', err);
-        return false;
-    }
+export interface SelfServiceTablePick {
+    id: number;
+    name: string;
+    room_id: number;
+    room_name: string;
+    location: 'INDOOR' | 'OUTDOOR' | null;
 }
+
+/**
+ * Il tavolo libero più piccolo che regge `guests`, saltando le sale che hanno
+ * già raggiunto il proprio limite di occupazione. È il punto di assegnazione
+ * condiviso dai due canali self-service: l'agente vocale (che filtra per
+ * dentro/fuori) e il modulo /prenota (che filtra per sala richiesta).
+ *
+ * Esclude tavoli nascosti per il turno, sale chiuse, tavoli con una
+ * prenotazione viva, tavoli accorpati e tavoli tenuti da un banchetto.
+ * Restituisce null quando non c'è niente: il chiamante salva comunque la
+ * prenotazione senza tavolo e la lascia allo staff.
+ */
+export async function pickSelfServiceTable(
+    date: string,
+    shift: Shift,
+    guests: number,
+    opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null } = {}
+): Promise<SelfServiceTablePick | null> {
+    const params: any[] = [guests, date, shift];
+    let extraFilters = '';
+    if (opts.location) {
+        params.push(opts.location);
+        extraFilters += ` AND r.location = $${params.length}`;
+    }
+    if (opts.roomId) {
+        params.push(Math.trunc(opts.roomId));
+        extraFilters += ` AND r.id = $${params.length}`;
+    }
+    params.push(await getCappedRoomIds(date, shift));
+    extraFilters += ` AND NOT (r.id = ANY($${params.length}::int[]))`;
+
+    const result = await queryWithRetry(`
+        SELECT t.id, t.name, r.id AS room_id, r.name AS room_name, r.location
+        FROM tables t
+        JOIN rooms r ON t.room_id = r.id
+        WHERE r.is_closed = false
+          ${extraFilters}
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.id NOT IN (
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.seats >= $1
+          AND NOT EXISTS (
+              SELECT 1 FROM reservations res
+              WHERE res.table_id = t.id
+                AND DATE(res.reservation_time) = $2
+                AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM table_merges tm
+              WHERE tm.date = $2 AND tm.shift = $3
+                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM banquet_menus b
+              WHERE b.event_date = $2 AND b.shift = $3 AND t.id = ANY(b.table_ids)
+          )
+        ORDER BY t.seats ASC, t.id ASC
+        LIMIT 1
+    `, params);
+    return result.rows[0] ?? null;
+}
+

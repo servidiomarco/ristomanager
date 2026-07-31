@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
-import { getCappedRoomIds } from './roomOccupancyService.js';
+import { getCappedRoomIds, pickSelfServiceTable } from './roomOccupancyService.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -674,44 +674,9 @@ async function pickAutoAssignTable(
     guests: number,
     locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const params: any[] = [guests, date, shift];
-    let locationFilter = '';
-    if (locationPreference) {
-        params.push(locationPreference);
-        locationFilter = ` AND r.location = $${params.length}`;
-    }
-    params.push(await getCappedRoomIds(date, shift));
-    const cappedFilter = ` AND NOT (r.id = ANY($${params.length}::int[]))`;
-    const result = await queryWithRetry(`
-        SELECT t.id, t.name, r.name AS room_name, r.location
-        FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
-          ${cappedFilter}
-          AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
-          )
-          AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
-          )
-          AND t.seats >= $1
-          ${locationFilter}
-          AND NOT EXISTS (
-              SELECT 1 FROM reservations res
-              WHERE res.table_id = t.id
-                AND DATE(res.reservation_time) = $2
-                AND res.shift = $3
-                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
-                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
-          )
-        ORDER BY t.seats ASC, t.id ASC
-        LIMIT 1
-    `, params);
-    return result.rows[0] ?? null;
+    const picked = await pickSelfServiceTable(date, shift, guests, { location: locationPreference });
+    if (!picked) return null;
+    return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
 
 /**
