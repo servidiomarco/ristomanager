@@ -4556,6 +4556,34 @@ function buildDepositConfirmationMessage(
     return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
+// Sent to the guest when staff refund a deposit from the Pagamenti page.
+//
+// Deliberately says nothing about the booking itself: refunding a deposit and
+// cancelling a table are separate decisions here (the reservation keeps its
+// status), so promising either "confermata" or "annullata" would be a guess.
+// It states the fact, sets the expectation that the money takes a few days to
+// land — the question staff would otherwise get by phone — and invites a reply.
+//
+// Accented characters are avoided on purpose, as in every other customer
+// message: they'd force UCS-2 encoding and halve the SMS length budget.
+function buildRefundNotificationMessage(
+    customerName: string | null | undefined,
+    amountCents: number,
+    reservationTime?: string | Date | null
+): string {
+    const fullName = toTitleCase(customerName);
+    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
+    const amount = formatEuroMinor(amountCents);
+    let when = '';
+    if (reservationTime) {
+        const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+        when = ` della prenotazione del ${dateLabel} alle ${timeLabel}`;
+    }
+    return `${greeting}, ti abbiamo rimborsato la caparra di ${amount}${when}. `
+        + `L'accredito puo' richiedere qualche giorno lavorativo, secondo la tua banca. `
+        + `Per qualsiasi dubbio rispondi a questo messaggio. Grazie!`;
+}
+
 // Global list of payment requests across all reservations, powering the
 // dedicated /pagamenti page. Supports the same filter vocabulary as the
 // UI: free-text search on customer/description/order id, status filter
@@ -5438,6 +5466,36 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                 payment.reservation_id ?? undefined,
                 `Rimborso ${formatEuroMinor(payment.amount_cents)} (${providerLabel(provider)}) — pagamento #${payment.id}`
             );
+        }
+
+        // Tell the guest their money is on the way back. Fire-and-forget on
+        // purpose: the refund already went through at the gateway, so a
+        // Twilio hiccup must not turn a successful refund into a 5xx. The
+        // send is recorded in outbound_messages either way, so it shows up in
+        // the payment's "Comunicazioni con il cliente" timeline.
+        if (payment.reservation_id) {
+            (async () => {
+                try {
+                    const resv = await queryWithRetry(
+                        'SELECT customer_name, phone, reservation_time FROM reservations WHERE id = $1',
+                        [payment.reservation_id]
+                    );
+                    const reservation = resv.rows[0];
+                    if (!reservation?.phone) return;
+                    const message = buildRefundNotificationMessage(
+                        reservation.customer_name,
+                        payment.amount_cents,
+                        reservation.reservation_time
+                    );
+                    // No Meta-approved template exists for refunds, so this
+                    // goes out as SMS (sendBookingConfirmation only attempts
+                    // WhatsApp when given a template).
+                    const delivery = await sendBookingConfirmation(reservation.phone, message, payment.reservation_id);
+                    console.log(`[payments] refund notice sent for payment ${payment.id} via ${delivery.channel}`);
+                } catch (err: any) {
+                    console.error('[payments] refund notice failed for payment', payment.id, err?.message || err);
+                }
+            })();
         }
 
         res.json({ ok: true, payment_request: row });
