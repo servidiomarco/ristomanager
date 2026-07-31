@@ -791,12 +791,50 @@ export interface PublicBookingBlock {
   date: string;                             // YYYY-MM-DD (Europe/Rome)
   shift: 'LUNCH' | 'DINNER' | 'ALL';        // ALL = intera giornata
 }
+// Limite di occupazione per sala applicato SOLO ai canali self-service
+// (agente vocale + modulo /prenota). Quando l'occupazione della sala
+// raggiunge `percent`, quei canali smettono di proporla; lo staff continua a
+// prenotarla normalmente dal gestionale. Le sale senza voce in questo array
+// non hanno limiti.
+export type OccupancyBasis = 'TABLES' | 'SEATS';
+export interface RoomOccupancyCap {
+  room_id: number;
+  percent: number;              // 1-100
+  basis: OccupancyBasis;        // TABLES = tavoli, SEATS = coperti
+}
 export interface ChannelSettings {
   voice_large_group_threshold: number;
   voice_bookings_suspension_callback_time: string;
   voice_bookings_suspension_schedule: ScheduledSuspension[];
   public_bookings_blocks: PublicBookingBlock[];
+  room_occupancy_caps: RoomOccupancyCap[];
 }
+
+// Occupazione corrente per sala, mostrata accanto al limite in Impostazioni.
+export interface RoomOccupancyShift {
+  used_tables: number;
+  used_seats: number;
+  percent_tables: number;
+  percent_seats: number;
+  at_cap: boolean;
+  closed_for_shift: boolean;
+}
+export interface RoomOccupancyRow {
+  room_id: number;
+  room_name: string;
+  is_closed: boolean;
+  capacity_tables: number;
+  capacity_seats: number;
+  lunch: RoomOccupancyShift;
+  dinner: RoomOccupancyShift;
+}
+
+export const getRoomsOccupancy = async (date?: string): Promise<{ date: string; rooms: RoomOccupancyRow[] }> => {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  return apiRequest<{ date: string; rooms: RoomOccupancyRow[] }>(`${API_URL}/settings/rooms-occupancy${qs}`, {
+    headers: getHeaders(false),
+  });
+};
 
 export const getChannelSettings = async (): Promise<ChannelSettings> => {
   return apiRequest<ChannelSettings>(`${API_URL}/settings/channels`, {

@@ -90,6 +90,14 @@ import {
     formatItalianDateReadback,
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
+import {
+    ROOM_OCCUPANCY_CAPS_KEY,
+    RoomOccupancyCap,
+    getRoomOccupancyCaps,
+    computeRoomOccupancy,
+    getCappedRoomIds,
+    areAllRoomsAtCap,
+} from './services/roomOccupancyService.js';
 import { toTitleCase } from './utils/text.js';
 import {
     getAvailableSlots,
@@ -13152,11 +13160,12 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
 
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getRoomOccupancyCaps(),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
@@ -13165,6 +13174,7 @@ app.get('/settings/channels', authenticate, async (_req, res) => {
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            room_occupancy_caps: roomCaps,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -13235,6 +13245,59 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
         updates.push({ key: PUBLIC_BOOKINGS_BLOCKS_KEY, column: 'text_value', value: JSON.stringify(deduped) });
     }
 
+    if (body.room_occupancy_caps !== undefined) {
+        if (!Array.isArray(body.room_occupancy_caps)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'room_occupancy_caps must be an array',
+            });
+        }
+        const normalizedCaps: RoomOccupancyCap[] = [];
+        const seenRooms = new Set<number>();
+        for (const entry of body.room_occupancy_caps) {
+            if (!entry || typeof entry !== 'object') {
+                return res.status(400).json({ error: 'invalid_value', message: 'Each room cap entry must be an object' });
+            }
+            const roomId = Number(entry.room_id);
+            const percent = Number(entry.percent);
+            const basis = String(entry.basis ?? 'TABLES').trim().toUpperCase();
+            if (!Number.isInteger(roomId) || roomId <= 0) {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap room_id must be a positive integer (got "${entry.room_id}")` });
+            }
+            if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap percent must be an integer between 1 and 100 (got "${entry.percent}")` });
+            }
+            if (basis !== 'TABLES' && basis !== 'SEATS') {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap basis must be TABLES or SEATS (got "${entry.basis}")` });
+            }
+            // Last write wins on duplicates so the UI never has to dedupe.
+            if (seenRooms.has(roomId)) {
+                const idx = normalizedCaps.findIndex(c => c.room_id === roomId);
+                normalizedCaps[idx] = { room_id: roomId, percent, basis };
+                continue;
+            }
+            seenRooms.add(roomId);
+            normalizedCaps.push({ room_id: roomId, percent, basis });
+        }
+        // Reject caps pointing at rooms that no longer exist: a stale entry
+        // would silently never apply and the operator would think it does.
+        if (normalizedCaps.length > 0) {
+            try {
+                const known = await queryWithRetry('SELECT id FROM rooms WHERE id = ANY($1::int[])', [normalizedCaps.map(c => c.room_id)]);
+                const knownIds = new Set<number>(known.rows.map((r: any) => Number(r.id)));
+                const unknown = normalizedCaps.filter(c => !knownIds.has(c.room_id)).map(c => c.room_id);
+                if (unknown.length > 0) {
+                    return res.status(400).json({ error: 'invalid_value', message: `Sale inesistenti: ${unknown.join(', ')}` });
+                }
+            } catch (err) {
+                console.error('Error validating room occupancy caps:', err);
+                return res.status(500).json({ error: 'Failed to validate room occupancy caps' });
+            }
+        }
+        normalizedCaps.sort((a, b) => a.room_id - b.room_id);
+        updates.push({ key: ROOM_OCCUPANCY_CAPS_KEY, column: 'text_value', value: JSON.stringify(normalizedCaps) });
+    }
+
     if (body.voice_bookings_suspension_schedule !== undefined) {
         if (!Array.isArray(body.voice_bookings_suspension_schedule)) {
             return res.status(400).json({
@@ -13286,11 +13349,12 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getRoomOccupancyCaps(),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         res.json({
@@ -13298,10 +13362,60 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            room_occupancy_caps: roomCaps,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);
         res.status(500).json({ error: 'Failed to update channel settings' });
+    }
+});
+
+// Live occupancy per room, used by Settings → Canali di prenotazione to show
+// the operator how full each sala is right now against its configured cap.
+// Read-only: no side effects, safe for any authenticated user to poll.
+app.get('/settings/rooms-occupancy', authenticate, async (req, res) => {
+    const dateParam = typeof req.query.date === 'string' ? req.query.date : '';
+    const date = ISO_DATE_RE.test(dateParam)
+        ? dateParam
+        : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+    try {
+        const [lunch, dinner] = await Promise.all([
+            computeRoomOccupancy(date, Shift.LUNCH),
+            computeRoomOccupancy(date, Shift.DINNER),
+        ]);
+        // One row per room carrying both shifts: the settings card renders a
+        // single line per sala, so joining here keeps the UI dumb.
+        const dinnerById = new Map(dinner.map(r => [r.room_id, r]));
+        const rooms = lunch.map(r => ({
+            room_id: r.room_id,
+            room_name: r.room_name,
+            is_closed: r.is_closed,
+            capacity_tables: r.capacity_tables,
+            capacity_seats: r.capacity_seats,
+            lunch: {
+                used_tables: r.used_tables,
+                used_seats: r.used_seats,
+                percent_tables: r.percent_tables,
+                percent_seats: r.percent_seats,
+                at_cap: r.at_cap,
+                closed_for_shift: r.closed_for_shift,
+            },
+            dinner: (() => {
+                const d = dinnerById.get(r.room_id);
+                return {
+                    used_tables: d?.used_tables ?? 0,
+                    used_seats: d?.used_seats ?? 0,
+                    percent_tables: d?.percent_tables ?? 0,
+                    percent_seats: d?.percent_seats ?? 0,
+                    at_cap: d?.at_cap ?? false,
+                    closed_for_shift: d?.closed_for_shift ?? false,
+                };
+            })(),
+        }));
+        res.json({ date, rooms });
+    } catch (err) {
+        console.error('Error fetching room occupancy:', err);
+        res.status(500).json({ error: 'Failed to fetch room occupancy' });
     }
 });
 
@@ -14471,16 +14585,20 @@ app.get('/public/availability', async (req, res) => {
     }
 
     try {
-        const [lunchSlotsRaw, dinnerSlotsRaw, blocks] = await Promise.all([
+        const [lunchSlotsRaw, dinnerSlotsRaw, blocks, lunchFull, dinnerFull] = await Promise.all([
             getAvailableSlots(date, Shift.LUNCH),
             getAvailableSlots(date, Shift.DINNER),
             getPublicBookingBlocks(),
+            areAllRoomsAtCap(date, Shift.LUNCH),
+            areAllRoomsAtCap(date, Shift.DINNER),
         ]);
         // Empty a shift's slot list if the operator has blocked it — the
         // public form treats "no slots" as "not bookable", so nothing else
-        // needs to know about blocks.
-        const lunchSlots = isPublicBookingBlocked(date, Shift.LUNCH as any, blocks) ? [] : lunchSlotsRaw;
-        const dinnerSlots = isPublicBookingBlocked(date, Shift.DINNER as any, blocks) ? [] : dinnerSlotsRaw;
+        // needs to know about blocks. Stessa cosa quando ogni sala ha già
+        // raggiunto il proprio limite di occupazione: non resta niente da
+        // offrire al canale web, nemmeno con "nessuna preferenza".
+        const lunchSlots = (isPublicBookingBlocked(date, Shift.LUNCH as any, blocks) || lunchFull) ? [] : lunchSlotsRaw;
+        const dinnerSlots = (isPublicBookingBlocked(date, Shift.DINNER as any, blocks) || dinnerFull) ? [] : dinnerSlotsRaw;
 
         // Drop past slots when the requested date is today (Europe/Rome).
         const now = new Date();
@@ -14522,10 +14640,14 @@ app.get('/public/rooms', async (req, res) => {
     }
 
     try {
+        // Sale che hanno raggiunto il limite di occupazione riservato ai
+        // canali self-service: spariscono dall'elenco del modulo /prenota.
+        const cappedRooms = await getCappedRoomIds(date, shift as Shift);
         const result = await queryWithRetry(
             `SELECT r.id, r.name
              FROM rooms r
              WHERE r.is_closed = false
+               AND NOT (r.id = ANY($4::int[]))
                AND r.id NOT IN (
                    SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
                )
@@ -14545,7 +14667,7 @@ app.get('/public/rooms', async (req, res) => {
                      )
                )
              ORDER BY r.name ASC`,
-            [Math.trunc(guests), date, shift]
+            [Math.trunc(guests), date, shift, cappedRooms]
         );
         res.json({ rooms: result.rows });
     } catch (err: any) {
@@ -14676,6 +14798,23 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             } else {
                 return res.status(409).json({ error: 'room_unavailable', message: 'La sala scelta non è disponibile per il turno selezionato' });
             }
+            // Limite di occupazione della sala (Impostazioni → Canali di
+            // prenotazione). Ricontrollato qui e non solo in /public/rooms:
+            // la sala può riempirsi tra il caricamento della lista e l'invio.
+            const cappedRooms = await getCappedRoomIds(date, shift as Shift);
+            if (cappedRooms.includes(Math.trunc(requestedRoomId))) {
+                return res.status(409).json({
+                    error: 'room_at_capacity',
+                    message: `La sala ${requestedRoomName} ha raggiunto il limite di prenotazioni online per questo turno. Provi un'altra sala o ci chiami al telefono.`,
+                });
+            }
+        } else if (await areAllRoomsAtCap(date, shift as Shift)) {
+            // Nessuna preferenza di sala: senza questo controllo basterebbe
+            // non sceglierne una per aggirare tutti i limiti.
+            return res.status(409).json({
+                error: 'rooms_at_capacity',
+                message: 'Le sale hanno raggiunto il limite di prenotazioni online per questo turno. La preghiamo di chiamarci al telefono.',
+            });
         }
 
         // Normalize phone to E.164 if it starts with a leading 3 (IT mobile) and no +.

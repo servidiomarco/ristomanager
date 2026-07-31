@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2 } from 'lucide-react';
+import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
     getFeatureFlags,
@@ -10,6 +10,9 @@ import {
     ChannelSettings,
     ScheduledSuspension,
     PublicBookingBlock,
+    RoomOccupancyCap,
+    RoomOccupancyRow,
+    getRoomsOccupancy,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -92,6 +95,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [blocksDraft, setBlocksDraft] = useState<PublicBookingBlock[]>([]);
     const [savingBlocks, setSavingBlocks] = useState(false);
 
+    // Limiti di occupazione per sala. `occupancy` è solo informativo (quanto
+    // è piena ogni sala oggi) e serve anche a elencare le sale disponibili,
+    // dato che il draft contiene solo quelle con un limite attivo.
+    const [occupancy, setOccupancy] = useState<RoomOccupancyRow[]>([]);
+    const [capsDraft, setCapsDraft] = useState<RoomOccupancyCap[]>([]);
+    const [savingCaps, setSavingCaps] = useState(false);
+
     // Keep showToast in a ref so the mount-fetch effect below has empty deps.
     // Parent (App.tsx) recreates addToast on every render, so listing showToast
     // as a dep would refetch on every parent re-render — which resets
@@ -114,6 +124,15 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
                 setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
                 setBlocksDraft(channelsData.public_bookings_blocks ?? []);
+                setCapsDraft(channelsData.room_occupancy_caps ?? []);
+                // L'occupazione è un di più: se fallisce mostriamo comunque i
+                // limiti, senza le percentuali live accanto.
+                try {
+                    const occ = await getRoomsOccupancy();
+                    if (!cancelled) setOccupancy(occ.rooms ?? []);
+                } catch (occErr) {
+                    console.warn('[channels] room occupancy unavailable:', occErr);
+                }
             } catch (err: any) {
                 if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
@@ -277,6 +296,49 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    // Limiti per sala: il draft contiene una riga solo per le sale limitate.
+    // Attivare il limite su una sala nuova parte da 70% sui tavoli — la
+    // soglia dell'esempio più comune, comunque modificabile subito.
+    const DEFAULT_CAP_PERCENT = 70;
+    const capFor = (roomId: number): RoomOccupancyCap | undefined => capsDraft.find(c => c.room_id === roomId);
+    const toggleCap = (roomId: number) => {
+        setCapsDraft(prev => prev.some(c => c.room_id === roomId)
+            ? prev.filter(c => c.room_id !== roomId)
+            : [...prev, { room_id: roomId, percent: DEFAULT_CAP_PERCENT, basis: 'TABLES' }]);
+    };
+    const updateCap = (roomId: number, patch: Partial<RoomOccupancyCap>) => {
+        setCapsDraft(prev => prev.map(c => (c.room_id === roomId ? { ...c, ...patch } : c)));
+    };
+    const saveCaps = async () => {
+        if (!channels || !canEdit || savingCaps) return;
+        for (const cap of capsDraft) {
+            if (!Number.isInteger(cap.percent) || cap.percent < 1 || cap.percent > 100) {
+                const roomName = occupancy.find(r => r.room_id === cap.room_id)?.room_name ?? `sala ${cap.room_id}`;
+                showToast(`${roomName}: la percentuale deve essere un intero tra 1 e 100`, 'error');
+                return;
+            }
+        }
+        setSavingCaps(true);
+        try {
+            const updated = await updateChannelSettings({ room_occupancy_caps: capsDraft });
+            setChannels(updated);
+            setCapsDraft(updated.room_occupancy_caps ?? []);
+            // Le percentuali live non cambiano salvando, ma il flag "al
+            // limite" sì: ricaricalo così la UI non mente.
+            try {
+                const occ = await getRoomsOccupancy();
+                setOccupancy(occ.rooms ?? []);
+            } catch (occErr) {
+                console.warn('[channels] room occupancy refresh failed:', occErr);
+            }
+            showToast('Limiti di occupazione aggiornati', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento limiti', 'error');
+        } finally {
+            setSavingCaps(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
@@ -292,6 +354,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
     const blocksDirty = JSON.stringify(channels.public_bookings_blocks ?? []) !== JSON.stringify(blocksDraft);
+    // Il backend riordina i cap per room_id: confronta ordinato, altrimenti
+    // togliere e rimettere lo stesso limite lascerebbe il tasto Salva acceso.
+    const sortCaps = (list: RoomOccupancyCap[]) => [...list].sort((a, b) => a.room_id - b.room_id);
+    const capsDirty = JSON.stringify(sortCaps(channels.room_occupancy_caps ?? [])) !== JSON.stringify(sortCaps(capsDraft));
     const todayKey = todayISO();
 
     return (
@@ -617,6 +683,146 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                     </details>
                 );
             })}
+
+            {/* Limiti di occupazione per sala — vale per entrambi i canali
+                self-service, quindi sta fuori dalle due schede canale. */}
+            <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
+                            <Percent className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Limiti di occupazione per sala</h4>
+                            <p className="text-[12px] text-[var(--color-fg-muted)] truncate">
+                                Quota massima di tavoli o coperti che agente vocale e prenotazioni web possono riempire in ogni sala.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-[11px] font-medium uppercase tracking-wide ${capsDraft.length > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
+                            {capsDraft.length > 0 ? `${capsDraft.length} attivi` : 'Nessun limite'}
+                        </span>
+                        <ChevronDown className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                    </div>
+                </summary>
+                <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-3">
+                    <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">
+                        Riserva una quota di ogni sala ai canali gestiti da voi. Quando l'occupazione della sala raggiunge la
+                        percentuale impostata, l'agente telefonico e il modulo /prenota smettono di proporre quella sala per
+                        quel turno — esempio: con il 70% sulla sala Macine, appena Macine tocca il 70% le prenotazioni
+                        automatiche vengono dirottate altrove. Lo staff continua a prenotare senza limiti dal gestionale.
+                    </p>
+                    <p className="text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
+                        <strong className="text-[var(--color-fg-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato
+                        conta come occupato). <strong className="text-[var(--color-fg-muted)]">Coperti</strong>: ospiti prenotati sul totale dei posti.
+                        Le richieste web ancora senza tavolo pesano sulla sala che il cliente ha scelto.
+                    </p>
+
+                    {occupancy.length === 0 ? (
+                        <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Nessuna sala configurata.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {occupancy.map(room => {
+                                const cap = capFor(room.room_id);
+                                const useSeats = cap?.basis === 'SEATS';
+                                const lunchPct = useSeats ? room.lunch.percent_seats : room.lunch.percent_tables;
+                                const dinnerPct = useSeats ? room.dinner.percent_seats : room.dinner.percent_tables;
+                                return (
+                                    <div
+                                        key={room.room_id}
+                                        className={`rounded-md border p-3 ${cap ? 'border-[var(--color-line-strong)] bg-[var(--color-surface-2)]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-[13px] font-medium text-[var(--color-fg)]">{room.room_name}</span>
+                                                    {room.is_closed && (
+                                                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]">chiusa</span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                                                    {room.capacity_tables} tavoli · {room.capacity_seats} coperti
+                                                </p>
+                                                <p className="text-[12px] text-[var(--color-fg-subtle)] mt-0.5">
+                                                    Oggi — pranzo <strong className={room.lunch.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>{lunchPct}%</strong>
+                                                    {' · '}cena <strong className={room.dinner.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>{dinnerPct}%</strong>
+                                                    {(room.lunch.at_cap || room.dinner.at_cap) && (
+                                                        <span className="ml-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                                                            limite raggiunto ({[room.lunch.at_cap ? 'pranzo' : null, room.dinner.at_cap ? 'cena' : null].filter(Boolean).join(' e ')})
+                                                        </span>
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={!!cap}
+                                                aria-label={`${cap ? 'Disattiva' : 'Attiva'} limite per ${room.room_name}`}
+                                                onClick={() => toggleCap(room.room_id)}
+                                                disabled={!canEdit || savingCaps}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                    cap ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                                                }`}
+                                            >
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                                        cap ? 'translate-x-5' : 'translate-x-0.5'
+                                                    } translate-y-0.5`}
+                                                />
+                                            </button>
+                                        </div>
+
+                                        {cap && (
+                                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                                                <span className="text-[12px] text-[var(--color-fg-muted)]">Stop oltre il</span>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={100}
+                                                    value={cap.percent}
+                                                    onChange={(e) => {
+                                                        const n = Number(e.target.value);
+                                                        updateCap(room.room_id, { percent: Number.isFinite(n) ? Math.trunc(n) : cap.percent });
+                                                    }}
+                                                    disabled={!canEdit || savingCaps}
+                                                    aria-label={`Percentuale massima per ${room.room_name}`}
+                                                    className="w-20 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                />
+                                                <span className="text-[12px] text-[var(--color-fg-muted)]">% dei</span>
+                                                <select
+                                                    value={cap.basis}
+                                                    onChange={(e) => updateCap(room.room_id, { basis: e.target.value as RoomOccupancyCap['basis'] })}
+                                                    disabled={!canEdit || savingCaps}
+                                                    aria-label={`Base di calcolo per ${room.room_name}`}
+                                                    className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                >
+                                                    <option value="TABLES">tavoli</option>
+                                                    <option value="SEATS">coperti</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="flex items-center justify-end">
+                        <button
+                            type="button"
+                            onClick={saveCaps}
+                            disabled={!canEdit || savingCaps || !capsDirty}
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                        >
+                            {savingCaps && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                            Salva limiti
+                        </button>
+                    </div>
+                </div>
+            </details>
+
             {!canEdit && (
                 <p className="text-[12px] text-[var(--color-fg-subtle)] mt-1">
                     Solo gli amministratori possono modificare queste impostazioni.
