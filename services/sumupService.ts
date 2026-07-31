@@ -395,6 +395,15 @@ export async function refundCheckout(
             { method: 'POST', body: { amount: minorToMajor(amountMinor) } }
         );
     } catch (err: any) {
+        // Keep the untranslated response in the server log: the friendly
+        // message below is for the operator, this is for debugging.
+        console.error('[SumUp] refund failed', {
+            status: err?.status,
+            merchant_code: config.merchantCode,
+            environment: config.environment,
+            transaction_id: transactionId,
+            body: err?.body,
+        });
         // Translate the failure modes SumUp documents into something an
         // operator can act on, instead of surfacing a raw JSON blob.
         const status = err?.status;

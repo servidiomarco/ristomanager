@@ -5405,9 +5405,14 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
             );
         } catch (err: any) {
             console.error('[payments] refund failed:', err?.message || err);
+            // The provider services already produce an operator-readable
+            // reason; use it as the message rather than burying it behind a
+            // generic wrapper, which read as "Rimborso SumUp fallito: SumUp
+            // ha rifiutato il rimborso: …" in the UI banner.
+            const reason = err?.message ? String(err.message) : '';
             return res.status(502).json({
-                error: `Rimborso ${providerLabel(provider)} fallito`,
-                detail: err?.message || String(err),
+                error: reason || `Rimborso ${providerLabel(provider)} fallito`,
+                detail: reason ? undefined : String(err),
             });
         }
 

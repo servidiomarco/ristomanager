@@ -45,7 +45,10 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetchWithAuth(url, options);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    const err: any = new Error(errorData.error || `Request failed with status ${response.status}`);
+    // Keep the server's `detail` in the message: for a refused refund it
+    // carries the gateway's own explanation.
+    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
+    const err: any = new Error(errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage);
     err.status = response.status;
     err.data = errorData;
     throw err;
