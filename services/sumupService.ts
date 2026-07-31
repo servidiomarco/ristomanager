@@ -365,22 +365,61 @@ export async function refundCheckout(
     checkoutId: string,
     amountMinor: number,
     _currency: string,
-    _description?: string
+    _description?: string,
+    // Transaction id captured when the payment completed. Preferred over a
+    // fresh lookup: an older checkout may no longer expose its transactions,
+    // and it saves a round-trip.
+    knownTransactionId?: string | null
 ): Promise<any> {
     const config = await requireConfig();
 
-    const checkout = await getCheckout(checkoutId);
-    const transactionId = extractTransactionId(checkout);
+    let transactionId = knownTransactionId || null;
     if (!transactionId) {
-        throw new Error(`SumUp refund: nessuna transazione riuscita sul checkout ${checkoutId}`);
+        const checkout = await getCheckout(checkoutId);
+        transactionId = extractTransactionId(checkout);
+        if (!transactionId) {
+            throw new Error(
+                `Nessuna transazione riuscita trovata sul checkout ${checkoutId} `
+                + `(stato SumUp: ${checkout.status || 'sconosciuto'}). Verifica il pagamento nella dashboard SumUp.`
+            );
+        }
     }
 
     // SumUp has no description field on refunds and derives the currency from
     // the original transaction, hence the unused parameters — they exist to
     // keep the signature interchangeable with the Revolut refund.
-    return sumupFetch(
-        config,
-        `/v1.0/merchants/${encodeURIComponent(config.merchantCode)}/payments/${encodeURIComponent(transactionId)}/refunds`,
-        { method: 'POST', body: { amount: minorToMajor(amountMinor) } }
-    );
+    try {
+        return await sumupFetch(
+            config,
+            `/v1.0/merchants/${encodeURIComponent(config.merchantCode)}/payments/${encodeURIComponent(transactionId)}/refunds`,
+            { method: 'POST', body: { amount: minorToMajor(amountMinor) } }
+        );
+    } catch (err: any) {
+        // Translate the failure modes SumUp documents into something an
+        // operator can act on, instead of surfacing a raw JSON blob.
+        const status = err?.status;
+        const detail = typeof err?.body === 'object'
+            ? (err.body.detail || err.body.message || err.body.error_message || '')
+            : '';
+        if (status === 403) {
+            throw new Error(
+                'SumUp ha rifiutato il rimborso: la chiave API non ha i permessi per rimborsare. '
+                + 'Abilita i rimborsi per questa chiave nella dashboard SumUp.'
+                + (detail ? ` (${detail})` : '')
+            );
+        }
+        if (status === 404) {
+            throw new Error(
+                `SumUp non trova la transazione ${transactionId} sul merchant ${config.merchantCode}. `
+                + 'Controlla che l\'ambiente attivo (sandbox/produzione) sia quello in cui è stato incassato il pagamento.'
+            );
+        }
+        if (status === 400 || status === 409) {
+            throw new Error(
+                `SumUp ha rifiutato il rimborso${detail ? `: ${detail}` : ''}. `
+                + 'Un pagamento appena incassato può non essere ancora rimborsabile: riprova più tardi.'
+            );
+        }
+        throw err;
+    }
 }

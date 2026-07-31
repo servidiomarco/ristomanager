@@ -292,16 +292,25 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
                   </button>
                 )}
               </div>
-              {reconcileFeedback && (
+              {reconcileFeedback && reconcileFeedback.kind !== 'err' && (
                 <div className={`mt-1.5 text-[11px] ${
-                  reconcileFeedback.kind === 'ok' ? 'text-emerald-700'
-                  : reconcileFeedback.kind === 'err' ? 'text-rose-700'
-                  : 'text-[var(--color-fg-muted)]'
+                  reconcileFeedback.kind === 'ok' ? 'text-emerald-700' : 'text-[var(--color-fg-muted)]'
                 }`}>
                   {reconcileFeedback.text}
                 </div>
               )}
-            </div>
+              </div>
+            {reconcileFeedback?.kind === 'err' && (
+              <div className="col-span-2 rounded-lg border border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10 px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-medium text-rose-700 dark:text-rose-300">Operazione non riuscita</div>
+                    <div className="text-[12px] text-rose-700/90 dark:text-rose-300/90 break-words">{reconcileFeedback.text}</div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div>
               <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Creato</div>
               <div className="text-[var(--color-fg)] mt-0.5">{formatDateTime(payment.created_at)}</div>

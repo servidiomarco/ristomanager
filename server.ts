@@ -3515,7 +3515,8 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         const rs = await queryWithRetry(
             `SELECT s.id, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
                     b.status AS bill_status, b.reservation_id, b.total_cents, b.currency,
-                    pr.id AS payment_request_id, pr.status AS pr_status, pr.provider, pr.provider_order_id
+                    pr.id AS payment_request_id, pr.status AS pr_status, pr.provider,
+                    pr.provider_order_id, pr.metadata AS pr_metadata
              FROM table_bill_splits s
              JOIN table_bills b ON b.id = s.table_bill_id
              LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
@@ -3542,7 +3543,8 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
             row.provider_order_id,
             row.amount_cents,
             row.currency || 'EUR',
-            `Rimborso quota${row.claimant_label ? ' ' + row.claimant_label : ''} - conto #${row.table_bill_id}`
+            `Rimborso quota${row.claimant_label ? ' ' + row.claimant_label : ''} - conto #${row.table_bill_id}`,
+            row.pr_metadata?.sumup_transaction_id ?? null
         );
 
         const updSplit = await queryWithRetry(
@@ -5367,7 +5369,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
 
         const paymentRes = await queryWithRetry(
             `SELECT id, provider, provider_order_id, status, amount_cents, currency,
-                    description, reservation_id, table_bill_split_id
+                    description, reservation_id, table_bill_split_id, metadata
              FROM payment_requests WHERE id = $1`,
             [id]
         );
@@ -5396,7 +5398,10 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                 payment.provider_order_id,
                 payment.amount_cents,
                 payment.currency || 'EUR',
-                payment.description || `Rimborso pagamento #${payment.id}`
+                payment.description || `Rimborso pagamento #${payment.id}`,
+                // Captured when the payment completed; SumUp refunds are keyed
+                // on the transaction, not the checkout.
+                payment.metadata?.sumup_transaction_id ?? null
             );
         } catch (err: any) {
             console.error('[payments] refund failed:', err?.message || err);
@@ -13726,14 +13731,24 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
 // Which gateway new payments are created with. Split out from the two
 // integration cards so either of them (and any future provider) can read and
 // flip it without knowing about the other.
-app.get('/settings/payments/provider', authenticate, requirePermission('settings:full'), async (_req, res) => {
+// GET is auth-only, not settings:full: the reservation modal labels its
+// deposit box with the gateway that will actually take the money ("Richiedi
+// acconto (SumUp)"), and that box is used by staff who can't see Settings.
+// Nothing here is secret — just which gateway is live and whether it's ready.
+// PUT stays admin-only.
+app.get('/settings/payments/provider', authenticate, async (_req, res) => {
     try {
         const active = await getActivePaymentProvider();
         const configured: Record<string, boolean> = {};
         for (const provider of PAYMENT_PROVIDERS) {
             configured[provider] = await isProviderConfigured(provider);
         }
-        res.json({ provider: active, providers: PAYMENT_PROVIDERS, configured });
+        res.json({
+            provider: active,
+            label: providerLabel(active),
+            providers: PAYMENT_PROVIDERS,
+            configured,
+        });
     } catch (err: any) {
         console.error('GET /settings/payments/provider error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });

@@ -265,16 +265,20 @@ export async function cancelPaymentOrder(provider: PaymentProvider, orderId: str
     await revolutCancelOrder(orderId);
 }
 
-// Send money back for a completed order.
+// Send money back for a completed order. `knownTransactionId` is only used by
+// SumUp, whose refunds are keyed on the transaction rather than the checkout:
+// callers pass metadata.sumup_transaction_id when they have it so we don't
+// have to re-derive it from the checkout.
 export async function refundPaymentOrder(
     provider: PaymentProvider,
     orderId: string,
     amountMinor: number,
     currency: string,
-    description?: string
+    description?: string,
+    knownTransactionId?: string | null
 ): Promise<any> {
     if (provider === 'sumup') {
-        return sumupRefundCheckout(orderId, amountMinor, currency, description);
+        return sumupRefundCheckout(orderId, amountMinor, currency, description, knownTransactionId);
     }
     return revolutRefundOrder(orderId, amountMinor, currency, description);
 }

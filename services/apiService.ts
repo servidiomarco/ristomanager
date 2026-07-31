@@ -922,6 +922,8 @@ export const updateSumUpIntegration = async (
 
 export interface ActivePaymentProvider {
   provider: PaymentProviderId;
+  // Human name of the active gateway ("Revolut" / "SumUp"), for UI labels.
+  label: string;
   providers: PaymentProviderId[];
   configured: Record<PaymentProviderId, boolean>;
 }

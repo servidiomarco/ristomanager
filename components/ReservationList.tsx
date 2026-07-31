@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -646,6 +646,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // in the modal. Loaded on open (only when editing) and mutated by the
   // "Richiedi acconto" flow. Socket updates keep the list live.
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  // Gateway that will actually take the deposit. The box used to be labelled
+  // "Richiedi acconto (Revolut)" unconditionally, which lied once SumUp was
+  // switched on. Defaults to the historical label until the fetch lands.
+  const [paymentProviderLabel, setPaymentProviderLabel] = useState('Revolut');
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentDescription, setPaymentDescription] = useState<string>('');
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
@@ -1850,6 +1854,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       .catch(err => console.warn('[payments] load failed:', err?.message || err));
     return () => { cancelled = true; };
   }, [isFormOpen, isEditing, formData.id]);
+
+  // Which gateway is live, for the deposit box label. Cheap and auth-only;
+  // refetched per open so flipping the provider in Settings shows up without
+  // a page reload.
+  useEffect(() => {
+    if (!isFormOpen || !isEditing) return;
+    let cancelled = false;
+    getActivePaymentProvider()
+      .then(r => { if (!cancelled && r?.label) setPaymentProviderLabel(r.label); })
+      .catch(err => console.warn('[payments] active provider load failed:', err?.message || err));
+    return () => { cancelled = true; };
+  }, [isFormOpen, isEditing]);
 
   // Load outbound SMS/WhatsApp log for this reservation. Same trigger as
   // paymentRequests — only in edit mode, once per open.
@@ -5636,13 +5652,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       </div>
                     )}
 
-                    {/* Revolut payment link — only in edit mode (needs a saved reservation to attach to) */}
+                    {/* Payment link (active gateway) — only in edit mode (needs a saved reservation to attach to) */}
                     {isEditing && formData.id && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
                         <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
                           <div className="flex items-center gap-2 mb-3">
                             <CreditCard className="h-4 w-4 text-emerald-600" />
-                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Richiedi acconto (Revolut)</h4>
+                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Richiedi acconto ({paymentProviderLabel})</h4>
                             {formData.phone && (
                               <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">Invio via {formData.phone}</span>
                             )}
