@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -286,6 +286,41 @@ const resolveDurationMinutes = (r: Pick<Reservation, 'duration_minutes' | 'shift
   const raw = r.duration_minutes;
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
   return defaultDurationForShift(r.shift);
+};
+
+// Barra di riempimento della sala. Il colore segue quanto è piena; la tacca
+// scura, quando la sala ha un limite configurato (Impostazioni → Canali di
+// prenotazione), segna la soglia oltre la quale agente vocale e prenotazioni
+// web smettono di assegnare tavoli da soli.
+const RoomOccupancyMeter: React.FC<{
+  percent: number;
+  capPercent?: number | null;
+  onBrand?: boolean;
+  className?: string;
+}> = ({ percent, capPercent, onBrand = false, className = '' }) => {
+  const pct = Math.max(0, Math.min(100, Math.round(percent)));
+  const cap = typeof capPercent === 'number' ? Math.max(0, Math.min(100, capPercent)) : null;
+  const fill = pct >= 90
+    ? 'bg-rose-500'
+    : pct >= 60
+      ? 'bg-amber-500'
+      : 'bg-emerald-500';
+  return (
+    <span
+      className={`relative inline-block h-1.5 rounded-full overflow-hidden align-middle ${onBrand ? 'bg-white/30' : 'bg-[var(--color-surface-3)]'} ${className}`}
+      role="img"
+      aria-label={`Occupazione ${pct}%${cap !== null ? `, limite ${cap}%` : ''}`}
+    >
+      <span className={`block h-full rounded-full transition-[width] duration-300 ${fill}`} style={{ width: `${pct}%` }} />
+      {cap !== null && cap < 100 && (
+        <span
+          aria-hidden="true"
+          className={`absolute top-0 bottom-0 w-[2px] ${onBrand ? 'bg-white' : 'bg-[var(--color-fg)]'}`}
+          style={{ left: `calc(${cap}% - 1px)` }}
+        />
+      )}
+    </span>
+  );
 };
 
 // [start, start+duration) time-window overlap. Two windows overlap iff
@@ -672,6 +707,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     getFeatureFlags()
       .then(f => { if (!cancelled) setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled); })
       .catch(() => { /* keep default false on error */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Limiti di occupazione per sala: servono solo a disegnare la tacca sulla
+  // barra di riempimento di ogni sala, così lo staff vede a colpo d'occhio
+  // quali sale hanno superato la soglia oltre la quale le prenotazioni web
+  // arrivano da confermare a mano. Nessun limite = nessuna tacca.
+  const [roomCaps, setRoomCaps] = useState<RoomOccupancyCap[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getChannelSettings()
+      .then(s => { if (!cancelled) setRoomCaps(s.room_occupancy_caps ?? []); })
+      .catch(() => { /* nessuna tacca se le impostazioni non arrivano */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -3558,6 +3606,42 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       guestsByRoomId.set(rid, (guestsByRoomId.get(rid) || 0) + (Number(r.guests) || 0));
     }
 
+    // Riempimento di ogni sala per il turno mostrato. Stessa definizione usata
+    // dal backend per i limiti: tavoli occupati sul totale dei tavoli
+    // utilizzabili, coperti prenotati sul totale dei posti. La sala mostra la
+    // metrica del proprio limite, così la tacca e la barra parlano la stessa
+    // lingua; senza limite mostra i tavoli.
+    const capByRoomId = new Map<number, RoomOccupancyCap>(roomCaps.map(c => [c.room_id, c]));
+    const roomFillById = new Map<string | number, { percent: number; label: string; capPercent: number | null; overCap: boolean }>();
+    for (const room of rooms) {
+      const roomTables = displayTables
+        .filter(t => t.room_id === room.id)
+        .filter(t => !displayTables.some(other =>
+          other.merged_with && other.merged_with.length > 0 &&
+          other.merged_with.map(id => Number(id)).includes(Number(t.id))
+        ))
+        // I tavoli nascosti restano fuori anche quando "mostra nascosti" è
+        // attivo: il backend calcola i limiti sulla capienza reale del turno,
+        // e barra e tacca devono raccontare la stessa cosa.
+        .filter(t => !hiddenTableIds.has(t.id));
+      const totalTables = roomTables.length;
+      const busyTables = roomTables.filter(t => getOccupierForTable(t.id)).length;
+      const totalSeats = roomTables.reduce((sum, t) => sum + (Number(t.seats) || 0), 0);
+      const busySeats = guestsByRoomId.get(room.id) || 0;
+      const cap = capByRoomId.get(Number(room.id)) ?? null;
+      const useSeats = cap?.basis === 'SEATS';
+      const total = useSeats ? totalSeats : totalTables;
+      const busy = useSeats ? busySeats : busyTables;
+      const percent = total > 0 ? Math.min(100, Math.round((busy / total) * 100)) : 0;
+      roomFillById.set(room.id, {
+        percent,
+        label: `${busy}/${total} ${useSeats ? 'coperti' : 'tavoli'} (${percent}%)`,
+        capPercent: cap?.percent ?? null,
+        overCap: cap ? percent >= cap.percent : false,
+      });
+    }
+    const activeRoomFill = typeof activeMapRoomId === 'number' ? roomFillById.get(activeMapRoomId) : undefined;
+
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
     // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
     //  - auto: tidy flowing rows via computeAutoLayout, shaped to the canvas
@@ -3655,9 +3739,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               const roomGuests = guestsByRoomId.get(room.id) || 0;
               const isActive = activeMapRoomId === room.id;
               const isClosedForShift = closedRoomIdsForShift.has(room.id);
+              const fill = roomFillById.get(room.id);
+              const fillTitle = fill
+                ? `${room.name} — ${fill.label}${fill.capPercent !== null ? ` · limite web ${fill.capPercent}%${fill.overCap ? ' (superato: le prenotazioni web arrivano da confermare)' : ''}` : ''}`
+                : room.name;
               return (
                 <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
-                  title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : room.name}
+                  title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : fillTitle}
                   className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
                     isActive
                       ? isClosedForShift
@@ -3669,6 +3757,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   }`}>
                   {isClosedForShift && <DoorClosed size={14} />}
                   <span>{room.name}</span>
+                  {fill && !isClosedForShift && (
+                    <RoomOccupancyMeter
+                      percent={fill.percent}
+                      capPercent={fill.capPercent}
+                      onBrand={isActive}
+                      className="w-8 flex-shrink-0"
+                    />
+                  )}
                   {roomGuests > 0 && (
                     <span
                       className={`inline-flex items-center justify-center min-w-[22px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold tabular ${
@@ -3732,7 +3828,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
               <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
               <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+              <RoomOccupancyMeter
+                percent={activeRoomFill?.percent ?? occupancyPercentage}
+                capPercent={activeRoomFill?.capPercent ?? null}
+                className="w-16 flex-shrink-0"
+              />
             </div>
+            {activeRoomFill?.overCap && (
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300"
+                title={`Sala oltre il limite del ${activeRoomFill.capPercent}%: le prenotazioni web e telefoniche non assegnano più tavoli qui da sole.`}
+              >
+                Oltre il limite web
+              </span>
+            )}
           </div>
         </div>
 
@@ -3766,6 +3875,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
             <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
             <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
+            <RoomOccupancyMeter
+              percent={activeRoomFill?.percent ?? occupancyPercentage}
+              capPercent={activeRoomFill?.capPercent ?? null}
+              className="w-12 flex-shrink-0"
+            />
           </div>
         </div>
 

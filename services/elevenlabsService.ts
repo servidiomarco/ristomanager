@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
+import { getCappedRoomIds, pickSelfServiceTable } from './roomOccupancyService.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -501,6 +502,8 @@ export interface AvailabilityResult {
  * Free-table breakdown for the given date+shift, split by room location
  * (INDOOR/OUTDOOR). Excludes:
  *   - Tables in closed rooms
+ *   - Tables in rooms that already hit their self-service occupancy cap
+ *     (Settings → Canali di prenotazione)
  *   - Tables already assigned to a non-cancelled reservation that date+shift
  *   - Tables whose seats are below requested guest count
  *
@@ -509,12 +512,14 @@ export interface AvailabilityResult {
  */
 export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
     const { date, shift, guests, location_preference } = input;
+    const cappedRooms = await getCappedRoomIds(date, shift);
 
     const breakdown = await queryWithRetry(`
         SELECT r.location AS location, COUNT(*)::int AS free
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
+          AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
               SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
           )
@@ -535,7 +540,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
         GROUP BY r.location
-    `, [guests, date, shift]);
+    `, [guests, date, shift, cappedRooms]);
 
     let freeIndoor = 0;
     let freeOutdoor = 0;
@@ -573,11 +578,14 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
     }
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
+    // I cap si misurano per turno: l'altro turno ha la sua occupazione.
+    const cappedRoomsAlt = await getCappedRoomIds(date, otherShift);
     const altResult = await queryWithRetry(`
         SELECT COUNT(*)::int AS free
         FROM tables t
         JOIN rooms r ON t.room_id = r.id
         WHERE r.is_closed = false
+          AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
               SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
           )
@@ -597,7 +605,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
               WHERE tm.date = $2 AND tm.shift = $3
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
-    `, [guests, date, otherShift]);
+    `, [guests, date, otherShift, cappedRoomsAlt]);
     const altFree = altResult.rows[0]?.free ?? 0;
 
     if (altFree > 0) {
@@ -654,9 +662,11 @@ export interface VoiceReservationOutput {
 
 /**
  * Pick the smallest free table that fits `guests` on the given date+shift,
- * restricted to `locationPreference` when provided. Returns null if nothing
- * matches — the caller saves the reservation with table_id=NULL so a human
- * can place it manually.
+ * restricted to `locationPreference` when provided. Rooms already at their
+ * self-service occupancy cap are skipped, so a voice booking can't land in
+ * the room the operator meant to protect. Returns null if nothing matches —
+ * the caller saves the reservation with table_id=NULL so a human can place
+ * it manually.
  */
 async function pickAutoAssignTable(
     date: string,
@@ -664,41 +674,9 @@ async function pickAutoAssignTable(
     guests: number,
     locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const params: any[] = [guests, date, shift];
-    let locationFilter = '';
-    if (locationPreference) {
-        params.push(locationPreference);
-        locationFilter = ` AND r.location = $${params.length}`;
-    }
-    const result = await queryWithRetry(`
-        SELECT t.id, t.name, r.name AS room_name, r.location
-        FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
-          AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
-          )
-          AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
-          )
-          AND t.seats >= $1
-          ${locationFilter}
-          AND NOT EXISTS (
-              SELECT 1 FROM reservations res
-              WHERE res.table_id = t.id
-                AND DATE(res.reservation_time) = $2
-                AND res.shift = $3
-                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
-                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
-          )
-        ORDER BY t.seats ASC, t.id ASC
-        LIMIT 1
-    `, params);
-    return result.rows[0] ?? null;
+    const picked = await pickSelfServiceTable(date, shift, guests, { location: locationPreference });
+    if (!picked) return null;
+    return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
 
 /**

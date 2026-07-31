@@ -90,6 +90,13 @@ import {
     formatItalianDateReadback,
     spellItalianPhoneDigits,
 } from './services/elevenlabsService.js';
+import {
+    ROOM_OCCUPANCY_CAPS_KEY,
+    RoomOccupancyCap,
+    getRoomOccupancyCaps,
+    computeRoomOccupancy,
+    pickSelfServiceTable,
+} from './services/roomOccupancyService.js';
 import { toTitleCase } from './utils/text.js';
 import {
     getAvailableSlots,
@@ -1897,8 +1904,10 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     // If found and we have a phone, send the WhatsApp recap.
     try {
         const linked = await queryWithRetry(
+            // Sala sì, tavolo no: i messaggi al cliente non nominano mai il
+            // tavolo assegnato (dato operativo, cambia fino all'arrivo).
             `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests,
-                    t.name AS table_name, rm.name AS room_name
+                    rm.name AS room_name
              FROM voice_calls vc
              JOIN reservations r ON r.id = vc.reservation_id
              LEFT JOIN tables t ON t.id = r.table_id
@@ -10551,8 +10560,12 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
 // Build the booking-confirmation message. Includes full name, date, time,
 // party size and (when known) the room — the data points the guest needs to
 // verify the booking. Shared by the manual /confirm-whatsapp endpoint, the
-// auto-fire on PENDING→CONFIRMED in PUT /reservations/:id, and the
-// voice-agent post-call.
+// auto-fire on PENDING→CONFIRMED in PUT /reservations/:id, the auto-confirmed
+// web bookings and the voice-agent post-call.
+//
+// Il tavolo assegnato non entra MAI in questo messaggio: è un dato operativo
+// che lo staff sposta fino all'ultimo, e comunicarlo crea solo aspettative da
+// smentire all'arrivo. Al cliente basta la sala.
 function buildConfirmationMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
@@ -13152,11 +13165,12 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
 
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getRoomOccupancyCaps(),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
@@ -13165,6 +13179,7 @@ app.get('/settings/channels', authenticate, async (_req, res) => {
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            room_occupancy_caps: roomCaps,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -13235,6 +13250,59 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
         updates.push({ key: PUBLIC_BOOKINGS_BLOCKS_KEY, column: 'text_value', value: JSON.stringify(deduped) });
     }
 
+    if (body.room_occupancy_caps !== undefined) {
+        if (!Array.isArray(body.room_occupancy_caps)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'room_occupancy_caps must be an array',
+            });
+        }
+        const normalizedCaps: RoomOccupancyCap[] = [];
+        const seenRooms = new Set<number>();
+        for (const entry of body.room_occupancy_caps) {
+            if (!entry || typeof entry !== 'object') {
+                return res.status(400).json({ error: 'invalid_value', message: 'Each room cap entry must be an object' });
+            }
+            const roomId = Number(entry.room_id);
+            const percent = Number(entry.percent);
+            const basis = String(entry.basis ?? 'TABLES').trim().toUpperCase();
+            if (!Number.isInteger(roomId) || roomId <= 0) {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap room_id must be a positive integer (got "${entry.room_id}")` });
+            }
+            if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap percent must be an integer between 1 and 100 (got "${entry.percent}")` });
+            }
+            if (basis !== 'TABLES' && basis !== 'SEATS') {
+                return res.status(400).json({ error: 'invalid_value', message: `Cap basis must be TABLES or SEATS (got "${entry.basis}")` });
+            }
+            // Last write wins on duplicates so the UI never has to dedupe.
+            if (seenRooms.has(roomId)) {
+                const idx = normalizedCaps.findIndex(c => c.room_id === roomId);
+                normalizedCaps[idx] = { room_id: roomId, percent, basis };
+                continue;
+            }
+            seenRooms.add(roomId);
+            normalizedCaps.push({ room_id: roomId, percent, basis });
+        }
+        // Reject caps pointing at rooms that no longer exist: a stale entry
+        // would silently never apply and the operator would think it does.
+        if (normalizedCaps.length > 0) {
+            try {
+                const known = await queryWithRetry('SELECT id FROM rooms WHERE id = ANY($1::int[])', [normalizedCaps.map(c => c.room_id)]);
+                const knownIds = new Set<number>(known.rows.map((r: any) => Number(r.id)));
+                const unknown = normalizedCaps.filter(c => !knownIds.has(c.room_id)).map(c => c.room_id);
+                if (unknown.length > 0) {
+                    return res.status(400).json({ error: 'invalid_value', message: `Sale inesistenti: ${unknown.join(', ')}` });
+                }
+            } catch (err) {
+                console.error('Error validating room occupancy caps:', err);
+                return res.status(500).json({ error: 'Failed to validate room occupancy caps' });
+            }
+        }
+        normalizedCaps.sort((a, b) => a.room_id - b.room_id);
+        updates.push({ key: ROOM_OCCUPANCY_CAPS_KEY, column: 'text_value', value: JSON.stringify(normalizedCaps) });
+    }
+
     if (body.voice_bookings_suspension_schedule !== undefined) {
         if (!Array.isArray(body.voice_bookings_suspension_schedule)) {
             return res.status(400).json({
@@ -13286,11 +13354,12 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getRoomOccupancyCaps(),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         res.json({
@@ -13298,10 +13367,60 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            room_occupancy_caps: roomCaps,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);
         res.status(500).json({ error: 'Failed to update channel settings' });
+    }
+});
+
+// Live occupancy per room, used by Settings → Canali di prenotazione to show
+// the operator how full each sala is right now against its configured cap.
+// Read-only: no side effects, safe for any authenticated user to poll.
+app.get('/settings/rooms-occupancy', authenticate, async (req, res) => {
+    const dateParam = typeof req.query.date === 'string' ? req.query.date : '';
+    const date = ISO_DATE_RE.test(dateParam)
+        ? dateParam
+        : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+    try {
+        const [lunch, dinner] = await Promise.all([
+            computeRoomOccupancy(date, Shift.LUNCH),
+            computeRoomOccupancy(date, Shift.DINNER),
+        ]);
+        // One row per room carrying both shifts: the settings card renders a
+        // single line per sala, so joining here keeps the UI dumb.
+        const dinnerById = new Map(dinner.map(r => [r.room_id, r]));
+        const rooms = lunch.map(r => ({
+            room_id: r.room_id,
+            room_name: r.room_name,
+            is_closed: r.is_closed,
+            capacity_tables: r.capacity_tables,
+            capacity_seats: r.capacity_seats,
+            lunch: {
+                used_tables: r.used_tables,
+                used_seats: r.used_seats,
+                percent_tables: r.percent_tables,
+                percent_seats: r.percent_seats,
+                at_cap: r.at_cap,
+                closed_for_shift: r.closed_for_shift,
+            },
+            dinner: (() => {
+                const d = dinnerById.get(r.room_id);
+                return {
+                    used_tables: d?.used_tables ?? 0,
+                    used_seats: d?.used_seats ?? 0,
+                    percent_tables: d?.percent_tables ?? 0,
+                    percent_seats: d?.percent_seats ?? 0,
+                    at_cap: d?.at_cap ?? false,
+                    closed_for_shift: d?.closed_for_shift ?? false,
+                };
+            })(),
+        }));
+        res.json({ date, rooms });
+    } catch (err) {
+        console.error('Error fetching room occupancy:', err);
+        res.status(500).json({ error: 'Failed to fetch room occupancy' });
     }
 });
 
@@ -14522,6 +14641,9 @@ app.get('/public/rooms', async (req, res) => {
     }
 
     try {
+        // Le sale oltre il limite di occupazione restano prenotabili dal web:
+        // cambia solo che la richiesta non viene confermata in automatico ma
+        // passa dallo staff (vedi POST /public/reservations).
         const result = await queryWithRetry(
             `SELECT r.id, r.name
              FROM rooms r
@@ -14702,6 +14824,49 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         const consentHealth = hasHealthData ? true : null;
         const consentUpdatedAt = hasHealthData ? new Date().toISOString() : null;
 
+        // Caparra automatica: letta PRIMA dell'inserimento perché decide anche
+        // se la prenotazione può essere confermata subito. Finché la caparra
+        // non è pagata il tavolo non è garantito, quindi in quel caso la
+        // richiesta resta PENDING e la conferma arriva col pagamento.
+        let autoDepositEnabled = false;
+        let autoDepositMinGuests = 9;
+        try {
+            const cfgRow = await queryWithRetry(
+                `SELECT auto_deposit_enabled, auto_deposit_min_guests
+                   FROM integration_settings WHERE provider = 'revolut'`
+            );
+            if (cfgRow.rows[0]) {
+                autoDepositEnabled = Boolean(cfgRow.rows[0].auto_deposit_enabled);
+                const n = Number(cfgRow.rows[0].auto_deposit_min_guests);
+                if (Number.isInteger(n) && n >= 1) autoDepositMinGuests = n;
+            }
+        } catch (err) {
+            console.warn('[public-booking] auto-deposit config lookup failed:', (err as any)?.message || err);
+        }
+        const depositRequired = autoDepositEnabled
+            && guestsNum >= autoDepositMinGuests
+            && (await isPaymentConfigured());
+
+        // Conferma automatica: se la sala è ancora sotto il proprio limite di
+        // occupazione assegniamo il tavolo e confermiamo subito; se il limite
+        // è già stato superato (o non c'è un tavolo libero) la richiesta resta
+        // PENDING e la conferma lo staff, come prima. Con una sala richiesta
+        // cerchiamo solo lì — dirottare il cliente in un'altra sala senza
+        // dirglielo sarebbe peggio di farlo confermare a mano.
+        let autoTable: Awaited<ReturnType<typeof pickSelfServiceTable>> = null;
+        if (!depositRequired) {
+            try {
+                autoTable = await pickSelfServiceTable(date, shift as Shift, Math.trunc(guestsNum), {
+                    roomId: requestedRoomId && Number.isFinite(requestedRoomId) ? Math.trunc(requestedRoomId) : null,
+                });
+            } catch (err) {
+                // Un errore qui non deve far perdere la prenotazione: si
+                // degrada al flusso manuale di sempre.
+                console.error('[public-booking] auto-assign lookup failed:', (err as any)?.message || err);
+            }
+        }
+        const autoConfirmed = autoTable !== null;
+
         const result = await queryWithRetry(
             `INSERT INTO reservations (
                 customer_name, reservation_time, shift, guests, children,
@@ -14709,11 +14874,40 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 reservation_status, source, requires_review,
                 consent_data_health, consent_updated_at
             )
-            VALUES ($1, $2, $3, $4, 0, NULL, $5, $6, $7, 'PENDING', 'WAITING', 'PENDING', 'GOOGLE', true, $8, $9)
+            VALUES ($1, $2, $3, $4, 0, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9)
             RETURNING *`,
-            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164, consentHealth, consentUpdatedAt]
+            [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
+             consentHealth, consentUpdatedAt,
+             autoTable?.id ?? null,
+             autoConfirmed ? 'CONFIRMED' : 'PENDING',
+             !autoConfirmed]
         );
         const created = result.rows[0];
+
+        // Guardia anti-doppia-assegnazione: pick e INSERT non sono atomici,
+        // quindi due richieste simultanee possono scegliere lo stesso tavolo.
+        // Se succede molliamo il tavolo e torniamo al flusso manuale: meglio
+        // una conferma in meno che due clienti sullo stesso tavolo.
+        if (autoConfirmed && autoTable) {
+            const clash = await findTableConflicts(date, shift as string, [autoTable.id], {
+                excludeReservationId: created.id,
+            });
+            if (clash.length > 0) {
+                console.warn('[public-booking] auto-assign race, reverting to manual review', {
+                    reservation_id: created.id, table_id: autoTable.id,
+                });
+                const reverted = await queryWithRetry(
+                    `UPDATE reservations
+                     SET table_id = NULL, reservation_status = 'PENDING', requires_review = true
+                     WHERE id = $1 RETURNING *`,
+                    [created.id]
+                );
+                Object.assign(created, reverted.rows[0]);
+                autoTable = null;
+            }
+        }
+        // Da qui in poi conta lo stato effettivamente salvato.
+        const confirmedNow = created.reservation_status === 'CONFIRMED';
 
         // Auto-save the booker into the rubrica so the contact appears even if
         // staff never edit this booking from the internal app. Skipped for
@@ -14730,20 +14924,25 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
-                title: 'Nuova richiesta prenotazione',
+                title: confirmedNow ? 'Prenotazione web confermata' : 'Nuova richiesta prenotazione',
                 body: `${toTitleCase(customer_name)} · ${guestsNum} ospiti · ${date} ${time}`,
                 url: `/?view=RESERVATIONS&reservationId=${created.id}`,
                 tag: `pending-${created.id}`,
             }
         ).catch(err => console.error('Push (public booking) failed:', err));
 
-        // Fire-and-forget acknowledgement to the customer. The booking is
-        // PENDING — staff still need to confirm — so wording reflects that.
+        // Fire-and-forget acknowledgement to the customer: "confermata" quando
+        // il tavolo è stato assegnato in automatico, "richiesta ricevuta"
+        // quando tocca allo staff.
         // Channel priority: Twilio SMS (while Meta verification is pending) →
         // Meta WhatsApp template → generic WhatsApp text fallback.
         const [yyyy, mm, dd] = date.split('-');
         const dateLabel = `${dd}/${mm}/${yyyy}`;
         const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
+        // Sala, mai il tavolo: il numero di tavolo è un dato operativo, lo
+        // staff lo sposta di continuo e comunicarlo al cliente crea solo
+        // aspettative da smentire all'arrivo.
+        const ackRoomName = autoTable?.room_name ?? requestedRoomName;
 
         // Large web bookings require a €10/person deposit before the table
         // is guaranteed. The enabled toggle and guest threshold live on the
@@ -14755,22 +14954,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        let autoDepositEnabled = false;
-        let autoDepositMinGuests = 9;
-        try {
-            const cfgRow = await queryWithRetry(
-                `SELECT auto_deposit_enabled, auto_deposit_min_guests
-                   FROM integration_settings WHERE provider = 'revolut'`
-            );
-            if (cfgRow.rows[0]) {
-                autoDepositEnabled = Boolean(cfgRow.rows[0].auto_deposit_enabled);
-                const n = Number(cfgRow.rows[0].auto_deposit_min_guests);
-                if (Number.isInteger(n) && n >= 1) autoDepositMinGuests = n;
-            }
-        } catch (err) {
-            console.warn('[public-booking] auto-deposit config lookup failed:', (err as any)?.message || err);
-        }
-        if (autoDepositEnabled && guestsNum >= autoDepositMinGuests && (await isPaymentConfigured())) {
+        if (depositRequired) {
             depositAmountCents = guestsNum * 1000; // €10 per person, in cents
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
@@ -14815,7 +14999,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 depositAmountCents,
                 depositCheckoutUrl
               )
-            : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
+            : confirmedNow
+                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName)
+                : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         // Pick the right WA template for the branch. When either env var is
         // unset, or the deposit token can't be parsed, waTemplate stays
@@ -14830,6 +15016,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 depositAmountCents,
                 depositCheckoutUrl
             );
+        } else if (confirmedNow) {
+            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum);
         } else {
             const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
             if (bookingReceivedSid) {
@@ -14862,13 +15050,20 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                     if (!(await isSmtpConfigured())) return;
                     const emailStatus = await getSmtpConfigStatus().catch(() => null);
                     const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
-                    const { subject, text, html } = buildBookingRequestEmail({
-                        customerName: toTitleCase(customer_name),
-                        reservationTime: reservation_time,
-                        guests: guestsNum,
-                        roomName: requestedRoomName,
-                        notes: userNote,
-                    });
+                    const { subject, text, html } = confirmedNow
+                        ? buildBookingConfirmationEmail({
+                            customerName: toTitleCase(customer_name),
+                            reservationTime: created.reservation_time,
+                            guests: guestsNum,
+                            roomName: ackRoomName,
+                          })
+                        : buildBookingRequestEmail({
+                            customerName: toTitleCase(customer_name),
+                            reservationTime: reservation_time,
+                            guests: guestsNum,
+                            roomName: requestedRoomName,
+                            notes: userNote,
+                          });
                     try {
                         const sent = await sendMail({ to: emailNormalized, subject, text, html });
                         await logOutboundEmail({
@@ -14896,7 +15091,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             })();
         }
 
-        res.status(201).json({ ok: true, id: created.id });
+        // `confirmed` pilota il testo della schermata finale del form. `room`
+        // è il nome della sala (mai il tavolo: vedi ackRoomName).
+        res.status(201).json({ ok: true, id: created.id, confirmed: confirmedNow, room: ackRoomName || null });
     } catch (err: any) {
         console.error('POST /public/reservations error:', err);
         res.status(500).json({ error: 'internal_error' });
