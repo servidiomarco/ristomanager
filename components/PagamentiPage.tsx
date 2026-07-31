@@ -138,20 +138,34 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
     }).catch(() => {});
   };
 
-  // Ask the server to poll Revolut for the authoritative order state and
-  // apply the transition — used when a webhook was missed (e.g. this order
-  // was created before the webhook endpoint existed).
+  // Human name of the gateway that owns this payment, for button labels and
+  // feedback. Never hardcode "Revolut" here: a payment carries its own
+  // provider and SumUp orders are reconciled and refunded the same way.
+  const providerName =
+    payment.provider === 'sumup' ? 'SumUp'
+    : payment.provider === 'revolut' ? 'Revolut'
+    : (payment.provider || 'il gateway');
+
+  // Ask the server to poll the gateway for the authoritative order state and
+  // apply the transition — used when a webhook was missed or never delivered
+  // (SumUp's status callback is unsigned and best-effort).
   const canReconcile =
     hasPermission('payments:full') &&
-    payment.provider === 'revolut' &&
+    ['revolut', 'sumup'].includes(payment.provider) &&
     !!payment.provider_order_id;
 
-  // Refund of a bill-split payment (PR 6). Two-tap confirm, then the server
-  // refunds via Revolut and reopens the bill if it was settled. Covers the
-  // overpayment case too (payment completed after the claim was abandoned).
+  // Two refund paths, both two-tap confirm:
+  //  - bill-split payments go through the split endpoint, which also reopens
+  //    the bill if the refund drops it below its total (and covers the
+  //    overpayment case, i.e. paid after the claim was abandoned);
+  //  - standalone payments (deposits / payment links) refund the order
+  //    directly. This second path used to be missing entirely, so a paid
+  //    deposit had no way back.
+  const isSplitPayment = payment.table_bill_split_id != null;
   const canRefund =
     hasPermission('payments:full') &&
-    payment.table_bill_split_id != null &&
+    ['revolut', 'sumup'].includes(payment.provider) &&
+    !!payment.provider_order_id &&
     ['COMPLETED', 'PAID'].includes((payment.status || '').toUpperCase());
 
   const refund = async () => {
@@ -160,11 +174,20 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
     setRefunding(true);
     setReconcileFeedback(null);
     try {
-      const result = await billsApiService.refundSplit(payment.table_bill_split_id as number);
-      const updated = { ...payment, status: 'REFUNDED' };
-      setPayment(updated);
-      onReconciled?.(updated);
-      setReconcileFeedback({ kind: 'ok', text: result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito' });
+      if (isSplitPayment) {
+        const result = await billsApiService.refundSplit(payment.table_bill_split_id as number);
+        const updated = { ...payment, status: 'REFUNDED' };
+        setPayment(updated);
+        onReconciled?.(updated);
+        setReconcileFeedback({ kind: 'ok', text: result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito' });
+      } else {
+        const result = await paymentsApiService.refund(payment.id);
+        if (result.payment_request) {
+          setPayment(result.payment_request);
+          onReconciled?.(result.payment_request);
+        }
+        setReconcileFeedback({ kind: 'ok', text: `Rimborso eseguito su ${providerName}` });
+      }
     } catch (err) {
       setReconcileFeedback({ kind: 'err', text: (err as Error).message });
     } finally {
@@ -183,7 +206,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
         onReconciled?.(result.payment_request);
       }
       if (result.changed) {
-        setReconcileFeedback({ kind: 'ok', text: `Stato aggiornato da Revolut: ${result.revolut_state ?? '—'}` });
+        setReconcileFeedback({ kind: 'ok', text: `Stato aggiornato da ${providerName}: ${result.provider_state ?? result.revolut_state ?? '—'}` });
       } else if (result.message) {
         setReconcileFeedback({ kind: 'info', text: result.message });
       } else {
@@ -240,7 +263,7 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
                     onClick={reconcile}
                     disabled={reconciling}
                     className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    title="Interroga Revolut e aggiorna lo stato"
+                    title={`Interroga ${providerName} e aggiorna lo stato`}
                   >
                     {reconciling
                       ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -258,7 +281,9 @@ const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onCl
                         ? 'bg-rose-600 text-white hover:bg-rose-700'
                         : 'border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:hover:bg-rose-500/10'
                     }`}
-                    title={refundArmed ? 'Clicca di nuovo per confermare' : 'Rimborsa la quota via Revolut'}
+                    title={refundArmed
+                      ? 'Clicca di nuovo per confermare'
+                      : `Rimborsa ${isSplitPayment ? 'la quota' : 'il pagamento'} via ${providerName}`}
                   >
                     {refunding
                       ? <Loader2 className="h-3 w-3 animate-spin" />

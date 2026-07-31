@@ -5351,6 +5351,92 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
     }
 });
 
+// Full refund of a standalone payment request (a deposit / payment link).
+// Split-linked payments deliberately go through /bills/splits/:id/refund
+// instead: that path also reopens the bill when the refund drops it below
+// its total, which this one has no business doing.
+//
+// Refund FIRST, then write: if the gateway refuses, nothing changed on our
+// side. If the write failed after a successful refund the gateway's records
+// remain the source of truth, and a retry is a no-op for us because the row
+// is no longer in a refundable state.
+app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const paymentRes = await queryWithRetry(
+            `SELECT id, provider, provider_order_id, status, amount_cents, currency,
+                    description, reservation_id, table_bill_split_id
+             FROM payment_requests WHERE id = $1`,
+            [id]
+        );
+        if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Pagamento non trovato' });
+        const payment = paymentRes.rows[0];
+
+        if (payment.table_bill_split_id != null) {
+            return res.status(409).json({
+                error: 'Questo pagamento è una quota di un conto: usa il rimborso della quota, che riapre anche il conto',
+            });
+        }
+        if (!['COMPLETED', 'PAID'].includes(String(payment.status || '').toUpperCase())) {
+            return res.status(409).json({ error: `Il pagamento non è rimborsabile (stato ${payment.status})` });
+        }
+        if (!isPaymentProvider(payment.provider) || !payment.provider_order_id) {
+            return res.status(409).json({ error: 'Nessun ordine di pagamento collegato' });
+        }
+        const provider: PaymentProvider = payment.provider;
+        if (!(await isProviderConfigured(provider))) {
+            return res.status(503).json({ error: `${providerLabel(provider)} non è configurato (credenziali mancanti)` });
+        }
+
+        try {
+            await refundPaymentOrder(
+                provider,
+                payment.provider_order_id,
+                payment.amount_cents,
+                payment.currency || 'EUR',
+                payment.description || `Rimborso pagamento #${payment.id}`
+            );
+        } catch (err: any) {
+            console.error('[payments] refund failed:', err?.message || err);
+            return res.status(502).json({
+                error: `Rimborso ${providerLabel(provider)} fallito`,
+                detail: err?.message || String(err),
+            });
+        }
+
+        const updated = await queryWithRetry(
+            `UPDATE payment_requests
+             SET status = 'REFUNDED', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [payment.id]
+        );
+        const row = updated.rows[0];
+
+        try { socketService?.broadcastToAll('paymentRequest:updated', row); }
+        catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
+
+        if (req.user) {
+            LogService.logActivity(
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.RESERVATION,
+                payment.reservation_id ?? undefined,
+                `Rimborso ${formatEuroMinor(payment.amount_cents)} (${providerLabel(provider)}) — pagamento #${payment.id}`
+            );
+        }
+
+        res.json({ ok: true, payment_request: row });
+    } catch (err: any) {
+        console.error('POST /payments/:id/refund error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 
 // Tables - require authentication
 app.get('/tables', authenticate, async (req, res) => {
@@ -6514,6 +6600,68 @@ const startBillSplitReconcileScheduler = () => {
     };
     tick();
     setInterval(tick, 60 * 1000);
+};
+
+// Payment reconcile: every 2 minutes, poll the gateway for payment_requests
+// that are still open and apply whatever transition the provider reports.
+//
+// Why this exists: webhooks are best-effort. Revolut signs and retries its
+// own, but SumUp's notification is an unsigned POST to the `return_url` we
+// register per checkout, with no delivery guarantee — and one that never
+// arrives (bad CRM_APP_BASE_URL, a deploy restart mid-delivery, a network
+// blip) used to leave a *paid* deposit stuck on "In attesa" forever, because
+// nothing else ever re-checked it. Bill splits already had a poller; standalone
+// payment links had none. This closes that gap for both providers.
+//
+// Split-linked rows are skipped: startBillSplitReconcileScheduler owns those,
+// and its cancel-before-abandon logic must stay the only writer for them.
+// Bounded by age and row count so the job stays cheap: abandoned checkouts
+// nobody ever paid shouldn't be polled forever.
+const startPaymentRequestReconcileScheduler = () => {
+    const tick = async () => {
+        try {
+            const open = await queryWithRetry(
+                `SELECT id, provider, provider_order_id
+                 FROM payment_requests
+                 WHERE status IN ('PENDING', 'AUTHORISED')
+                   AND provider_order_id IS NOT NULL
+                   AND table_bill_split_id IS NULL
+                   AND created_at > NOW() - INTERVAL '3 days'
+                 ORDER BY created_at DESC
+                 LIMIT 25`
+            );
+            if (open.rowCount === 0) return;
+
+            for (const row of open.rows) {
+                if (!isPaymentProvider(row.provider)) continue;
+                const provider: PaymentProvider = row.provider;
+                try {
+                    if (!(await isProviderConfigured(provider))) continue;
+                    const fetched = await fetchPaymentOrder(provider, row.provider_order_id);
+                    if (!fetched.event) continue; // still genuinely pending
+                    const result = await applyPaymentOrderTransition(
+                        row.provider_order_id,
+                        fetched.event,
+                        transitionMetadata(provider, fetched.raw)
+                    );
+                    if (result.status === 'applied') {
+                        console.log(
+                            `[payment-reconcile] payment ${row.id} (${provider}) → ${fetched.state}`,
+                            result.isFirstCompletion ? '(first completion)' : ''
+                        );
+                    }
+                } catch (err: any) {
+                    // Gateway unreachable or the order is unknown to it: log
+                    // and move on, the next tick retries.
+                    console.warn(`[payment-reconcile] payment ${row.id} lookup failed:`, err?.message || err);
+                }
+            }
+        } catch (err: any) {
+            console.error('[payment-reconcile] scheduler tick failed:', err?.message || err);
+        }
+    };
+    tick();
+    setInterval(tick, 2 * 60 * 1000);
 };
 
 // Registry of hardcoded handlers for reminders that need dynamic content
@@ -17636,6 +17784,12 @@ const startServer = async () => {
                         console.log('✅ Bill split reconcile scheduler started (60s)');
                     } catch (schedErr) {
                         console.error('Bill split reconcile scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startPaymentRequestReconcileScheduler();
+                        console.log('✅ Payment reconcile scheduler started (2 min)');
+                    } catch (schedErr) {
+                        console.error('Payment reconcile scheduler failed to start:', schedErr);
                     }
                     try {
                         // Fire-and-forget: the IMAP handshake can take seconds

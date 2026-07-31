@@ -178,7 +178,14 @@ function normaliseCreationStatus(provider: PaymentProvider, state: string | unde
 // SumUp before believing anything, because the callback body is unsigned.
 async function sumupReturnUrl(): Promise<string | undefined> {
     const secret = await getSumUpCallbackSecret();
-    if (!secret) return undefined;
+    if (!secret) {
+        // Not fatal — the reconcile poller will still settle the payment —
+        // but it costs us real-time updates, so make it visible in the logs
+        // instead of silently degrading.
+        console.warn('[SumUp] no callback secret configured: creating checkout without return_url, '
+            + 'status will only update via the reconcile job');
+        return undefined;
+    }
     return `${publicBaseUrl()}/webhook/sumup/${encodeURIComponent(secret)}`;
 }
 
@@ -187,13 +194,14 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
     const provider = await getActivePaymentProvider();
 
     if (provider === 'sumup') {
+        const returnUrl = await sumupReturnUrl();
         const checkout = await sumupCreateCheckout({
             amount: input.amount,
             currency: input.currency,
             description: input.description,
             reference: input.reference,
             redirectUrl: input.redirectUrl,
-            returnUrl: await sumupReturnUrl(),
+            returnUrl,
         });
         return {
             provider,
@@ -203,6 +211,10 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
             metadata: {
                 sumup_checkout_reference: checkout.checkout_reference || null,
                 sumup_merchant_code: checkout.merchant_code || null,
+                // Recorded so a payment stuck on PENDING can be diagnosed
+                // without guessing: if this points at the wrong host, the
+                // callback never had a chance and CRM_APP_BASE_URL is wrong.
+                sumup_return_url: returnUrl || null,
             },
         };
     }

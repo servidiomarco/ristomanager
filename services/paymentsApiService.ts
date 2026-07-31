@@ -173,6 +173,18 @@ class PaymentsApiService {
     });
   }
 
+  /**
+   * Full refund of a standalone payment (deposit / payment link). Bill-split
+   * payments use billsApiService.refundSplit instead — that endpoint also
+   * reopens the bill when the refund drops it below its total.
+   */
+  async refund(id: number): Promise<{ ok: true; payment_request: PaymentRequest }> {
+    return apiRequest<{ ok: true; payment_request: PaymentRequest }>(`${API_URL}/payments/${id}/refund`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** Paid payments nobody has looked at yet — feeds the sidebar badge. */
   async unseenCount(): Promise<{ count: number }> {
     return apiRequest<{ count: number }>(`${API_URL}/payments/unseen-count`, {
