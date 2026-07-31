@@ -10567,6 +10567,13 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
 // Il tavolo assegnato non entra MAI in questo messaggio: è un dato operativo
 // che lo staff sposta fino all'ultimo, e comunicarlo crea solo aspettative da
 // smentire all'arrivo. Al cliente basta la sala.
+// Link "indicazioni stradali" verso la scheda Google del ristorante. Il
+// destination include nome E indirizzo completo: esiste un omonimo "Vecchio
+// Frantoio" a Castagneto Carducci, e il solo nome potrebbe risolvere lì.
+// Lo stesso URL è nel bottone del template WhatsApp booking_confirmed_v2:
+// cambiarlo qui NON aggiorna il template, che richiede una nuova approvazione Meta.
+const MAPS_DIRECTIONS_URL = 'https://www.google.com/maps/dir/?api=1&destination=Il+Vecchio+Frantoio%2C+Contrada+Lago+25%2C+87020+Buonvicino+CS';
+
 function buildConfirmationMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
@@ -10586,7 +10593,9 @@ function buildConfirmationMessage(
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
     const roomPart = room ? ` in ${room}` : '';
-    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
+    // Il link resta in coda al messaggio senza punto finale: alcuni client SMS
+    // includono la punteggiatura adiacente nell'URL e il link si rompe.
+    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto! Come raggiungerci: ${MAPS_DIRECTIONS_URL}`;
 }
 
 // Resolve the room name for a reservation, preferring the actually assigned
@@ -10902,6 +10911,8 @@ function contactBlockHtml(): string {
             📞 <a href="tel:+390985876578" style="color:#065f46;text-decoration:none;">0985 876578</a>
             &nbsp;·&nbsp;
             💬 <a href="https://wa.me/393895916494" style="color:#065f46;text-decoration:none;">WhatsApp +39 389 591 6494</a>
+            &nbsp;·&nbsp;
+            📍 <a href="${MAPS_DIRECTIONS_URL}" style="color:#065f46;text-decoration:none;">Come raggiungerci</a>
           </td>
         </tr>
       </table>
