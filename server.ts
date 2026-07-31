@@ -10567,11 +10567,13 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
 // Il tavolo assegnato non entra MAI in questo messaggio: è un dato operativo
 // che lo staff sposta fino all'ultimo, e comunicarlo crea solo aspettative da
 // smentire all'arrivo. Al cliente basta la sala.
-// Link "indicazioni stradali" verso la scheda Google del ristorante. Il
-// destination include nome E indirizzo completo: esiste un omonimo "Vecchio
-// Frantoio" a Castagneto Carducci, e il solo nome potrebbe risolvere lì.
-// Lo stesso URL è nel bottone del template WhatsApp booking_confirmed_v2:
-// cambiarlo qui NON aggiorna il template, che richiede una nuova approvazione Meta.
+// Link "indicazioni stradali" verso la scheda Google del ristorante — da
+// sostituire col link breve del profilo Google Business (maps.app.goo.gl/…)
+// appena disponibile. Il fallback canonico include nome E indirizzo completo:
+// esiste un omonimo "Vecchio Frantoio" a Castagneto Carducci, e il solo nome
+// potrebbe risolvere lì. Lo stesso URL va nel bottone del template WhatsApp
+// booking_confirmed: cambiarlo qui NON aggiorna il template, che richiede un
+// nuovo template e una nuova approvazione Meta.
 const MAPS_DIRECTIONS_URL = 'https://www.google.com/maps/dir/?api=1&destination=Il+Vecchio+Frantoio%2C+Contrada+Lago+25%2C+87020+Buonvicino+CS';
 
 function buildConfirmationMessage(
@@ -10593,9 +10595,11 @@ function buildConfirmationMessage(
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
     const roomPart = room ? ` in ${room}` : '';
-    // Il link resta in coda al messaggio senza punto finale: alcuni client SMS
-    // includono la punteggiatura adiacente nell'URL e il link si rompe.
-    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto! Come raggiungerci: ${MAPS_DIRECTIONS_URL}`;
+    // Niente link Maps qui: questo testo finisce negli SMS e il link — anche
+    // in forma maps.app.goo.gl — porta il messaggio tipico oltre i 160
+    // caratteri, cioè a 2 segmenti fatturati. Il link viaggia solo dove non
+    // costa: bottone del template WhatsApp e email (contactBlockHtml).
+    return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
 // Resolve the room name for a reservation, preferring the actually assigned
@@ -11064,7 +11068,7 @@ function buildBookingConfirmationEmail(params: {
     const name = toTitleCase(params.customerName);
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
     const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
-    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: 0985 876578\n• WhatsApp: +39 389 591 6494`;
+    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: 0985 876578\n• WhatsApp: +39 389 591 6494\n• Come raggiungerci: ${MAPS_DIRECTIONS_URL}`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
