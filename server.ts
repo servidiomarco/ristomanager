@@ -96,6 +96,7 @@ import {
     getRoomOccupancyCaps,
     computeRoomOccupancy,
     pickSelfServiceTable,
+    listBookableRooms,
 } from './services/roomOccupancyService.js';
 import { toTitleCase } from './utils/text.js';
 import {
@@ -14641,35 +14642,10 @@ app.get('/public/rooms', async (req, res) => {
     }
 
     try {
-        // Le sale oltre il limite di occupazione restano prenotabili dal web:
-        // cambia solo che la richiesta non viene confermata in automatico ma
-        // passa dallo staff (vedi POST /public/reservations).
-        const result = await queryWithRetry(
-            `SELECT r.id, r.name
-             FROM rooms r
-             WHERE r.is_closed = false
-               AND r.id NOT IN (
-                   SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
-               )
-               AND EXISTS (
-                   SELECT 1 FROM tables t
-                   WHERE t.room_id = r.id
-                     AND t.seats >= $1
-                     AND t.id NOT IN (
-                         SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
-                     )
-                     AND NOT EXISTS (
-                         SELECT 1 FROM reservations res
-                         WHERE res.table_id = t.id
-                           AND DATE(res.reservation_time) = $2
-                           AND res.shift = $3
-                           AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
-                     )
-               )
-             ORDER BY r.name ASC`,
-            [Math.trunc(guests), date, shift]
-        );
-        res.json({ rooms: result.rows });
+        // Stessa definizione di "tavolo assegnabile" usata dall'assegnazione
+        // automatica: una sala compare solo se ha davvero qualcosa da dare.
+        const rooms = await listBookableRooms(date, shift as Shift, guests);
+        res.json({ rooms });
     } catch (err: any) {
         console.error('GET /public/rooms error:', err);
         res.status(500).json({ error: 'Failed to load rooms' });

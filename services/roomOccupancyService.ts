@@ -240,6 +240,75 @@ export interface SelfServiceTablePick {
 }
 
 /**
+ * Cosa rende un tavolo davvero assegnabile per un (data, turno): non nascosto,
+ * senza prenotazioni vive, non accorpato e non tenuto da un banchetto.
+ *
+ * Vive qui in un pezzo solo perché la usano sia chi elenca le sale prenotabili
+ * sia chi sceglie il tavolo. Quando erano due query separate divergevano: la
+ * lista sale ignorava accorpamenti e banchetti e proponeva online sale in
+ * realtà piene.
+ *
+ * `alias` è l'alias del tavolo nella query chiamante; `dateParam`/`shiftParam`
+ * sono le posizioni dei placeholder di data e turno.
+ */
+function assignableTableSql(alias: string, dateParam: number, shiftParam: number): string {
+    const d = `$${dateParam}`;
+    const s = `$${shiftParam}`;
+    return `
+              ${alias}.id NOT IN (
+                  SELECT table_id FROM table_hidden_overrides WHERE date = ${d} AND shift = ${s}
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM reservations res
+                  WHERE res.table_id = ${alias}.id
+                    AND DATE(res.reservation_time) = ${d}
+                    AND res.shift = ${s}
+                    AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM table_merges tm
+                  WHERE tm.date = ${d} AND tm.shift = ${s}
+                    AND (tm.primary_id = ${alias}.id OR ${alias}.id = ANY(tm.merged_ids))
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM banquet_menus b
+                  WHERE b.event_date = ${d} AND b.shift = ${s} AND ${alias}.id = ANY(b.table_ids)
+              )`;
+}
+
+/**
+ * Sale che il modulo /prenota può proporre: aperte per quel turno e con almeno
+ * un tavolo davvero assegnabile per quel numero di ospiti.
+ *
+ * Le sale oltre il limite di occupazione restano nell'elenco — sono ancora
+ * prenotabili, cambia solo che la richiesta la conferma lo staff invece del
+ * sistema (vedi POST /public/reservations). Una sala piena, invece, sparisce:
+ * non ha niente da dare a nessuno dei due.
+ */
+export async function listBookableRooms(
+    date: string,
+    shift: Shift,
+    guests: number
+): Promise<Array<{ id: number; name: string }>> {
+    const result = await queryWithRetry(`
+        SELECT r.id, r.name
+        FROM rooms r
+        WHERE r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND EXISTS (
+              SELECT 1 FROM tables t
+              WHERE t.room_id = r.id
+                AND t.seats >= $1
+                AND ${assignableTableSql('t', 2, 3)}
+          )
+        ORDER BY r.name ASC
+    `, [Math.trunc(guests), date, shift]);
+    return result.rows;
+}
+
+/**
  * Il tavolo libero più piccolo che regge `guests`, saltando le sale che hanno
  * già raggiunto il proprio limite di occupazione. È il punto di assegnazione
  * condiviso dai due canali self-service: l'agente vocale (che filtra per
@@ -278,26 +347,8 @@ export async function pickSelfServiceTable(
           AND r.id NOT IN (
               SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
           )
-          AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
-          )
           AND t.seats >= $1
-          AND NOT EXISTS (
-              SELECT 1 FROM reservations res
-              WHERE res.table_id = t.id
-                AND DATE(res.reservation_time) = $2
-                AND res.shift = $3
-                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
-                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM banquet_menus b
-              WHERE b.event_date = $2 AND b.shift = $3 AND t.id = ANY(b.table_ids)
-          )
+          AND ${assignableTableSql('t', 2, 3)}
         ORDER BY t.seats ASC, t.id ASC
         LIMIT 1
     `, params);

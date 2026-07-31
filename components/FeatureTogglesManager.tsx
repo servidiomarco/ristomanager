@@ -12,6 +12,7 @@ import {
     PublicBookingBlock,
     RoomOccupancyCap,
     RoomOccupancyRow,
+    RoomOccupancyShift,
     getRoomsOccupancy,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -294,6 +295,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         } finally {
             setSavingBlocks(false);
         }
+    };
+
+    // Riempimento di un turno: "chiusa" quando la sala non apre (per sempre o
+    // solo per quel turno), altrimenti la percentuale, in ambra se ha già
+    // raggiunto il limite.
+    const renderShiftFill = (shift: RoomOccupancyShift, percent: number, roomClosed: boolean) => {
+        if (roomClosed || shift.closed_for_shift) {
+            return <em className="not-italic text-[var(--color-fg-subtle)]">chiusa</em>;
+        }
+        return (
+            <strong className={shift.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>
+                {percent}%
+            </strong>
+        );
     };
 
     // Limiti per sala: il draft contiene una riga solo per le sale limitate.
@@ -729,6 +744,12 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                 const useSeats = cap?.basis === 'SEATS';
                                 const lunchPct = useSeats ? room.lunch.percent_seats : room.lunch.percent_tables;
                                 const dinnerPct = useSeats ? room.dinner.percent_seats : room.dinner.percent_tables;
+                                // Un turno chiuso non è "al limite": non accetta niente da nessun
+                                // canale, quindi non ha senso segnalarlo come soglia raggiunta.
+                                const atCapShifts = [
+                                    room.lunch.at_cap && !room.lunch.closed_for_shift && !room.is_closed ? 'pranzo' : null,
+                                    room.dinner.at_cap && !room.dinner.closed_for_shift && !room.is_closed ? 'cena' : null,
+                                ].filter(Boolean) as string[];
                                 return (
                                     <div
                                         key={room.room_id}
@@ -745,12 +766,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
                                                     {room.capacity_tables} tavoli · {room.capacity_seats} coperti
                                                 </p>
+                                                {/* Un turno chiuso dice "chiusa", non "0%": a zero per cento
+                                                    la sala sembra vuota e disponibile, ed è l'opposto. */}
                                                 <p className="text-[12px] text-[var(--color-fg-subtle)] mt-0.5">
-                                                    Oggi — pranzo <strong className={room.lunch.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>{lunchPct}%</strong>
-                                                    {' · '}cena <strong className={room.dinner.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>{dinnerPct}%</strong>
-                                                    {(room.lunch.at_cap || room.dinner.at_cap) && (
+                                                    Oggi — pranzo {renderShiftFill(room.lunch, lunchPct, room.is_closed)}
+                                                    {' · '}cena {renderShiftFill(room.dinner, dinnerPct, room.is_closed)}
+                                                    {atCapShifts.length > 0 && (
                                                         <span className="ml-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-                                                            limite raggiunto ({[room.lunch.at_cap ? 'pranzo' : null, room.dinner.at_cap ? 'cena' : null].filter(Boolean).join(' e ')})
+                                                            limite raggiunto ({atCapShifts.join(' e ')})
                                                         </span>
                                                     )}
                                                 </p>
