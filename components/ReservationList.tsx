@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -554,14 +554,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   }, [currentTime, selectedDate]);
 
+  // Rooms closed only for the focused (date, shift) — the per-shift closures
+  // managed from Sala & Tavoli. Kept separate from the extended
+  // `rooms.is_closed` flag; `isRoomClosed` below combines the two. Loaded and
+  // kept in sync further down, once focalDate/focalShift are known.
+  const [closedRoomIdsForShift, setClosedRoomIdsForShift] = useState<Set<number>>(new Set());
+
+  // A room is closed when it is either closed for an extended period or just
+  // for the date+shift currently in focus.
+  const isRoomClosed = (room: Room) => room.is_closed === true || closedRoomIdsForShift.has(room.id);
+  const isRoomIdClosed = (roomId: number | null | undefined) =>
+    roomId != null && rooms.some(r => r.id === roomId && isRoomClosed(r));
+
   useEffect(() => {
-    const openRoomsList = rooms.filter(r => !r.is_closed);
+    const openRoomsList = rooms.filter(r => !isRoomClosed(r));
     if (openRoomsList.length === 0) return;
-    const currentIsClosed = activeMapRoomId !== 'ALL' && rooms.find(r => r.id === activeMapRoomId)?.is_closed;
-    if (activeMapRoomId === 'ALL' || currentIsClosed) {
+    const current = activeMapRoomId !== 'ALL' ? rooms.find(r => r.id === activeMapRoomId) : undefined;
+    if (activeMapRoomId === 'ALL' || (current && isRoomClosed(current))) {
       setActiveMapRoomId(openRoomsList[0].id);
     }
-  }, [rooms, activeMapRoomId]);
+  }, [rooms, activeMapRoomId, closedRoomIdsForShift]);
 
   // Auto-switch from 'ALL' to a specific shift (no 'Tutte' option in UI)
   useEffect(() => {
@@ -1017,7 +1029,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (preferredTableId == null) return null;
     const table = tables.find(t => t.id === preferredTableId);
     if (!table) return null;
-    if (rooms.some(r => r.id === (table as any).room_id && r.is_closed)) return null;
+    if (isRoomIdClosed((table as any).room_id)) return null;
     const guests = Number(formData.guests || 0);
     const cap = Number((table as any).max_seats ?? table.seats ?? 0);
     if (guests > 0 && cap > 0 && guests > cap) return null;
@@ -1199,6 +1211,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { cancelled = true; };
   }, [focalDate, focalShift]);
 
+  // Per-shift room closures for the focused date+shift, so a room closed from
+  // Sala & Tavoli reads as closed here too (greyed tab, no new assignments).
+  useEffect(() => {
+    let cancelled = false;
+    getRoomClosed(focalDate, focalShift)
+      .then(rows => { if (!cancelled) setClosedRoomIdsForShift(new Set(rows.map(r => r.room_id))); })
+      .catch(err => {
+        console.error('Error fetching closed rooms:', err);
+        if (!cancelled) setClosedRoomIdsForShift(new Set());
+      });
+    return () => { cancelled = true; };
+  }, [focalDate, focalShift]);
+
   const { socket, isConnected } = useSocket();
 
   useEffect(() => {
@@ -1252,6 +1277,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => {
       socket.off('tableHidden:created', onCreated);
       socket.off('tableHidden:deleted', onDeleted);
+    };
+  }, [socket, focalDate, focalShift]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const matches = (c: RoomClosedOverride) => c.date === focalDate && c.shift === focalShift;
+    const onCreated = (c: RoomClosedOverride) => {
+      if (!matches(c)) return;
+      setClosedRoomIdsForShift(prev => {
+        const next = new Set(prev);
+        next.add(c.room_id);
+        return next;
+      });
+    };
+    const onDeleted = (c: RoomClosedOverride) => {
+      if (!matches(c)) return;
+      setClosedRoomIdsForShift(prev => {
+        const next = new Set(prev);
+        next.delete(c.room_id);
+        return next;
+      });
+    };
+    socket.on('roomClosed:created', onCreated);
+    socket.on('roomClosed:deleted', onDeleted);
+    return () => {
+      socket.off('roomClosed:created', onCreated);
+      socket.off('roomClosed:deleted', onDeleted);
     };
   }, [socket, focalDate, focalShift]);
 
@@ -2249,7 +2301,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       // Check if table is too small
       if (table.seats < guests) {
-          const closedRoomIds = new Set(rooms.filter(r => r.is_closed).map(r => r.id));
+          const closedRoomIds = new Set(rooms.filter(isRoomClosed).map(r => r.id));
           // Find suitable alternatives (use displayTables for current shift context)
           const suitableTables = displayTables
               .filter(t => !closedRoomIds.has(t.room_id))
@@ -2322,7 +2374,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleAutoAssign = () => {
       if (!formData.guests || !formData.reservation_time || !formData.shift) return;
 
-      const closedRoomIds = new Set(rooms.filter(r => r.is_closed).map(r => r.id));
+      const closedRoomIds = new Set(rooms.filter(isRoomClosed).map(r => r.id));
 
       const availableTables = displayTables
         .filter(t => !closedRoomIds.has(t.room_id))
@@ -2560,7 +2612,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  const openRooms = rooms.filter(r => !r.is_closed);
+  // Rooms available for new assignments: neither closed for an extended
+  // period nor closed for the date+shift currently in focus.
+  const openRooms = rooms.filter(r => !isRoomClosed(r));
   const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
 
@@ -3577,16 +3631,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {/* Room tabs + stats */}
         <div className="flex items-center gap-3 px-3 py-2 border-b border-[var(--color-line)]">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+            {/* Extended-closed rooms drop out entirely; rooms closed just for
+                this date+shift stay visible but greyed out (same treatment as
+                Sala & Tavoli), so the closure is obvious and the host can still
+                open the room to move guests already seated there. */}
             {rooms.filter(r => !r.is_closed).map(room => {
               const roomGuests = guestsByRoomId.get(room.id) || 0;
               const isActive = activeMapRoomId === room.id;
+              const isClosedForShift = closedRoomIdsForShift.has(room.id);
               return (
                 <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
+                  title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : room.name}
                   className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
                     isActive
-                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                      ? isClosedForShift
+                        ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
+                        : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                      : isClosedForShift
+                        ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] border-[var(--color-line)] line-through hover:bg-[var(--color-surface-hover)]'
+                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
                   }`}>
+                  {isClosedForShift && <DoorClosed size={14} />}
                   <span>{room.name}</span>
                   {roomGuests > 0 && (
                     <span
@@ -3654,6 +3719,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Per-shift closure banner for the room currently shown on the map */}
+        {typeof activeMapRoomId === 'number' && closedRoomIdsForShift.has(activeMapRoomId) && (
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300">
+            <DoorClosed size={14} className="flex-shrink-0" />
+            <span>Sala chiusa per questo turno</span>
+          </div>
+        )}
 
         {/* Mobile stats */}
         <div className="md:hidden px-3 py-2 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
