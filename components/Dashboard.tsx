@@ -763,7 +763,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   }, [selectedDate]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8">
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
@@ -794,34 +794,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
         const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
         const serviceLabel = inLunch
-          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
+          ? { text: 'Servizio pranzo · In corso', dot: 'bg-[var(--ds-seated-solid)]', color: 'text-[var(--ds-seated-text)]' }
           : inDinner
-          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
-          : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
+          ? { text: 'Servizio cena · In corso', dot: 'bg-[var(--ds-seated-solid)]', color: 'text-[var(--ds-seated-text)]' }
+          : { text: 'Fuori servizio', dot: 'bg-[var(--ds-text-subtle)]', color: 'text-[var(--ds-text-muted)]' };
         return (
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
             <div className="flex items-center justify-between w-full gap-4">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
-                  <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-block w-2 h-2 rounded-full ${serviceLabel.dot}`} aria-hidden />
+                  <span className={`text-[13px] font-medium ${serviceLabel.color}`}>
                     {serviceLabel.text}
                   </span>
                 </div>
-                <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
+                <h1 className="text-[22px] sm:text-[28px] lg:text-[34px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.02em] leading-[1.1] mt-2">
                   {greeting}, {firstName}.
                 </h1>
               </div>
               {todaysTodos.length > 0 && (
                 <button
                   onClick={() => onNavigateToAttivita?.()}
-                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex-shrink-0 self-end"
+                  className="inline-flex items-center gap-2 md:gap-2.5 pl-4 md:pl-5 pr-1.5 h-11 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors flex-shrink-0 self-center"
                   aria-label={`${todaysTodos.length} attività di oggi`}
                   title="Attività di oggi"
                 >
-                  <ListTodo className="h-7 w-7" />
-                  <span className="hidden md:inline text-sm font-semibold">Attività di oggi</span>
-                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-violet-500 text-[#ffffff]">
+                  {/* Mobile shows the icon; md+ shows the full label. */}
+                  <ListTodo className="h-5 w-5 md:hidden text-[var(--ds-text-secondary)]" aria-hidden />
+                  <span className="hidden md:inline text-[15px] font-semibold tracking-[-0.01em] whitespace-nowrap">Attività di oggi</span>
+                  {/* KNOWN DEVIATION (see spec §3.3): white on amber is 3.25:1. At 16px
+                      regular this is below WCAG's large-text threshold, so it does not meet
+                      the 4.5:1 AA floor. Deliberate product decision. Switching the
+                      foreground to var(--ds-pending-fg) would restore 5.80:1 at any size. */}
+                  <span className="inline-flex items-center justify-center min-w-[32px] h-8 px-2 rounded-full text-[16px] font-normal leading-none tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
                     {todaysTodos.length}
                   </span>
                 </button>
@@ -829,7 +834,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
-            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden">
+            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden bg-[var(--ds-surface)] rounded-[24px] shadow-[var(--ds-shadow-card)] p-3">
               <DateNavigator
                 value={selectedDateStr}
                 onChange={(dateOnly) => {
@@ -840,27 +845,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               />
 
               {/* Separate time chip — always shows live current time */}
-              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 h-10 flex-shrink-0">
-                <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+              <div className="flex items-center gap-1.5 bg-[var(--ds-surface-row)] rounded-full px-4 h-10 flex-shrink-0">
+                <Clock className="h-4 w-4 text-[var(--ds-text-secondary)] flex-shrink-0" />
+                <span className="tabular-nums font-semibold text-[15px] tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">
                   {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
 
               {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
-              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5">
                 {([
-                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                   { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
                   { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                 ] as const).map(opt => (
                   <button
                     key={opt.key}
                     onClick={() => setGlobalShiftFilter(opt.key)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-[15px] font-medium transition-colors flex-1 md:flex-none ${
                       globalShiftFilter === opt.key
-                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                     }`}
                     aria-pressed={globalShiftFilter === opt.key}
                   >

@@ -1131,7 +1131,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Portrait orientation gate — block floor plan on mobile portrait
   if (isPortrait) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-[var(--color-surface-2)]">
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
         <RotateCw className="h-16 w-16 text-[var(--color-fg-subtle)] mb-6" />
         <h2 className="text-lg font-semibold text-[var(--color-fg)] mb-2">Ruota il dispositivo</h2>
         <p className="text-sm text-[var(--color-fg-muted)] max-w-[280px]">

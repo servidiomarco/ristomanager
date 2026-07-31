@@ -54,7 +54,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
     <button
       type="button"
       onClick={goToToday}
-      className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] border border-[var(--color-line)] text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0"
+      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-surface-row)] text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0"
     >
       <RotateCcw className="h-3 w-3" />
       Torna a oggi
@@ -68,7 +68,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Giorno precedente"
-          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
+          className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -93,22 +93,24 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           />
           <div
             aria-hidden="true"
-            className={`pointer-events-none w-full h-10 px-3 rounded-full border bg-[var(--color-surface)] peer-hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center gap-2 ${
-              isToday ? 'border-[var(--color-line)]' : 'border-[var(--color-line-strong)]'
+            className={`pointer-events-none w-full h-10 px-4 rounded-full transition-colors flex items-center justify-center gap-2 ${
+              isToday
+                ? 'bg-[var(--ds-surface-row)]'
+                : 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]'
             }`}
           >
             <Calendar
-              className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-fg)]'}`}
+              className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-primary)]'}`}
             />
             {relativeLabel ? (
               <span className="flex items-baseline gap-1.5 min-w-0">
-                <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">{relativeLabel}</span>
-                <span className="text-[11px] text-[var(--color-fg-muted)] capitalize whitespace-nowrap hidden sm:inline">
+                <span className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">{relativeLabel}</span>
+                <span className="text-[13px] text-[var(--ds-text-secondary)] capitalize whitespace-nowrap hidden sm:inline">
                   · {formatDateShort(selectedDate)}
                 </span>
               </span>
             ) : (
-              <span className="text-sm font-semibold text-[var(--color-fg)] capitalize whitespace-nowrap truncate">
+              <span className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] capitalize whitespace-nowrap truncate">
                 {formatDateShort(selectedDate)}
               </span>
             )}
@@ -119,7 +121,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(1)}
           aria-label="Giorno successivo"
-          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] active:scale-[0.96] transition-all flex items-center justify-center"
+          className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center"
         >
           <ChevronRight className="h-4 w-4" />
         </button>

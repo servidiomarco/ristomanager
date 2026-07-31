@@ -722,3 +722,111 @@ body {
   .no-print { display: none !important; }
   @page { size: A4; margin: 1.5cm; }
 }
+
+/* ===========================================================================
+   Design-system tokens (docs/risto-design-system.md)
+   ---------------------------------------------------------------------------
+   Scoped with a --ds- prefix and ADDITIVE ONLY: nothing here overrides an
+   existing --color-* token, so screens that have not been migrated yet keep
+   their current appearance. Chrome (sidebar + top bar) consumes these first;
+   the remaining surfaces adopt them screen by screen during the revamp.
+   ========================================================================= */
+:root {
+  /* Surface depth — canvas is DARKER than cards in light mode */
+  --ds-canvas: #ededf1;
+  --ds-surface: #ffffff;
+  --ds-surface-row: #f4f4f5;
+
+  --ds-border: #e9e9ec;
+  --ds-border-strong: #d4d4d8;
+  --ds-border-focus: #5250c9;
+
+  --ds-text-primary: #111113;
+  --ds-text-secondary: #52525b;
+  --ds-text-muted: #6f6f78;    /* 4.98:1 on surface, 4.53:1 on surface-row — clears AA on BOTH */
+  --ds-text-subtle: #a1a1aa;   /* disabled / decorative only — not AA */
+
+  --ds-action-bg: #111827;
+  --ds-action-bg-hover: #000000;
+  --ds-action-fg: #ffffff;
+
+  /* Semantic families — only the slots chrome needs today */
+  --ds-seated-tint: #ecf5ef;
+  --ds-seated-text: #275238;
+  --ds-seated-solid: #316648;
+  --ds-pending-tint: #fbf4e6;
+  --ds-pending-text: #7a5807;
+  --ds-pending-solid: #b8860b;   /* the reference gold — paired with DARK text (5.80:1).
+                                    White on this fill is only 3.25:1, so amber solids take
+                                    near-black text in BOTH themes. See spec §3.3. */
+  --ds-pending-fg: #111113;
+
+  --ds-arriving-tint: #f0f0fb;
+  --ds-arriving-text: #4340a8;
+  --ds-arriving-solid: #5250c9;
+  --ds-arriving-fg: #ffffff;
+
+  --ds-critical-tint: #fceeeb;
+  --ds-critical-text: #82251b;
+  --ds-critical-solid: #c0392b;
+  --ds-critical-fg: #ffffff;
+
+  /* Elevation — light mode lifts with soft, wide shadows */
+  --ds-backdrop: rgba(11, 11, 13, 0.40);
+
+  --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
+  --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);
+}
+
+.dark {
+  /* Depth runs the OTHER way in dark: canvas darkest, each nested level
+     steps lighter. Shadows barely register, so borders carry the boundaries. */
+  --ds-canvas: #0b0b0d;
+  --ds-surface: #141417;
+  --ds-surface-row: #1c1c20;
+
+  --ds-border: #2a2a30;
+  --ds-border-strong: #3a3a42;
+  --ds-border-focus: #8481de;
+
+  --ds-text-primary: #f4f4f5;
+  --ds-text-secondary: #c4c4cc;
+  --ds-text-muted: #9a9aa4;
+  --ds-text-subtle: #6e6e78;
+
+  /* Primary action inverts — near-black would vanish on a dark canvas */
+  --ds-action-bg: #f4f4f5;
+  --ds-action-bg-hover: #ffffff;
+  --ds-action-fg: #111113;
+
+  --ds-seated-tint: #16271d;
+  --ds-seated-text: #7fb795;
+  --ds-seated-solid: #3e7d5a;
+  --ds-pending-tint: #2a2109;
+  --ds-pending-text: #dfbb6e;
+  --ds-pending-solid: #b8860b;
+  --ds-pending-fg: #111113;
+
+  --ds-arriving-tint: #1a1a2e;
+  --ds-arriving-text: #a5a3e8;
+  --ds-arriving-solid: #5250c9;
+  --ds-arriving-fg: #ffffff;
+
+  --ds-critical-tint: #2b1310;
+  --ds-critical-text: #e28878;
+  --ds-critical-solid: #c0392b;
+  --ds-critical-fg: #ffffff;
+
+  --ds-backdrop: rgba(0, 0, 0, 0.60);
+
+  --ds-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --ds-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Clearance for the floating mobile bottom bar: bar height (68px) + its 12px
+   offset + the raised "+" overhang + the iOS safe-area inset. Exposed as a
+   variable so the bar, the scroll region and any sheet anchored above the bar
+   all derive from ONE number instead of drifting apart. */
+:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 104px); }
+.pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
+@media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
