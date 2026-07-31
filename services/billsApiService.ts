@@ -1,6 +1,7 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { TableBill, TableBillWithSplits } from '../types';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -45,13 +46,7 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetchWithAuth(url, options);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    // Keep the server's `detail` in the message: for a refused refund it
-    // carries the gateway's own explanation.
-    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
-    const err: any = new Error(errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage);
-    err.status = response.status;
-    err.data = errorData;
-    throw err;
+    throw buildApiError(response.status, errorData);
   }
   return response.json();
 };

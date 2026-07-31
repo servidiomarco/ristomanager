@@ -1,5 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -130,14 +131,7 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetchWithAuth(url, options);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    // Append `detail` like apiService does. Without it a refund refused by the
-    // gateway surfaced as a bare "Rimborso SumUp fallito", throwing away the
-    // one piece of information that says WHY it was refused.
-    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
-    const err: any = new Error(errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage);
-    err.status = response.status;
-    err.data = errorData;
-    throw err;
+    throw buildApiError(response.status, errorData);
   }
   return response.json();
 };

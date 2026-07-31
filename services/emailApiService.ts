@@ -1,5 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -69,7 +70,7 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetchWithAuth(url, options);
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(err.error || `Request failed with status ${response.status}`);
+    throw buildApiError(response.status, err);
   }
   return response.json();
 };

@@ -1,6 +1,7 @@
 import { TodoItem, TodoPriority, TodoCategory, UserRole } from '../types';
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
@@ -61,7 +62,7 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+    throw buildApiError(response.status, errorData);
   }
 
   if (expectJson) {

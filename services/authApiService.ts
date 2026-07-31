@@ -1,4 +1,5 @@
 import { User, UserRole, LoginCredentials } from '../types';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
@@ -270,7 +271,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch users' }));
-      throw new Error(error.error || 'Failed to fetch users');
+      throw buildApiError(response.status, error, 'Failed to fetch users');
     }
 
     return response.json();
@@ -282,7 +283,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch assignable users' }));
-      throw new Error(error.error || 'Failed to fetch assignable users');
+      throw buildApiError(response.status, error, 'Failed to fetch assignable users');
     }
 
     return response.json();
@@ -302,7 +303,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to create user' }));
-      throw new Error(error.error || 'Failed to create user');
+      throw buildApiError(response.status, error, 'Failed to create user');
     }
 
     return response.json();
@@ -323,7 +324,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to update user' }));
-      throw new Error(error.error || 'Failed to update user');
+      throw buildApiError(response.status, error, 'Failed to update user');
     }
 
     return response.json();
@@ -336,7 +337,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to delete user' }));
-      throw new Error(error.error || 'Failed to delete user');
+      throw buildApiError(response.status, error, 'Failed to delete user');
     }
   }
 
@@ -352,7 +353,7 @@ class AuthApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to update preferences' }));
-      throw new Error(error.error || 'Failed to update preferences');
+      throw buildApiError(response.status, error, 'Failed to update preferences');
     }
 
     const data = await response.json();

@@ -1,6 +1,7 @@
 import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
+import { buildApiError } from './apiError';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -69,12 +70,7 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    const baseMessage = errorData.error || `Request failed with status ${response.status}`;
-    const message = errorData.detail ? `${baseMessage}: ${errorData.detail}` : baseMessage;
-    const error = new Error(message) as Error & { status?: number; data?: any };
-    error.status = response.status;
-    error.data = errorData;
-    throw error;
+    throw buildApiError(response.status, errorData);
   }
 
   if (expectJson) {

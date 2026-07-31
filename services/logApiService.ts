@@ -1,5 +1,6 @@
 import { ActivityLog, LogFilters, ActivityStats } from '../types';
 import { authApiService } from './authApiService';
+import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
@@ -74,7 +75,7 @@ class LogApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch logs' }));
-      throw new Error(error.error || 'Failed to fetch logs');
+      throw buildApiError(response.status, error, 'Failed to fetch logs');
     }
 
     return response.json();
@@ -90,7 +91,7 @@ class LogApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch stats' }));
-      throw new Error(error.error || 'Failed to fetch stats');
+      throw buildApiError(response.status, error, 'Failed to fetch stats');
     }
 
     return response.json();
@@ -106,7 +107,7 @@ class LogApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to fetch users' }));
-      throw new Error(error.error || 'Failed to fetch users');
+      throw buildApiError(response.status, error, 'Failed to fetch users');
     }
 
     return response.json();
