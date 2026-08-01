@@ -10567,14 +10567,11 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
 // Il tavolo assegnato non entra MAI in questo messaggio: è un dato operativo
 // che lo staff sposta fino all'ultimo, e comunicarlo crea solo aspettative da
 // smentire all'arrivo. Al cliente basta la sala.
-// Link "indicazioni stradali" verso la scheda Google del ristorante — da
-// sostituire col link breve del profilo Google Business (maps.app.goo.gl/…)
-// appena disponibile. Il fallback canonico include nome E indirizzo completo:
-// esiste un omonimo "Vecchio Frantoio" a Castagneto Carducci, e il solo nome
-// potrebbe risolvere lì. Lo stesso URL va nel bottone del template WhatsApp
-// booking_confirmed: cambiarlo qui NON aggiorna il template, che richiede un
-// nuovo template e una nuova approvazione Meta.
-const MAPS_DIRECTIONS_URL = 'https://www.google.com/maps/dir/?api=1&destination=Il+Vecchio+Frantoio%2C+Contrada+Lago+25%2C+87020+Buonvicino+CS';
+// Link breve del profilo Google Business del ristorante (scheda "Vecchio
+// Frantoio", Buonvicino CS — entità /g/1tf45dt8). Lo stesso URL è nel bottone
+// del template WhatsApp booking_confirmed_v3: cambiarlo qui NON aggiorna il
+// template, che richiede un nuovo template e una nuova approvazione Meta.
+const MAPS_DIRECTIONS_URL = 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8';
 
 function buildConfirmationMessage(
     customerName: string | null | undefined,
