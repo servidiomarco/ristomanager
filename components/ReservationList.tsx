@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { ModalShell, FormCard, Field, Stepper, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton } from './ds';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -2181,6 +2182,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast('Copia non riuscita', 'error');
     }
   };
+
+  const closeBookingForm = useCallback(() => {
+    setIsFormOpen(false);
+    setMergeMode(false);
+    setSelectedTablesForMerge([]);
+  }, []);
 
   const handleRestoreDraft = () => {
       const existing = loadDraft<{
@@ -4503,36 +4510,71 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       </React.Fragment>
       )}
       {/* Reservation Modal */}
-      {isFormOpen && createPortal(
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}>
-            <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-5xl overflow-hidden flex flex-col h-full sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}</h3>
-                    <button onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                        <X className="h-5 w-5" />
-                    </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
+      {isFormOpen && (
+        <ModalShell
+          open={isFormOpen}
+          onClose={closeBookingForm}
+          size="fluid"
+          title={isEditing ? 'Modifica prenotazione' : 'Nuova prenotazione'}
+          subtitle={(() => {
+            // Restates what's about to be booked, straight from the form state,
+            // so the header stays true as the fields change.
+            const iso = formData.reservation_time?.split('T')[0];
+            const time = formData.reservation_time?.split('T')[1]?.substring(0, 5);
+            const asDay = (d: Date) =>
+              `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const now = new Date();
+            const todayIso = asDay(now);
+            const tomorrowIso = asDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+            const [yy, mm, dd] = (iso || '').split('-').map(Number);
+            const dayLabel = !iso ? null
+              : iso === todayIso ? 'Oggi'
+              : iso === tomorrowIso ? 'Domani'
+              : new Date(yy, mm - 1, dd).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' });
+            const shiftLabel = formData.shift === Shift.LUNCH ? 'Pranzo' : formData.shift === Shift.DINNER ? 'Cena' : null;
+            return [dayLabel, shiftLabel, time].filter(Boolean).join(' · ');
+          })()}
+          footer={
+            <>
+              {mergeMode && selectedTablesForMerge.length > 0 && (
+                <span className="rounded-full bg-[var(--ds-pending-tint)] px-3 py-1.5 text-center text-[13px] text-[var(--ds-pending-text)]">
+                  Conferma l'unione tavoli prima di salvare
+                </span>
+              )}
+              <button type="button" onClick={closeBookingForm} className={`w-full sm:w-auto ${dsButton.quiet}`}>
+                Annulla
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
+                className={`w-full sm:w-auto ${dsButton.primary}`}
+              >
+                {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isEditing ? 'Salva modifiche' : 'Crea prenotazione'}
+              </button>
+            </>
+          }
+        >
+                <div>
                     {matchedCustomerNoShows > 0 && (
-                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-rose-50 border border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30 rounded-xl flex items-start gap-3">
-                            <UserX className="h-5 w-5 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
+                        <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-4">
+                            <UserX className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-critical-text)]" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-rose-900 dark:text-rose-200">
+                                <p className="text-[15px] font-semibold text-[var(--ds-critical-text)]">
                                     Attenzione: cliente con {matchedCustomerNoShows} no-show
                                 </p>
-                                <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5">
+                                <p className="mt-0.5 text-[13px] text-[var(--ds-critical-text)]">
                                     Questo cliente non si è presentato {matchedCustomerNoShows === 1 ? 'una volta' : `${matchedCustomerNoShows} volte`} in passato.
                                 </p>
                             </div>
                         </div>
                     )}
                     {!isEditing && draftBanner && (
-                        <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl flex items-start gap-3">
-                            <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-pending-tint)] p-4">
+                            <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Bozza non salvata trovata</p>
-                                <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                                <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">Bozza non salvata trovata</p>
+                                <p className="mt-0.5 text-[13px] text-[var(--ds-pending-text)]">
                                     Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
                                 </p>
                             </div>
@@ -4540,137 +4582,89 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRestoreDraft}
-                                    className="px-3 py-1.5 bg-amber-600 text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-amber-700"
+                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-pending-solid)] px-3.5 text-[14px] font-semibold text-[var(--ds-pending-fg)] transition-all hover:brightness-95"
                                 >
                                     Riprendi
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleDiscardDraft}
-                                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100 dark:bg-[var(--color-surface-3)] dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-[var(--color-surface-hover)]"
+                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-surface)] px-3.5 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                 >
                                     Scarta
                                 </button>
                             </div>
                         </div>
                     )}
-                    <form id="reservation-form" onSubmit={handleSubmit} className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
+                    <form id="reservation-form" onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 p-4 sm:p-6 lg:grid-cols-12">
                         {/* Left Column: Details (5 cols) */}
-                        <div className="lg:col-span-5 space-y-5 sm:space-y-6">
-                            {/* Guests */}
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Numero Ospiti</label>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const newGuests = Math.max(1, (formData.guests || 2) - 1);
-                                            setFormData({...formData, guests: newGuests, children: Math.min(formData.children || 0, newGuests)});
-                                        }}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                                    >
-                                        −
-                                    </button>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        required
-                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.guests || ''}
-                                        onChange={e => {
-                                            const newGuests = parseInt(e.target.value) || undefined;
-                                            setFormData({...formData, guests: newGuests, children: newGuests != null ? Math.min(formData.children || 0, newGuests) : formData.children});
-                                        }}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, guests: (formData.guests || 2) + 1})}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Children */}
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Di cui Bambini</label>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, children: Math.max(0, (formData.children || 0) - 1)})}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-medium text-lg sm:text-xl hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                                    >
-                                        −
-                                    </button>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max={formData.guests || 0}
-                                        className="flex-1 min-w-0 rounded-md border border-[var(--color-line)] px-3 py-2 text-center text-lg sm:text-xl font-semibold focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
-                                        value={formData.children ?? 0}
-                                        onChange={e => {
-                                            const raw = parseInt(e.target.value) || 0;
-                                            const clamped = Math.max(0, Math.min(raw, formData.guests || 0));
-                                            setFormData({...formData, children: clamped});
-                                        }}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData({...formData, children: Math.min(formData.guests || 0, (formData.children || 0) + 1)})}
-                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] font-medium text-lg sm:text-xl hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Date & Shift */}
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Turno</label>
-                                    <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.LUNCH, reservation_time: `${currentDate}T13:00`, duration_minutes: defaultDurationForShift(Shift.LUNCH)});
-                                            }}
-                                            className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                                        >
-                                            <Sun className="h-3.5 w-3.5" /> Pranzo
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, shift: Shift.DINNER, reservation_time: `${currentDate}T20:00`, duration_minutes: defaultDurationForShift(Shift.DINNER)});
-                                            }}
-                                            className={`inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${formData.shift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                                        >
-                                            <Sunset className="h-3.5 w-3.5" /> Cena
-                                        </button>
-                                    </div>
-                                </div>
+                        <div className="lg:col-span-5 flex flex-col gap-5 min-w-0">
+                            <FormCard>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div className="overflow-hidden">
-                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Data</label>
+                                    <Field label="Numero ospiti">
+                                        <Stepper
+                                            value={formData.guests}
+                                            min={1}
+                                            required
+                                            ariaLabel="Numero ospiti"
+                                            onChange={next => setFormData({
+                                                ...formData,
+                                                guests: next,
+                                                children: next != null ? Math.min(formData.children || 0, next) : formData.children,
+                                            })}
+                                        />
+                                    </Field>
+                                    <Field label="Di cui bambini">
+                                        <Stepper
+                                            value={formData.children ?? 0}
+                                            min={0}
+                                            max={formData.guests || 0}
+                                            ariaLabel="Di cui bambini"
+                                            onChange={next => setFormData({ ...formData, children: next ?? 0 })}
+                                        />
+                                    </Field>
+                                </div>
+
+                                <div className="mt-5">
+                                    <Field label="Turno">
+                                        <SegmentedControl
+                                            ariaLabel="Turno"
+                                            value={formData.shift === Shift.LUNCH ? Shift.LUNCH : Shift.DINNER}
+                                            onChange={next => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                const isLunch = next === Shift.LUNCH;
+                                                setFormData({
+                                                    ...formData,
+                                                    shift: next,
+                                                    reservation_time: `${currentDate}T${isLunch ? '13:00' : '20:00'}`,
+                                                    duration_minutes: defaultDurationForShift(next),
+                                                });
+                                            }}
+                                            options={[
+                                                { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
+                                                { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+                                            ]}
+                                        />
+                                    </Field>
+                                </div>
+
+                                <div className="mt-5 grid grid-cols-2 gap-3">
+                                    <Field label="Data">
                                         <input
                                             type="date"
                                             required
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
+                                            className={dsInput}
                                             value={formData.reservation_time?.split('T')[0] || ''}
                                             onChange={e => {
                                                 const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
                                                 setFormData({...formData, reservation_time: `${e.target.value}T${currentTime}`});
                                             }}
                                         />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Ora</label>
+                                    </Field>
+                                    <Field label="Ora">
                                         <select
                                             required
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
+                                            className={dsSelect}
                                             value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
                                             onChange={e => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
@@ -4691,12 +4685,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 return options.map(s => <option key={s} value={s}>{s}</option>);
                                             })()}
                                         </select>
-                                    </div>
+                                    </Field>
                                 </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)]">Durata (min)</label>
-                                        {(() => {
+
+                                <div className="mt-5">
+                                    <Field
+                                        label="Durata"
+                                        aside={(() => {
                                             const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
                                             const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
                                             if (!start) return null;
@@ -4704,83 +4699,86 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             const hh = String(end.getHours()).padStart(2, '0');
                                             const mm = String(end.getMinutes()).padStart(2, '0');
                                             return (
-                                                <span className="text-[10px] text-[var(--color-fg-muted)] tabular-nums">
-                                                    Tavolo libero alle <span className="font-semibold text-[var(--color-fg)]">{hh}:{mm}</span>
+                                                <span className="tabular-nums">
+                                                    Tavolo libero alle <span className="font-semibold text-[var(--ds-text-primary)]">{hh}:{mm}</span>
                                                 </span>
                                             );
                                         })()}
-                                    </div>
-                                    <select
-                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors"
-                                        value={formData.duration_minutes ?? defaultDurationForShift(formData.shift)}
-                                        onChange={e => setFormData({ ...formData, duration_minutes: Number(e.target.value) })}
                                     >
-                                        {[45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 210, 240].map(min => {
-                                            const label = min < 60
-                                                ? `${min} min`
-                                                : min % 60 === 0
-                                                    ? `${min / 60}h`
-                                                    : `${Math.floor(min / 60)}h ${min % 60}`;
-                                            return <option key={min} value={min}>{label}</option>;
-                                        })}
-                                    </select>
-                                </div>
-                                {slotArrivalStats && (
-                                    <div>
-                                        <div className="flex items-center justify-between mb-1.5">
-                                            <label className="block text-xs font-medium text-[var(--color-fg-muted)]">Affluenza arrivi</label>
-                                            <div className="hidden sm:flex items-center gap-2 text-[10px] text-[var(--color-fg-muted)]">
-                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400" /> scarsa</span>
-                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400" /> media</span>
-                                                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-500" /> alta</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-1">
-                                            {slotArrivalStats.map(s => {
-                                                const bg = s.level === 'high' ? 'bg-rose-500'
-                                                    : s.level === 'medium' ? 'bg-amber-400'
-                                                    : s.level === 'low' ? 'bg-emerald-400'
-                                                    : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)]';
-                                                const isSelected = formData.reservation_time?.split('T')[1]?.substring(0, 5) === s.time;
-                                                return (
-                                                    <button
-                                                        type="button"
-                                                        key={s.time}
-                                                        onClick={() => {
-                                                            const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                            setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
-                                                        }}
-                                                        className={`flex-1 min-w-0 flex flex-col items-center rounded transition-opacity ${isSelected ? 'ring-2 ring-[var(--color-fg)] ring-offset-1 ring-offset-[var(--color-surface)]' : 'opacity-80 hover:opacity-100'}`}
-                                                        title={`${s.time} — ${s.guests} coperti`}
-                                                    >
-                                                        <div className={`w-full h-3 rounded-sm ${bg}`} />
-                                                        <div className="text-[9px] mt-0.5 text-[var(--color-fg-muted)] tabular-nums leading-tight">{s.time}</div>
-                                                        <div className="text-[10px] font-semibold text-[var(--color-fg)] tabular-nums leading-tight">{s.guests}</div>
-                                                    </button>
-                                                );
+                                        <select
+                                            className={dsSelect}
+                                            value={formData.duration_minutes ?? defaultDurationForShift(formData.shift)}
+                                            onChange={e => setFormData({ ...formData, duration_minutes: Number(e.target.value) })}
+                                        >
+                                            {[45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 210, 240].map(min => {
+                                                const label = min < 60
+                                                    ? `${min} min`
+                                                    : min % 60 === 0
+                                                        ? `${min / 60}h`
+                                                        : `${Math.floor(min / 60)}h ${min % 60}`;
+                                                return <option key={min} value={min}>{label}</option>;
                                             })}
-                                        </div>
+                                        </select>
+                                    </Field>
+                                </div>
+
+                                {slotArrivalStats && (
+                                    <div className="mt-5">
+                                        <Field
+                                            label="Affluenza arrivi"
+                                            aside={
+                                                <span className="hidden sm:inline-flex items-center gap-2.5">
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" /> scarsa</span>
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]" /> media</span>
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-critical-solid)]" /> alta</span>
+                                                </span>
+                                            }
+                                        >
+                                            <div className="flex gap-1">
+                                                {slotArrivalStats.map(s => {
+                                                    const bg = s.level === 'high' ? 'bg-[var(--ds-critical-solid)]'
+                                                        : s.level === 'medium' ? 'bg-[var(--ds-pending-solid)]'
+                                                        : s.level === 'low' ? 'bg-[var(--ds-seated-solid)]'
+                                                        : 'bg-[var(--ds-surface-row)]';
+                                                    const isSelected = formData.reservation_time?.split('T')[1]?.substring(0, 5) === s.time;
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            key={s.time}
+                                                            onClick={() => {
+                                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                                setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
+                                                            }}
+                                                            className={`flex min-w-0 flex-1 flex-col items-center rounded-[10px] px-1 py-1.5 transition-colors ${isSelected ? 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]' : 'hover:bg-[var(--ds-surface-row)]'}`}
+                                                            title={`${s.time} — ${s.guests} coperti`}
+                                                        >
+                                                            <div className={`h-2.5 w-full rounded-full ${bg}`} />
+                                                            <div className="mt-1 text-[11px] leading-tight tabular-nums text-[var(--ds-text-muted)]">{s.time}</div>
+                                                            <div className="text-[12px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">{s.guests}</div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </Field>
                                     </div>
                                 )}
-                            </div>
+                            </FormCard>
 
                             {/* Dettagli cliente — grouped in a fieldset so the legend
                                 sits on the border ("cuts" it) and gives visual
                                 weight to the block. Light grey fill + soft border
                                 separates it from the datetime / table pickers above
                                 without adding another card shadow. */}
-                            <fieldset className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-3)] px-4 pt-2 pb-4 space-y-4">
-                                <legend className="px-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">
-                                    Dettagli cliente
-                                </legend>
+                            <FormCard title="Dettagli cliente">
+                            <div className="flex flex-col gap-5">
                             {/* Customer Name with Voice Input */}
                             <div>
-                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Nome Cliente</label>
+                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Nome cliente</label>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 relative">
                                         <input
                                             required
-                                            className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                            className={dsInput}
                                             value={formData.customer_name}
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
@@ -4793,25 +4791,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             autoComplete="off"
                                         />
                                         {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
-                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                            <ul className="absolute left-0 right-0 z-30 mt-1.5 max-h-60 overflow-y-auto rounded-[14px] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-raised)]">
                                                 {customerSuggestions.map(c => (
                                                     <li key={c.id}>
                                                         <button
                                                             type="button"
                                                             onMouseDown={e => e.preventDefault()}
                                                             onClick={() => applyCustomerSuggestion(c)}
-                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                            className="w-full rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                                         >
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                <span className="text-[15px] font-medium text-[var(--ds-text-primary)]">{c.name}</span>
                                                                 {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
                                                                     </span>
                                                                 )}
                                                             </div>
-                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-[13px] text-[var(--ds-text-muted)]">
                                                                 {c.phone && <span>{c.phone}</span>}
                                                                 {c.email && <span className="truncate">{c.email}</span>}
                                                             </div>
@@ -4824,29 +4822,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         type="button"
                                         onClick={() => setIsCustomerPickerOpen(true)}
-                                        className="p-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex items-center justify-center flex-shrink-0"
+                                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                         title="Rubrica clienti"
                                     >
-                                        <BookUser className="h-4 w-4" />
+                                        <BookUser className="h-[18px] w-[18px]" />
                                     </button>
                                     {isVoiceSupported() && (
                                         <button
                                             type="button"
                                             onClick={handleVoiceInput}
                                             disabled={isListening}
-                                            className={`p-2 rounded-md transition-colors flex items-center justify-center flex-shrink-0 border ${
+                                            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                                 isListening
-                                                    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30 animate-pulse'
-                                                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                                                    ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] animate-pulse motion-reduce:animate-none'
+                                                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                                             }`}
                                             title="Dettatura vocale"
                                         >
-                                            <Mic className="h-4 w-4" />
+                                            <Mic className="h-[18px] w-[18px]" />
                                         </button>
                                     )}
                                 </div>
                                 {isVoiceSupported() && (
-                                    <p className="text-xs text-[var(--color-fg-subtle)] mt-1">
+                                    <p className="mt-2 text-[13px] text-[var(--ds-text-muted)]">
                                         Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
                                     </p>
                                 )}
@@ -4855,15 +4853,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {/* Phone & Email */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">
                                         Telefono
-                                        {!(formData.email && formData.email.trim()) && <span className="text-rose-600"> *</span>}
+                                        {!(formData.email && formData.email.trim()) && <span className="text-[var(--ds-critical-text)]"> *</span>}
                                     </label>
                                     <div className="relative">
                                         <input
                                             type="tel"
                                             required={!(formData.email && formData.email.trim())}
-                                            className={`w-full rounded-md border border-[var(--color-line)] py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors ${formData.phone ? 'pl-3 pr-10' : 'px-3'}`}
+                                            className={`${dsInput} ${formData.phone ? 'pr-10' : ''}`}
                                             value={formData.phone || ''}
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
@@ -4879,7 +4877,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             <a
                                                 href={`tel:${formData.phone.replace(/[^\d+]/g, '')}`}
                                                 onMouseDown={e => e.preventDefault()}
-                                                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-7 w-7 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                                                className="absolute right-1.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[10px] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-all hover:brightness-95"
                                                 aria-label="Chiama"
                                                 title="Chiama"
                                             >
@@ -4887,25 +4885,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             </a>
                                         )}
                                         {activeSuggestField === 'phone' && customerSuggestions.length > 0 && (
-                                            <ul className="absolute z-30 left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md shadow-[var(--shadow-md)] max-h-60 overflow-y-auto">
+                                            <ul className="absolute left-0 right-0 z-30 mt-1.5 max-h-60 overflow-y-auto rounded-[14px] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-raised)]">
                                                 {customerSuggestions.map(c => (
                                                     <li key={c.id}>
                                                         <button
                                                             type="button"
                                                             onMouseDown={e => e.preventDefault()}
                                                             onClick={() => applyCustomerSuggestion(c)}
-                                                            className="w-full text-left px-3 py-2 hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                            className="w-full rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                                         >
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-medium text-[var(--color-fg)]">{c.name}</span>
+                                                                <span className="text-[15px] font-medium text-[var(--ds-text-primary)]">{c.name}</span>
                                                                 {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300">
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
                                                                     </span>
                                                                 )}
                                                             </div>
-                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                                                            <div className="mt-0.5 flex flex-wrap gap-3 text-[13px] text-[var(--ds-text-muted)]">
                                                                 {c.phone && <span>{c.phone}</span>}
                                                                 {c.email && <span className="truncate">{c.email}</span>}
                                                             </div>
@@ -4917,17 +4915,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Email</label>
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Email</label>
                                     <input
                                         type="email"
-                                        className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] transition-colors"
+                                        className={dsInput}
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
                                         placeholder="cliente@email.com"
                                     />
                                 </div>
                             </div>
-                            </fieldset>
+                            </div>
+                            </FormCard>
 
                             {/* Banchetto - shown only if there are banquets on the chosen date */}
                             {(() => {
@@ -4938,10 +4937,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 if (banquetsForDate.length === 0) return null;
                                 return (
                                     <div>
-                                        <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Banchetto</label>
+                                        <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Banchetto</label>
                                         <div className="relative">
                                             <select
-                                                className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 pr-10 text-sm focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface)] cursor-pointer transition-colors appearance-none"
+                                                className={dsSelect}
                                                 value={formData.banquet_menu_id ?? ''}
                                                 onChange={e => setFormData({
                                                     ...formData,
@@ -4955,7 +4954,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     </option>
                                                 ))}
                                             </select>
-                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)] pointer-events-none" />
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--ds-text-muted)] pointer-events-none" />
                                         </div>
                                     </div>
                                 );
@@ -4966,48 +4965,48 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {/* Allergie & Intolleranze — two tabs, same preset list.
                                     Selecting an item is exclusive: it moves between the
                                     two lists. Allergie (serious) = rose, Intolleranze = amber. */}
-                                <div className="rounded-md border border-[var(--color-line)] overflow-hidden">
+                                <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)]">
                                     <button
                                         type="button"
                                         onClick={() => setShowAllergensSection(!showAllergensSection)}
                                         className={`w-full flex items-center justify-between p-3 transition-colors ${
-                                            showAllergensSection ? 'bg-[var(--color-surface-3)]' : 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                                            showAllergensSection ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <AlertTriangle className={`h-4 w-4 ${(selectedAllergies.length + selectedAllergens.length) > 0 ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
+                                            <AlertTriangle className={`h-4 w-4 ${(selectedAllergies.length + selectedAllergens.length) > 0 ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--color-fg)]">Allergie &amp; Intolleranze</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Allergie &amp; Intolleranze</span>
                                                 {(selectedAllergies.length + selectedAllergens.length) > 0 && (
-                                                    <p className="text-xs text-[var(--color-fg-muted)]">
+                                                    <p className="text-xs text-[var(--ds-text-secondary)]">
                                                         {[selectedAllergies.length > 0 && `${selectedAllergies.length} allergie`, selectedAllergens.length > 0 && `${selectedAllergens.length} intolleranze`].filter(Boolean).join(' · ')}
                                                     </p>
                                                 )}
                                             </div>
                                         </div>
-                                        <ChevronDown className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-4 h-4 text-[var(--ds-text-muted)] transition-transform ${showAllergensSection ? 'rotate-180' : ''}`} />
                                     </button>
 
                                     {showAllergensSection && (
-                                        <div className="p-3 pt-0 space-y-3 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
+                                        <div className="p-3 pt-0 space-y-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
                                             {/* Tab switcher */}
-                                            <div className="grid grid-cols-2 gap-1.5 p-1 mt-3 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)]">
+                                            <div className="grid grid-cols-2 gap-0.5 p-1 mt-3 rounded-full bg-[var(--ds-surface-row)]">
                                                 {([['allergie', 'Allergie', selectedAllergies.length], ['intolleranze', 'Intolleranze', selectedAllergens.length]] as const).map(([key, label, count]) => (
                                                     <button
                                                         key={key}
                                                         type="button"
                                                         onClick={() => setDietaryTab(key)}
-                                                        className={`inline-flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-semibold transition-colors ${
+                                                        className={`inline-flex items-center justify-center gap-1.5 h-9 rounded-full text-[14px] font-semibold transition-colors ${
                                                             dietaryTab === key
-                                                                ? (key === 'allergie' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white')
-                                                                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                                                                ? (key === 'allergie' ? 'bg-[var(--ds-critical-solid)] text-white' : 'bg-[var(--ds-pending-solid)] text-white')
+                                                                : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                                                         }`}
                                                         aria-pressed={dietaryTab === key}
                                                     >
                                                         {label}
                                                         {count > 0 && (
                                                             <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
-                                                                dietaryTab === key ? 'bg-white/25' : (key === 'allergie' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300')
+                                                                dietaryTab === key ? 'bg-white/25' : (key === 'allergie' ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ' : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ')
                                                             }`}>{count}</span>
                                                         )}
                                                     </button>
@@ -5020,11 +5019,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     const inActive = (dietaryTab === 'allergie' ? selectedAllergies : selectedAllergens).includes(item);
                                                     const inOther = (dietaryTab === 'allergie' ? selectedAllergens : selectedAllergies).includes(item);
                                                     const onCls = dietaryTab === 'allergie'
-                                                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300'
-                                                        : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300';
+                                                        ? 'border-[var(--ds-critical-tint)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] '
+                                                        : 'border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ';
                                                     const boxCls = dietaryTab === 'allergie'
-                                                        ? 'bg-rose-600 border-rose-600 dark:bg-rose-500 dark:border-rose-500'
-                                                        : 'bg-amber-600 border-amber-600 dark:bg-amber-500 dark:border-amber-500';
+                                                        ? 'bg-[var(--ds-critical-solid)] border-[var(--ds-critical-solid)] '
+                                                        : 'bg-[var(--ds-pending-solid)] border-[var(--ds-pending-solid)] ';
                                                     return (
                                                         <button
                                                             key={item}
@@ -5039,18 +5038,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     setSelectedAllergens(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
                                                                 }
                                                             }}
-                                                            className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
-                                                                inActive ? onCls : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                                                            className={`flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
+                                                                inActive ? onCls : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
                                                             }`}
                                                         >
                                                             <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                inActive ? boxCls : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+                                                                inActive ? boxCls : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
                                                             }`}>
                                                                 {inActive && <Check className="text-[#ffffff] w-2.5 h-2.5" />}
                                                             </div>
                                                             <span className="text-sm font-medium truncate">{item}</span>
                                                             {inOther && !inActive && (
-                                                                <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] flex-shrink-0">
+                                                                <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)] flex-shrink-0">
                                                                     {dietaryTab === 'allergie' ? 'intoll.' : 'allergia'}
                                                                 </span>
                                                             )}
@@ -5070,28 +5069,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
 
                                 {/* Notes Button */}
-                                <div className="rounded-md border border-[var(--color-line)] overflow-hidden">
+                                <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)]">
                                     <button
                                         type="button"
                                         onClick={() => setShowNotesSection(!showNotesSection)}
                                         className={`w-full flex items-center justify-between p-3 transition-colors ${
-                                            showNotesSection ? 'bg-[var(--color-surface-3)]' : 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                                            showNotesSection ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]'}`} />
+                                            <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--color-fg)]">Note</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Note</span>
                                                 {selectedQuickNotes.length > 0 && (
-                                                    <p className="text-xs text-[var(--color-fg-muted)]">{selectedQuickNotes.join(', ')}</p>
+                                                    <p className="text-xs text-[var(--ds-text-secondary)]">{selectedQuickNotes.join(', ')}</p>
                                                 )}
                                             </div>
                                         </div>
-                                        <ChevronDown className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-4 h-4 text-[var(--ds-text-muted)] transition-transform ${showNotesSection ? 'rotate-180' : ''}`} />
                                     </button>
 
                                     {showNotesSection && (
-                                        <div className="p-3 pt-0 space-y-4 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
+                                        <div className="p-3 pt-0 space-y-4 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
                                             {/* Quick Notes */}
                                             <div className="grid grid-cols-2 gap-2 pt-3">
                                                 {quickNotes.map(note => {
@@ -5108,16 +5107,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                         : [...prev, note.label]
                                                                 );
                                                             }}
-                                                            className={`flex items-center gap-2 px-3 py-2 rounded-md border transition-colors text-left ${
+                                                            className={`flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
                                                                 isSelected
-                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] text-[var(--color-fg)]'
-                                                                    : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                                                                    ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                                                                    : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
                                                             }`}
                                                         >
                                                             <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                isSelected ? 'bg-[var(--color-fg)] border-[var(--color-fg)]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+                                                                isSelected ? 'bg-[var(--ds-text-primary)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
                                                             }`}>
-                                                                {isSelected && <Check className="text-[var(--color-fg-on-brand)] w-2.5 h-2.5" />}
+                                                                {isSelected && <Check className="text-[var(--ds-action-fg)] w-2.5 h-2.5" />}
                                                             </div>
                                                             {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
                                                             <span className="text-sm font-medium truncate">{note.label}</span>
@@ -5128,9 +5127,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                             {/* Free text notes */}
                                             <div>
-                                                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1">Altre note</label>
+                                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Altre note</label>
                                                 <textarea
-                                                    className="w-full rounded-md border border-[var(--color-line)] px-3 py-2 focus:outline-none focus:border-[var(--color-fg)] h-20 text-sm bg-[var(--color-surface)] resize-none transition-colors"
+                                                    className={`${dsTextarea} h-20 resize-none`}
                                                     placeholder="Richieste speciali..."
                                                     value={formData.notes || ''}
                                                     onChange={e => setFormData({...formData, notes: e.target.value})}
@@ -5144,34 +5143,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     Health/allergy consent is gated by the "Chiedi consenso allergie" legal setting;
                                     the whole card hides when neither consent applies. */}
                                 {((askHealthConsent && selectedAllergens.length > 0) || marketingEnabled) && (
-                                <div className="mt-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
-                                    <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Consensi privacy (GDPR)</label>
+                                <div className="mt-3 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3">
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Consensi privacy (GDPR)</label>
                                     <div className="space-y-1.5">
                                         {askHealthConsent && selectedAllergens.length > 0 && (
-                                        <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
+                                        <label className="flex items-start gap-2 text-sm text-[var(--ds-text-primary)] cursor-pointer">
                                             <input
                                                 type="checkbox"
                                                 className="mt-0.5 h-4 w-4 rounded flex-shrink-0"
                                                 checked={formData.consent_data_health === true}
                                                 onChange={e => setFormData({ ...formData, consent_data_health: e.target.checked })}
                                             />
-                                            <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--color-fg-muted)]">(dati sanitari, art. 9 GDPR)</span></span>
+                                            <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
                                         </label>
                                         )}
                                         {marketingEnabled && (
-                                        <label className="flex items-start gap-2 text-sm text-[var(--color-fg)] cursor-pointer">
+                                        <label className="flex items-start gap-2 text-sm text-[var(--ds-text-primary)] cursor-pointer">
                                             <input
                                                 type="checkbox"
                                                 className="mt-0.5 h-4 w-4 rounded flex-shrink-0"
                                                 checked={formData.consent_marketing === true}
                                                 onChange={e => setFormData({ ...formData, consent_marketing: e.target.checked })}
                                             />
-                                            <span>Consenso all'invio di comunicazioni commerciali <span className="text-[var(--color-fg-muted)]">(marketing)</span></span>
+                                            <span>Consenso all'invio di comunicazioni commerciali <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
                                         </label>
                                         )}
                                     </div>
                                     {formData.consent_updated_at && (
-                                        <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1.5">
+                                        <p className="text-[11px] text-[var(--ds-text-muted)] mt-1.5">
                                             Consensi aggiornati il {new Date(formData.consent_updated_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     )}
@@ -5181,22 +5180,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         </div>
 
                         {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col h-full bg-[var(--color-surface-2)] rounded-2xl p-3 sm:p-4 lg:p-5">
+                        <div className="lg:col-span-7 flex flex-col min-w-0 h-full rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6">
                              {/* Section Header */}
-                             <div className="flex items-center gap-3 pb-4 mb-4 border-b border-[var(--color-line)]">
-                                <MapPin className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                             <div className="flex flex-wrap items-center gap-3 pb-4 mb-4 border-b border-[var(--ds-border)]">
+                                <MapPin className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" />
                                 <div className="flex-1">
-                                    <h3 className="text-sm font-semibold text-[var(--color-fg)]">Seleziona Tavolo</h3>
-                                    <p className="text-sm text-[var(--color-fg-muted)]">
-                                        {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} - {' '}
-                                        <span className="font-medium text-emerald-700 dark:text-emerald-400">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
+                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Seleziona tavolo</h3>
+                                    <p className="text-[14px] text-[var(--ds-text-muted)]">
+                                        {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} — {' '}
+                                        <span className="font-semibold text-[var(--ds-seated-text)]">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
                                     </p>
                                 </div>
                                 {selectedTableObj && (
-                                    <div className="flex items-stretch rounded-full border border-emerald-300 dark:border-emerald-500/50 overflow-hidden shadow-[var(--shadow-xs)] flex-shrink-0">
-                                        <span className="inline-flex items-center gap-1.5 pl-3 pr-3 py-1.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-200 text-sm font-bold whitespace-nowrap">
-                                            <Armchair className="h-4 w-4 flex-shrink-0" />
+                                    /* Solid pill: table name, its capacity, and a clear action.
+                                       Green rather than near-black — near-black is this system's
+                                       "action" colour, and an assigned table is a state, not a
+                                       button. White on this green measures 6.7:1; the secondary
+                                       "posti" text at 80% still clears AA at 4.9:1. */
+                                    <div className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-seated-solid)] py-1.5 pl-4 pr-1.5">
+                                        <span className="whitespace-nowrap text-[15px] font-semibold text-white">
                                             Tavolo {selectedTableObj.name}
+                                        </span>
+                                        <span className="whitespace-nowrap text-[14px] text-white/80">
+                                            {selectedTableObj.seats} posti
                                         </span>
                                         <button
                                             type="button"
@@ -5204,26 +5210,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setFormData({...formData, table_id: undefined});
                                                 showToast('Tavolo scollegato dalla prenotazione', 'info');
                                             }}
-                                            className="pressable inline-flex items-center gap-1 pl-2.5 pr-3 py-1.5 border-l border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 text-rose-600 hover:bg-rose-500 hover:text-white dark:bg-emerald-500/10 dark:text-rose-400 dark:hover:bg-rose-600 dark:hover:text-white text-xs font-semibold transition-colors"
+                                            className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                                             title="Scollega il tavolo dalla prenotazione"
                                             aria-label="Scollega tavolo dalla prenotazione"
                                         >
-                                            <X className="h-4 w-4 flex-shrink-0" />
-                                            <span className="hidden sm:inline">Scollega</span>
+                                            <X className="h-4 w-4" />
                                         </button>
                                     </div>
                                 )}
                              </div>
 
                              {/* Auto-assign & Actions */}
-                             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                                <div className="flex items-center gap-2 flex-wrap">
+                             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={handleAutoAssign}
-                                        className="inline-flex items-center gap-2 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
+                                        className={dsButton.primary}
                                     >
-                                        <Wand2 className="h-4 w-4" /> Assegna Automatico
+                                        <Wand2 className="h-4 w-4" /> Assegna automatico
                                     </button>
 
                                     {/* Merge Mode Toggle */}
@@ -5240,20 +5245,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 }
                                             }
                                         }}
-                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors font-medium text-xs border ${
-                                            mergeMode
-                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                                        }`}
+                                        className={mergeMode ? dsButton.primary : dsButton.secondary}
                                     >
-                                        <Combine className="h-3.5 w-3.5" /> {mergeMode ? 'Esci Unione' : 'Unisci Tavoli'}
+                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci unione' : 'Unisci tavoli'}
                                     </button>
                                 </div>
-
                                 <div className="flex gap-2 items-center">
                                     {/* Show selected tables count and total capacity */}
                                     {selectedTablesForMerge.length >= 1 && (
-                                        <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-3 py-1.5 rounded-full font-medium">
+                                        <div className="text-xs text-[var(--ds-text-secondary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-1.5 rounded-full font-medium">
                                             {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
                                         </div>
                                     )}
@@ -5280,7 +5280,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante l\'unione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition-opacity"
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
                                         >
                                             <Combine className="h-4 w-4" /> Conferma Unione
                                         </button>
@@ -5304,7 +5304,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante la divisione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-amber-100 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 text-sm font-medium hover:bg-amber-100 transition-colors"
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
                                         >
                                             <Scissors className="h-4 w-4" /> Dividi
                                         </button>
@@ -5314,12 +5314,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                              {/* Room Tabs */}
                              <div className="mb-4">
-                                 <p className="text-sm font-semibold text-[var(--color-fg)] mb-3">Sale</p>
                                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                                      <button
                                         type="button"
                                         onClick={() => setModalRoomFilter('ALL')}
-                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                      >
                                          Tutte le sale
                                      </button>
@@ -5328,7 +5327,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             key={room.id}
                                             type="button"
                                             onClick={() => setModalRoomFilter(room.id)}
-                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                          >
                                              {room.name}
                                          </button>
@@ -5336,19 +5335,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  </div>
                              </div>
 
-                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] sm:text-[11px] text-[var(--color-fg-muted)] mb-3 px-1">
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></span> Libero</div>
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface)] border-2 border-emerald-500 rounded"></span> Consigliato</div>
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-fg)] rounded"></span> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-rose-50 border border-rose-200 dark:bg-rose-500/15 dark:border-rose-500/30 rounded"></span> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded opacity-50"></span> Capienza insuff.</div>
-                                 <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--color-banquet-bg)] border border-[var(--color-banquet-border)] rounded"></span> Evento / Banchetto</div>
-                             </div>
-
                              <div className="flex-1 min-h-0 rounded-lg overflow-y-auto relative max-h-[50vh] lg:max-h-none">
                                 {isLoadingMerges && (
-                                    <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
-                                        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+                                    <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                                        <div className="flex items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
                                             <CookingPotLoader label="Caricamento tavoli…" size={40} />
                                         </div>
                                     </div>
@@ -5389,10 +5379,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
 
                                     return (
-                                    <div key={room.id} className="mb-3 sm:mb-4 last:mb-0 bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 sm:p-4">
-                                        <h4 className="text-sm font-semibold text-[var(--color-fg)] sticky top-0 z-20 -mx-3 sm:-mx-4 -mt-3 sm:-mt-4 mb-3 px-3 sm:px-4 pt-3 sm:pt-4 pb-2 bg-[var(--color-surface)] border-b border-[var(--color-line)] rounded-t-xl">
+                                    <div key={room.id} className="mb-3 last:mb-0 rounded-[16px] bg-[var(--ds-surface-row)] p-4">
+                                        <h4 className="mb-3 text-[15px] font-semibold text-[var(--ds-text-primary)]">
                                             {room.name}
-                                            <span className="font-normal text-[var(--color-fg-muted)]">
+                                            <span className="font-normal text-[var(--ds-text-muted)]">
                                                 {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
                                                 {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
                                                 {occupatiCount > 0 ? ` · ${occupatiCount} ${occupatiCount === 1 ? 'occupato' : 'occupati'}` : ''}
@@ -5402,23 +5392,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         {/* Banquet / event containers — one grouped card per event,
                                             tinted with the same per-banquet color used on the floor plan. */}
                                         {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
-                                            <div key={`banq-${banquet.id}`} className={`${modalBanquetColorByBanquetId.get(banquet.id) || 'banquet-color-0'} mb-4 rounded-xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] p-3`}>
+                                            <div key={`banq-${banquet.id}`} className={`${modalBanquetColorByBanquetId.get(banquet.id) || 'banquet-color-0'} mb-4 rounded-xl border border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] p-3`}>
                                                 <div className="flex items-start gap-2 mb-3">
-                                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-banquet-accent)] text-white">
+                                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--ds-arriving-solid)] text-white">
                                                         <Calendar size={14} />
                                                     </span>
                                                     <div className="min-w-0">
-                                                        <p className="text-sm font-semibold text-[var(--color-banquet-fg-strong)] truncate">{banquet.name}</p>
-                                                        <p className="text-xs text-[var(--color-banquet-fg)]">
+                                                        <p className="text-sm font-semibold text-[var(--ds-arriving-text)] truncate">{banquet.name}</p>
+                                                        <p className="text-xs text-[var(--ds-arriving-text)]">
                                                             {bTables.length} {bTables.length === 1 ? 'tavolo' : 'tavoli'} · {banquet.guests ?? 0} coperti · {banquet.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
                                                         </p>
                                                     </div>
                                                 </div>
                                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
                                                     {bTables.map(t => (
-                                                        <div key={t.id} className="flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--color-banquet-border)] px-2 py-2 text-center">
+                                                        <div key={t.id} className="flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--ds-arriving-solid)] px-2 py-2 text-center">
                                                             <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
-                                                            <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-banquet-fg)]">
+                                                            <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ds-arriving-text)]">
                                                                 <Armchair size={11} /> {t.seats}
                                                             </span>
                                                         </div>
@@ -5461,28 +5451,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                 handleTableSelection(table);
                                                             }
                                                         }}
-                                                        className={`relative flex w-full min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-xl border p-2 sm:p-3 text-center transition-all ${
+                                                        className={`relative flex w-full min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-[14px] p-2 sm:p-3 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                                             isSelectedForMerge
-                                                                ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500 z-10'
+                                                                ? 'z-10 bg-[var(--ds-arriving-tint)] ring-2 ring-inset ring-[var(--ds-arriving-solid)]'
                                                                 : isSelected
-                                                                    ? 'border-[var(--color-fg)] bg-[var(--color-fg)] z-10'
+                                                                    ? 'z-10 bg-[var(--ds-seated-solid)] text-white'
                                                                     : isOccupied
-                                                                        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/15 cursor-not-allowed'
+                                                                        ? 'cursor-not-allowed bg-[var(--ds-critical-tint)]'
                                                                         : recommended
-                                                                            ? 'border-emerald-500 bg-[var(--color-surface)] ring-1 ring-emerald-500 hover:bg-[var(--color-surface-hover)]'
+                                                                            ? 'bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]/40 hover:brightness-[0.97]'
                                                                             : insufficient
-                                                                                ? 'border-[var(--color-line)] bg-[var(--color-surface)] cursor-not-allowed'
-                                                                                : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                                                                ? 'cursor-not-allowed bg-[var(--ds-surface)] opacity-50'
+                                                                                : 'bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border)] hover:ring-[var(--ds-border-strong)]'
                                                         }`}
                                                     >
                                                         {recommended && !isSelected && !isSelectedForMerge && (
-                                                            <span className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded-full bg-emerald-500 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-white shadow-[var(--shadow-xs)]">
+                                                            <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-seated-solid)] px-2 py-0.5 text-[10px] font-semibold text-white">
                                                                 Consigliato
                                                             </span>
                                                         )}
 
                                                         {isMerged && !isSelectedForMerge && (
-                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--shadow-xs)] ${isSelected ? 'bg-[var(--color-surface)] text-[var(--color-fg)]' : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'}`}>
+                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--shadow-xs)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
                                                                 <Combine size={8} />
                                                             </span>
                                                         )}
@@ -5496,27 +5486,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         />
 
                                                         {/* Capacity (chair icon) — shown on every table */}
-                                                        <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs ${isSelected ? 'text-[var(--color-fg-on-brand)]/80' : 'text-[var(--color-fg-muted)]'}`}>
+                                                        <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs ${isSelected ? 'text-white/80' : 'text-[var(--ds-text-muted)]'}`}>
                                                             <Armchair size={11} /> {table.seats}
                                                         </span>
 
                                                         {/* Occupied footer: actual covers (people icon) + time */}
                                                         {isOccupied && (
-                                                            <div className="mt-1 w-full border-t border-rose-200/70 dark:border-rose-500/30 pt-1">
-                                                                <p className="truncate text-[11px] sm:text-xs font-medium text-[var(--color-fg)]">{occLabel}</p>
-                                                                <p className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-[var(--color-fg-muted)]">
+                                                            <div className="mt-1 w-full pt-1">
+                                                                <p className="truncate text-[11px] sm:text-xs font-medium text-[var(--ds-text-primary)]">{occLabel}</p>
+                                                                <p className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-[var(--ds-text-secondary)]">
                                                                     <Users size={10} /> {occGuests}{occTime ? ` · ${occTime}` : ''}
                                                                 </p>
                                                             </div>
                                                         )}
 
                                                         {isSelected && !isSelectedForMerge && (
-                                                            <span className="absolute top-1.5 right-1.5 z-20 text-[var(--color-fg-on-brand)]">
+                                                            <span className="absolute top-1.5 right-1.5 z-20 text-[var(--ds-action-fg)]">
                                                                 <Check size={15} strokeWidth={3} />
                                                             </span>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-indigo-600 p-1 shadow-[var(--shadow-xs)]">
+                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--shadow-xs)]">
                                                                 <Combine size={10} className="text-white" />
                                                             </span>
                                                         )}
@@ -5529,13 +5519,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     );
                                 })}
                                 {displayedRooms.length === 0 && (
-                                    <div className="text-center py-10 text-[var(--color-fg-subtle)]">
+                                    <div className="text-center py-10 text-[var(--ds-text-muted)]">
                                         Nessuna sala trovata.
                                     </div>
                                 )}
                              </div>
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-[var(--ds-border)] text-[12px] text-[var(--ds-text-secondary)]">
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> Libero</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> Consigliato</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-seated-solid)]"></span> Selezionato</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-critical-tint)]"></span> Occupato</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] opacity-50"></span> Capienza insuff.</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
+                             </div>
                              {mergeMode && (
-                                 <div className="mt-3 px-1 text-[11px] text-[var(--color-fg)] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-1 rounded-md">
+                                 <div className="mt-3 rounded-full bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
                                      Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
                                  </div>
                              )}
@@ -5547,26 +5545,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         lives in Settings → Conto al tavolo. */}
                     {isEditing && formData.id && hasPermission('payments:view') && payAtTableEnabled && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
+                        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
                           <div className="flex items-center gap-2 mb-3">
-                            <Receipt className="h-4 w-4 text-sky-600" />
-                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Conto al tavolo</h4>
+                            <Receipt className="h-4 w-4 text-[var(--ds-arriving-text)]" />
+                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Conto al tavolo</h4>
                             {bill && (
-                              <span className="ml-auto inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300">
+                              <span className="ml-auto inline-flex items-center h-6 px-2.5 rounded-full text-[12px] font-semibold bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                                 {bill.bill.status}
                               </span>
                             )}
                           </div>
 
                           {billLoading && !bill && (
-                            <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
+                            <div className="flex items-center gap-2 text-[12px] text-[var(--ds-text-muted)]">
                               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Caricamento…
                             </div>
                           )}
 
                           {!billLoading && !bill && hasPermission('payments:full') && (
                             <>
-                              <p className="text-[12px] text-[var(--color-fg-subtle)] mb-2">
+                              <p className="text-[12px] text-[var(--ds-text-muted)] mb-2">
                                 Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
                               </p>
                               {(() => {
@@ -5575,7 +5573,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   <div className="space-y-2">
                                     <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
                                       <div className="relative">
-                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
+                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)] text-sm">€</span>
                                         <input
                                           type="text"
                                           inputMode="decimal"
@@ -5583,7 +5581,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                           value={billTotalInput}
                                           onChange={e => setBillTotalInput(e.target.value)}
                                           disabled={busy}
-                                          className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                          className="h-9 w-full rounded-[10px] bg-[var(--ds-surface-row)] pl-6 pr-2 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                         />
                                       </div>
                                       <input
@@ -5593,13 +5591,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         value={billCoversInput}
                                         onChange={e => setBillCoversInput(e.target.value)}
                                         disabled={busy}
-                                        className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+                                        className="h-9 w-full rounded-[10px] bg-[var(--ds-surface-row)] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                       />
                                       <button
                                         type="button"
                                         onClick={() => handleOpenBill()}
                                         disabled={busy}
-                                        className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[14px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
                                         {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
                                         Apri conto
@@ -5613,7 +5611,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       onClick={() => handleOpenBill({ notify: true })}
                                       disabled={busy || !formData.phone}
                                       title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
-                                      className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-sky-200 bg-white text-sky-700 text-sm font-medium hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:border-sky-500/40 dark:text-sky-300 dark:hover:bg-sky-500/10"
+                                      className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-[var(--ds-arriving-tint)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:"
                                     >
                                       {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                       Apri e invia link al cliente
@@ -5625,7 +5623,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           )}
 
                           {!billLoading && !bill && !hasPermission('payments:full') && (
-                            <p className="text-[12px] text-[var(--color-fg-subtle)]">Nessun conto attivo.</p>
+                            <p className="text-[12px] text-[var(--ds-text-muted)]">Nessun conto attivo.</p>
                           )}
 
                           {bill && (() => {
@@ -5640,43 +5638,43 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             return (
                               <div className="space-y-3">
                                 <div className="flex items-center gap-3 text-[13px]">
-                                  <span className="font-semibold text-[var(--color-fg)]">Totale: € {totalEur}</span>
-                                  <span className="text-[var(--color-fg-subtle)]">·</span>
-                                  <span className="text-[var(--color-fg-subtle)]">{bill.bill.covers} coperti</span>
+                                  <span className="font-semibold text-[var(--ds-text-primary)]">Totale: € {totalEur}</span>
+                                  <span className="text-[var(--ds-text-muted)]">·</span>
+                                  <span className="text-[var(--ds-text-muted)]">{bill.bill.covers} coperti</span>
                                 </div>
 
                                 <div>
-                                  <div className="flex items-center justify-between text-[11px] text-[var(--color-fg-subtle)] mb-1">
+                                  <div className="flex items-center justify-between text-[11px] text-[var(--ds-text-muted)] mb-1">
                                     <span>Pagato € {paidEur}</span>
                                     <span>{paidPct}%</span>
                                   </div>
-                                  <div className="h-2 rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">
-                                    <div className="h-full bg-emerald-500 transition-all" style={{ width: `${paidPct}%` }} />
+                                  <div className="h-2 overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
+                                    <div className="h-full bg-[var(--ds-seated-solid)] transition-all" style={{ width: `${paidPct}%` }} />
                                   </div>
                                 </div>
 
                                 {publicUrl && (
                                   <div className="flex flex-col sm:flex-row gap-3 items-start">
-                                    <div className="p-2 bg-white rounded-lg border border-[var(--color-line)] shrink-0">
+                                    <div className="p-2 bg-[var(--ds-surface)] rounded-[14px] border border-[var(--ds-border)] shrink-0">
                                       <QRCodeSVG value={publicUrl} size={128} level="M" />
                                     </div>
                                     <div className="flex-1 min-w-0 w-full">
-                                      <div className="text-[11px] text-[var(--color-fg-subtle)] mb-1">Link pubblico</div>
+                                      <div className="text-[11px] text-[var(--ds-text-muted)] mb-1">Link pubblico</div>
                                       <div className="flex items-center gap-1.5">
                                         <input
                                           type="text"
                                           readOnly
                                           value={publicUrl}
                                           onFocus={e => e.currentTarget.select()}
-                                          className="flex-1 min-w-0 h-8 px-2 text-[12px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] font-mono"
+                                          className="flex-1 min-w-0 h-8 px-3 text-[13px] rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] font-mono"
                                         />
                                         <button
                                           type="button"
                                           onClick={() => copyBillUrl(publicUrl)}
-                                          className="inline-flex items-center justify-center h-8 w-8 rounded-md text-slate-500 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-500/15"
+                                          className="inline-flex items-center justify-center h-8 w-8 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
                                           title="Copia link"
                                         >
-                                          {copiedBillUrl ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                          {copiedBillUrl ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
                                         </button>
                                       </div>
                                     </div>
@@ -5685,7 +5683,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                 {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').length > 0 && (
                                   <div className="pt-1">
-                                    <div className="text-[11px] font-semibold text-[var(--color-fg-subtle)] uppercase tracking-wide mb-1.5">
+                                    <div className="text-[11px] font-semibold text-[var(--ds-text-muted)] uppercase tracking-wide mb-1.5">
                                       Quote ({bill.splits.filter(s => s.status === 'PAID').length} pagate)
                                     </div>
                                     <ul className="space-y-1">
@@ -5694,10 +5692,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         return (
                                           <li key={s.id} className="flex items-center gap-2 text-[12px]">
                                             {s.status === 'PAID'
-                                              ? <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                              : <Loader2 className="h-3.5 w-3.5 text-amber-500 shrink-0 animate-spin" />}
-                                            <span className="text-[var(--color-fg)] truncate flex-1">{s.claimant_label || 'Anonimo'}</span>
-                                            <span className="text-[10px] text-[var(--color-fg-subtle)] uppercase tracking-wide">
+                                              ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] shrink-0" />
+                                              : <Loader2 className="h-3.5 w-3.5 text-[var(--ds-pending-text)] shrink-0 animate-spin" />}
+                                            <span className="text-[var(--ds-text-primary)] truncate flex-1">{s.claimant_label || 'Anonimo'}</span>
+                                            <span className="text-[10px] text-[var(--ds-text-muted)] uppercase tracking-wide">
                                               {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
                                             </span>
                                             <span className="text-[12px] font-medium tabular-nums">€ {eur}</span>
@@ -5708,10 +5706,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
                                                 disabled={refundingSplitId !== null}
                                                 title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
-                                                className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-[10px] font-semibold shrink-0 transition-colors disabled:opacity-50 ${
+                                                className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-full text-[10px] font-semibold shrink-0 transition-colors disabled:opacity-50 ${
                                                   refundConfirmSplitId === s.id
-                                                    ? 'bg-rose-600 text-white hover:bg-rose-700'
-                                                    : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15'
+                                                    ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:brightness-95'
+                                                    : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]'
                                                 }`}
                                               >
                                                 {refundingSplitId === s.id
@@ -5734,7 +5732,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       onClick={handleNotifyBill}
                                       disabled={billActionLoading !== null || !formData.phone}
                                       title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-sky-200 bg-white text-sky-700 text-[12px] font-medium hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:border-sky-500/40 dark:text-sky-300 dark:hover:bg-sky-500/10"
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[13px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       {billActionLoading === 'notify' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                                       Invia link al cliente
@@ -5743,7 +5741,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={handleCloseBill}
                                       disabled={billActionLoading !== null}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-600 text-white text-[12px] font-medium hover:bg-emerald-700 disabled:opacity-50"
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-seated-solid)] text-white text-[13px] font-semibold hover:brightness-95 disabled:opacity-50"
                                     >
                                       {billActionLoading === 'close' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                                       Chiudi conto
@@ -5752,7 +5750,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={handleVoidBill}
                                       disabled={billActionLoading !== null}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-rose-200 text-rose-700 text-[12px] font-medium hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10 disabled:opacity-50"
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[13px] font-semibold hover:brightness-95 disabled:opacity-50"
                                     >
                                       {billActionLoading === 'void' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
                                       Annulla
@@ -5769,12 +5767,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {/* Payment link (active gateway) — only in edit mode (needs a saved reservation to attach to) */}
                     {isEditing && formData.id && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] p-4">
+                        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
                           <div className="flex items-center gap-2 mb-3">
-                            <CreditCard className="h-4 w-4 text-emerald-600" />
-                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Richiedi acconto ({paymentProviderLabel})</h4>
+                            <CreditCard className="h-4 w-4 text-[var(--ds-seated-text)]" />
+                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Richiedi acconto ({paymentProviderLabel})</h4>
                             {formData.phone && (
-                              <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">Invio via {formData.phone}</span>
+                              <span className="ml-auto text-[11px] text-[var(--ds-text-muted)]">Invio via {formData.phone}</span>
                             )}
                           </div>
 
@@ -5783,10 +5781,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               {paymentRequests.map(pr => {
                                 const euros = (pr.amount_cents / 100).toFixed(2).replace('.', ',');
                                 const statusColor =
-                                  pr.status === 'COMPLETED' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300' :
-                                  pr.status === 'AUTHORISED' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300' :
-                                  pr.status === 'FAILED' || pr.status === 'CANCELLED' || pr.status === 'EXPIRED' ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300' :
-                                  'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300';
+                                  pr.status === 'COMPLETED' ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] ' :
+                                  pr.status === 'AUTHORISED' ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ' :
+                                  pr.status === 'FAILED' || pr.status === 'CANCELLED' || pr.status === 'EXPIRED' ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ' :
+                                  'bg-[var(--ds-pending-tint)] border-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ';
                                 const statusLabel =
                                   pr.status === 'PENDING' ? 'In attesa' :
                                   pr.status === 'AUTHORISED' ? 'Autorizzato' :
@@ -5795,13 +5793,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   pr.status === 'FAILED' ? 'Fallito' :
                                   'Scaduto';
                                 return (
-                                  <li key={pr.id} className="flex items-center gap-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] px-2.5 py-1.5">
-                                    <span className="text-[13px] font-semibold text-[var(--color-fg)]">€ {euros}</span>
+                                  <li key={pr.id} className="flex items-center gap-2 rounded-[14px] bg-[var(--ds-surface)] px-2.5 py-1.5">
+                                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">€ {euros}</span>
                                     <span className={`inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold ${statusColor}`}>
                                       {statusLabel}
                                     </span>
                                     {pr.delivery_channel && (
-                                      <span className="text-[10px] text-[var(--color-fg-subtle)] uppercase tracking-wide">
+                                      <span className="text-[10px] text-[var(--ds-text-muted)] uppercase tracking-wide">
                                         via {pr.delivery_channel}
                                       </span>
                                     )}
@@ -5811,16 +5809,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => copyPaymentLink(pr)}
-                                            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-500/15"
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]"
                                             title="Copia link"
                                           >
-                                            {copiedPaymentId === pr.id ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                            {copiedPaymentId === pr.id ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
                                           </button>
                                           <a
                                             href={pr.checkout_url}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="inline-flex items-center justify-center h-7 w-7 rounded-md text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
                                             title="Apri link"
                                           >
                                             <ExternalLink className="h-3.5 w-3.5" />
@@ -5836,7 +5834,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                           <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_auto] gap-2">
                             <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">€</span>
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)] text-sm">€</span>
                               <input
                                 type="text"
                                 inputMode="decimal"
@@ -5844,7 +5842,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 value={paymentAmount}
                                 onChange={e => setPaymentAmount(e.target.value)}
                                 disabled={isCreatingPayment}
-                                className="w-full h-9 pl-6 pr-2 text-sm rounded-lg border border-slate-200 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none"
+                                className="w-full h-9 pl-6 pr-3 text-[14px] rounded-full bg-[var(--ds-surface-row)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                               />
                             </div>
                             <input
@@ -5853,13 +5851,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               value={paymentDescription}
                               onChange={e => setPaymentDescription(e.target.value)}
                               disabled={isCreatingPayment}
-                              className="w-full h-9 px-3 text-sm rounded-lg border border-slate-200 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none"
+                              className="w-full h-9 px-4 text-[14px] rounded-full bg-[var(--ds-surface-row)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             />
                             <button
                               type="button"
                               onClick={handleCreatePaymentRequest}
                               disabled={isCreatingPayment || !formData.phone}
-                              className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-[var(--ds-seated-solid)] text-white text-[14px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
                               title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : 'Genera link e invia via WhatsApp/SMS'}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -5867,7 +5865,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </button>
                           </div>
                           {!formData.phone && (
-                            <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-400">
+                            <p className="mt-2 text-[11px] text-[var(--ds-critical-text)]">
                               Aggiungi un numero di telefono per inviare il link di pagamento.
                             </p>
                           )}
@@ -5878,23 +5876,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {/* Unified customer-communication log — SMS, WhatsApp, and email history for this booking. Edit-mode only, same as the payment card. */}
                     {isEditing && formData.id && (
                       <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] dark:bg-white/[0.02] overflow-hidden">
+                        <div className="rounded-2xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] dark:bg-[var(--ds-surface)]/[0.02] overflow-hidden">
                           <button
                             type="button"
                             onClick={() => setShowCommsSection(prev => !prev)}
-                            className="w-full flex items-center gap-2 p-4 hover:bg-[var(--color-surface-hover)] transition-colors"
+                            className="w-full flex items-center gap-2 p-4 hover:bg-[var(--ds-surface-row)] transition-colors"
                             aria-expanded={showCommsSection}
                           >
-                            <MessageCircle className="h-4 w-4 text-indigo-600" />
-                            <h4 className="text-[13px] font-semibold text-[var(--color-fg)]">Comunicazione con il cliente</h4>
+                            <MessageCircle className="h-4 w-4 text-[var(--ds-arriving-text)]" />
+                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Comunicazione con il cliente</h4>
                             {outboundMessages.length > 0 && (
-                              <span className="text-[11px] text-[var(--color-fg-subtle)]">· {outboundMessages.length}</span>
+                              <span className="text-[11px] text-[var(--ds-text-muted)]">· {outboundMessages.length}</span>
                             )}
-                            <ChevronDown className={`ml-auto h-4 w-4 text-[var(--color-fg-subtle)] transition-transform ${showCommsSection ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`ml-auto h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${showCommsSection ? 'rotate-180' : ''}`} />
                           </button>
 
                           {showCommsSection && (
-                            <div className="px-4 pb-4 pt-0 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
+                            <div className="px-4 pb-4 pt-0 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
                               {(formData.phone || formData.email) && (
                                 <div className="pt-3 pb-2 flex justify-end gap-2 flex-wrap">
                                   {formData.email && (
@@ -5905,7 +5903,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         setCustomEmailBody('');
                                         setCustomEmailOpen(true);
                                       }}
-                                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-[11px] font-medium hover:bg-[var(--color-surface-hover)]"
+                                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[11px] font-medium hover:bg-[var(--ds-surface-row)]"
                                       title="Componi un'email libera al cliente"
                                     >
                                       <Mail className="h-3 w-3" />
@@ -5918,7 +5916,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       reservation: { ...(formData as Reservation) },
                                       fromSave: false,
                                     })}
-                                    className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-indigo-600 text-white text-[11px] font-medium hover:bg-indigo-700"
+                                    className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[12px] font-semibold hover:brightness-95"
                                     title="Invia una conferma prenotazione al cliente"
                                   >
                                     <Send className="h-3 w-3" />
@@ -5928,18 +5926,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               )}
 
                               {outboundMessagesLoading ? (
-                                <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)] pt-3">
+                                <div className="flex items-center gap-2 text-[12px] text-[var(--ds-text-secondary)] pt-3">
                                   <Loader2 className="h-3 w-3 animate-spin" />
                                   <span>Carico comunicazioni…</span>
                                 </div>
                               ) : outboundMessages.length === 0 ? (
-                                <p className="text-[12px] text-[var(--color-fg-subtle)] italic pt-3">
+                                <p className="text-[12px] text-[var(--ds-text-muted)] italic pt-3">
                                   Nessuna comunicazione inviata per questa prenotazione.
                                 </p>
                               ) : (
                                 <ol className="relative pt-2 pl-6">
                                   {/* Vertical timeline rail */}
-                                  <div className="absolute left-2.5 top-4 bottom-4 w-px bg-[var(--color-line)]" aria-hidden />
+                                  <div className="absolute left-2.5 top-4 bottom-4 w-px bg-[var(--ds-border)]" aria-hidden />
                                   {outboundMessages.map(msg => {
                                     const isInbound = msg.direction === 'inbound';
                                     // A reply is an inbound message that carries an In-Reply-To
@@ -5950,14 +5948,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const isReply = isInbound && !!msg.in_reply_to;
                                     const s = (msg.status || '').toLowerCase();
                                     const badgeCls = isInbound
-                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
+                                      ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] '
                                       : s === 'delivered' || s === 'read'
-                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300'
+                                        ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] '
                                         : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending'
-                                        ? 'bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300'
+                                        ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] '
                                         : s === 'failed' || s === 'undelivered'
-                                        ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300'
-                                        : 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-500/15 dark:border-slate-500/30 dark:text-slate-300';
+                                        ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] '
+                                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
                                     const badgeLabel = isReply
                                       ? 'Risposta'
                                       : isInbound
@@ -5981,23 +5979,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             can scan received-vs-sent at a glance. */}
                                         <span className={`absolute -left-[18px] top-2 flex items-center justify-center w-5 h-5 rounded-full border ${
                                           isInbound
-                                            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/20 dark:border-emerald-500/40'
-                                            : 'bg-indigo-50 border-indigo-200 dark:bg-indigo-500/20 dark:border-indigo-500/40'
+                                            ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] '
+                                            : 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] '
                                         }`}>
                                           <ChannelIcon className={`h-2.5 w-2.5 ${
                                             isInbound
-                                              ? 'text-emerald-600 dark:text-emerald-300'
-                                              : 'text-indigo-600 dark:text-indigo-300'
+                                              ? 'text-[var(--ds-seated-text)] '
+                                              : 'text-[var(--ds-arriving-text)] '
                                           }`} />
                                         </span>
                                         <div className={`rounded-lg border p-2.5 ${
                                           isInbound
-                                            ? 'bg-emerald-50/40 dark:bg-emerald-500/[0.05] border-emerald-200/60 dark:border-emerald-500/20'
-                                            : 'bg-[var(--color-surface-2)] dark:bg-white/[0.02] border-[var(--color-line)]'
+                                            ? 'bg-[var(--ds-seated-tint)] /[0.05] border-[var(--ds-seated-tint)] '
+                                            : 'bg-[var(--ds-surface-row)] dark:bg-[var(--ds-surface)]/[0.02] border-[var(--ds-border)]'
                                         }`}>
                                           <div className="flex items-center justify-between gap-2 mb-1">
-                                            <div className="flex items-center gap-2 text-[11px] text-[var(--color-fg-muted)] min-w-0">
-                                              <span className="font-medium text-[var(--color-fg)]">{channelLabel}</span>
+                                            <div className="flex items-center gap-2 text-[11px] text-[var(--ds-text-secondary)] min-w-0">
+                                              <span className="font-medium text-[var(--ds-text-primary)]">{channelLabel}</span>
                                               {counterparty && (
                                                 <>
                                                   <span>·</span>
@@ -6014,15 +6012,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             </span>
                                           </div>
                                           {isEmail && msg.subject && (
-                                            <p className="text-[12px] font-semibold text-[var(--color-fg)] mb-0.5">
+                                            <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-0.5">
                                               {msg.subject}
                                             </p>
                                           )}
-                                          <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">
+                                          <p className="text-[13px] text-[var(--ds-text-primary)] whitespace-pre-wrap leading-relaxed">
                                             {msg.body}
                                           </p>
                                           {msg.error_message && (
-                                            <div className="mt-1 flex items-start gap-1 text-[11px] text-rose-600 dark:text-rose-400">
+                                            <div className="mt-1 flex items-start gap-1 text-[11px] text-[var(--ds-critical-text)]">
                                               <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
                                               <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
                                             </div>
@@ -6040,37 +6038,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                 </div>
 
-                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2">
-                    {/* Mobile: taller targets (py-3.5 ≈ 48px total) to hit
-                        Apple/Material minimum tap size; desktop keeps py-2. */}
-                    <button
-                        type="button"
-                        onClick={() => { setIsFormOpen(false); setMergeMode(false); setSelectedTablesForMerge([]); }}
-                        className="w-full sm:w-auto px-4 py-3.5 sm:py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                    >
-                        Annulla
-                    </button>
-                    {mergeMode && selectedTablesForMerge.length > 0 && (
-                        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-full text-center">
-                            Conferma l'unione tavoli prima di salvare
-                        </span>
-                    )}
-                    <button
-                        onClick={handleSubmit}
-                        disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
-                        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3.5 sm:py-2 rounded-full text-sm font-medium ${
-                            (mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation
-                                ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] cursor-not-allowed border border-[var(--color-line)]'
-                                : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
-                        }`}
-                    >
-                        {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
-                        {isEditing ? 'Salva' : 'Conferma'}
-                    </button>
-                </div>
-            </div>
-        </div>,
-        document.body
+        </ModalShell>
       )}
 
       {/* Confirmation Modal — portaled: it opens above the (portaled) booking

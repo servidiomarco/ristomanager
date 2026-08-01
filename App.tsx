@@ -1557,7 +1557,7 @@ const App: React.FC = () => {
 
       {/* Sidebar — blends into page bg */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[88px]' : 'w-[264px]'} m-3 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[88px]' : 'w-[264px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
         aria-label="Navigazione principale"
       >
         <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-4'}`}>
@@ -1729,7 +1729,7 @@ const App: React.FC = () => {
       <main id="main" className="flex-1 min-w-0 flex flex-col min-h-0 relative bg-[var(--ds-canvas)]">
         {/* Header — floating rounded card on the canvas (no blur: the design
             system is opaque, see docs/risto-design-system.md §2.2). */}
-        <header className="flex-shrink-0 h-16 md:h-[72px] m-3 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 flex items-center justify-between px-3 md:px-4">
+        <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 flex items-center justify-between px-3 md:px-4">
            <div className="flex items-center gap-2.5 lg:hidden">
               <div className="bg-[var(--ds-action-bg)] h-9 w-9 rounded-[12px] inline-flex items-center justify-center">
                 <ChefHat className="text-[var(--ds-action-fg)] h-[18px] w-[18px]" />
@@ -1923,7 +1923,7 @@ const App: React.FC = () => {
             rise-in (see .animate-view-in). pb-20 on mobile clears the fixed
             bottom nav; full-height views (h-full) size to the padding-excluded
             area so they sit neatly between header and nav. */}
-        {/* .pb-mobile-nav clears the floating bottom bar (height + 12px offset
+        {/* .pb-mobile-nav clears the floating bottom bar (height + 16px offset
             + safe-area inset) and collapses to 0 at lg, where the bar is gone. */}
         <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-mobile-nav animate-view-in">
 
@@ -2480,8 +2480,8 @@ const App: React.FC = () => {
             chrome. Offset by the safe-area inset so it clears the iOS home
             indicator instead of sitting under it. */}
         <nav
-          className="fixed left-3 right-3 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
+          className="fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
           aria-label="Navigazione mobile"
         >
           <div className="flex items-stretch py-2 px-2 gap-1">
@@ -2553,7 +2553,7 @@ const App: React.FC = () => {
                 it — anchored to the same --ds-bottom-nav-clear the scroll
                 region uses, so it always clears the bar and the raised "+". */}
             <div
-              className="fixed left-3 right-3 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
+              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
               style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
