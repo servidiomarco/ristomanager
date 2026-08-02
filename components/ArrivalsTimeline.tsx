@@ -189,7 +189,9 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
           Nessuna prenotazione per questo turno
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto scrollbar-hide -mx-1 px-1">
+        // Five rows (5 × 60px + 4 × 8px gap) then scroll. On xl the card is
+        // height-constrained by the grid row instead, so the cap lifts.
+        <div className="flex-1 min-h-0 max-h-[332px] xl:max-h-none flex flex-col gap-2 overflow-y-auto scrollbar-hide -mx-1 px-1">
           {rows.map(r => {
             const { tone, action } = rowState(r);
             const table = r.table_id ? tableById.get(r.table_id) : undefined;
@@ -201,11 +203,14 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
 
             return (
               <div key={r.id} className={`flex items-center gap-3 rounded-[16px] p-3 min-w-0 ${tone}`}>
-                <div className="flex-shrink-0 w-[52px]">
+                {/* Wide enough for the longest realistic label ("tra 10h 30m")
+                    on a single line — two lines here would set the row height
+                    and break the rhythm of the list. */}
+                <div className="flex-shrink-0 w-[68px]">
                   <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] leading-tight">
                     {getRomeTimePart(r.reservation_time)}
                   </div>
-                  <div className="text-[12px] text-[var(--ds-text-muted)] leading-tight mt-0.5">
+                  <div className="text-[12px] text-[var(--ds-text-muted)] leading-tight mt-0.5 whitespace-nowrap">
                     {elapsedLabel(r.reservation_time, nowTick)}
                   </div>
                 </div>

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Phone, RefreshCw, Search, X, Loader2, Calendar, Clock, MessageSquare,
-  CheckCircle2, AlertCircle, Filter, ExternalLink, Play, StickyNote, CalendarPlus,
-  BookUser, Send, Check, Users,
+  Phone, RefreshCw, Loader2, ListFilter, ArrowRight,
+  CheckCircle2, AlertCircle, ExternalLink, CalendarPlus,
+  BookUser, Check, Users,
 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
+import { CallRecordingPlayer } from './CallRecordingPlayer';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
   voiceCallsApiService,
@@ -16,6 +17,12 @@ import {
 } from '../services/voiceCallsApiService';
 import { Reservation } from '../types';
 import { toTitleCase } from '../utils/text';
+import {
+  SplitPane, PaneHeader, PanePlaceholder, StatusPill, CountBadge, SearchField, EmptyState, SectionHeader,
+  Avatar, SwipeRow, useFirstRunHint, SegmentedControl, FormCard, Callout,
+  dsButton, dsTextarea, dsIconButton,
+} from './ds';
+import type { PillTone } from './ds';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -44,12 +51,12 @@ const formatPhone = (phone: string | null | undefined): string => {
   return phone;
 };
 
-const messageStatusBadge = (status: string | null | undefined): { label: string; cls: string } => {
+const messageStatusBadge = (status: string | null | undefined): { label: string; tone: PillTone } => {
   const s = (status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
-  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', cls: 'bg-sky-50 text-sky-700 ring-sky-200' };
-  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', cls: 'bg-rose-50 text-rose-700 ring-rose-200' };
-  return { label: s || 'In coda', cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
+  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', tone: 'positive' };
+  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', tone: 'info' };
+  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', tone: 'critical' };
+  return { label: s || 'In coda', tone: 'neutral' };
 };
 
 const channelLabel = (channel: string): string => {
@@ -58,13 +65,13 @@ const channelLabel = (channel: string): string => {
   return channel;
 };
 
-const reservationStatusBadge = (status: string | null | undefined): { label: string; cls: string } | null => {
+const reservationStatusBadge = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
   if (!status) return null;
   switch (status) {
-    case 'CONFIRMED': return { label: 'Confermata', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
-    case 'CANCELLED': return { label: 'Annullata', cls: 'bg-rose-50 text-rose-700 ring-rose-200' };
-    case 'PENDING': return { label: 'In attesa', cls: 'bg-amber-50 text-amber-700 ring-amber-200' };
-    default: return { label: status, cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
+    case 'CONFIRMED': return { label: 'Confermata', tone: 'positive' };
+    case 'CANCELLED': return { label: 'Annullata', tone: 'critical' };
+    case 'PENDING': return { label: 'In attesa', tone: 'pending' };
+    default: return { label: status, tone: 'neutral' };
   }
 };
 
@@ -88,7 +95,7 @@ const parseTranscript = (raw: string | null): TranscriptTurn[] => {
   });
 };
 
-interface DetailModalProps {
+interface CallDetailProps {
   callId: number;
   reservations: Reservation[];
   onClose: () => void;
@@ -101,7 +108,7 @@ interface DetailModalProps {
   refreshTick?: number;
 }
 
-const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick }) => {
+const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -242,419 +249,371 @@ const DetailModal: React.FC<DetailModalProps> = ({ callId, reservations, onClose
   }, [reservations, callDigits]);
   const hasReservationsForPhone = reservationsForPhone.length > 0;
 
+  const heading = detail ? (toTitleCase(detail.customer_name) || formatPhone(detail.phone)) : 'Conversazione';
+
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Phone className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
-            <div className="flex flex-col min-w-0">
-              <h2 className="text-[15px] font-semibold text-[var(--color-fg)] truncate">
-                {detail ? (toTitleCase(detail.customer_name) || formatPhone(detail.phone)) : 'Conversazione'}
-              </h2>
-              {detail?.customer_name && detail.phone && (
-                <span className="text-[12px] text-[var(--color-fg-muted)] tabular truncate">
-                  {detail.phone}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+    <>
+      <PaneHeader
+        onBack={onClose}
+        backLabel="Torna alle chiamate"
+        title={heading}
+        subtitle={detail?.customer_name && detail.phone ? detail.phone : undefined}
+        badge={detail && detail.reservation_id == null ? (
+          <StatusPill tone={detail.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
+            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+            {detail.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+          </StatusPill>
+        ) : undefined}
+        actions={
+          /* Desktop keeps the two contact actions up here; on mobile they sit
+             in the bar at the bottom, within thumb reach. */
+          <div className="hidden items-center gap-2 md:flex">
             {detail?.phone && onOpenCustomerProfile && (
               <button
                 type="button"
                 onClick={() => onOpenCustomerProfile({ phone: detail.phone! })}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors"
-                aria-label="Apri anagrafica cliente"
+                className={dsButton.secondary}
                 title="Apri anagrafica cliente"
               >
                 <BookUser className="h-4 w-4" />
+                Anagrafica
               </button>
             )}
             {detail?.phone && (
-              <a
-                href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`}
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-[12px] font-medium transition-colors"
-                aria-label="Chiama"
-                title="Chiama"
-              >
-                <Phone className="h-3.5 w-3.5" />
+              <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={dsButton.primary}>
+                <Phone className="h-4 w-4" />
                 Chiama
               </a>
             )}
-            <button
-              onClick={onClose}
-              className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-fg-muted)]"
-              aria-label="Chiudi"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
+        }
+      />
+
+      {/* The scroller carries no padding of its own, so its scrollbar rides
+          the pane edge. Put the padding on the scroller and the scrollbar eats
+          into it, leaving these cards narrower than the pinned header above. */}
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
+      <div className="space-y-4 px-4 pb-4 sm:px-6 lg:px-8">
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <CookingPotLoader label="Carico dettaglio…" size={40} />
         </div>
+      )}
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <CookingPotLoader label="Carico dettaglio…" size={40} />
-            </div>
-          )}
+      {error && <Callout tone="critical" icon={AlertCircle}>{error}</Callout>}
 
-          {error && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-sm">
-              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {detail && !loading && (
-            <>
-              <div className="grid grid-cols-2 gap-3 text-[13px]">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Data</div>
-                  <div className="text-[var(--color-fg)] mt-0.5">{formatDateTime(detail.created_at)}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Durata</div>
-                  <div className="text-[var(--color-fg)] mt-0.5 tabular">{formatDuration(detail.duration_seconds)}</div>
-                </div>
+      {detail && !loading && (
+        <>
+          <FormCard>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-[13px] text-[var(--ds-text-muted)]">Data</div>
+                <div className="mt-0.5 text-[15px] text-[var(--ds-text-primary)]">{formatDateTime(detail.created_at)}</div>
               </div>
+              <div>
+                <div className="text-[13px] text-[var(--ds-text-muted)]">Durata</div>
+                <div className="mt-0.5 text-[15px] tabular-nums text-[var(--ds-text-primary)]">{formatDuration(detail.duration_seconds)}</div>
+              </div>
+            </div>
+          </FormCard>
 
-              {hasReservationsForPhone && (
-                <div className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium flex items-center gap-1.5">
-                    <Calendar className="h-3 w-3" />
-                    Prenotazioni per questo numero
-                    <span className="text-[var(--color-fg-muted)] font-normal">· {reservationsForPhone.length}</span>
-                  </div>
-                  {reservationsForPhone.map(res => {
-                    const badge = reservationStatusBadge(res.reservation_status ?? null);
-                    const isLinked = detail.reservation_id === res.id;
-                    return (
-                      <div key={res.id} className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                            <span className="font-medium truncate">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
-                            {badge && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
-                                {badge.label}
-                              </span>
-                            )}
-                            {isLinked && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-indigo-50 text-indigo-700 ring-indigo-200 shrink-0">
-                                Collegata
-                              </span>
-                            )}
-                          </div>
-                          <a
-                            href={`/?view=RESERVATIONS&reservationId=${res.id}`}
-                            className="text-[12px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1 shrink-0"
-                          >
-                            Apri <ExternalLink className="h-3 w-3" />
-                          </a>
+          {hasReservationsForPhone && (
+            <FormCard
+              title="Prenotazioni per questo numero"
+              aside={<CountBadge count={reservationsForPhone.length} />}
+            >
+              <div className="flex flex-col gap-2">
+                {reservationsForPhone.map(res => {
+                  const badge = reservationStatusBadge(res.reservation_status ?? null);
+                  const isLinked = detail.reservation_id === res.id;
+                  return (
+                    <div key={res.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2 text-[15px] text-[var(--ds-text-primary)]">
+                          <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
+                          <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
+                          {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
+                          {isLinked && <StatusPill tone="info">Collegata</StatusPill>}
                         </div>
-                        <div className="text-[12px] text-[var(--color-fg-muted)] mt-1">
-                          {formatDateTime(res.reservation_time)}
-                          {res.guests != null && ` · ${res.guests} ospiti`}
-                        </div>
+                        <a
+                          href={`/?view=RESERVATIONS&reservationId=${res.id}`}
+                          className="inline-flex flex-shrink-0 items-center gap-1 text-[14px] font-medium text-[var(--ds-text-primary)] underline-offset-4 hover:underline"
+                        >
+                          Apri <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                        </a>
                       </div>
-                    );
-                  })}
+                      <div className="mt-1 text-[13px] text-[var(--ds-text-muted)]">
+                        {formatDateTime(res.reservation_time)}
+                        {res.guests != null && ` · ${res.guests} ospiti`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </FormCard>
+          )}
+
+          {/* Fallback: call is linked to a reservation that isn't in the
+              current list (e.g. filtered out by date range or phone
+              mismatch after normalization) — still show its summary. */}
+          {!hasReservationsForPhone && detail.reservation_id && (
+            <FormCard>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-[15px] text-[var(--ds-text-primary)]">
+                  <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
+                  <span className="truncate font-medium">{toTitleCase(detail.reservation_customer_name) || 'Prenotazione'}</span>
+                  {resBadge && <StatusPill tone={resBadge.tone}>{resBadge.label}</StatusPill>}
+                </div>
+                <a
+                  href={`/?view=RESERVATIONS&reservationId=${detail.reservation_id}`}
+                  className="inline-flex flex-shrink-0 items-center gap-1 text-[14px] font-medium text-[var(--ds-text-primary)] underline-offset-4 hover:underline"
+                >
+                  Apri <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                </a>
+              </div>
+              {detail.reservation_time && (
+                <div className="mt-1 text-[13px] text-[var(--ds-text-muted)]">
+                  {formatDateTime(detail.reservation_time)}
+                  {detail.reservation_guests != null && ` · ${detail.reservation_guests} ospiti`}
                 </div>
               )}
+            </FormCard>
+          )}
 
-              {/* Fallback: call is linked to a reservation that isn't in the
-                  current list (e.g. filtered out by date range or phone
-                  mismatch after normalization) — still show its summary. */}
-              {!hasReservationsForPhone && detail.reservation_id && (
-                <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      <span className="font-medium">{toTitleCase(detail.reservation_customer_name) || 'Prenotazione'}</span>
-                      {resBadge && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset ${resBadge.cls}`}>
-                          {resBadge.label}
-                        </span>
-                      )}
-                    </div>
-                    <a
-                      href={`/?view=RESERVATIONS&reservationId=${detail.reservation_id}`}
-                      className="text-[12px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
+          {detail.phantom_confirmation && !detail.phantom_recovered && (
+            <Callout tone="critical" icon={AlertCircle} title="Prenotazione da recuperare">
+              L'agent ha detto al cliente che la prenotazione è confermata, ma non è mai stata invocata la creazione nel CRM. Richiama il cliente per confermare o annullare, poi crea manualmente la prenotazione.
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={markPhantomRecovered}
+                  disabled={saving}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-colors hover:brightness-95 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Segna come recuperata
+                </button>
+              </div>
+            </Callout>
+          )}
+          {detail.phantom_confirmation && detail.phantom_recovered && (
+            <Callout tone="positive" icon={CheckCircle2} title="Prenotazione recuperata">
+              La conferma fantasma dell'agent è stata gestita.
+            </Callout>
+          )}
+          {/* Large-group handoff: agent redirected the caller to a human
+              because the party was above the configurable threshold.
+              Distinct from phantom (which is an agent hallucination);
+              this one is expected behavior and just needs a callback. */}
+          {detail.large_group_handoff && !detail.reservation_id && (
+            <Callout tone="info" icon={Users} title="Gruppo grande — richiamare">
+              Il cliente voleva prenotare per un gruppo oltre la soglia dell'agent. Sofia ha detto che avremmo richiamato: concorda con lui data, orario e mise en place.
+            </Callout>
+          )}
+
+          <FormCard
+            title="Follow-up"
+            aside={
+              detail.follow_up_status === 'CONTACTED' ? (
+                <StatusPill tone="positive">Ricontattato</StatusPill>
+              ) : detail.reservation_id == null ? (
+                <StatusPill tone="pending">Da ricontattare</StatusPill>
+              ) : null
+            }
+          >
+            <div className="flex flex-col gap-3">
+              {/* Both on one line, neither clipped. The card is ~318px wide on
+                  a phone, so the pair has to come in under that: the primary
+                  keeps its full label but at 14px in a shorter pill, and the
+                  toggle beside it is bare text. flex-wrap stays as the escape
+                  hatch — on a 320px screen it drops to a second line rather
+                  than truncating anything. */}
+              {detail.reservation_id == null && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  {!hasReservationsForPhone && onCreateReservation && (
+                    <button
+                      onClick={() => {
+                        onCreateReservation({
+                          callId,
+                          customer_name: detail.customer_name || '',
+                          phone: detail.phone || '',
+                        });
+                        onClose();
+                      }}
+                      className={`${dsButton.primary} h-10 flex-shrink-0 px-4 text-[14px]`}
                     >
-                      Apri <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                  {detail.reservation_time && (
-                    <div className="text-[12px] text-[var(--color-fg-muted)] mt-1">
-                      {formatDateTime(detail.reservation_time)}
-                      {detail.reservation_guests != null && ` · ${detail.reservation_guests} ospiti`}
-                    </div>
+                      <CalendarPlus className="h-4 w-4" aria-hidden />
+                      Crea prenotazione
+                    </button>
                   )}
+                  {/* The toggle drops to a text action so the primary keeps its
+                      full label. Two solid pills competing for one row is what
+                      forced the truncation — and only one of these is the thing
+                      you came here to do. No icon: it's the last ~22px needed
+                      to keep the pair on one line at 375px. */}
+                  <button
+                    onClick={() => applyFollowUpPatch({
+                      status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
+                    })}
+                    disabled={saving}
+                    className="flex-shrink-0 rounded-full text-[14px] font-medium text-[var(--ds-text-primary)] underline underline-offset-4 transition-opacity hover:no-underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {detail.follow_up_status === 'CONTACTED' ? 'Da ricontattare' : 'Segna ricontattato'}
+                  </button>
                 </div>
               )}
-
-              {detail.summary && (
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-1">Riassunto</div>
-                  <p className="text-[13px] text-[var(--color-fg)] leading-relaxed">{detail.summary}</p>
+              {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
+                <div className="text-[13px] text-[var(--ds-text-muted)]">
+                  {detail.follow_up_updated_by_name && `Ricontattato da ${detail.follow_up_updated_by_name}`}
+                  {detail.follow_up_updated_by_name && detail.follow_up_updated_at && ' · '}
+                  {detail.follow_up_updated_at && formatDateTime(detail.follow_up_updated_at)}
                 </div>
               )}
-
-              {detail.phantom_confirmation && !detail.phantom_recovered && (
-                <div className="rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/40 p-3">
-                  <div className="flex items-start gap-2 text-[13px] text-rose-800 dark:text-rose-200">
-                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold">Prenotazione da recuperare</div>
-                      <div className="text-[12px] mt-0.5 opacity-90">
-                        L'agent ha detto al cliente che la prenotazione è confermata, ma non è mai stata invocata la creazione nel CRM. Richiama il cliente per confermare o annullare, poi crea manualmente la prenotazione.
-                      </div>
-                      <div className="mt-2">
+              <div>
+                <textarea
+                  value={notesDraft}
+                  onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
+                  placeholder="Note utili per la prenotazione…"
+                  rows={3}
+                  className={`${dsTextarea} resize-y`}
+                />
+                {(notesDirty || saveError) && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    {saveError ? (
+                      <span className="text-[13px] text-[var(--ds-critical-text)]">{saveError}</span>
+                    ) : <span />}
+                    <div className="flex items-center gap-2">
+                      {notesDirty && (
                         <button
-                          type="button"
-                          onClick={markPhantomRecovered}
+                          onClick={() => { setNotesDraft(detail.notes ?? ''); setNotesDirty(false); setSaveError(null); }}
                           disabled={saving}
-                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg font-medium border border-rose-300 bg-white text-rose-700 hover:bg-rose-100 disabled:opacity-50 dark:bg-transparent dark:text-rose-100 dark:border-rose-400/60 dark:hover:bg-rose-500/20"
+                          className={dsButton.quiet}
                         >
-                          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                          Segna come recuperata
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {detail.phantom_confirmation && detail.phantom_recovered && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/40 p-3">
-                  <div className="flex items-start gap-2 text-[13px] text-emerald-800 dark:text-emerald-200">
-                    <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div>
-                      <div className="font-semibold">Prenotazione recuperata</div>
-                      <div className="text-[12px] mt-0.5 opacity-90">
-                        La conferma fantasma dell'agent è stata gestita.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Large-group handoff: agent redirected the caller to a human
-                  because the party was above the configurable threshold.
-                  Distinct from phantom (which is an agent hallucination);
-                  this one is expected behavior and just needs a callback. */}
-              {detail.large_group_handoff && !detail.reservation_id && (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-500/10 dark:border-indigo-500/40 p-3">
-                  <div className="flex items-start gap-2 text-[13px] text-indigo-800 dark:text-indigo-200">
-                    <Users className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div>
-                      <div className="font-semibold">Gruppo grande — richiamare</div>
-                      <div className="text-[12px] mt-0.5 opacity-90">
-                        Il cliente voleva prenotare per un gruppo oltre la soglia dell'agent. Sofia ha detto che avremmo richiamato: concorda con lui data, orario e mise en place.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)]">
-                    <StickyNote className="h-4 w-4 text-[var(--color-fg-muted)]" />
-                    <span className="font-medium">Follow-up</span>
-                    {detail.follow_up_status === 'CONTACTED' ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-200">
-                        Ricontattato
-                      </span>
-                    ) : detail.reservation_id == null ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-200">
-                        Da ricontattare
-                      </span>
-                    ) : null}
-                  </div>
-                  {detail.reservation_id == null && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => applyFollowUpPatch({
-                          status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
-                        })}
-                        disabled={saving}
-                        className={`text-[12px] px-2.5 py-1 rounded-lg font-medium border transition-colors disabled:opacity-50 ${
-                          detail.follow_up_status === 'CONTACTED'
-                            ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                        }`}
-                      >
-                        {detail.follow_up_status === 'CONTACTED' ? 'Segna come da ricontattare' : 'Segna come ricontattato'}
-                      </button>
-                      {!hasReservationsForPhone && onCreateReservation && (
-                        <button
-                          onClick={() => {
-                            onCreateReservation({
-                              callId,
-                              customer_name: detail.customer_name || '',
-                              phone: detail.phone || '',
-                            });
-                            onClose();
-                          }}
-                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700"
-                        >
-                          <CalendarPlus className="h-3.5 w-3.5" />
-                          Crea prenotazione
+                          Annulla
                         </button>
                       )}
-                    </div>
-                  )}
-                </div>
-                {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
-                  <div className="text-[11px] text-[var(--color-fg-muted)]">
-                    {detail.follow_up_updated_by_name && `Ricontattato da ${detail.follow_up_updated_by_name}`}
-                    {detail.follow_up_updated_by_name && detail.follow_up_updated_at && ' · '}
-                    {detail.follow_up_updated_at && formatDateTime(detail.follow_up_updated_at)}
-                  </div>
-                )}
-                <div>
-                  <textarea
-                    value={notesDraft}
-                    onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
-                    placeholder="Note utili per la prenotazione…"
-                    rows={3}
-                    className="w-full px-3 py-2 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-y"
-                  />
-                  {(notesDirty || saveError) && (
-                    <div className="flex items-center justify-between gap-2 mt-2">
-                      {saveError ? (
-                        <span className="text-[11px] text-rose-600">{saveError}</span>
-                      ) : <span />}
-                      <div className="flex items-center gap-2">
-                        {notesDirty && (
-                          <button
-                            onClick={() => { setNotesDraft(detail.notes ?? ''); setNotesDirty(false); setSaveError(null); }}
-                            disabled={saving}
-                            className="text-[12px] px-2.5 py-1 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-                          >
-                            Annulla
-                          </button>
-                        )}
-                        <button
-                          onClick={() => applyFollowUpPatch({ notes: notesDraft })}
-                          disabled={saving || !notesDirty}
-                          className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
-                        >
-                          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
-                          Salva note
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2">Audio</div>
-                {audioUrl ? (
-                  <audio controls src={audioUrl} className="w-full" />
-                ) : audioError ? (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-[12px]">
-                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span>{audioError}</span>
-                  </div>
-                ) : (
-                  <button
-                    onClick={loadAudio}
-                    disabled={audioLoading}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] text-[13px] text-[var(--color-fg)] disabled:opacity-50"
-                  >
-                    {audioLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                    {audioLoading ? 'Carico…' : 'Carica audio'}
-                  </button>
-                )}
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2 flex items-center gap-1.5">
-                  <Send className="h-3 w-3" />
-                  Messaggi inviati
-                  {messages.length > 0 && (
-                    <span className="text-[var(--color-fg-muted)] font-normal">· {messages.length}</span>
-                  )}
-                </div>
-                {messagesLoading ? (
-                  <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span>Carico messaggi…</span>
-                  </div>
-                ) : messagesError ? (
-                  <div className="flex items-start gap-2 p-2 rounded-lg bg-rose-50 text-rose-700 text-[12px]">
-                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                    <span>{messagesError}</span>
-                  </div>
-                ) : messages.length === 0 ? (
-                  <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Nessun messaggio inviato a questo numero.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {messages.map(msg => {
-                      const badge = messageStatusBadge(msg.status);
-                      return (
-                        <div key={msg.id} className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
-                              <span className="font-medium text-[var(--color-fg)]">{channelLabel(msg.channel)}</span>
-                              <span>·</span>
-                              <span className="tabular">{formatDateTime(msg.sent_at)}</span>
-                            </div>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
-                              {badge.label}
-                            </span>
-                          </div>
-                          <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">{msg.body}</p>
-                          {msg.error_message && (
-                            <div className="mt-1.5 text-[11px] text-rose-600 flex items-start gap-1">
-                              <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                              <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2">Trascrizione</div>
-                {turns.length === 0 ? (
-                  <p className="text-[13px] text-[var(--color-fg-subtle)] italic">Trascrizione non disponibile.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {turns.map((turn, idx) => (
-                      <div
-                        key={idx}
-                        className={`flex ${turn.who === 'user' ? 'justify-end' : 'justify-start'}`}
+                      <button
+                        onClick={() => applyFollowUpPatch({ notes: notesDraft })}
+                        disabled={saving || !notesDirty}
+                        className={dsButton.primary}
                       >
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
-                            turn.who === 'user'
-                              ? 'bg-indigo-600 text-white rounded-br-sm'
-                              : turn.who === 'agent'
-                              ? 'bg-[var(--color-bg)] text-[var(--color-fg)] border border-[var(--color-line)] rounded-bl-sm'
-                              : 'bg-amber-50 text-amber-900 border border-amber-200'
-                          }`}
-                        >
-                          {turn.text}
-                        </div>
-                      </div>
-                    ))}
+                        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Salva note
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
-            </>
-          )}
-        </div>
+            </div>
+          </FormCard>
+
+          <FormCard title="Registrazione">
+            {audioError ? (
+              <Callout tone="critical" icon={AlertCircle}>{audioError}</Callout>
+            ) : (
+              <CallRecordingPlayer
+                src={audioUrl}
+                durationSeconds={detail.duration_seconds}
+                loading={audioLoading}
+                onLoad={loadAudio}
+              />
+            )}
+          </FormCard>
+
+          <FormCard
+            title="Messaggi inviati"
+            aside={messages.length > 0 ? <CountBadge count={messages.length} /> : undefined}
+          >
+            {messagesLoading ? (
+              <div className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Carico messaggi…</span>
+              </div>
+            ) : messagesError ? (
+              <Callout tone="critical" icon={AlertCircle}>{messagesError}</Callout>
+            ) : messages.length === 0 ? (
+              <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun messaggio inviato a questo numero.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {messages.map(msg => {
+                  const badge = messageStatusBadge(msg.status);
+                  return (
+                    <div key={msg.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+                          <span className="font-medium text-[var(--ds-text-primary)]">{channelLabel(msg.channel)}</span>
+                          <span aria-hidden>·</span>
+                          <span className="tabular-nums">{formatDateTime(msg.sent_at)}</span>
+                        </div>
+                        <StatusPill tone={badge.tone}>{badge.label}</StatusPill>
+                      </div>
+                      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-[var(--ds-text-primary)]">{msg.body}</p>
+                      {msg.error_message && (
+                        <div className="mt-1.5 flex items-start gap-1 text-[13px] text-[var(--ds-critical-text)]">
+                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                          <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </FormCard>
+
+          <FormCard title="Trascrizione" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">Agente vocale</span>}>
+            {detail.summary && (
+              <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Riassunto</div>
+                <p className="text-[15px] leading-relaxed text-[var(--ds-text-primary)]">{detail.summary}</p>
+              </div>
+            )}
+            {turns.length === 0 ? (
+              <p className="text-[14px] text-[var(--ds-text-muted)]">Trascrizione non disponibile.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {turns.map((turn, idx) => (
+                  <div key={idx} className={`flex ${turn.who === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[85%] rounded-[18px] px-3.5 py-2 text-[14px] leading-relaxed ${
+                        turn.who === 'user'
+                          ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                          : turn.who === 'agent'
+                          ? 'rounded-bl-[6px] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                          : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                      }`}
+                    >
+                      {turn.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormCard>
+        </>
+      )}
       </div>
-    </div>
+      </div>
+
+      {detail?.phone && (
+        <div className="flex flex-shrink-0 items-center gap-2 bg-[var(--ds-surface)] px-4 py-3 md:hidden">
+          {onOpenCustomerProfile && (
+            <button
+              type="button"
+              onClick={() => onOpenCustomerProfile({ phone: detail.phone! })}
+              className={`${dsButton.secondary} flex-1`}
+            >
+              <BookUser className="h-4 w-4" />
+              Anagrafica
+            </button>
+          )}
+          <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={`${dsButton.primary} flex-1`}>
+            <Phone className="h-4 w-4" />
+            Chiama
+          </a>
+        </div>
+      )}
+    </>
   );
 };
 
@@ -683,6 +642,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   const [statusFilter, setStatusFilter] = useState<'all' | 'phantom' | 'linked' | 'to-contact' | 'contacted'>('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Chips and the date range fold away by default — on a phone they cost more
+  // room than the first two results.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -800,280 +762,310 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     }
   }, [markAllArmed, fetchItems, onFollowUpChanged]);
 
-  return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-xl md:text-2xl font-semibold text-[var(--color-fg)]">Conversazioni</h1>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mt-0.5">
-              Chiamate gestite dall'agent vocale ElevenLabs
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {syncMessage && (
-              <span className="text-[12px] text-[var(--color-fg-muted)]">{syncMessage}</span>
+  // Swipe-right on a pending call. Same endpoint the detail modal's
+  // "Ricontattato" button uses — the gesture is a shortcut to it,
+  // not a new path.
+  const markContacted = useCallback(async (call: VoiceCallSummary) => {
+    try {
+      await voiceCallsApiService.updateFollowUp(call.id, { status: 'CONTACTED' });
+      await fetchItems();
+      onFollowUpChanged?.();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [fetchItems, onFollowUpChanged]);
+
+  const statusChips = [
+    { value: 'all' as const, label: 'Tutte' },
+    { value: 'phantom' as const, label: 'Da recuperare', dot: 'bg-[var(--ds-critical-solid)]' },
+    { value: 'linked' as const, label: 'Con prenotazione', dot: 'bg-[var(--ds-seated-solid)]' },
+    { value: 'to-contact' as const, label: 'Da ricontattare', dot: 'bg-[var(--ds-pending-solid)]' },
+    { value: 'contacted' as const, label: 'Ricontattati', dot: 'bg-[var(--ds-seated-solid)]' },
+  ];
+  const hasActiveFilters = statusFilter !== 'all' || !!from || !!to;
+  const resetAll = () => {
+    setStatusFilter('all');
+    setFrom('');
+    setTo('');
+    setSearch('');
+  };
+
+  // A call is "da ricontattare" when nobody has called back and it isn't
+  // already tied to a reservation. Pure derivation over rows already loaded —
+  // the section pins them to the top instead of leaving them scattered by time.
+  const needsCallback = (c: VoiceCallSummary) =>
+    c.reservation_id == null && c.follow_up_status !== 'CONTACTED';
+  const pendingCalls = visibleItems.filter(needsCallback);
+  const handledCalls = visibleItems.filter(c => !needsCallback(c));
+  const swipeHint = useFirstRunHint('ds-swipe-hint-chiamate');
+
+  const renderCall = (item: VoiceCallSummary, hint: boolean) => {
+    const resBadge = reservationStatusBadge(item.reservation_status);
+    const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
+    const pending = needsCallback(item);
+    const tel = (item.phone || '').replace(/[^\d+]/g, '');
+    return (
+      <SwipeRow
+        key={item.id}
+        hint={hint}
+        left={pending ? {
+          label: 'Ricontattato',
+          tone: 'confirm',
+          icon: <Check className="h-4 w-4" aria-hidden />,
+          onAction: () => markContacted(item),
+        } : undefined}
+        right={tel ? {
+          label: 'Richiama',
+          tone: 'primary',
+          icon: <ArrowRight className="h-4 w-4" aria-hidden />,
+          onAction: () => { window.location.href = `tel:${tel}`; },
+        } : undefined}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedId(item.id)}
+          className="flex w-full gap-3 bg-[var(--ds-surface)] p-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <Avatar icon={Phone} tone={pending || phantomOpen ? 'critical' : 'neutral'} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                {toTitleCase(item.customer_name) || formatPhone(item.phone)}
+              </span>
+              <span className="flex-shrink-0 whitespace-nowrap text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                {formatDateTime(item.created_at)}
+              </span>
+            </div>
+            {item.customer_name && item.phone && (
+              <div className="truncate text-[13px] tabular-nums text-[var(--ds-text-muted)]">{item.phone}</div>
             )}
-            <button
-              onClick={handleMarkAllContacted}
-              disabled={markingAll}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors disabled:opacity-50 ${
-                markAllArmed
-                  ? 'bg-amber-500 text-white border-amber-500 hover:bg-amber-600'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-              }`}
-              title="Segna tutte le conversazioni in attesa come ricontattate"
-            >
-              {markingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-              {markAllArmed ? 'Confermi?' : 'Segna tutte ricontattate'}
-            </button>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[13px] font-medium hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Sincronizza
-            </button>
+            {item.summary && (
+              <p className="mt-0.5 truncate text-[14px] text-[var(--ds-text-muted)]">{item.summary}</p>
+            )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {phantomOpen && (
+                <StatusPill
+                  tone="critical"
+                  title="L'agent ha detto 'confermata' senza creare davvero la prenotazione — richiamare il cliente"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-critical-solid)]" aria-hidden />
+                  Da recuperare
+                </StatusPill>
+              )}
+              {resBadge && (
+                <StatusPill tone={resBadge.tone}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+                  {resBadge.label}
+                </StatusPill>
+              )}
+              {!phantomOpen && item.reservation_id == null && (
+                <StatusPill tone={item.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+                  {item.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+                </StatusPill>
+              )}
+              {/* Handoff reason badge: shown alongside the follow-up status so
+                  the operator knows *why* this call needs a callback (agent
+                  redirected a large group). */}
+              {!phantomOpen && item.reservation_id == null && item.large_group_handoff && (
+                <StatusPill
+                  tone="info"
+                  title="Il cliente voleva prenotare per un gruppo grande — l'agent ha promesso una richiamata"
+                >
+                  Gruppo grande
+                </StatusPill>
+              )}
+              <StatusPill tone="neutral" title="Durata">
+                {formatDuration(item.duration_seconds)}
+              </StatusPill>
+            </div>
           </div>
-        </div>
+        </button>
+      </SwipeRow>
+    );
+  };
 
-        {(() => {
-          const statusChips = [
-            { v: 'all', l: 'Tutte', dot: null },
-            { v: 'phantom', l: '⚠︎ Da recuperare', dot: 'bg-rose-500' },
-            { v: 'linked', l: 'Con prenotazione', dot: 'bg-emerald-500' },
-            { v: 'to-contact', l: 'Da ricontattare', dot: 'bg-amber-500' },
-            { v: 'contacted', l: 'Ricontattati', dot: 'bg-emerald-500' },
-          ] as const;
-          const hasActiveFilters =
-            statusFilter !== 'all' || !!from || !!to || !!searchDebounced.trim();
-          const resetAll = () => {
-            setStatusFilter('all');
-            setFrom('');
-            setTo('');
-            setSearch('');
-          };
-          return (
-            <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 space-y-3">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Cerca telefono, nome, riassunto, trascrizione…"
-                  className="w-full pl-8 pr-8 py-2 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-                    aria-label="Svuota ricerca"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-
-              {/* Quick filter chips — horizontal carousel on narrow screens.
-                  The right-edge mask fades the last chip so users can tell
-                  more chips exist beyond the viewport (mobile browsers don't
-                  render a scrollbar for horizontal scroll containers). */}
-              <div
-                className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]"
+  return (
+    <>
+      {/* No visible page title: the desktop sidebar and the mobile switcher
+          both already name this screen. The heading stays for screen readers. */}
+      <h1 className="sr-only">Chiamate</h1>
+      <SplitPane
+        detailOpen={selectedId !== null}
+        toolbar={
+          <div className="space-y-3">
+            {/* One row: search, filters, sync. Filters live behind the toggle
+                because they cost more vertical space than the first two rows
+                of results. */}
+            <div className="flex items-center gap-2">
+              <SearchField
+                className="min-w-0 flex-1"
+                value={search}
+                onChange={setSearch}
+                placeholder="Cerca telefono, nome, riassunto"
+              />
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(v => !v)}
+                aria-expanded={filtersOpen}
+                aria-label="Filtri"
+                title="Filtri"
+                className={filtersOpen
+                  ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
+                  : `relative ${dsIconButton}`}
               >
-                {statusChips.map(({ v, l, dot }) => {
-                  const active = statusFilter === v;
-                  return (
-                    <button
-                      key={v}
-                      onClick={() => setStatusFilter(v)}
-                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
-                        active
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                          : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)]'
-                      }`}
-                    >
-                      {dot && (
-                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-white/90' : dot}`} />
-                      )}
-                      {l}
-                    </button>
-                  );
-                })}
-              </div>
+                <ListFilter className="h-4 w-4" />
+                {/* A filter you can't see is a filter you forget you set. */}
+                {hasActiveFilters && !filtersOpen && (
+                  <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-[var(--ds-critical-solid)] ring-2 ring-[var(--ds-surface)]" aria-hidden />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncing}
+                aria-label="Sincronizza"
+                title="Sincronizza"
+                className={dsIconButton}
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
 
-              {/* Period + count + reset */}
-              <div className="flex items-center gap-2 flex-wrap text-[12px] text-[var(--color-fg-muted)] pt-1 border-t border-[var(--color-line)]">
-                {/* Period row: single line even on mobile. Inputs shrink to
-                    share the row (flex-1 min-w-0); the label is icon-only on
-                    xs so nothing wraps under ~340px. */}
-                <div className="flex items-center gap-2 pt-2 w-full sm:w-auto">
-                  <Filter className="h-3.5 w-3.5 shrink-0" />
-                  <span className="shrink-0 hidden sm:inline">Periodo:</span>
+            {filtersOpen && (
+              <div className="space-y-3 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <SegmentedControl
+                  value={statusFilter}
+                  onChange={next => setStatusFilter(next)}
+                  ariaLabel="Filtra per stato"
+                  overflow="scroll"
+                  size="sm"
+                  options={statusChips.map(c => ({
+                    value: c.value,
+                    label: c.label,
+                    // The dot keeps its semantic colour when selected — it
+                    // names the state, so inverting it to white throws the
+                    // meaning away.
+                    icon: c.dot ? <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${c.dot}`} aria-hidden /> : undefined,
+                  }))}
+                />
+                <div className="flex items-center gap-2">
                   <input
                     type="date"
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
-                    className="flex-1 sm:flex-none min-w-0 px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular sm:min-w-[120px]"
+                    aria-label="Da"
+                    className="h-10 min-w-0 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
-                  <span className="shrink-0">→</span>
+                  <span className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden>→</span>
                   <input
                     type="date"
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
-                    className="flex-1 sm:flex-none min-w-0 px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular sm:min-w-[120px]"
+                    aria-label="A"
+                    className="h-10 min-w-0 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
-                  {(from || to) && (
-                    <button
-                      onClick={() => { setFrom(''); setTo(''); }}
-                      className="shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
-                      aria-label="Svuota periodo"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
                 </div>
-                <div className="ml-auto flex items-center gap-2 pt-2">
-                  {hasActiveFilters && (
+                <div className="flex items-center justify-between gap-3 text-[13px] text-[var(--ds-text-muted)]">
+                  <span className="tabular-nums">{displayedCount} chiamat{displayedCount === 1 ? 'a' : 'e'}</span>
+                  {(hasActiveFilters || search) && (
                     <button
                       onClick={resetAll}
-                      className="text-indigo-600 hover:text-indigo-700 font-medium"
+                      className="font-medium text-[var(--ds-text-primary)] underline-offset-4 hover:underline"
                     >
                       Reimposta filtri
                     </button>
                   )}
-                  <span className="tabular">{displayedCount} conversazion{displayedCount === 1 ? 'e' : 'i'}</span>
                 </div>
               </div>
-            </div>
-          );
-        })()}
-
-        {error && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-sm">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <span>{error}</span>
+            )}
           </div>
-        )}
+        }
+        list={
+          <div className="space-y-3">
+            {/* One slot for both outcomes of a sync or a bulk mark — the
+                string already carries which one it was. */}
+            {syncMessage && (
+              <Callout
+                tone={syncMessage.startsWith('Errore') ? 'critical' : 'info'}
+                icon={syncMessage.startsWith('Errore') ? AlertCircle : CheckCircle2}
+              >
+                {syncMessage}
+              </Callout>
+            )}
 
-        {loading ? (
-          <SkeletonInboxList count={6} className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] overflow-hidden" />
-        ) : visibleItems.length === 0 ? (
-          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
-            <Phone className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-            <p className="text-[13px] text-[var(--color-fg-muted)]">
-              {statusFilter === 'to-contact'
-                ? 'Nessuna chiamata da ricontattare.'
-                : statusFilter === 'contacted'
-                  ? 'Nessuna chiamata ricontattata.'
-                  : statusFilter === 'linked'
-                    ? 'Nessuna chiamata collegata a una prenotazione.'
-                    : 'Nessuna conversazione. Prova a sincronizzare se ne hai di recenti.'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {visibleItems.map(item => {
-              const resBadge = reservationStatusBadge(item.reservation_status);
-              const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  className={`w-full text-left bg-[var(--color-surface)] rounded-xl border p-3 md:p-4 hover:shadow-sm transition-all ${
-                    phantomOpen
-                      ? 'border-rose-300 ring-1 ring-rose-200 hover:border-rose-400'
-                      : 'border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Phone className={`h-4 w-4 shrink-0 ${phantomOpen ? 'text-rose-600' : 'text-[var(--color-fg-muted)]'}`} />
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
-                          {toTitleCase(item.customer_name) || formatPhone(item.phone)}
-                        </span>
-                        {item.customer_name && item.phone && (
-                          <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
-                            {item.phone}
-                          </span>
-                        )}
-                      </div>
-                      {phantomOpen && (
-                        <span
-                          className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ring-1 ring-inset shrink-0 bg-rose-50 text-rose-700 ring-rose-300"
-                          title="L'agent ha detto 'confermata' senza creare davvero la prenotazione — richiamare il cliente"
+            {error && <Callout tone="critical" icon={AlertCircle}>{error}</Callout>}
+
+            {loading ? (
+              <SkeletonInboxList count={6} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+            ) : visibleItems.length === 0 ? (
+              <EmptyState icon={Phone}>
+                {statusFilter === 'to-contact'
+                  ? 'Nessuna chiamata da ricontattare.'
+                  : statusFilter === 'contacted'
+                    ? 'Nessuna chiamata ricontattata.'
+                    : statusFilter === 'linked'
+                      ? 'Nessuna chiamata collegata a una prenotazione.'
+                      : 'Nessuna conversazione. Prova a sincronizzare se ne hai di recenti.'}
+              </EmptyState>
+            ) : (
+              <div className="space-y-1">
+                {pendingCalls.length > 0 && (
+                  <>
+                    <SectionHeader
+                      tone="attention"
+                      action={
+                        <button
+                          onClick={handleMarkAllContacted}
+                          disabled={markingAll}
+                          title="Segna tutte le conversazioni in attesa come ricontattate"
+                          className={`flex-shrink-0 text-[13px] font-semibold underline-offset-4 hover:underline disabled:opacity-50 ${
+                            markAllArmed ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
+                          }`}
                         >
-                          ⚠︎ Da recuperare
-                        </span>
-                      )}
-                      {resBadge && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
-                          {resBadge.label}
-                        </span>
-                      )}
-                      {!phantomOpen && item.reservation_id == null && item.follow_up_status === 'CONTACTED' && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-emerald-50 text-emerald-700 ring-emerald-200">
-                          Ricontattato
-                        </span>
-                      )}
-                      {!phantomOpen && item.reservation_id == null && item.follow_up_status !== 'CONTACTED' && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-amber-50 text-amber-700 ring-amber-200">
-                          Da ricontattare
-                        </span>
-                      )}
-                      {/* Handoff reason badge: shown alongside the follow-up
-                          status so the operator knows *why* this call needs
-                          a callback (agent redirected a large group). */}
-                      {!phantomOpen && item.reservation_id == null && item.large_group_handoff && (
-                        <span
-                          className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ring-1 ring-inset shrink-0 bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30"
-                          title="Il cliente voleva prenotare per un gruppo grande — l'agent ha promesso una richiamata"
-                        >
-                          Gruppo grande
-                        </span>
-                      )}
+                          {markingAll ? 'Attendi…' : markAllArmed ? 'Confermi?' : 'Segna tutte'}
+                        </button>
+                      }
+                    >
+                      Da ricontattare
+                    </SectionHeader>
+                    <div className="space-y-2 pb-2">
+                      {pendingCalls.map((c, i) => renderCall(c, swipeHint && i === 0))}
                     </div>
-                    <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] shrink-0">
-                      <span className="inline-flex items-center gap-1 tabular">
-                        <Clock className="h-3 w-3" />
-                        {formatDuration(item.duration_seconds)}
-                      </span>
-                      <span className="inline-flex items-center gap-1 tabular">
-                        <Calendar className="h-3 w-3" />
-                        {formatDateTime(item.created_at)}
-                      </span>
+                  </>
+                )}
+                {handledCalls.length > 0 && (
+                  <>
+                    <SectionHeader>
+                      {pendingCalls.length > 0 ? 'Gestite' : 'Tutte le chiamate'}
+                    </SectionHeader>
+                    <div className="space-y-2">
+                      {handledCalls.map((c, i) => renderCall(c, swipeHint && pendingCalls.length === 0 && i === 0))}
                     </div>
-                  </div>
-                  {item.summary && (
-                    <p className="text-[13px] text-[var(--color-fg-muted)] mt-2 line-clamp-2 flex items-start gap-1.5">
-                      <MessageSquare className="h-3 w-3 mt-1 shrink-0" />
-                      <span>{item.summary}</span>
-                    </p>
-                  )}
-                </button>
-              );
-            })}
+                  </>
+                )}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-
-      {selectedId !== null && (
-        <DetailModal
-          callId={selectedId}
-          reservations={reservations}
-          onClose={() => setSelectedId(null)}
-          onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
-          onCreateReservation={onCreateReservationFromCall}
-          onOpenCustomerProfile={onOpenCustomerProfile}
-          refreshTick={refreshTick}
-        />
-      )}
-    </div>
+        }
+        detail={
+          selectedId !== null ? (
+            <CallDetail
+              key={selectedId}
+              callId={selectedId}
+              reservations={reservations}
+              onClose={() => setSelectedId(null)}
+              onFollowUpChanged={() => { fetchItems(); onFollowUpChanged?.(); }}
+              onCreateReservation={onCreateReservationFromCall}
+              onOpenCustomerProfile={onOpenCustomerProfile}
+              refreshTick={refreshTick}
+            />
+          ) : (
+            <PanePlaceholder icon={Phone}>Seleziona una chiamata dalla lista</PanePlaceholder>
+          )
+        }
+      />
+    </>
   );
 };
 

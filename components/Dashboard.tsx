@@ -1198,8 +1198,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Row 1: Timeline arrivi — the reception's working view — with the two
           action lists (Da confermare, Note & allergeni) stacked beside it. */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 min-w-0 flex">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 xl:h-[440px]">
+        <div className="xl:col-span-2 min-w-0 flex min-h-0">
           <ArrivalsTimeline
             reservations={timelineReservations}
             tables={tables}
@@ -1212,12 +1212,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             onNavigateToReservations={onNavigateToReservations}
           />
         </div>
-        <div className="flex flex-col gap-4 min-w-0">
+        <div className="flex flex-col gap-4 min-w-0 min-h-0">
       {/* Da confermare — pending reservations across the whole DB (not just
           today), ordered by reservation time ascending. Confirm/decline act in
           place; a booking with an unpaid deposit still routes into the modal so
           the guard holds. Full editing lives in Prenotazioni. */}
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0">
+      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Da confermare</h2>
           {pendingReservations.length > 0 && (
@@ -1237,7 +1237,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <p className="text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione da confermare</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 max-h-[340px] overflow-y-auto scrollbar-hide -mx-1 px-1">
+          <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {pendingReservations.map(res => {
               const source = res.source || ReservationSource.MANUAL;
               const channelLabel = source === ReservationSource.WHATSAPP ? 'WhatsApp'
@@ -1287,7 +1287,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         )}
       </div>
       {/* Note & Allergeni */}
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0">
+      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
             Note &amp; allergeni
@@ -1304,7 +1304,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 max-h-[340px] overflow-y-auto scrollbar-hide -mx-1 px-1">
+          <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {reservationNotes.map(({ reservation, table, room, allergens }) => {
               const time = getRomeTimePart(reservation.reservation_time);
               const isExpanded = expandedNoteIds.has(reservation.id);

@@ -881,6 +881,23 @@ body {
   .ds-live-frame { animation: none; }
 }
 
+/* First-run swipe hint: the top row nudges open far enough to show the action
+   underneath, then settles. A gesture nobody knows about is a gesture nobody
+   uses, and there is no room on a row for a "swipe me" label. Plays once per
+   channel, then never again — see useFirstRunHint. */
+@keyframes ds-swipe-hint {
+  0%   { transform: translateX(0); }
+  30%  { transform: translateX(-46px); }
+  60%  { transform: translateX(-46px); }
+  100% { transform: translateX(0); }
+}
+.ds-swipe-hint { animation: ds-swipe-hint 1500ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* The hint is pure affordance — the row is fully usable by tap without it. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-swipe-hint { animation: none; }
+}
+
 /* Native select chevrons sit hard against the right edge and can't be inset
    reliably across browsers, so we draw our own. appearance:none removes the
    platform arrow; the SVG is inlined (no network request) and re-declared for

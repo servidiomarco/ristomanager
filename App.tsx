@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -20,6 +20,7 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
+import { SegmentedControl } from './components/ds';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
@@ -131,10 +132,13 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
   { kind: 'link', label: 'Passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
 
-  // Comunicazioni
-  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
-  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: false, view: ViewState.EMAIL, sidebarCollapse: false },
+  // Comunicazioni — all four are isTab, so the whole group drops out of the
+  // mobile "Altro" sheet. The three channels live behind the Comunicazioni
+  // bottom tab; Notifiche is the top-bar bell on every breakpoint. The sidebar
+  // ignores isTab, so desktop still lists them individually.
+  { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
+  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
@@ -156,6 +160,11 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
+// The Comunicazioni channels, in the order the mobile switcher shows them.
+// Presentation only — each one is still its own ViewState, so deep links from
+// the command palette, notifications and the sidebar are untouched.
+const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL];
+
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
@@ -164,6 +173,13 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // Which Comunicazioni channel the mobile tab reopens on. Declared up here
+  // with its effect: everything below the auth guards runs conditionally, so a
+  // hook placed there changes the hook count once the user logs in.
+  const [lastCommsView, setLastCommsView] = useState<ViewState>(ViewState.CONVERSAZIONI);
+  useEffect(() => {
+    if (COMMS_VIEWS.includes(view)) setLastCommsView(view);
+  }, [view]);
   // Tracks whether we've already applied the user's preferred landing for this
   // session. Reset on logout so the next login re-applies it.
   const appliedPreferredLandingRef = useRef(false);
@@ -1504,6 +1520,22 @@ const App: React.FC = () => {
   // Drives the bottom-tab "Altro" button's visibility and active state.
   const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
 
+  // ── Comunicazioni, mobile ────────────────────────────────────────────────
+  // One bottom tab stands in for three views. The channels the user can't
+  // reach drop out, so a single-channel user gets a plain tab with no switcher.
+  const commsChannels = [
+    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', badge: voiceCallsPendingCount },
+    { view: ViewState.MESSAGGI, label: 'Messaggi', badge: messagesUnreadCount },
+    { view: ViewState.EMAIL, label: 'Email', badge: emailUnreadCount },
+  ].filter(c => canAccessView(c.view));
+  const commsBadgeTotal = commsChannels.reduce((n, c) => n + (c.badge || 0), 0);
+  const isCommsView = COMMS_VIEWS.includes(view);
+  // Returning to the tab lands you back on the channel you left, the way the
+  // sheet used to remember nothing and always cost two taps.
+  const commsTargetView = commsChannels.some(c => c.view === lastCommsView)
+    ? lastCommsView
+    : commsChannels[0]?.view;
+
   // Global "+" create menu — identical on every page (not contextual to the view).
   // Each item reuses an existing create flow; items the user can't create are hidden.
   // Two clusters (service actions, then records) rendered with an unlabeled divider.
@@ -1923,6 +1955,33 @@ const App: React.FC = () => {
             rise-in (see .animate-view-in). pb-20 on mobile clears the fixed
             bottom nav; full-height views (h-full) size to the padding-excluded
             area so they sit neatly between header and nav. */}
+        {/* Mobile channel switcher. Comunicazioni is a single bottom tab, so
+            without this, moving between Conversazioni, Messaggi and Email would
+            mean going back out to the bar. Desktop keeps three sidebar entries
+            and never renders it.
+
+            A sibling of the scroll region, not a child: Messaggi and Email are
+            full-height split views, so a bar inside the scroller would push
+            them past the fold. Out here the scroller's flex-1 accounts for it.
+            It sits on a white card because the segmented track is a level-2
+            surface — on the canvas it would be invisible. */}
+        {isCommsView && commsChannels.length > 1 && (
+          // pb-4 is not decoration: the card's shadow falls below it, and the
+          // scroll region underneath now paints an opaque sticky toolbar. With
+          // no gap the shadow gets sliced by a hard horizontal edge.
+          <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
+            <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+              <SegmentedControl
+                value={view}
+                onChange={next => setView(next)}
+                ariaLabel="Tipo di comunicazione"
+                equalWidth={false}
+                options={commsChannels.map(c => ({ value: c.view, label: c.label, badge: c.badge }))}
+              />
+            </div>
+          </div>
+        )}
+
         {/* .pb-mobile-nav clears the floating bottom bar (height + 16px offset
             + safe-area inset) and collapses to 0 at lg, where the bar is gone. */}
         <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-mobile-nav animate-view-in">
@@ -2220,7 +2279,7 @@ const App: React.FC = () => {
                       [ViewState.INVENTARIO]: 'Inventario',
                       [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
                       [ViewState.HACCP]: 'HACCP',
-                      [ViewState.CONVERSAZIONI]: 'Conversazioni',
+                      [ViewState.CONVERSAZIONI]: 'Chiamate',
                       [ViewState.MESSAGGI]: 'Messaggi',
                       [ViewState.EMAIL]: 'Email',
                       [ViewState.NOTIFICHE]: 'Notifiche',
@@ -2521,13 +2580,15 @@ const App: React.FC = () => {
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
             </div>
-            {canAccessView(ViewState.NOTIFICHE) && (
+            {/* Comunicazioni replaces the old Notifiche tab, which duplicated
+                the top-bar bell. The badge rolls up all three channels. */}
+            {commsTargetView !== undefined && (
               <BottomNavItem
-                icon={<Bell size={20} />}
-                label="Notifiche"
-                active={view === ViewState.NOTIFICHE}
-                badge={notificationsUnreadCount}
-                onClick={() => setView(ViewState.NOTIFICHE)}
+                icon={<MessagesSquare size={20} />}
+                label="Comunicazioni"
+                active={isCommsView}
+                badge={commsBadgeTotal}
+                onClick={() => setView(commsTargetView)}
               />
             )}
             {altroNavItems.length > 0 && (

@@ -143,14 +143,37 @@ export function SegmentedControl<T extends string>({
   onChange,
   options,
   ariaLabel,
+  equalWidth = true,
+  overflow = 'fit',
+  size = 'md',
 }: {
   value: T;
   onChange: (next: T) => void;
-  options: { value: T; label: string; icon?: React.ReactNode }[];
+  options: { value: T; label: string; icon?: React.ReactNode; badge?: number; badgeTone?: 'neutral' | 'alert' }[];
   ariaLabel: string;
+  /** Equal-width segments (the default) read as a filter. Set false when the
+   *  labels differ a lot in length — segments then start from their own text
+   *  width and share the leftover space, so a long one isn't clipped to fit a
+   *  short one's box. */
+  equalWidth?: boolean;
+  /** 'scroll' lets the track run past the viewport — for filter rows with more
+   *  options than fit. The right edge fades so it's clear more exist; mobile
+   *  browsers draw no scrollbar to say so. */
+  overflow?: 'fit' | 'scroll';
+  /** Smaller type and height, for a filter row sitting inside a card. */
+  size?: 'md' | 'sm';
 }) {
+  const scroll = overflow === 'scroll';
   return (
-    <div className="flex gap-0.5 rounded-full bg-[var(--ds-surface-row)] p-1" role="group" aria-label={ariaLabel}>
+    <div
+      className={`flex gap-0.5 rounded-full bg-[var(--ds-surface-row)] p-1 ${
+        scroll
+          ? 'overflow-x-auto scrollbar-hide [mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)]'
+          : ''
+      }`}
+      role="group"
+      aria-label={ariaLabel}
+    >
       {options.map(opt => {
         const active = opt.value === value;
         return (
@@ -159,14 +182,30 @@ export function SegmentedControl<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={active}
-            className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex ${size === 'sm' ? 'h-8 text-[13px]' : 'h-9 text-[15px]'} min-w-0 ${
+              scroll ? 'flex-none whitespace-nowrap' : equalWidth ? 'flex-1' : 'flex-auto'
+            } items-center justify-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               active
                 ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                 : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
             }`}
           >
             {opt.icon}
-            {opt.label}
+            <span className="truncate">{opt.label}</span>
+            {/* Counts ride inside the segment rather than as a corner dot: at
+                this size a dot can't say "3" vs "99+", and the number is the
+                reason to switch channel. */}
+            {opt.badge !== undefined && opt.badge > 0 && (
+              <span
+                className={`inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold leading-none tabular-nums ${
+                  opt.badgeTone === 'neutral'
+                    ? 'bg-[var(--ds-border)] text-[var(--ds-text-secondary)]'
+                    : 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)]'
+                }`}
+              >
+                {opt.badge > 99 ? '99+' : opt.badge}
+              </span>
+            )}
           </button>
         );
       })}
