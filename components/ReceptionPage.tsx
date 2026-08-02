@@ -851,9 +851,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
         </div>
 
-        {/* RIGHT — the detail of what's selected, over the door queue, over
-            the one button this page exists to offer. */}
+        {/* RIGHT — the one button this page exists to offer, over the detail
+            of what's selected, over the door queue. */}
         <aside className="hidden w-[340px] flex-shrink-0 flex-col gap-4 lg:flex xl:w-[380px]">
+          {walkInButton}
           {selectedReservation && (
             <DetailPanel
               reservation={selectedReservation}
@@ -870,7 +871,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             />
           )}
           {allaPorta}
-          {walkInButton}
         </aside>
       </div>
 
