@@ -20,7 +20,8 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
-import { SegmentedControl } from './components/ds';
+import { SegmentedControl, useMediaQuery } from './components/ds';
+import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
@@ -390,6 +391,13 @@ const App: React.FC = () => {
   }, [isAuthenticated, canSeeEmail, view]);
 
   const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0);
+  // The bell is a dropdown on pointer-sized screens and a link to the full
+  // page below lg — the same line the sidebar and bottom nav already use.
+  const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const bellOpensPanel = useMediaQuery('(min-width: 1024px)');
+  // Never leave the panel hanging over a screen that shouldn't have one.
+  useEffect(() => { if (!bellOpensPanel) setNotificationsPanelOpen(false); }, [bellOpensPanel]);
   const canSeeNotifications = canAccessView(ViewState.NOTIFICHE);
   useEffect(() => {
     if (!isAuthenticated || !canSeeNotifications) return;
@@ -1886,12 +1894,23 @@ const App: React.FC = () => {
               </button>
 
               {/* Notifications — moved out of the sidebar into the top bar.
-                  Navigates to the same Notifiche view the sidebar entry used;
-                  the NAV_ITEMS entry is untouched so mobile tabs still work. */}
+                  On a pointer-sized screen the bell opens a dropdown; below lg
+                  it navigates to the full page, which is the mobile design.
+                  The NAV_ITEMS entry is untouched so the tabs still work. */}
               {canAccessView(ViewState.NOTIFICHE) && (
                 <button
-                  onClick={() => setView(ViewState.NOTIFICHE)}
-                  className="relative h-11 w-11 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
+                  ref={bellRef}
+                  onClick={() => {
+                    if (bellOpensPanel) setNotificationsPanelOpen(v => !v);
+                    else setView(ViewState.NOTIFICHE);
+                  }}
+                  aria-haspopup={bellOpensPanel ? 'dialog' : undefined}
+                  aria-expanded={bellOpensPanel ? notificationsPanelOpen : undefined}
+                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-full transition-colors ${
+                    notificationsPanelOpen
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                  }`}
                   aria-label={notificationsUnreadCount > 0 ? `Notifiche, ${notificationsUnreadCount} non lette` : 'Notifiche'}
                   title="Notifiche"
                 >
@@ -1902,6 +1921,18 @@ const App: React.FC = () => {
                     </span>
                   )}
                 </button>
+              )}
+              {notificationsPanelOpen && bellOpensPanel && (
+                <NotificationsPanel
+                  anchorRef={bellRef}
+                  onClose={() => setNotificationsPanelOpen(false)}
+                  onSeeAll={() => setView(ViewState.NOTIFICHE)}
+                  onCountsChanged={() => {
+                    notificationsApiService.unreadCount()
+                      .then(({ count }) => setNotificationsUnreadCount(count))
+                      .catch(() => {});
+                  }}
+                />
               )}
 
               {/* Global "+" create menu — replaces the old Nuova prenotazione + per-view secondary CTAs.

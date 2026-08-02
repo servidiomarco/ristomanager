@@ -12,6 +12,7 @@ export {
 } from './FormPrimitives';
 export {
   SplitPane,
+  useMediaQuery,
   PaneHeader,
   PanePlaceholder,
   StatusPill,

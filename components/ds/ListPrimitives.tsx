@@ -13,8 +13,9 @@ import { ArrowLeft, Search, X } from 'lucide-react';
  */
 
 /** Tracks a media query. Used to pick a container, not to style — the choice
- *  between a sheet and a pane changes the tree, which CSS can't express. */
-const useMediaQuery = (query: string): boolean => {
+ *  between a sheet and a pane, or a dropdown and a page, changes the tree,
+ *  which CSS can't express. */
+export const useMediaQuery = (query: string): boolean => {
   const [matches, setMatches] = useState(() =>
     typeof window !== 'undefined' && !!window.matchMedia?.(query).matches
   );
