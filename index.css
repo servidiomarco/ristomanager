@@ -447,6 +447,22 @@ body {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Edge fades for a horizontally scrolling track. Applied only to the side that
+   still has content behind it — a fade that never lifts veils the option you
+   just scrolled to and makes it read as disabled. */
+.ds-fade-end {
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+}
+.ds-fade-start {
+  mask-image: linear-gradient(to left, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to left, black calc(100% - 24px), transparent);
+}
+.ds-fade-x {
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+}
+
 /* ===========================================================================
    Mobile input zoom guard
    iOS Safari (and some Android browsers) auto-zoom into form fields whose

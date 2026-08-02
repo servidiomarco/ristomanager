@@ -1,5 +1,5 @@
 ---
-version: "1.0"
+version: "1.1"
 name: "RistoManager Design System"
 description: "Single source of truth for the RistoManager design language — a dense, real-time restaurant operations CRM. Staff read it mid-service, standing, often on a phone. Colour carries meaning: service (pranzo/cena), state (seated/arriving/pending/critical), and severity. Two themes, light and dark, with WCAG 2.2 AA as the floor."
 
@@ -282,7 +282,7 @@ zIndex:
 density:
   comfortable: { row-padding-y: "16px", icon: "20px", gap: "16px" }  # mobile, Settings, Login
   default:     { row-padding-y: "12px", icon: "18px", gap: "12px" }  # most screens
-  compact:     { row-padding-y: "8px",  icon: "16px", gap: "8px"  }  # ReservationList in service, ActivityLogs
+  compact:     { row-padding-y: "8px",  icon: "16px", gap: "8px"  }  # ActivityLogs, long log-style tables
 
 # ---------------------------------------------------------------------------
 # TOUCH TARGETS
@@ -491,6 +491,10 @@ Every icon-only control needs an accessible name. Live regions (`aria-live="poli
 socket-driven updates — reservation arrivals, connection state — never `assertive` except
 for errors that block work. Decorative icons take `aria-hidden="true"`.
 
+Short all-caps strings are often spelled out letter by letter by a synthesiser, which cannot
+distinguish a word from an initialism. This is one of the reasons nothing in this product is
+set in capitals — see §5.2.
+
 ### 4.6 Forms
 
 Every control has a programmatically associated `<label>`. Errors are announced via
@@ -526,6 +530,32 @@ Fractions render as bold value plus muted denominator: **`73`**`/86`, **`8`**`/4
 takes `text-primary`, separator and denominator take `text-muted`. Applies to every
 `n/total` in the product.
 
+### 5.2 Case — never uppercase
+
+**No element in this product is set in capitals.** Not eyebrows, not badges, not section
+headers, not table column labels, not tab labels. `text-transform: uppercase` does not appear
+in the codebase, and neither does a string typed in caps to fake it. Brand names keep whatever
+case they own — `RistoCRM`, `WhatsApp`, `SMS`, `VIP`, `No-show` — because that is their
+spelling, not a style.
+
+This is a hard rule rather than a preference, for three reasons:
+
+1. **Legibility.** Capitals strip the ascender and descender profile that lets a reader
+   identify a word by shape. At the 10–13px these labels are usually set, that loss is worst
+   exactly where it is least affordable.
+2. **Screen readers.** A short all-caps string is frequently read letter by letter, because
+   the synthesiser cannot tell a word from an initialism. "IN RITARDO" becomes "eye en, ar eye
+   tee ay ar dee oh".
+3. **Italian.** Accented capitals are inconsistently available and frequently dropped, so
+   `PIÙ TARDI` degrades to `PIU TARDI`. Sentence case never has this problem.
+
+**Hierarchy comes from weight, size and colour, which is what they are for.** A section eyebrow
+is `caption` at weight 600 in the family's `text` colour. That reads as a heading at a glance
+and stays a word while doing it. If a label still doesn't separate from its surroundings after
+weight and colour, the fix is spacing — never capitals.
+
+See §10 for the copy side of the same rule.
+
 ---
 
 ## 6. Responsive & density
@@ -551,6 +581,13 @@ Long-press is a context menu only where documented, and never blocks text select
 Three tiers applied per route (see frontmatter). Density modifies row padding, icon sizes,
 and gaps — **never font-size.** Shrinking type to fit more rows is not a density change, it
 is an accessibility regression.
+
+**Density is a route-level decision, not a user-facing control.** Prenotazioni shipped a
+per-device density toggle — a button in the toolbar, persisted in `localStorage` — and it was
+removed: it doubled the states every card had to be designed and checked in, for a preference
+almost nobody set twice. Where a screen genuinely needs tighter rows, pick the tier for that
+route and commit to it. Reserve a toggle for the case where two populations demonstrably need
+different answers on the same screen, and expect to justify it.
 
 ---
 
@@ -623,6 +660,24 @@ helper. Wires `htmlFor`, `aria-describedby`, and `aria-invalid` automatically.
 shaded using the `intensity` ramp of the relevant service. Always pair with a typable text
 input — never calendar-only.
 
+**SearchField** [obs] — pill at `rounded.full`, 44px, leading search glyph, trailing clear
+button once there is a value. **Always visible, never behind a toggle:** on a list you filter
+before you scroll, and a hidden search costs a tap plus remembering it exists.
+
+On the canvas it takes `surface` with `elevation.card`, not `surface-row` — see §8.8. Accepts
+an optional passive hint parked inside the field (what Enter will do to the last remaining
+match), which never covers the clear button.
+
+**IconButton** [obs] — circle at 44px, one linear icon, always an `aria-label`. On the canvas
+it is `surface` with `elevation.card`; inside a card it is `surface-row`. When it toggles
+something on it takes `action-bg`; when it carries a count the badge overlaps the top-right
+corner with a ring in the colour behind it.
+
+**Stepper** [obs] — `[−] value [+]` at 44px. The value is an `<input type="number">`, not a
+label: typing "14" beats fourteen taps on `+`, and the field it usually replaces was typeable.
+Native spinners hidden — the buttons are the affordance. Increment carries the solid fill and
+decrement stays quiet, because people add covers far more often than they remove them.
+
 ### 7.3 Display
 
 **Card** [obs] — `surface` fill, `rounded.2xl`, `card-padding`, `elevation.card`. Header is a
@@ -641,8 +696,21 @@ plus name at `label`. Wraps freely in a flow row. Used for staff on shift.
 **Avatar** [obs] — circle at 24/32/40px. Initials at `label`, `surface-row` fill,
 `text-secondary`. The user avatar in chrome inverts to `action-bg` with `action-fg`.
 
-**TableNumberBadge** [obs] — rounded square at `rounded.md`, ~40px. `seated.solid` with white
-numerals when occupied, `neutral.solid` when free, `pending.tint` when unassigned.
+**TableNumberBadge** [obs] — rounded square at `rounded.md`, 56–64px. The number in the
+family's `text` colour on its `tint`, with the room name beneath it where there is space.
+
+**The family comes from the booking, not from the table.** A table holding a confirmed party
+is `arriving`, one holding a seated party is `seated`, one holding a no-show is `critical`. The
+badge answers "what is happening at this table", which is a property of who is sitting there.
+
+Two variants carry meaning beyond identity:
+
+- **Unassigned** — a dashed `pending` outline around a `+`. It is a *button*, opening the same
+  assign-table flow the record already offers elsewhere. An empty slot that looks like a slot
+  and does nothing is a dead end.
+- **Undersized** — `pending` tint with the seat count printed under the number (`109` /
+  `3 posti`) whenever `seats < guests`. This is the error worth catching while the host is
+  still at the pass rather than walking a party of six to a table for three.
 
 **CountBadge** [obs] — pill at `rounded.full`, minimum 20px wide so two digits and `99+` fit,
 `states.X.solid` fill with `solid-fg` numeral at `tabular-nums`. Where it overlaps another
@@ -657,6 +725,45 @@ Choosing a fill:
   "Da confermare" count on a dashboard card.
 - **no badge** — a count that describes the size of a collection rather than a backlog.
   Render it as a plain `text-muted` number.
+
+**StatusPill** [obs] — pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
+family's `text` colour. Carries a state as words. Where the state can be changed it gains a
+leading dot and a trailing chevron and becomes a button; where it is read-only it stays a
+`<span>`. **The dot is what makes it survive a colour-blind reader**, per §4.3.
+
+**StatStrip** [der] — the headline figures for a screen, in one card divided by hairlines
+rather than in separate boxes. They are one reading of the same thing, and four cards claim
+they are four unrelated things.
+
+Two layouts: `inline` (value and label on one line, `rounded.full`) for a strip sitting among
+other controls, and `stacked` (value over label, `rounded.2xl`) where the strip is the page's
+headline. A segment takes a family only when it is **actionable** — the tinted background plus
+a chevron mark the one figure that is a task rather than a fact, and that segment is a button.
+
+Two rules that matter more than they look:
+
+- **Zero reads neutral.** A green "0 arrivati" claims something went right before service has
+  started. Tone the segment only once the number is above zero.
+- **Totals come from the unfiltered set.** A headline that moves while the user types in the
+  search box is not a total.
+
+**SectionHeader** [obs] — the eyebrow above a group of rows. `caption` at weight 600 in the
+family's `text` colour, with an optional leading dot; muted meta text beside it. Sentence case,
+never caps — see §5.2.
+
+Two variants. **Static** is a `<div>`. **Collapsible** is a `<button>` wrapping the whole row,
+clearing 44px, with the chevron in a 32px circle and a `surface-row` press state. A bare 16px
+chevron floating beside text reads as decoration; people aim at the circle even though the
+whole row is the target.
+
+Where the column is too narrow, label and meta **wrap as a pair** — the meta drops to a second
+line rather than truncating mid-word — while the chevron stays on the first line. The 44px is a
+floor, not a fixed height.
+
+**Callout** [der] — tinted notice at `rounded.lg`, `states.X.tint` with the matching `text`
+colour, optional leading icon and a single trailing action. For a condition the user should
+know about but need not act on immediately: a closed room, a missing table, a load failure.
+Distinct from Toast, which is transient, and from a form error, which belongs on the field.
 
 **ProgressBar** [obs] — track at `border` colour, `rounded.full`, 8–10px tall. Fill may be
 segmented by service, amber then indigo, left to right. A labeled variant places a
@@ -687,9 +794,37 @@ waiting on someone. A count that merely describes the size of a collection is a 
 `text-muted` number with no badge. The distinction is *does this number decay when someone
 does their job* — if yes, it is a badge.
 
-**SegmentedControl / Tabs** [obs] — track at `surface-row`, `rounded.full`. Active segment is
-`surface` with `elevation.card` and `text-primary`; inactive are `text-muted`. Arrow-key
-navigation, `role="tablist"` when switching panels.
+**SegmentedControl / Tabs** [obs] — track at `rounded.full`, active segment a pill inside it.
+Which pill depends on what the control does, and the two are not interchangeable:
+
+- **Filter** — narrows a set that stays the same set. Track at `surface-row`, active segment
+  `surface` with `elevation.card` and `text-primary`, inactive `text-muted`. This is the
+  default and covers most cases: `Tutte / Non lette`, the shift filter, status chips.
+- **Scope switch** — changes *which* set you are looking at. Track at `surface` with
+  `elevation.card` sitting on the canvas, active segment `action-bg` with `action-fg`,
+  inactive `text-secondary`. Used for room tabs on the floor plan and in the table picker.
+
+The distinction is worth the second treatment because the two answer different questions. A
+filter says "of these, show me the confirmed ones" and the raised pill reads as a subset. A
+scope switch says "I am now in Veranda, not Fiume" — nearer to a location than a filter — and
+the solid fill is the strongest "you are here" the palette has.
+
+This is the one place `action-bg` is not an action. Everywhere else a solid near-black fill
+means a button; here it means the current scope. Do not extend it further without a reason
+this specific.
+
+Counts ride **inside** the segment rather than as a corner dot: at this size a dot cannot say
+"3" versus "99+", and the number is usually the reason to switch.
+
+Arrow-key navigation, `role="tablist"` when switching panels.
+
+**Overflowing tracks.** Where the options outrun the width the track scrolls horizontally, with
+no visible scrollbar on touch. Two rules make that usable:
+
+- Selecting a partly-visible segment scrolls it fully into view (`inline: 'nearest'`).
+- The edge fade that signals "more exists" is **bound to scroll position** — applied only to
+  the side that still has content behind it, and removed entirely when the track fits. A fade
+  that never lifts veils the option the user just scrolled to and makes it read as disabled.
 
 **Pagination** [der] — pill buttons at `rounded.full`, 40px. Current page uses `action-bg`.
 Prefer "load more" or virtualised scroll on mobile.
@@ -712,6 +847,31 @@ full visual weight, because the user has already committed to the intent.
 
 **Drawer / Sheet** [der] — side panel at `≥md` (max-width 420px, full height, `rounded.3xl` on
 the inner edge), bottom sheet at `<md`. Same focus rules as Modal.
+
+**SplitPane** [obs] — the list-plus-detail layout behind every two-column screen
+(Comunicazioni, Prenotazioni, Reception). List column at a fixed ladder — 340 / 400 / 440px by
+breakpoint, never a percentage, which collapses to a phone shape on a laptop and sprawls on a
+27" screen.
+
+**The detail changes container by size, not just by CSS.** At `≥md` it is a pane beside the
+list; below that a full-screen sheet portaled to `<body>`, because reading one record is a
+focused task and the surrounding chrome only crowds it. It renders in exactly one place at a
+time — mounting both and hiding one means two audio elements and two fetches.
+
+**PaneHeader** [obs] — the top of an open record: a card floating on the canvas, not a flush
+bar, so the detail side is built from the same blocks as the list side. Its **bottom padding is
+load-bearing** — see §8.10.
+
+**SwipeRow** [obs] — a list row with one revealed action per side. Touch only; on a pointer
+device the same actions are reachable by opening the record, so binding drag to the mouse only
+fights text selection. Gate on the **event's pointer type**, never on `(pointer: coarse)`,
+which is false in a desktop browser's device emulation and on some hybrid machines — that gate
+shipped once and the gesture was silently dead.
+
+Vertical wins axis ties: a list is scrolled far more often than swiped, and stealing the scroll
+is the one failure everybody notices. Capture the pointer, or a finger leaving the row's box
+freezes the swipe half-open. Pair with a one-time hint that plays on first visit per surface,
+skipped for fine pointers and under `prefers-reduced-motion`.
 
 **Toast** [der] — `surface` fill, `rounded.lg`, `border` hairline, `elevation.raised`, at
 `z.toast`. Variants take state families via a leading icon and `tint-border`. Stacks
@@ -771,6 +931,31 @@ the `critical` family with a `motion.pulse` ring. Requires a visible text label 
    depth.
 9. **The redundancy rule.** State is never colour alone. See §4.3.
 
+The four rules below are about layout rather than taste. Each of them shipped as a visible
+defect at least once, and each is invisible in review until it renders.
+
+10. **A fixed element owns the gap beneath it.** Where an opaque scrolling region sits below
+    something pinned — a toolbar, a pane header, a switcher — the space between them must be
+    *inside the fixed element's box*. Put it on the scrolling side and the region paints over
+    the fixed element's shadow, cutting it with a hard line and slicing whatever card is
+    passing behind. This was diagnosed and fixed four separate times before it was written
+    down.
+
+11. **`overflow-y: auto` clips horizontally too.** A vertical scroll container also establishes
+    horizontal clipping, so card shadows and focus rings inside it come out sliced flat at both
+    edges. Give the container a small horizontal bleed (negative margin plus equal padding) so
+    elevation has room to render.
+
+12. **A scroll container's own padding is eaten by its scrollbar.** Padding on the scrolling
+    element sits *behind* the scrollbar, so content stops short of where the same padding puts
+    it on a pinned sibling and the two columns visibly misalign. Move the padding to an inner
+    wrapper, or push the scrollbar out into the gutter with `-mr-4 pr-4`.
+
+13. **A media query picks the container, not the style.** Where a layout differs by *tree* and
+    not by appearance — a sheet versus a pane, a dropdown versus a page — resolve it in
+    JavaScript with a matchMedia hook and render one of them. CSS cannot express it, and
+    rendering both while hiding one duplicates every mount, fetch and media element inside.
+
 ---
 
 ## 9. Naming
@@ -778,8 +963,12 @@ the `critical` family with a `motion.pulse` ring. Requires a visible text label 
 - Primitive components: PascalCase, single noun — `Button`, `Field`.
 - Variant prop values: kebab-case strings — `variant="state-solid"`, `density="compact"`.
 - Token names: kebab-case CSS custom properties — `--color-surface-row`.
-- Tailwind: standard class names only. No arbitrary values inside `ui/` primitives
-  (arbitrary values are tolerated in one-off domain code during the transition).
+- Tailwind: standard class names only inside primitives (arbitrary values are tolerated in
+  one-off domain code during the transition).
+- **Class names must be statically written out.** Tailwind extracts them by scanning source
+  text, so a name assembled at runtime — `` bg-[var(--ds-${family}-tint)] `` — is never
+  generated and the element ships unstyled. Map a variant to a full literal class string
+  instead. This compiles, passes review, and fails silently only in the browser.
 
 ---
 
@@ -791,8 +980,9 @@ the `critical` family with a `motion.pulse` ring. Requires a visible text label 
   (esempio: nome@dominio.it)."
 - **Empty states describe the absence and the next action:** "Nessuna prenotazione per questa
   data. Aggiungi la prima."
-- **Sentence case everywhere** except the brand. No ALL CAPS body text. Eyebrows and badges
-  may use caps with letter-spacing.
+- **Sentence case everywhere**, with no exceptions but the brand — see §5.2. This includes
+  eyebrows, badges and column labels, which an earlier version of this document allowed to be
+  set in caps with letter-spacing. They may not.
 - **No emoji in core UI** — they fail screen readers unpredictably. Lucide icons only.
 - **Numbers and dates** go through `Intl.NumberFormat('it-IT')` and
   `Intl.DateTimeFormat('it-IT')`. No hand-rolled formatters.
@@ -828,26 +1018,29 @@ and `prefers-reduced-motion` on first load.
 
 ```
 components/
-  ui/              # design system primitives (§7)
-    Button/
-      Button.tsx
-      Button.types.ts
-      Button.test.tsx
-    Input/
-    Field/
-    Modal/
-    index.ts       # barrel export
-  layout/          # Page, Sidebar, TopBar, BottomNav
-  domain/          # screen components, composing ui/
-hooks/
-  useTheme.ts
-  useDensity.ts
-  useReducedMotion.ts
-  useFocusTrap.ts
+  ds/                    # design system primitives (§7)
+    ModalShell.tsx       # the modal frame
+    FormPrimitives.tsx   # FormCard, Field, Stepper, SegmentedControl, dsInput/Select/Textarea, dsButton
+    ListPrimitives.tsx   # SplitPane, PaneHeader, SectionHeader, StatStrip, StatusPill, CountBadge,
+                         # SearchField, Avatar, Callout, EmptyState, dsIconButton, useMediaQuery
+    SwipeRow.tsx         # swipe actions + first-run hint
+    index.ts             # barrel export — import from './ds', never from a file
+  <screen>.tsx           # domain screens, composing ds/
 ```
 
-Tokens live in `index.css` under Tailwind v4 `@theme`, which is already the case — this
-document is the specification, `index.css` is the implementation.
+Primitives are grouped by role in a handful of modules rather than split one folder per
+component. At this size that keeps related pieces — a control and the class string it shares
+with its siblings — in one file, and the barrel means callers never depend on the arrangement.
+Split a module out when it grows its own state or tests, not on principle.
+
+**Two conventions worth knowing.** Components exported as `PascalCase` are React components;
+the `ds`-prefixed camelCase exports (`dsButton`, `dsInput`, `dsIconButton`) are **class-name
+constants**, not components — used where the element must stay native, such as an `<a>` that
+should look like a button. `reservationState.tsx` is the single source of truth for reservation
+state and its colour; it is domain, not `ds/`, and every surface derives from it.
+
+Tokens live in `index.css` under Tailwind v4 `@theme` — this document is the specification,
+`index.css` is the implementation.
 
 ---
 
@@ -887,6 +1080,13 @@ token was derived and the original kept in the ramp for reference: this affected
 using §2.1 and verified against §4.1. Review it on a real screen before shipping — derived
 dark palettes tend to look flatter in practice than they measure.
 
-**The `[der]` components in §7 — the entire form family, all overlays, and the data
-table — have no visual reference.** They are consistent with the token system and meet the
-contrast floor, but they are proposals. Expect to adapt them during the revamp.
+**Some `[der]` components in §7 are still proposals.** They are consistent with the token
+system and meet the contrast floor, but they have no visual reference: Toast, Tooltip,
+Popover, DropdownMenu, Pagination, Drawer, and the data table.
+
+The rest have since been built and observed in shipped screens, and their entries here were
+rewritten from what actually works rather than from what was projected: the form family,
+Modal, SplitPane, SwipeRow, SectionHeader, StatStrip, StatusPill, SearchField, Stepper and
+TableNumberBadge. Where an entry now contradicts the original proposal — the segmented
+control's second variant, the table badge taking the booking's family rather than the
+table's — the shipped behaviour is the specification.

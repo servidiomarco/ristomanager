@@ -1036,9 +1036,10 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 )}
                 {handledCalls.length > 0 && (
                   <>
-                    <SectionHeader>
-                      {pendingCalls.length > 0 ? 'Gestite' : 'Tutte le chiamate'}
-                    </SectionHeader>
+                    {/* Always the same label, whether or not "Da ricontattare"
+                        sits above it — Messaggi and Email name their remainder
+                        section the same way at both times. */}
+                    <SectionHeader>Tutte le chiamate</SectionHeader>
                     <div className="space-y-2">
                       {handledCalls.map((c, i) => renderCall(c, swipeHint && pendingCalls.length === 0 && i === 0))}
                     </div>

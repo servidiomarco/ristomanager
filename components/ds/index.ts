@@ -19,11 +19,12 @@ export {
   CountBadge,
   SearchField,
   SectionHeader,
+  StatStrip,
   Avatar,
   Callout,
   EmptyState,
   dsIconButton,
 } from './ListPrimitives';
-export type { PillTone, CalloutTone, SectionTone } from './ListPrimitives';
+export type { PillTone, CalloutTone, SectionTone, Stat, StatTone } from './ListPrimitives';
 export { SwipeRow, useFirstRunHint } from './SwipeRow';
 export type { SwipeAction } from './SwipeRow';

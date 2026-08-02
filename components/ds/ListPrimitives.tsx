@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Search, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 
 /**
  * Page-level building blocks: the header, the list-plus-detail layout, the
@@ -234,20 +234,33 @@ export const SearchField: React.FC<{
   placeholder?: string;
   ariaLabel?: string;
   className?: string;
-}> = ({ value, onChange, placeholder, ariaLabel = 'Cerca', className = '' }) => (
+  /** For a focus shortcut that lives outside this component. */
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** A passive hint parked inside the field — e.g. what Enter will do to the
+   *  single remaining match. Never covers the clear button. */
+  hint?: React.ReactNode;
+}> = ({ value, onChange, placeholder, ariaLabel = 'Cerca', className = '', inputRef, onKeyDown, hint }) => (
   <div className={`relative ${className}`}>
     <Search
       className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
       aria-hidden
     />
     <input
+      ref={inputRef}
       type="text"
       value={value}
       onChange={e => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       aria-label={ariaLabel}
       className="h-11 w-full rounded-full bg-[var(--ds-surface)] pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     />
+    {hint && (
+      <span className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 lg:inline-flex">
+        {hint}
+      </span>
+    )}
     {value && (
       <button
         type="button"
@@ -266,11 +279,13 @@ export const SearchField: React.FC<{
    attention; the plain muted variant marks the remainder. Sentence case, never
    caps — capitals are harder to read at small sizes and screen readers can
    spell them out letter by letter. Weight and colour carry the hierarchy. */
-export type SectionTone = 'attention' | 'positive' | 'muted';
+export type SectionTone = 'attention' | 'positive' | 'pending' | 'info' | 'muted';
 
 const SECTION_TONE: Record<SectionTone, { text: string; dot: string | null }> = {
   attention: { text: 'text-[var(--ds-critical-text)]', dot: 'bg-[var(--ds-critical-solid)]' },
   positive: { text: 'text-[var(--ds-seated-text)]', dot: 'bg-[var(--ds-seated-solid)]' },
+  pending: { text: 'text-[var(--ds-pending-text)]', dot: 'bg-[var(--ds-pending-solid)]' },
+  info: { text: 'text-[var(--ds-arriving-text)]', dot: 'bg-[var(--ds-arriving-solid)]' },
   muted: { text: 'text-[var(--ds-text-muted)]', dot: null },
 };
 
@@ -278,16 +293,169 @@ export const SectionHeader: React.FC<{
   tone?: SectionTone;
   /** A single text action, right-aligned — e.g. "Segna tutte". */
   action?: React.ReactNode;
+  /** Muted text after the label — a count, a total. Stays neutral so the tone
+   *  colour marks the group and doesn't shout the arithmetic too. */
+  meta?: React.ReactNode;
+  /** Makes the whole eyebrow a toggle, with a chevron on the right. */
+  onToggle?: () => void;
+  expanded?: boolean;
   children: React.ReactNode;
-}> = ({ tone = 'muted', action, children }) => {
+}> = ({ tone = 'muted', action, meta, onToggle, expanded = true, children }) => {
   const t = SECTION_TONE[tone];
+  const label = (
+    <span className={`flex min-w-0 flex-shrink-0 items-center gap-1.5 text-[13px] font-semibold ${t.text}`}>
+      {t.dot && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${t.dot}`} aria-hidden />}
+      <span className="truncate">{children}</span>
+    </span>
+  );
+
+  if (!onToggle) {
+    // Same box as the toggle variant so bands line up across pages, minus the
+    // 44px floor and the pressed states — there's nothing here to press, and a
+    // static row that lights up under the thumb is a lie.
+    return (
+      <div className="-mx-1 flex w-full items-center gap-2 px-2 py-2 text-left">
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+          {label}
+          {meta && <span className="text-[13px] text-[var(--ds-text-muted)]">{meta}</span>}
+        </span>
+        {action}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-between gap-3 px-1 pb-1 pt-2">
-      <span className={`flex min-w-0 items-center gap-1.5 text-[13px] font-semibold ${t.text}`}>
-        {t.dot && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${t.dot}`} aria-hidden />}
-        <span className="truncate">{children}</span>
+    // 44px minimum — this is the control that collapses a whole band of
+    // bookings, and on a phone it sat at roughly 30px between two cards with
+    // nothing to say it could be pressed.
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    >
+      {/* Label and meta wrap as a pair: on a wide column they share one line,
+          and where the column is too narrow the meta drops beneath the label
+          instead of being cut off mid-word. The chevron sits outside the
+          wrapping box so it stays put on the first line either way. */}
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+        {label}
+        {meta && <span className="text-[13px] text-[var(--ds-text-muted)]">{meta}</span>}
       </span>
       {action}
+      {/* A circle, not a bare glyph. The whole row is the target, but the
+          chevron is what people aim at, and a 16px icon floating in space
+          reads as decoration rather than a control. */}
+      <span
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform ${
+          expanded ? '' : '-rotate-90'
+        }`}
+        aria-hidden
+      >
+        <ChevronDown className="h-4 w-4" />
+      </span>
+    </button>
+  );
+};
+
+/* ── StatStrip ────────────────────────────────────────────────────────────
+   A row of headline numbers in one card, split by hairlines rather than sat in
+   separate boxes: they're one reading of the same service, and four cards
+   would say they're four unrelated things.
+
+   A segment that needs acting on takes the pending tint and becomes a button.
+   That's the whole reason the strip is tinted anywhere — the eye should land on
+   the number that costs money, not on the tally of what's already fine. */
+export type StatTone = 'neutral' | 'positive' | 'pending' | 'critical';
+
+// Written out in full rather than composed: Tailwind extracts class names
+// statically, so a template-built `bg-[var(--ds-${x}-tint)]` never ships.
+const STAT_TONE: Record<StatTone, { value: string; label: string; dot: string; tint: string }> = {
+  neutral: {
+    value: 'text-[var(--ds-text-primary)]', label: 'text-[var(--ds-text-muted)]',
+    dot: 'bg-[var(--ds-text-muted)]', tint: 'bg-[var(--ds-surface-row)]',
+  },
+  positive: {
+    value: 'text-[var(--ds-seated-text)]', label: 'text-[var(--ds-seated-text)]',
+    dot: 'bg-[var(--ds-seated-solid)]', tint: 'bg-[var(--ds-seated-tint)]',
+  },
+  pending: {
+    value: 'text-[var(--ds-pending-text)]', label: 'text-[var(--ds-pending-text)]',
+    dot: 'bg-[var(--ds-pending-solid)]', tint: 'bg-[var(--ds-pending-tint)]',
+  },
+  critical: {
+    value: 'text-[var(--ds-critical-text)]', label: 'text-[var(--ds-critical-text)]',
+    dot: 'bg-[var(--ds-critical-solid)]', tint: 'bg-[var(--ds-critical-tint)]',
+  },
+};
+
+export interface Stat {
+  /** The number. Rendered bold and tabular so segments don't jitter on update. */
+  value: React.ReactNode;
+  label: string;
+  /** Colours the number and its label. Zero should read neutral — a green "0
+   *  arrivati" claims something went right when nothing has happened yet. */
+  tone?: StatTone;
+  /** Adds the tone's tinted background. For the one segment that's a task
+   *  rather than a fact — the tint is what makes it read as actionable. */
+  tint?: boolean;
+  onClick?: () => void;
+  title?: string;
+  /** Drops below the given breakpoint — for segments a phone has no room for. */
+  hideBelow?: 'sm' | 'md' | 'lg';
+}
+
+const HIDE_BELOW: Record<NonNullable<Stat['hideBelow']>, string> = {
+  sm: 'hidden sm:flex',
+  md: 'hidden md:flex',
+  lg: 'hidden lg:flex',
+};
+
+export const StatStrip: React.FC<{
+  stats: Stat[];
+  /** 'stacked' puts the number over its label — for a strip that's the page's
+   *  headline. 'inline' keeps it on one line, for a strip that sits between
+   *  other controls. */
+  layout?: 'inline' | 'stacked';
+  className?: string;
+}> = ({ stats, layout = 'inline', className = '' }) => {
+  const stacked = layout === 'stacked';
+  return (
+    <div
+      className={`flex items-stretch overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+        stacked ? 'rounded-[20px]' : 'rounded-full'
+      } ${className}`}
+    >
+      {stats.map((s, i) => {
+        const t = STAT_TONE[s.tone ?? 'neutral'];
+        const Tag = s.onClick ? 'button' : 'div';
+        return (
+          <Tag
+            key={`${s.label}-${i}`}
+            type={s.onClick ? 'button' : undefined}
+            onClick={s.onClick}
+            title={s.title}
+            className={`${s.hideBelow ? HIDE_BELOW[s.hideBelow] : 'flex'} min-w-0 flex-1 whitespace-nowrap ${
+              stacked ? 'flex-col items-center justify-center px-2 py-2.5' : 'items-center justify-center gap-1.5 px-3 py-2.5 text-[13px]'
+            } ${i > 0 ? 'border-l border-[var(--ds-border)]' : ''} ${s.tint ? t.tint : ''} ${
+              s.onClick ? 'transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]' : ''
+            }`}
+          >
+            {!stacked && s.tint && t.dot && (
+              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${t.dot}`} aria-hidden />
+            )}
+            <span
+              className={`flex-shrink-0 font-semibold tabular-nums ${stacked ? 'text-[20px] leading-tight' : ''} ${t.value}`}
+            >
+              {s.value}
+            </span>
+            <span className={`truncate ${stacked ? 'text-[12px]' : ''} ${t.label}`}>{s.label}</span>
+            {!stacked && s.onClick && (
+              <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 ${t.label}`} aria-hidden />
+            )}
+          </Tag>
+        );
+      })}
     </div>
   );
 };

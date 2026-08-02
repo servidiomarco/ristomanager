@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ModalShell, FormCard, Field, Stepper, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton } from './ds';
+import {
+  ModalShell, FormCard, Field, Stepper, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton,
+  SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge,
+} from './ds';
+import type { SectionTone, Stat } from './ds';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, Filter, Map as MapIcon, List, MessageCircle, Mail, Armchair, Search, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, Rows3, Rows4, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
@@ -16,6 +20,7 @@ import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './Table
 import {
   getReservationState, getTimedReservationState, RESERVATION_STATE_META,
   reservationStatePatch, deriveTableDisplayStatus, isSeated, StatusChip,
+  DsStatusChip, reservationStateDs,
   isOverdue, extendedDurationMin, OVERDUE_EXTEND_MIN, getEffectiveDurationMin,
   type ReservationStateKey,
 } from './reservationState';
@@ -120,7 +125,7 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
   if (res.source === ReservationSource.VOICE) {
     return (
       <span
-        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-600 dark:bg-indigo-500/20 dark:border-indigo-500/30 dark:text-indigo-300 flex-shrink-0"
+        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]"
         title="Presa dall'agente vocale"
         aria-label="Presa dall'agente vocale"
       >
@@ -131,7 +136,7 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
   if (res.created_by_user_name) {
     return (
       <span
-        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-[9px] font-semibold flex-shrink-0"
+        className="inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-1 text-[10px] font-semibold text-[var(--ds-text-secondary)]"
         title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
         aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
       >
@@ -145,32 +150,37 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
 // Tier 3 attribute: small circular badge showing how the booking arrived
 // (channel). Phone for manually-entered calls, WhatsApp, web for the public
 // booking page, mic for the voice agent. Quiet/secondary by design.
+// The badge shell every attribute icon on a card shares. Neutral by default:
+// how a booking arrived is context, not a warning, and four tinted circles in
+// a row would each claim to be the important one.
+const ATTR_BADGE =
+  'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
+
 const renderChannelIcon = (res: Reservation): React.ReactNode => {
   const source = res.source || ReservationSource.MANUAL;
-  const base = 'inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0';
   if (source === ReservationSource.WHATSAPP) {
     return (
-      <span className={`${base} bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400`} title="WhatsApp" aria-label="Canale: WhatsApp">
+      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title="WhatsApp" aria-label="Canale: WhatsApp">
         <MessageCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.GOOGLE) {
     return (
-      <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Web" aria-label="Canale: Web">
+      <span className={ATTR_BADGE} title="Web" aria-label="Canale: Web">
         <Globe className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.VOICE) {
     return (
-      <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Agente vocale" aria-label="Canale: Agente vocale">
+      <span className={ATTR_BADGE} title="Agente vocale" aria-label="Canale: Agente vocale">
         <Mic className="h-3.5 w-3.5" />
       </span>
     );
   }
   return (
-    <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title="Telefono" aria-label="Canale: Telefono">
+    <span className={ATTR_BADGE} title="Telefono" aria-label="Canale: Telefono">
       <Phone className="h-3.5 w-3.5" />
     </span>
   );
@@ -199,13 +209,12 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
   const status = res.confirmation_status;
   if (!status) return null;
   const channelLabel = res.confirmation_channel === 'sms' ? 'SMS' : 'WhatsApp';
-  const base = 'inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0';
 
   if (status === 'delivered') {
     const ts = formatConfirmationTs(res.confirmation_delivered_at);
     const title = `${channelLabel} consegnato il ${ts}`;
     return (
-      <span className={`${base} bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400`} title={title} aria-label={title}>
+      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title={title} aria-label={title}>
         <CheckCheck className="h-3.5 w-3.5" />
       </span>
     );
@@ -215,7 +224,7 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
     const err = res.confirmation_error ? ` — ${res.confirmation_error}` : '';
     const title = `${channelLabel}: consegna fallita${err}`;
     return (
-      <span className={`${base} bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400`} title={title} aria-label={title}>
+      <span className={`${ATTR_BADGE} bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]`} title={title} aria-label={title}>
         <AlertOctagon className="h-3.5 w-3.5" />
       </span>
     );
@@ -225,7 +234,7 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
   const ts = formatConfirmationTs(res.confirmation_sent_at);
   const title = `${channelLabel} inviato il ${ts} — in attesa di consegna`;
   return (
-    <span className={`${base} bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]`} title={title} aria-label={title}>
+    <span className={ATTR_BADGE} title={title} aria-label={title}>
       <Send className="h-3.5 w-3.5" />
     </span>
   );
@@ -234,8 +243,10 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
 // Payment badge (icon + tooltip) is now a shared component in
 // PaymentBadge.tsx so the Dashboard's pending-reservations card and the
 // Prenotazioni list can render the exact same chip without drift.
+// `md` matches ATTR_BADGE, so the payment circle is the same size as the
+// channel and confirmation ones sitting beside it.
 const renderPaymentIcon = (res: Reservation): React.ReactNode => (
-  <PaymentBadge reservation={res} />
+  <PaymentBadge reservation={res} size="md" />
 );
 
 // Tooltip label for the booking timestamp icon. Falls back gracefully when
@@ -302,13 +313,13 @@ const RoomOccupancyMeter: React.FC<{
   const pct = Math.max(0, Math.min(100, Math.round(percent)));
   const cap = typeof capPercent === 'number' ? Math.max(0, Math.min(100, capPercent)) : null;
   const fill = pct >= 90
-    ? 'bg-rose-500'
+    ? 'bg-[var(--ds-critical-solid)]'
     : pct >= 60
-      ? 'bg-amber-500'
-      : 'bg-emerald-500';
+      ? 'bg-[var(--ds-pending-solid)]'
+      : 'bg-[var(--ds-seated-solid)]';
   return (
     <span
-      className={`relative inline-block h-1.5 rounded-full overflow-hidden align-middle ${onBrand ? 'bg-white/30' : 'bg-[var(--color-surface-3)]'} ${className}`}
+      className={`relative inline-block h-1.5 rounded-full overflow-hidden align-middle ${onBrand ? 'bg-white/30' : 'bg-[var(--ds-border)]'} ${className}`}
       role="img"
       aria-label={`Occupazione ${pct}%${cap !== null ? `, limite ${cap}%` : ''}`}
     >
@@ -316,7 +327,7 @@ const RoomOccupancyMeter: React.FC<{
       {cap !== null && cap < 100 && (
         <span
           aria-hidden="true"
-          className={`absolute top-0 bottom-0 w-[2px] ${onBrand ? 'bg-white' : 'bg-[var(--color-fg)]'}`}
+          className={`absolute top-0 bottom-0 w-[2px] ${onBrand ? 'bg-white' : 'bg-[var(--ds-text-primary)]'}`}
           style={{ left: `calc(${cap}% - 1px)` }}
         />
       )}
@@ -861,16 +872,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // service — past and future dates must read their persisted enum state.
   const isViewingToday = selectedDate.split('T')[0] === formatLocalDate(new Date(nowTick));
 
-  // Density mode (cassa/desktop): 'compact' trades air for rows-on-screen.
-  // Persisted per device — the cassa PC stays compact, the tablet stays comfy.
-  const [density, setDensity] = useState<'comfy' | 'compact'>(() =>
-    localStorage.getItem('ristocrm_density') === 'compact' ? 'compact' : 'comfy');
-  const toggleDensity = () => setDensity(d => {
-    const next = d === 'comfy' ? 'compact' : 'comfy';
-    localStorage.setItem('ristocrm_density', next);
-    return next;
-  });
-  const compact = density === 'compact';
   const [newReservationFlashId, setNewReservationFlashId] = useState<number | null>(null);
   const [hoveredReservationId, setHoveredReservationId] = useState<number | null>(null);
   const [hoveredMapTableId, setHoveredMapTableId] = useState<number | null>(null);
@@ -1539,6 +1540,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
+
+  /* The headline numbers for the service. Deliberately NOT derived from
+     `groupedReservations`: those are filtered by the search box and the filter
+     panel, and a total that moves while you type isn't a total. Held at
+     component scope because both the floor plan's strip and the phone's read
+     the same three figures. */
+  const dayShiftTotals = useMemo(() => {
+    const forDayShift = reservations.filter(r =>
+      getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0]
+      && (selectedShift === 'ALL' ? true : r.shift === selectedShift)
+    );
+    return {
+      rows: forDayShift,
+      guests: forDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0),
+      count: forDayShift.length,
+      unassigned: forDayShift.filter(r =>
+        !r.table_id
+        && r.reservation_status !== ReservationStatus.CANCELLED
+        && r.reservation_status !== ReservationStatus.DECLINED
+      ).length,
+    };
+  }, [reservations, selectedDate, selectedShift]);
+  const totalGuestsForDayShift = dayShiftTotals.guests;
+  const reservationCountForDayShift = dayShiftTotals.count;
+  const unassignedCountForDayShift = dayShiftTotals.unassigned;
 
   // --- Search-first check-in (desktop cassa) ---
   // "/" focuses the search from anywhere; with a search term active, Enter
@@ -2973,14 +2999,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     );
   };
 
-  const renderReservationRow = (res: Reservation, group: ReservationGroup) => {
+  /**
+   * One reservation, one card — the same one on the phone and in the desktop
+   * column. The two used to be separate blocks of near-identical JSX, which is
+   * how they drifted: different name sizes, different table chips, different
+   * badges on show.
+   *
+   * Reading order is the order a host needs it in: when and how many, who,
+   * where they're sitting, then what state the booking is in.
+   */
+  const renderReservationCard = (res: Reservation, group: ReservationGroup) => {
     const table = displayTables.find(t => t.id === res.table_id);
     const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
     const isSelected = selectedReservationId === res.id;
     const noteText = stripDietaryNote(res.notes);
     // Preset notes whose label appears in res.notes AND that carry an icon.
-    // We render each as a small pill in tier 3 so operators can spot common
-    // requests (seggiolone, cane, compleanno, ...) at a glance.
+    // Each becomes a badge in the attribute cluster so common requests
+    // (seggiolone, cane, compleanno, ...) are visible without opening the card.
     const matchedNoteIcons = res.notes
       ? quickNotes
           .filter(n => n.icon && res.notes!.toLowerCase().includes(n.label.toLowerCase()))
@@ -2989,171 +3024,187 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       : [];
     const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
     const isFlashing = newReservationFlashId === res.id;
-    const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
+    const state = isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res);
+    const ds = reservationStateDs(state);
+    const turno = turnoIndexById.get(res.id);
+    const isVoided = group.key === 'noshow' || group.key === 'cancelled';
+    const preferredMatch = res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id;
+    const preferredMissed = res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id;
+    const dietary = parseDietary(res.notes, allergenPresets);
+    // The third line only exists when something needs it — an empty flex row
+    // still costs its gap, and most bookings carry none of these.
+    const hasWideAttributes = !!turno || preferredMatch || preferredMissed
+      || dietary.allergies.length > 0 || dietary.intolerances.length > 0;
 
     return (
       <div
         key={res.id}
         id={`reservation-row-${res.id}`}
-        className={`w-full flex flex-col border-b border-[var(--color-line)] last:border-b-0 group/row cursor-pointer
-          ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50/40 hover:bg-rose-50 dark:bg-rose-500/10 dark:hover:bg-rose-500/15' : 'hover:bg-[var(--color-surface-hover)]'}
-          ${isFlashing ? 'animate-flash-row' : ''}
-          ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''}
-        `}
+        className={`w-full cursor-pointer rounded-[20px] shadow-[var(--ds-shadow-card)] transition-shadow p-3.5 ${
+          isVoided ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface)]'
+        } ${isSelected ? 'ring-2 ring-[var(--ds-border-focus)]' : ''} ${
+          group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''
+        } ${isFlashing ? 'animate-flash-row' : ''}`}
         onMouseEnter={() => setHoveredReservationId(res.id)}
         onMouseLeave={() => setHoveredReservationId(null)}
         onClick={() => handleRowClick(res)}
       >
-        {/* Main content: tiers 1–3 (left) + party/table rail (right) */}
-        <div className="flex">
-        {/* Left content */}
-        <div className={`flex-1 min-w-0 px-3 ${compact ? 'pt-1' : 'pt-2'}`}>
-          {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
-          <div className="flex items-center gap-1.5 h-5">
-            <span className="text-xs text-[var(--color-fg)] tabular">
-              {formatTime(res.reservation_time)}
-            </span>
-            {(() => {
-              const turno = turnoIndexById.get(res.id);
-              if (!turno) return null;
-              return (
-                <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0"
-                  title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
-                >
-                  {turno.position}° turno
-                </span>
-              );
-            })()}
-            <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-              <Info className="h-5 w-5" />
-            </button>
-            {renderOperatorBadge(res)}
-            {group.key === 'noshow' && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                <UserX className="h-2.5 w-2.5" /> No show
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            {/* When, how many, and who took it */}
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                {formatTime(res.reservation_time)}
               </span>
-            )}
-            {group.key === 'cancelled' && (
-              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                <Ban className="h-2.5 w-2.5" /> Annullata
+              <span
+                className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)]"
+                title={`${res.guests} coperti${res.children ? ` (${res.children} bambini)` : ''}`}
+              >
+                <Users className="h-3.5 w-3.5" aria-hidden />
+                <span className="tabular-nums">{res.guests}</span>
+                {res.children && res.children > 0 ? (
+                  <span className="text-[var(--ds-text-muted)]">+{res.children}b</span>
+                ) : null}
               </span>
+              {renderOperatorBadge(res)}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }}
+                className="flex-shrink-0 text-[var(--ds-text-subtle)] transition-colors hover:text-[var(--ds-text-primary)]"
+                title={formatBookedAt(res.created_at)}
+                aria-label={formatBookedAt(res.created_at)}
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Who */}
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              {res.customer_is_vip && (
+                <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="Cliente VIP" />
+              )}
+              <p className={`truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] ${group.key === 'cancelled' ? 'line-through' : ''}`}>
+                {toTitleCase(res.customer_name)}
+              </p>
+            </div>
+
+            {/* Anything that needs words rather than a glyph */}
+            {hasWideAttributes && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {turno && (
+                  <StatusPill tone="info" title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}>
+                    {turno.position}° turno
+                  </StatusPill>
+                )}
+                <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
+                {preferredMatch && (
+                  <StatusPill tone="positive" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+                    <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Tavolo preferito
+                  </StatusPill>
+                )}
+                {preferredMissed && (
+                  <StatusPill tone="pending" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+                    <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Preferito non disponibile
+                  </StatusPill>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Tier 1 — guest name */}
-          <div className="flex items-center gap-1.5 min-w-0 mt-0.5">
-            {res.customer_is_vip && (
-              <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
-            )}
-            <p className={`${compact ? 'text-[14px] leading-5' : 'text-base leading-6'} font-semibold text-[var(--color-fg)] truncate ${group.key === 'cancelled' ? 'line-through' : ''}`}>
-              {toTitleCase(res.customer_name)}
-            </p>
-          </div>
-
-          {/* Tier 3 — attributes: channel · confirmation · dietary · preferred · note · payment · menu */}
-          <div className={`flex items-center flex-wrap gap-1.5 ${compact ? 'mt-0.5' : 'mt-1.5'}`}>
+          {/* Attributes, as glyphs. Hidden below sm, where the name needs the
+              width more than the provenance does — everything here is also in
+              the detail drawer. */}
+          <div className="hidden flex-shrink-0 items-center gap-1.5 self-start sm:flex">
             {renderChannelIcon(res)}
             {renderConfirmationIcon(res)}
             {matchedNoteIcons.map(m => {
               const Icon = m.Icon!;
               return (
-                <span
-                  key={m.label}
-                  className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30 flex-shrink-0"
-                  title={m.label}
-                  aria-label={m.label}
-                >
+                <span key={m.label} className={ATTR_BADGE} title={m.label} aria-label={m.label}>
                   <Icon className="h-3.5 w-3.5" />
                 </span>
               );
             })}
-            <DietaryChips notes={res.notes} presets={allergenPresets} />
-            {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
-              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
-                <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
-              </span>
-            )}
-            {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
-              <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
-                <Armchair className="h-3 w-3 flex-shrink-0" /> Preferito non disponibile
-              </span>
-            )}
             {noteText && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] flex-shrink-0" title="Nota" aria-label="Nota">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+                className={`${ATTR_BADGE} transition-colors hover:text-[var(--ds-text-primary)]`}
+                title="Nota"
+                aria-label="Nota"
+              >
                 <StickyNote className="h-3.5 w-3.5" />
               </button>
             )}
             {renderPaymentIcon(res)}
             {menu && (
-              <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={menu.name}>
-                <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+              <span className={`${ATTR_BADGE} bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]`} title={menu.name} aria-label={`Menù: ${menu.name}`}>
+                <BookOpen className="h-3.5 w-3.5" />
               </span>
             )}
           </div>
 
+          {/* Where they're sitting. Takes the booking's own colour family, so
+              the table reads as occupied-by-this-state at a glance. */}
+          {table ? (
+            <div
+              className={`flex min-h-[56px] w-[64px] max-w-[120px] flex-shrink-0 flex-col items-center justify-center rounded-[14px] px-2 py-1.5 ${ds.tint} ${ds.text}`}
+            >
+              {renderTableStripContent(res, table, tableRoom, ds.text, true)}
+            </div>
+          ) : canEdit ? (
+            // The dashed box is the affordance for the assign-table action the
+            // row already had buried in its action band.
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+              title="Assegna un tavolo"
+              aria-label="Assegna un tavolo"
+              className={`flex min-h-[56px] w-[64px] flex-shrink-0 items-center justify-center rounded-[14px] border border-dashed border-[var(--ds-pending-solid)] text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]`}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          ) : (
+            <div className={`flex min-h-[56px] w-[64px] flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-surface-row)] text-[13px] text-[var(--ds-text-muted)]`}>
+              —
+            </div>
+          )}
         </div>
 
-          {/* Rail: party (top) + table chip (bottom-aligned with tier 3) */}
-          <div className={`flex flex-col items-end justify-between self-stretch flex-shrink-0 pr-2 ${compact ? 'py-1.5 gap-1' : 'py-2 gap-2'}`}>
-            <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
-              <Users className="h-3.5 w-3.5" />
-              <span className="text-base font-medium tabular">{res.guests}</span>
-              {res.children && res.children > 0 ? (
-                  <span className="text-[10px] opacity-75">({res.children}b)</span>
-              ) : null}
-            </div>
-            <div className={`min-w-[60px] max-w-[120px] ${compact ? 'min-h-[40px]' : 'min-h-[56px]'} px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
-              table
-                ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
-                  : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
-                  : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-                  : group.key === 'departing' ? 'bg-cyan-50 dark:bg-cyan-500/15'
-                  : 'bg-booked-50 dark:bg-booked-600/25'
-                : 'bg-[var(--color-surface-3)]'
-            }`}>
-              {table ? renderTableStripContent(res, table, tableRoom,
-                group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-                  : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-                  : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
-                  : group.key === 'departing' ? 'text-cyan-700 dark:text-cyan-300'
-                  : 'text-booked-600 dark:text-booked-300'
-              ) : (
-                <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
-              )}
-            </div>
-          </div>
+        {/* State and the two actions, below a hairline so they read as
+            operating on the card rather than describing it. The band renders
+            without edit rights too — a read-only viewer still has to be able
+            to tell a no-show from a confirmed booking. */}
+        <div className={`flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-[var(--ds-border)] mt-3 pt-3`}>
+          <DsStatusChip
+            state={state}
+            onClick={canEdit ? (e) => { e.stopPropagation(); setStateChangeReservation(res); } : undefined}
+            title={canEdit ? 'Cambia stato' : undefined}
+            trailing={canEdit ? <ChevronDown className="h-3.5 w-3.5 opacity-60" /> : undefined}
+          />
+          {canEdit && (
+            <>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
+              className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+              aria-label="Modifica"
+              title="Modifica"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
+              className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
+              aria-label="Annulla"
+              title="Annulla"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            </>
+          )}
         </div>
-
-        {/* Actions band: status (left) · edit + delete (right) */}
-        {canEdit && (
-          <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-3 ${compact ? 'pt-1 pb-1.5' : 'pt-1.5 pb-2'}`}>
-            <StatusChip
-              state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
-              size="sm"
-              onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-              title="Cambia stato"
-              trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
-            />
-            {isSeated(res) && !res.table_id && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
-                <MapPin className="h-3.5 w-3.5" /> Tavolo
-              </button>
-            )}
-            <div className="ml-auto -mr-1.5 flex items-center gap-3">
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
-                <Edit2 className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -3321,126 +3372,147 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     );
   };
 
+  /** Which family a group belongs to. Same mapping as the state pill on the
+   *  cards inside it, so a section and its contents agree on colour. */
+  const groupTone = (key: string): SectionTone =>
+    key === 'pending' ? 'pending'
+    : key === 'waiting' ? 'info'
+    : key === 'arrived' || key === 'departing' ? 'positive'
+    : key === 'noshow' || key === 'cancelled' ? 'attention'
+    : 'muted';
+
+  /* --- Toolbar (shared by the desktop column and the mobile list) ---------
+     One set of controls, shown at both widths. Density is desktop-only (a
+     cashier wants rows, a tablet wants air) and the channel sheet is
+     mobile-only — on desktop the same toggles sit inline in the header. */
+  const renderListToolbar = () => (
+    <div className="flex items-center gap-2">
+      <SearchField
+        value={searchTerm}
+        onChange={setSearchTerm}
+        inputRef={searchInputRef}
+        onKeyDown={handleSearchKeyDown}
+        placeholder="Cerca per nome o telefono"
+        ariaLabel="Cerca prenotazioni"
+        className="min-w-0 flex-1"
+        hint={searchTerm && quickArriveCandidates.length === 1 ? (
+          <StatusPill tone="positive">↵ Arrivato</StatusPill>
+        ) : undefined}
+      />
+
+      <button type="button" onClick={() => setShowSortModal(true)} className={dsIconButton} aria-label="Ordina" title="Ordina">
+        <ArrowUpDown className="h-4 w-4" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setShowFiltersPanel(true)}
+        aria-label="Filtri"
+        title="Filtri"
+        className={activeFilterCount > 0
+          ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
+          : `relative ${dsIconButton}`}
+      >
+        <ListFilter className="h-4 w-4" />
+        {activeFilterCount > 0 && (
+          <span className="absolute -right-0.5 -top-0.5">
+            <CountBadge count={activeFilterCount} tone="alert" className="h-5 min-w-[20px] text-[11px] ring-2 ring-[var(--ds-canvas)]" />
+          </span>
+        )}
+      </button>
+
+      <button type="button" onClick={() => setIsPrintModalOpen(true)} className={dsIconButton} aria-label="Stampa" title="Stampa">
+        <Printer className="h-4 w-4" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setShowChannelsSheet(true)}
+        className={`${dsIconButton} lg:hidden`}
+        aria-label="Opzioni canali di prenotazione"
+        title="Opzioni canali di prenotazione"
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  /* --- The grouped cards, without any chrome of their own ----------------
+     Used inside the desktop column and the mobile page alike; each caller
+     owns its own padding and scrolling. */
+  const renderGroupedCards = (wrapRow?: (res: Reservation, group: ReservationGroup, card: React.ReactNode) => React.ReactNode) => {
+    if (isInitialLoading && reservations.length === 0) {
+      return (
+        <SkeletonReservationList
+          groups={[
+            { count: 3, titleWidth: 'lg' },
+            { count: 4, titleWidth: 'md' },
+            { count: 2, titleWidth: 'sm' },
+          ]}
+        />
+      );
+    }
+    if (totalGroupedCount === 0) {
+      return (
+        <EmptyState
+          icon={selectedShift === Shift.LUNCH ? Sun : Sunset}
+          action={canEdit ? (
+            <button type="button" onClick={() => handleOpenNew()} className={dsButton.primary}>
+              <Plus className="h-4 w-4" aria-hidden /> Nuova prenotazione
+            </button>
+          ) : undefined}
+        >
+          Nessuna prenotazione per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
+        </EmptyState>
+      );
+    }
+    return groupedReservations.map(group => {
+      const covers = group.items.reduce((s, r) => s + (r.guests || 0), 0);
+      const children = group.items.reduce((s, r) => s + (r.children || 0), 0);
+      const expanded = expandedGroups.has(group.key);
+      return (
+        <div key={group.key}>
+          <SectionHeader
+            tone={groupTone(group.key)}
+            onToggle={() => toggleGroup(group.key)}
+            expanded={expanded}
+            meta={`${group.items.length} ${group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · ${covers} coperti${
+              children > 0 ? ` (${children} bambin${children === 1 ? 'o' : 'i'})` : ''
+            }`}
+          >
+            {group.label}
+          </SectionHeader>
+          {expanded && (
+            <div className="space-y-2 pb-3">
+              {group.items.map(res => {
+                const card = renderReservationCard(res, group);
+                return wrapRow ? wrapRow(res, group, card) : card;
+              })}
+            </div>
+          )}
+        </div>
+      );
+    });
+  };
+
   // --- Desktop header controls (date/shift moved to App header) ---
   const renderHeaderControls = () => null;
 
-  // --- Grouped list panel (shared between desktop left column and mobile list view) ---
+  // --- Grouped list panel (desktop left column) ---
+  // The toolbar is pinned and the cards scroll under it. Its bottom padding is
+  // load-bearing: the scrolling region below is opaque and paints later, so
+  // without it the toolbar's shadow gets sliced off by a hard line.
   const renderGroupedList = () => (
     <>
-      {/* Search + filter + sort row */}
-      <div className="px-3 pt-3 pb-2 flex items-center gap-1.5">
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-          <input ref={searchInputRef} type="text" placeholder="Cerca per nome o tavolo…  /" className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
-            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleSearchKeyDown} />
-          {searchTerm && quickArriveCandidates.length === 1 && (
-            <span className="hidden lg:inline-flex absolute right-9 top-1/2 -translate-y-1/2 items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 text-[10px] font-semibold whitespace-nowrap pointer-events-none">
-              ↵ Arrivato
-            </span>
-          )}
-          {searchTerm && (
-            <button type="button" onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Densità — desktop only: la cassa vuole righe, il tablet vuole aria */}
-        <button type="button" onClick={toggleDensity}
-          className="pressable hidden lg:flex h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] items-center justify-center flex-shrink-0"
-          aria-label={compact ? 'Densità: compatta (passa a comoda)' : 'Densità: comoda (passa a compatta)'}
-          title={compact ? 'Vista compatta — clic per comoda' : 'Vista comoda — clic per compatta'}>
-          {compact
-            ? <Rows4 className="h-3.5 w-3.5 text-[var(--color-fg)]" />
-            : <Rows3 className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />}
-        </button>
-
-        {/* Sort — opens modal */}
-        <button type="button" onClick={() => setShowSortModal(true)}
-          className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-          aria-label="Ordina">
-          <ArrowUpDown className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-        </button>
-
-        {/* Filter — opens modal */}
-        <button type="button" onClick={() => setShowFiltersPanel(true)}
-          className={`relative h-9 w-9 rounded-full border transition-colors flex items-center justify-center flex-shrink-0 ${
-            activeFilterCount > 0
-              ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-              : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-          }`}>
-          <Filter className="h-3.5 w-3.5" />
-          {activeFilterCount > 0 && (
-            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
-
-        {/* Print — desktop only (next to search/filter/sort) */}
-        <button type="button" onClick={() => setIsPrintModalOpen(true)}
-          className="hidden lg:flex h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors items-center justify-center flex-shrink-0"
-          aria-label="Stampa">
-          <Printer className="h-4 w-4" />
-        </button>
+      <div className="flex-shrink-0 px-4 pb-3 pt-4">
+        {renderListToolbar()}
       </div>
 
-      {/* Grouped reservation list */}
-      {isInitialLoading && reservations.length === 0 ? (
-        <div className="flex-1 overflow-y-auto p-3">
-          <SkeletonReservationList
-            groups={[
-              { count: 3, titleWidth: 'lg' },
-              { count: 4, titleWidth: 'md' },
-              { count: 2, titleWidth: 'sm' },
-            ]}
-          />
-        </div>
-      ) : totalGroupedCount === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center py-16 px-4">
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
-            {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
-          </div>
-          <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
-          <p className="text-xs text-[var(--color-fg-muted)] mt-1">
-            Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
-          </p>
-          {canEdit && (
-            <button onClick={() => handleOpenNew()}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
-              <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto">
-          {groupedReservations.map(group => (
-            <div key={group.key}>
-              {/* Group header */}
-              <button type="button" onClick={() => toggleGroup(group.key)}
-                className={`w-full flex items-center gap-2.5 px-3 ${compact ? 'py-2' : 'py-3'} bg-[var(--color-surface-3)] border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors sticky top-0 z-10`}>
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${group.dotClass}`} />
-                <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap flex-shrink-0">{group.label}</span>
-                <span className="text-xs text-[var(--color-fg-muted)] font-medium whitespace-nowrap truncate min-w-0">
-                  {group.items.length} {group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · {group.items.reduce((s, r) => s + (r.guests || 0), 0)} coperti
-                  {(() => {
-                    const totalChildren = group.items.reduce((s, r) => s + (r.children || 0), 0);
-                    return totalChildren > 0 ? ` (${totalChildren} bambin${totalChildren === 1 ? 'o' : 'i'})` : '';
-                  })()}
-                </span>
-                <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto flex-shrink-0 transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
-              </button>
-              {/* Group items */}
-              {expandedGroups.has(group.key) && (
-                <div>
-                  {group.items.map(res => renderReservationRow(res, group))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* -mr-4/pr-4 pushes the scrollbar out into the column's own padding so
+          it rides the edge instead of pressing on the cards. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 md:-mr-4 md:pr-4">
+        {renderGroupedCards()}
+      </div>
 
       {/* Sort modal — slides up within list column on desktop */}
       {showSortModal && (
@@ -3589,14 +3661,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const totalTablesInRoom = tablesInRoom.length;
     const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 
-    const reservationsForDayShift = reservations.filter(r => {
-      const matchesDate = getRomeDatePart(r.reservation_time) === selectedDate.split('T')[0];
-      const matchesShift = selectedShift === 'ALL' ? true : r.shift === selectedShift;
-      return matchesDate && matchesShift;
-    });
-    const totalGuestsForDayShift = reservationsForDayShift.reduce((sum, r) => sum + (Number(r.guests) || 0), 0);
-    const reservationCountForDayShift = reservationsForDayShift.length;
-    const unassignedCountForDayShift = reservationsForDayShift.filter(r => !r.table_id && r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED).length;
+    // The day+shift totals now live at component scope (dayShiftTotals), so
+    // the phone's strip and this one can't disagree.
+    const reservationsForDayShift = dayShiftTotals.rows;
 
     // Coperti per sala per il turno corrente — usato come badge accanto al
     // nome della sala nei tab del map view. Solo prenotazioni con tavolo
@@ -3734,10 +3801,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       ? Math.max(0, (mapCanvasSize.height - extentHeight * scale) / 2) : 0;
 
     return (
-      <div className="flex flex-col h-full">
-        {/* Room tabs + stats */}
-        <div className="flex items-center gap-3 px-3 py-2 border-b border-[var(--color-line)]">
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+      <div className="flex h-full min-h-0 flex-col gap-3 px-4 pb-4 pt-4 sm:px-6 lg:px-8">
+        {/* Which room you're looking at. A scope switch, not a filter: the
+            active room takes the solid fill so "you are here" reads before the
+            names do. */}
+        <div className="flex flex-shrink-0 items-center gap-3">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {/* Extended-closed rooms drop out entirely; rooms closed just for
                 this date+shift stay visible but greyed out (same treatment as
                 Sala & Tavoli), so the closure is obvious and the host can still
@@ -3752,17 +3821,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 : room.name;
               return (
                 <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
+                  type="button"
+                  aria-pressed={isActive}
                   title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : fillTitle}
-                  className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-full transition-colors whitespace-nowrap flex-shrink-0 border ${
+                  className={`inline-flex h-9 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     isActive
-                      ? isClosedForShift
-                        ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
-                        : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : isClosedForShift
-                        ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] border-[var(--color-line)] line-through hover:bg-[var(--color-surface-hover)]'
-                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                        ? 'text-[var(--ds-text-subtle)] line-through hover:bg-[var(--ds-surface-row)]'
+                        : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
                   }`}>
-                  {isClosedForShift && <DoorClosed size={14} />}
+                  {isClosedForShift && <DoorClosed size={14} aria-hidden />}
                   <span>{room.name}</span>
                   {fill && !isClosedForShift && (
                     <RoomOccupancyMeter
@@ -3773,122 +3842,70 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     />
                   )}
                   {roomGuests > 0 && (
-                    <span
-                      className={`inline-flex items-center justify-center min-w-[22px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold tabular ${
-                        isActive
-                          ? 'bg-white/20 text-[var(--color-fg-on-brand)]'
-                          : 'bg-[var(--color-surface-3)] text-[var(--color-fg)]'
-                      }`}
-                      title={`${roomGuests} coperti in sala`}
-                    >
-                      {roomGuests}
-                    </span>
+                    <CountBadge
+                      count={roomGuests}
+                      max={999}
+                      className="h-5 min-w-[20px] text-[11px]"
+                    />
                   )}
                 </button>
               );
             })}
           </div>
-          {hiddenTableIds.size > 0 && (
-            <>
-              <button type="button" onClick={() => setShowHidden(v => !v)}
-                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors border ${
-                  showHidden
-                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                }`}
-                title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
-                {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                <span>{hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
-              </button>
-              {canEdit && (
-                <button type="button" onClick={() => setUnhideAllConfirm(true)}
-                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/25 transition-colors"
-                  title="Riattiva tutti i tavoli nascosti per questo turno">
-                  <RotateCcw size={14} />
-                  <span>Riattiva tutti</span>
-                </button>
-              )}
-            </>
+
+          {activeRoomFill?.overCap && (
+            <StatusPill
+              tone="pending"
+              className="hidden xl:inline-flex"
+              title={`Sala oltre il limite del ${activeRoomFill.capPercent}%: le prenotazioni web e telefoniche non assegnano più tavoli qui da sole.`}
+            >
+              Oltre il limite web
+            </StatusPill>
           )}
-          <div className="hidden md:flex items-center gap-3 text-xs flex-shrink-0">
-            <div className="flex items-center gap-1.5">
-              <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
-              <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
-              <span className="text-[var(--color-fg-muted)]">coperti</span>
-            </div>
-            <span className="text-[var(--color-fg-subtle)]">·</span>
-            <div className="flex items-center gap-1.5">
-              <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
-              <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-            </div>
-            {unassignedCountForDayShift > 0 && (
-              <button type="button" onClick={() => setShowUnassignedModal(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors"
-                title="Tocca per vedere le prenotazioni senza tavolo">
-                <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
-                <span className="text-xs">senza tavolo</span>
-                <ChevronRight size={12} className="text-amber-600 flex-shrink-0" />
-              </button>
-            )}
-            <span className="text-[var(--color-fg-subtle)]">·</span>
-            <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
-              <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
-              <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-              <RoomOccupancyMeter
-                percent={activeRoomFill?.percent ?? occupancyPercentage}
-                capPercent={activeRoomFill?.capPercent ?? null}
-                className="w-16 flex-shrink-0"
-              />
-            </div>
-            {activeRoomFill?.overCap && (
-              <span
-                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300"
-                title={`Sala oltre il limite del ${activeRoomFill.capPercent}%: le prenotazioni web e telefoniche non assegnano più tavoli qui da sole.`}
-              >
-                Oltre il limite web
-              </span>
-            )}
-          </div>
+
+          {hiddenTableIds.size > 0 && canEdit && (
+            <button type="button" onClick={() => setUnhideAllConfirm(true)}
+              className="inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-opacity hover:opacity-80"
+              title="Riattiva tutti i tavoli nascosti per questo turno">
+              <RotateCcw size={16} aria-hidden />
+              <span>Riattiva tutti</span>
+            </button>
+          )}
         </div>
+
+        {/* The service in four numbers. One card rather than four: they're one
+            reading of the same shift. Only the segment that costs money is
+            tinted, and only that one is a button. */}
+        <StatStrip
+          className="flex-shrink-0"
+          stats={[
+            { value: totalGuestsForDayShift, label: 'coperti' },
+            {
+              value: reservationCountForDayShift,
+              label: reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni',
+            },
+            ...(unassignedCountForDayShift > 0 ? [{
+              value: unassignedCountForDayShift,
+              label: unassignedCountForDayShift === 1 ? 'senza tavolo' : 'senza tavoli',
+              tone: 'pending' as const,
+              tint: true,
+              onClick: () => setShowUnassignedModal(true),
+              title: 'Tocca per vedere le prenotazioni senza tavolo',
+            }] : []),
+            {
+              value: `${occupiedTablesCount}/${totalTablesInRoom}`,
+              label: `tavoli (${occupancyPercentage}%)`,
+              hideBelow: 'md' as const,
+            },
+          ]}
+        />
 
         {/* Per-shift closure banner for the room currently shown on the map */}
         {typeof activeMapRoomId === 'number' && closedRoomIdsForShift.has(activeMapRoomId) && (
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300">
-            <DoorClosed size={14} className="flex-shrink-0" />
-            <span>Sala chiusa per questo turno</span>
-          </div>
+          <Callout tone="pending" icon={DoorClosed} className="flex-shrink-0">
+            Sala chiusa per questo turno
+          </Callout>
         )}
-
-        {/* Mobile stats */}
-        <div className="md:hidden px-3 py-2 bg-[var(--color-surface-3)] border-b border-[var(--color-line)] grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <div className="flex items-center gap-1.5">
-            <Users size={14} className="text-[var(--color-fg-muted)] flex-shrink-0" />
-            <span className="font-semibold text-[var(--color-fg)]">{totalGuestsForDayShift}</span>
-            <span className="text-[var(--color-fg-muted)]">coperti</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium text-[var(--color-fg)]">{reservationCountForDayShift}</span>
-            <span className="text-[var(--color-fg-muted)]">{reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</span>
-          </div>
-          {unassignedCountForDayShift > 0 && (
-            <button type="button" onClick={() => setShowUnassignedModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 font-medium rounded-full hover:bg-amber-100 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors w-fit">
-              <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
-              <span className="text-sm font-semibold">{unassignedCountForDayShift}</span>
-              <span className="text-xs">senza tavolo</span>
-            </button>
-          )}
-          <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)] justify-self-end">
-            <span className="font-medium text-[var(--color-fg)]">{occupiedTablesCount}</span>
-            <span>/{totalTablesInRoom} tavoli ({occupancyPercentage}%)</span>
-            <RoomOccupancyMeter
-              percent={activeRoomFill?.percent ?? occupancyPercentage}
-              capPercent={activeRoomFill?.capPercent ?? null}
-              className="w-12 flex-shrink-0"
-            />
-          </div>
-        </div>
 
         {/* Map canvas */}
         {isPhone ? (
@@ -4000,14 +4017,36 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
           </div>
         ) : (
+          // The floor is a card like everything else on this page, not a
+          // pinned-down plan: the dashed border read as a drop target even
+          // where nothing can be dropped.
           <div ref={setMapCanvasNode}
-            className="flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)] relative overflow-auto md:overflow-hidden m-3"
+            className="relative min-h-0 flex-1 overflow-auto rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] md:overflow-hidden"
             style={{ backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)', backgroundSize: window.innerWidth < 768 ? '15px 15px' : '20px 20px' }}>
             {isLoadingMerges && (
-              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--ds-surface)]/70 backdrop-blur-[1px]">
+                <div className="flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
                   <CookingPotLoader label="Caricamento tavoli…" size={40} />
                 </div>
+              </div>
+            )}
+
+            {/* Hidden tables live on the floor they're hidden from, so the
+                toggle sits on the floor too rather than in the header. */}
+            {hiddenTableIds.size > 0 && (
+              <div className="absolute left-4 top-4 z-10 select-none">
+                <button type="button" onClick={() => setShowHidden(v => !v)}
+                  aria-pressed={showHidden}
+                  className={`inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium shadow-[var(--ds-shadow-card)] transition-colors ${
+                    showHidden
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                  }`}
+                  title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
+                  {showHidden ? <Eye size={16} aria-hidden /> : <EyeOff size={16} aria-hidden />}
+                  <span className="tabular-nums">{hiddenTableIds.size}</span>
+                  <span>{hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
+                </button>
               </div>
             )}
             <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
@@ -4035,25 +4074,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {/* Legend */}
             <div className="absolute bottom-4 right-4 z-10 select-none">
               <button type="button" onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)]/95 backdrop-blur rounded-full shadow-[var(--shadow-xs)] border border-[var(--color-line)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface)] transition-colors"
+                className="inline-flex h-9 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)]"
                 aria-expanded={isLegendOpen}>
-                <Info size={14} className="text-[var(--color-fg-muted)]" /> Legenda
+                <Info size={16} aria-hidden /> Legenda
               </button>
               {isLegendOpen && (
-                <div className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)]/95 backdrop-blur p-3 rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                <div className="animate-in fade-in slide-in-from-bottom-2 absolute bottom-full right-0 mb-2 w-60 space-y-2 rounded-[20px] bg-[var(--ds-surface)] p-4 text-[13px] shadow-[var(--ds-shadow-raised)] duration-150"
                   onClick={(e) => e.stopPropagation()}>
-                  <div className="text-sm font-semibold text-[var(--color-fg)] mb-1">Legenda Stato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato</div>
-                  <div className="flex items-center gap-2 text-[var(--color-fg-muted)]"><div className="w-3 h-3 rounded-sm border flex items-center justify-center" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}><BookOpen size={8} style={{ color: '#4f46e5' }} /></div> Banchetto</div>
-                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                    <div className="text-sm font-semibold text-[var(--color-fg)]">Occupazione</div>
-                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold">{occupancyPercentage}%</span>)</div>
+                  <div className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Stato dei tavoli</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[4px] border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[4px] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[4px] border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="flex h-3 w-3 items-center justify-center rounded-[4px] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}><BookOpen size={8} style={{ color: 'var(--ds-arriving-solid)' }} /></div> Banchetto</div>
+                  <div className="mt-1 border-t border-[var(--ds-border)] pt-2">
+                    <div className="font-semibold text-[var(--ds-text-primary)]">Occupazione</div>
+                    <div className="text-[var(--ds-text-secondary)]"><span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{occupancyPercentage}%</span>)</div>
                   </div>
-                  <div className="border-t border-[var(--color-line)] mt-1 pt-2">
-                    <div className="text-sm font-semibold text-[var(--color-fg)]">Coperti</div>
-                    <div className="text-sm text-[var(--color-fg)]"><span className="font-semibold">{totalGuestsForDayShift}</span> in <span className="font-semibold">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</div>
+                  <div className="mt-1 border-t border-[var(--ds-border)] pt-2">
+                    <div className="font-semibold text-[var(--ds-text-primary)]">Coperti</div>
+                    <div className="text-[var(--ds-text-secondary)]"><span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{totalGuestsForDayShift}</span> in <span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</div>
                   </div>
                 </div>
               )}
@@ -4071,306 +4110,91 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       {/* ===== DESKTOP: Two-column split view (>= 1024px) ===== */}
       {isDesktop ? (
-        <div className="flex flex-col h-full overflow-hidden">
-          {/* Split view */}
-          <div className="flex flex-1 min-h-0 min-w-0">
-            {/* Left column — Reservation list (20%) */}
-            <div className="w-[20%] min-w-[280px] border-r border-[var(--color-line)] bg-[var(--color-surface)] flex flex-col relative overflow-hidden">
-              {renderGroupedList()}
-            </div>
+        <div className="flex h-full min-h-0 min-w-0 bg-[var(--ds-canvas)]">
+          {/* Left column — the bookings. A percentage width made this column
+              shrink to a phone shape on a laptop and sprawl on a 27" screen;
+              fixed steps keep a name, a time and a table chip on one line at
+              every size. */}
+          <div className="relative flex w-[340px] flex-shrink-0 flex-col overflow-hidden border-r border-[var(--ds-border)] lg:w-[400px] xl:w-[440px]">
+            {renderGroupedList()}
+          </div>
 
-            {/* Right column — Floor map (75%) */}
-            <div className="flex-1 min-w-0 bg-[var(--color-surface)]">
-              {renderMapPanel()}
-            </div>
+          {/* Right column — the floor */}
+          <div className="min-w-0 flex-1">
+            {renderMapPanel()}
           </div>
         </div>
       ) : (
         /* ===== MOBILE / TABLET: List only (< 1024px) ===== */
-        <div className="flex flex-col h-full overflow-hidden">
-          {/* Row 1: Date - Shift */}
-          <div className="px-4 pt-2.5 pb-2 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
-            <div className="flex items-start gap-2">
-              <DateNavigator
-                value={selectedDateStr}
-                onChange={(dateOnly) => {
-                  const time = selectedDate.split('T')[1] || '12:00';
-                  setSelectedDate(`${dateOnly}T${time}`);
-                }}
-                className="flex-1 min-w-0"
-              />
-
-              {/* Shift toggle — icon only; top-aligned so it tracks the date pill,
-                  not the chip below. */}
-              <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0 w-[108px] h-10">
-                <button onClick={() => setSelectedShift(Shift.LUNCH)}
-                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
-                    selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
-                  }`} aria-label="Pranzo">
-                  <Sun className="h-4 w-4" />
+        <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)]">
+          {/* Date and shift stay pinned — they name what the whole list below
+              is about, and losing them on scroll is how you end up reading
+              yesterday's service. */}
+          <div className="flex flex-shrink-0 items-center gap-2 px-4 pb-3 pt-3">
+            <DateNavigator
+              value={selectedDateStr}
+              onChange={(dateOnly) => {
+                const time = selectedDate.split('T')[1] || '12:00';
+                setSelectedDate(`${dateOnly}T${time}`);
+              }}
+              className="min-w-0 flex-1"
+              onCanvas
+            />
+            <div className="flex h-11 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+              {[
+                { shift: Shift.LUNCH, label: 'Pranzo', Icon: Sun },
+                { shift: Shift.DINNER, label: 'Cena', Icon: Sunset },
+              ].map(({ shift, label, Icon }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setSelectedShift(shift)}
+                  aria-pressed={selectedShift === shift}
+                  aria-label={label}
+                  title={label}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                    selectedShift === shift
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
                 </button>
-                <button onClick={() => setSelectedShift(Shift.DINNER)}
-                  className={`inline-flex items-center justify-center flex-1 h-8 rounded-full transition-colors ${
-                    selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)]'
-                  }`} aria-label="Cena">
-                  <Sunset className="h-4 w-4" />
-                </button>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Content: Card-based list */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {/* Search + filter + sort row */}
-            <div className="px-4 pt-3 pb-2 flex items-center gap-1.5">
-              <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)] h-3.5 w-3.5" />
-                <input type="text" placeholder="Cerca..." className="w-full h-9 pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] focus:outline-none focus:border-[var(--color-fg)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm"
-                  value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                {searchTerm && (
-                  <button type="button" onClick={() => setSearchTerm('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] rounded-full transition-colors" aria-label="Cancella ricerca">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            {/* The same three numbers the floor plan shows on desktop. There's
+                no map on a phone, so without this the shift had no headline at
+                all — you had to count the cards. */}
+            <StatStrip
+              className="mb-3"
+              stats={[
+                { value: totalGuestsForDayShift, label: 'coperti' },
+                { value: reservationCountForDayShift, label: 'pren.' },
+                ...(unassignedCountForDayShift > 0 ? [{
+                  value: unassignedCountForDayShift,
+                  label: 'senza tav.',
+                  tone: 'pending' as const,
+                  tint: true,
+                  onClick: () => setShowUnassignedModal(true),
+                  title: 'Tocca per vedere le prenotazioni senza tavolo',
+                }] : []),
+              ]}
+            />
 
-              {/* Sort — opens modal */}
-              <button type="button" onClick={() => setShowSortModal(true)}
-                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                aria-label="Ordina">
-                <ArrowUpDown className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-              </button>
+            <div className="pb-1">{renderListToolbar()}</div>
 
-              {/* Filter — opens modal */}
-              <button type="button" onClick={() => setShowFiltersPanel(true)}
-                className={`relative h-9 w-9 rounded-full border transition-colors flex items-center justify-center flex-shrink-0 ${
-                  activeFilterCount > 0
-                    ? 'bg-[var(--color-fg)] border-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                }`}>
-                <Filter className="h-3.5 w-3.5" />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-0.5 rounded-full bg-rose-500 text-[#ffffff] text-[9px] font-bold">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Print */}
-              <button type="button" onClick={() => setIsPrintModalOpen(true)}
-                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                aria-label="Stampa">
-                <Printer className="h-3.5 w-3.5" />
-              </button>
-
-              {/* Opzioni canali — apre un bottom sheet con i toggle voice+web
-                  per il turno corrente. Mobile-only: sul desktop le stesse
-                  icone stanno inline nell'header (BookingChannelsBar). */}
-              <button type="button" onClick={() => setShowChannelsSheet(true)}
-                className="h-9 w-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center flex-shrink-0"
-                aria-label="Opzioni canali di prenotazione">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            {isInitialLoading && reservations.length === 0 ? (
-              <div className="px-4 pb-4">
-                <SkeletonReservationList
-                  groups={[
-                    { count: 3, titleWidth: 'lg' },
-                    { count: 2, titleWidth: 'md' },
-                  ]}
-                />
-              </div>
-            ) : totalGroupedCount === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center py-16 px-4">
-                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-surface-3)] mb-3">
-                  {selectedShift === Shift.LUNCH ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Sunset className="h-5 w-5 text-[var(--color-fg-muted)]" />}
-                </div>
-                <h3 className="text-sm font-semibold text-[var(--color-fg)]">Nessuna prenotazione per questo servizio</h3>
-                <p className="text-xs text-[var(--color-fg-muted)] mt-1">Non ci sono prenotazioni per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}.</p>
-                {canEdit && (
-                  <button onClick={() => handleOpenNew()}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-xs font-medium hover:opacity-90 transition-opacity">
-                    <Plus className="h-3.5 w-3.5" /> Nuova prenotazione
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="px-4 pb-4 space-y-2">
-                {groupedReservations.map(group => {
-                  const groupCovers = group.items.reduce((s, r) => s + (r.guests || 0), 0);
-                  return (
-                    <div key={group.key}>
-                      {/* Group header */}
-                      <button type="button" onClick={() => toggleGroup(group.key)}
-                        className="w-full flex items-center gap-2.5 px-1 py-3 transition-colors">
-                        <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
-                        <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
-                        <span className="text-xs text-[var(--color-fg-muted)]">{group.items.length} · {groupCovers} coperti</span>
-                        <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${expandedGroups.has(group.key) ? '' : '-rotate-90'}`} />
-                      </button>
-
-                      {/* Cards */}
-                      {expandedGroups.has(group.key) && (
-                        <div className="space-y-2">
-                          {group.items.map(res => {
-                            const table = displayTables.find(t => t.id === res.table_id);
-                            const tableRoom = table ? rooms.find(r => r.id === table.room_id) : null;
-                            const arrivalStatus = res.arrival_status || ArrivalStatus.WAITING;
-                            const noteText = stripDietaryNote(res.notes);
-                            const menu = banquetMenus.find(m => m.id === res.banquet_menu_id);
-
-                            const isFlashing = newReservationFlashId === res.id;
-                            return (
-                              <SwipeToCheckIn
-                                key={res.id}
-                                enabled={!!canEdit && group.key === 'waiting' && isViewingToday}
-                                onConfirm={() => handleSetReservationState(res, 'arrived')}
-                              >
-                              <div
-                                id={`reservation-row-${res.id}`}
-                                className={`bg-[var(--color-surface)] rounded-2xl border cursor-pointer p-3.5 ${group.key === 'noshow' || group.key === 'cancelled' ? 'border-rose-200 bg-rose-50/40 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-[var(--color-line)]'} ${group.key === 'freed' || group.key === 'cancelled' ? 'opacity-60' : ''} ${selectedReservationId === res.id ? 'ring-2 ring-blue-400 ring-offset-1' : ''} ${isFlashing ? 'animate-flash-row' : ''}`}
-                                onMouseEnter={() => setHoveredReservationId(res.id)}
-                                onMouseLeave={() => setHoveredReservationId(null)}
-                                onClick={() => handleRowClick(res)}>
-                                {/* Card body: main + rail */}
-                                <div className="flex gap-3">
-                                  {/* Main */}
-                                  <div className="flex-1 min-w-0 flex flex-col">
-                                    {/* Tier 2 — provenance eyebrow: time · info · who-took-it */}
-                                    <div className="flex items-center gap-1.5 h-5">
-                                      <span className="text-xs text-[var(--color-fg)] tabular">
-                                        {formatTime(res.reservation_time)}
-                                      </span>
-                                      <button onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }} className="flex-shrink-0 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] transition-colors" title={formatBookedAt(res.created_at)} aria-label={formatBookedAt(res.created_at)}>
-                                        <Info className="h-5 w-5" />
-                                      </button>
-                                      {renderOperatorBadge(res)}
-                                      {group.key === 'noshow' && (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                                          <UserX className="h-2.5 w-2.5" /> No show
-                                        </span>
-                                      )}
-                                      {group.key === 'cancelled' && (
-                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 text-[10px] font-semibold uppercase tracking-wide flex-shrink-0">
-                                          <Ban className="h-2.5 w-2.5" /> Annullata
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    {/* Tier 1 — guest name */}
-                                    <div className={`flex items-center gap-1.5 min-w-0 mt-1 ${group.key === 'cancelled' ? 'line-through' : ''}`}>
-                                      {res.customer_is_vip && (
-                                        <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
-                                      )}
-                                      <p className="text-[17px] font-medium text-[var(--color-fg)] leading-tight truncate">
-                                        {toTitleCase(res.customer_name)}
-                                      </p>
-                                    </div>
-
-                                    {/* Tier 3 — attributes: channel · confirmation · dietary · preferred · note · payment · menu (bottom-aligned with table chip) */}
-                                    <div className="flex items-center flex-wrap gap-1.5 mt-auto pt-2">
-                                      {renderChannelIcon(res)}
-                                      {renderConfirmationIcon(res)}
-                                      <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
-                                      {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
-                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
-                                          <Armchair className="h-3 w-3 flex-shrink-0" /> Tavolo preferito
-                                        </span>
-                                      )}
-                                      {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
-                                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
-                                          <Armchair className="h-3 w-3 flex-shrink-0" /> Preferito non disponibile
-                                        </span>
-                                      )}
-                                      {noteText && (
-                                        <button type="button" onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
-                                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] flex-shrink-0" title="Nota" aria-label="Nota">
-                                          <StickyNote className="h-3.5 w-3.5" />
-                                        </button>
-                                      )}
-                                      {renderPaymentIcon(res)}
-                                      {menu && (
-                                        <span className="inline-flex items-center justify-center w-6 h-6 flex-shrink-0" title={menu.name}>
-                                          <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Tier 1 — rail: party (top) + table chip (bottom-aligned with Tier 3) */}
-                                  <div className="flex flex-col items-end justify-between self-stretch flex-shrink-0">
-                                    <div className="flex items-center gap-1 text-[var(--color-fg-muted)]">
-                                      <Users className="h-3.5 w-3.5" />
-                                      <span className="text-base font-medium tabular">{res.guests}</span>
-                                      {res.children && res.children > 0 ? (
-                                        <span className="text-[10px] opacity-75">({res.children}b)</span>
-                                      ) : null}
-                                    </div>
-                                    <div className={`min-w-[66px] max-w-[160px] min-h-[60px] px-2.5 py-1.5 flex flex-col items-center justify-center rounded-lg ${
-                                      table
-                                        ? group.key === 'freed' ? 'bg-slate-100 dark:bg-slate-500/15'
-                                          : group.key === 'arrived' ? 'bg-emerald-50 dark:bg-emerald-500/15'
-                                          : group.key === 'noshow' || group.key === 'cancelled' ? 'bg-rose-50 dark:bg-rose-500/15'
-                                          : group.key === 'departing' ? 'bg-cyan-50 dark:bg-cyan-500/15'
-                                          : 'bg-booked-50 dark:bg-booked-600/25'
-                                        : 'bg-[var(--color-surface-3)]'
-                                    }`}>
-                                      {table ? renderTableStripContent(res, table, tableRoom,
-                                        group.key === 'freed' ? 'text-slate-500 dark:text-slate-300'
-                                          : group.key === 'arrived' ? 'text-emerald-700 dark:text-emerald-300'
-                                          : group.key === 'noshow' || group.key === 'cancelled' ? 'text-rose-700 dark:text-rose-300'
-                                          : group.key === 'departing' ? 'text-cyan-700 dark:text-cyan-300'
-                                          : 'text-booked-600 dark:text-booked-300',
-                                        true
-                                      ) : (
-                                        <span className="text-xs text-[var(--color-fg-subtle)]">—</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Actions band: status (left) · edit + delete (right) */}
-                                {canEdit && (
-                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3 pt-3 border-t border-[var(--color-line)]">
-                                    <StatusChip
-                                      state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
-                                      size="sm"
-                                      onClick={(e) => { e.stopPropagation(); setStateChangeReservation(res); }}
-                                      title="Cambia stato"
-                                      trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
-                                    />
-                                    {isSeated(res) && !res.table_id && (
-                                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                                        className="inline-flex items-center gap-1 px-2.5 h-6 rounded-lg text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors whitespace-nowrap">
-                                        <MapPin className="h-3.5 w-3.5" /> Tavolo
-                                      </button>
-                                    )}
-                                    <div className="ml-auto -mr-1.5 flex items-center gap-3">
-                                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors" aria-label="Modifica">
-                                        <Edit2 className="h-3.5 w-3.5" />
-                                      </button>
-                                      <button onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-                                        className="inline-flex items-center justify-center min-w-[2rem] min-h-[2rem] rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors" aria-label="Annulla">
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                              </SwipeToCheckIn>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {renderGroupedCards((res, group, card) => (
+              <SwipeToCheckIn
+                key={res.id}
+                enabled={!!canEdit && group.key === 'waiting' && isViewingToday}
+                onConfirm={() => handleSetReservationState(res, 'arrived')}
+              >
+                {card}
+              </SwipeToCheckIn>
+            ))}
           </div>
 
           {/* Sort modal — slide up (mobile/tablet) */}
@@ -6708,72 +6532,53 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
 
           return (
-            <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setShowUnassignedModal(false)}>
-              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-                  <div>
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Prenotazioni senza tavolo</h3>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
-                      {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowUnassignedModal(false)}
-                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-3">
-                  {unassigned.length === 0 ? (
-                    <div className="text-center py-10 px-4">
-                      <div className="mx-auto w-12 h-12 bg-emerald-100 dark:bg-emerald-500/15 rounded-full flex items-center justify-center mb-3">
-                        <Check className="h-6 w-6 text-emerald-600" />
+            <ModalShell
+              open
+              onClose={() => setShowUnassignedModal(false)}
+              closeOnEscape
+              size="sm"
+              title="Prenotazioni senza tavolo"
+              subtitle={`${effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · ${new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}`}
+              bodyClassName="p-4"
+            >
+              {unassigned.length === 0 ? (
+                <EmptyState icon={Check}>
+                  Tutte le prenotazioni hanno un tavolo per questo turno.
+                </EmptyState>
+              ) : (
+                // Cards, not a divided list: each row is a booking you're about
+                // to open, and it should look like the ones on the page behind.
+                <div className="space-y-2">
+                  {unassigned.map(r => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => { setShowUnassignedModal(false); handleEditClick(r); }}
+                      className="flex w-full items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3.5 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                            {toTitleCase(r.customer_name)}
+                          </span>
+                          {renderOperatorBadge(r)}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-3 text-[13px] text-[var(--ds-text-muted)]">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" aria-hidden /> {formatTime(r.reservation_time)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Users className="h-3.5 w-3.5" aria-hidden /> {r.guests}
+                          </span>
+                          {r.phone && <span className="truncate">{r.phone}</span>}
+                        </div>
                       </div>
-                      <p className="text-sm font-semibold text-[var(--color-fg)]">Tutte le prenotazioni hanno un tavolo</p>
-                      <p className="text-xs text-[var(--color-fg-muted)] mt-1">Nessuna prenotazione da assegnare per questo turno.</p>
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-[var(--color-line)]">
-                      {unassigned.map(r => (
-                        <li key={r.id}>
-                          <button
-                            onClick={() => {
-                                setShowUnassignedModal(false);
-                                handleEditClick(r);
-                            }}
-                            className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
-                                {renderOperatorBadge(r)}
-                              </div>
-                              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
-                                <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
-                                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
-                                {r.phone && <span className="truncate">{r.phone}</span>}
-                              </div>
-                            </div>
-                            <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                      <ChevronRight className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                    </button>
+                  ))}
                 </div>
-
-                <div className="p-4 border-t border-[var(--color-line)]">
-                  <button
-                    onClick={() => setShowUnassignedModal(false)}
-                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                  >
-                    Chiudi
-                  </button>
-                </div>
-              </div>
-            </div>
+              )}
+            </ModalShell>
           );
       })()}
 

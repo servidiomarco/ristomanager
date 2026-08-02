@@ -40,6 +40,9 @@ interface ModalShellProps {
   closeOnEscape?: boolean;
   /** The body sits on the canvas tone so cards inside it read as raised. */
   bodyClassName?: string;
+  /** Merged onto the backdrop. For the rare modal that opens over another one
+   *  and needs to say so explicitly rather than rely on paint order. */
+  className?: string;
   children: React.ReactNode;
 }
 
@@ -53,6 +56,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   size = 'md',
   closeOnEscape = false,
   bodyClassName = '',
+  className = '',
   children,
 }) => {
   // Lock the page behind the modal so a scroll gesture over the backdrop
@@ -75,7 +79,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-[var(--ds-backdrop)] p-0 sm:p-4"
+      className={`fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-[var(--ds-backdrop)] p-0 sm:p-4 ${className}`}
       onClick={onClose}
     >
       <div

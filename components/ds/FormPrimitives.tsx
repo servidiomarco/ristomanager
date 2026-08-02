@@ -164,12 +164,52 @@ export function SegmentedControl<T extends string>({
   size?: 'md' | 'sm';
 }) {
   const scroll = overflow === 'scroll';
+  const trackRef = React.useRef<HTMLDivElement | null>(null);
+  // Which ends have more track behind them. The fade has to follow the scroll
+  // position, not sit permanently on the right: a static fade veils the last
+  // segment even once you've scrolled to it, so the option you just picked
+  // reads as half-disabled.
+  const [edges, setEdges] = React.useState({ start: false, end: false });
+
+  const syncEdges = React.useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setEdges({ start: el.scrollLeft > 1, end: el.scrollLeft < max - 1 });
+  }, []);
+
+  React.useEffect(() => {
+    if (!scroll) return;
+    syncEdges();
+    const el = trackRef.current;
+    if (!el) return;
+    // ResizeObserver too: the track also becomes scrollable when the window
+    // narrows or a badge count grows, without any scroll event firing.
+    const ro = new ResizeObserver(syncEdges);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scroll, syncEdges, options.length]);
+
+  // On a scrolling track the segment you tap is often the half-visible one at
+  // the edge — that's what made you reach for it. Pull it fully into view so
+  // the selection you just made is readable, instead of leaving it clipped.
+  const revealOnSelect = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!scroll) return;
+    e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  };
+
+  const mask =
+    edges.start && edges.end ? 'ds-fade-x'
+    : edges.end ? 'ds-fade-end'
+    : edges.start ? 'ds-fade-start'
+    : '';
+
   return (
     <div
+      ref={trackRef}
+      onScroll={scroll ? syncEdges : undefined}
       className={`flex gap-0.5 rounded-full bg-[var(--ds-surface-row)] p-1 ${
-        scroll
-          ? 'overflow-x-auto scrollbar-hide [mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)] [-webkit-mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)]'
-          : ''
+        scroll ? `overflow-x-auto scrollbar-hide ${mask}` : ''
       }`}
       role="group"
       aria-label={ariaLabel}
@@ -180,7 +220,7 @@ export function SegmentedControl<T extends string>({
           <button
             key={opt.value}
             type="button"
-            onClick={() => onChange(opt.value)}
+            onClick={(e) => { onChange(opt.value); revealOnSelect(e); }}
             aria-pressed={active}
             className={`inline-flex ${size === 'sm' ? 'h-8 text-[13px]' : 'h-9 text-[15px]'} min-w-0 ${
               scroll ? 'flex-none whitespace-nowrap' : equalWidth ? 'flex-1' : 'flex-auto'

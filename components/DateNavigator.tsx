@@ -7,6 +7,11 @@ interface DateNavigatorProps {
   widthClass?: string;
   backToToday?: 'below' | 'inline' | 'none';
   className?: string;
+  /** Set when the navigator sits directly on the canvas rather than inside a
+   *  white card. The recessed grey it uses by default measures about 1.03:1
+   *  against the canvas and simply vanishes there, so on canvas it takes the
+   *  white-plus-shadow treatment the search field and icon buttons use. */
+  onCanvas?: boolean;
 }
 
 const formatLocalDate = (date: Date) => {
@@ -25,8 +30,12 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   widthClass = 'flex-1 min-w-0',
   backToToday = 'below',
   className = '',
+  onCanvas = false,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const surface = onCanvas
+    ? 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
+    : 'bg-[var(--ds-surface-row)]';
   const selectedDate = new Date(`${value}T00:00:00`);
   const todayStr = formatLocalDate(new Date());
   const isToday = value === todayStr;
@@ -54,7 +63,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
     <button
       type="button"
       onClick={goToToday}
-      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-surface-row)] text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0"
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0`}
     >
       <RotateCcw className="h-3 w-3" />
       Torna a oggi
@@ -68,7 +77,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Giorno precedente"
-          className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center"
+          className={`h-10 w-10 flex-shrink-0 rounded-full ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -95,8 +104,8 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
             aria-hidden="true"
             className={`pointer-events-none w-full h-10 px-4 rounded-full transition-colors flex items-center justify-center gap-2 ${
               isToday
-                ? 'bg-[var(--ds-surface-row)]'
-                : 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]'
+                ? surface
+                : `${surface} ring-1 ring-inset ring-[var(--ds-border-strong)]`
             }`}
           >
             <Calendar
@@ -121,7 +130,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(1)}
           aria-label="Giorno successivo"
-          className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center"
+          className={`h-10 w-10 flex-shrink-0 rounded-full ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronRight className="h-4 w-4" />
         </button>
