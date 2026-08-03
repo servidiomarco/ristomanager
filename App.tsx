@@ -2932,7 +2932,8 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
   <button
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 rounded-[14px] transition-colors ${
+    aria-label={label}
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[15px] rounded-[14px] transition-colors ${
       active ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
     }`}
   >
@@ -2944,7 +2945,10 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
         </span>
       )}
     </span>
-    <span className={`text-[11px] whitespace-nowrap ${active ? 'font-semibold' : 'font-medium'}`}>
+    {/* On narrow phones (iPhone SE, ~Pixel/Xiaomi widths) four labels plus
+        the raised "+" don't fit and the last one clips past the card edge —
+        below 420px the bar goes icon-only (aria-label keeps the name). */}
+    <span className={`text-[11px] whitespace-nowrap max-[420px]:hidden ${active ? 'font-semibold' : 'font-medium'}`}>
       {label}
     </span>
   </button>
