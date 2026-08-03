@@ -3508,9 +3508,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {renderListToolbar()}
       </div>
 
-      {/* -mr-4/pr-4 pushes the scrollbar out into the column's own padding so
-          it rides the edge instead of pressing on the cards. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 md:-mr-4 md:pr-4">
+      {/* -mr-4 extends the scroll container 16px past the column edge so the
+          scrollbar disappears under the column's overflow-hidden; pr-8 gives
+          those 16px back so the cards stay inset like the toolbar above and
+          the selection ring (drawn outside the card) isn't clipped. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 md:-mr-4 md:pr-8">
         {renderGroupedCards()}
       </div>
 
