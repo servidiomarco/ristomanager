@@ -2566,6 +2566,18 @@ const App: React.FC = () => {
         </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
+        {/* Scrim under the floating bar: content scrolling past fades into
+            the canvas instead of being cut raw at the screen edge. On iOS the
+            safe-area inset masks most of this; on Android the inset is 0 and
+            the page shows through the gap below the bar. */}
+        <div
+          aria-hidden
+          className="fixed inset-x-0 bottom-0 z-20 pointer-events-none lg:hidden"
+          style={{
+            height: 'calc(env(safe-area-inset-bottom, 0px) + 112px)',
+            background: 'linear-gradient(to top, var(--ds-canvas) 45%, transparent)',
+          }}
+        />
         {/* Floating bottom bar — a card on the canvas, matching the desktop
             chrome. Offset by the safe-area inset so it clears the iOS home
             indicator instead of sitting under it. */}
