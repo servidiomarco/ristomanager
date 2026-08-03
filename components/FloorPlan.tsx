@@ -18,6 +18,7 @@ import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
+import { SegmentedControl, Callout, ModalShell, FormCard, Field, dsInput, dsTextarea, dsButton, dsIconButton } from './ds';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -32,6 +33,44 @@ const detectShiftFromNow = (): Shift => {
   const hour = new Date().getHours();
   return hour >= 11 && hour < 17 ? Shift.LUNCH : Shift.DINNER;
 };
+
+// The "n nascosti" toggle appears twice — mobile header and desktop note. It
+// means the same thing in both, so the states live here rather than being
+// retyped per breakpoint, where they drifted apart before. Height is applied at
+// the call site: 44px on mobile, 32px in the dense desktop row.
+const HIDDEN_TOGGLE_BASE =
+  'inline-flex items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+const HIDDEN_TOGGLE_ON = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
+const HIDDEN_TOGGLE_OFF =
+  'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]';
+
+// Room tabs. A closed room stays legible rather than being greyed out of
+// reach — you still need to open it again from here, so "closed" is carried by
+// the strike-through and the door glyph, not by disabling the control.
+const ROOM_TAB_BASE =
+  'inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+const ROOM_TAB_ACTIVE = 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]';
+const ROOM_TAB_ACTIVE_CLOSED = 'bg-[var(--ds-text-muted)] text-[var(--ds-surface)] line-through';
+const ROOM_TAB_IDLE =
+  'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]';
+const ROOM_TAB_IDLE_CLOSED =
+  'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)] hover:bg-[var(--ds-border)] line-through';
+
+// A latched tool (selection mode, manual layout) has to read as "on" and not
+// merely hovered, so it takes the tint rather than a darker grey.
+const TOOL_BUTTON_ON = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
+
+// Selection-toolbar actions: one 44px pill shape that takes an icon and an
+// optional short label, so "Unisci", "Dividi" and "Elimina" differ by tone
+// only and the row keeps a single rhythm however many actions are showing.
+const EDIT_ACTION_BASE =
+  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+const EDIT_ACTION_QUIET =
+  'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]';
+// Inline value editors (name, seats) sit on the same 44px baseline as the
+// buttons beside them — a shorter field made the row look broken.
+const EDIT_FIELD_WRAP =
+  'flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3';
 
 interface FloorPlanProps {
   rooms: Room[];
@@ -1103,21 +1142,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Timer Badge */}
         {timerDisplay && (
-          <div className="absolute bg-amber-500 text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, right: -4 }}>
+          <div className="absolute bg-[var(--ds-pending-solid)] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
             <Timer size={8} /> {timerDisplay}
           </div>
         )}
 
         {/* Merged Table Badge */}
         {isMerged && !timerDisplay && (
-          <div className="absolute bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, left: -4 }}>
+          <div className="absolute bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
             <Combine size={8} />
           </div>
         )}
 
         {/* Hidden-for-shift Badge */}
         {isHidden && (
-          <div className="absolute bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--color-surface)] pointer-events-none" style={{ top: -4, left: -4 }}>
+          <div className="absolute bg-[var(--ds-text-muted)] text-[var(--ds-surface)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
             <EyeOff size={8} />
           </div>
         )}
@@ -1132,9 +1171,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   if (isPortrait) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-        <RotateCw className="h-16 w-16 text-[var(--color-fg-subtle)] mb-6" />
-        <h2 className="text-lg font-semibold text-[var(--color-fg)] mb-2">Ruota il dispositivo</h2>
-        <p className="text-sm text-[var(--color-fg-muted)] max-w-[280px]">
+        <RotateCw className="h-16 w-16 text-[var(--ds-text-subtle)] mb-6" />
+        <h2 className="text-[20px] font-semibold text-[var(--ds-text-primary)] mb-2">Ruota il dispositivo</h2>
+        <p className="text-[15px] text-[var(--ds-text-muted)] max-w-[280px]">
           Ruota il dispositivo in orizzontale per vedere sala e tavoli
         </p>
       </div>
@@ -1150,38 +1189,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="md:hidden bg-[var(--color-surface)] px-3 sm:px-4 py-2 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center gap-3 z-20">
+      <div className="md:hidden flex flex-wrap items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)] sm:px-4 z-20">
         <DateNavigator
           value={selectedDate}
           onChange={setSelectedDate}
           className="flex-1 min-w-[220px]"
         />
-        <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-          <button
-            onClick={() => setSelectedShift(Shift.LUNCH)}
-            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              selectedShift === Shift.LUNCH ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-            }`}
-          >
-            <Sun className="h-4 w-4" /> Pranzo
-          </button>
-          <button
-            onClick={() => setSelectedShift(Shift.DINNER)}
-            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              selectedShift === Shift.DINNER ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-            }`}
-          >
-            <Sunset className="h-4 w-4" /> Cena
-          </button>
-        </div>
+        <SegmentedControl<Shift>
+          value={selectedShift}
+          onChange={setSelectedShift}
+          ariaLabel="Turno"
+          size="sm"
+          options={[
+            { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
+            { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+          ]}
+        />
         {hiddenTableIds.size > 0 && (
             <button
                 onClick={() => setShowHidden(s => !s)}
-                className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                    showHidden
-                        ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
-                        : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
-                }`}
+                className={`ml-auto h-11 ${HIDDEN_TOGGLE_BASE} ${showHidden ? HIDDEN_TOGGLE_ON : HIDDEN_TOGGLE_OFF}`}
                 title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
             >
                 {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -1192,19 +1219,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Desktop: Merge scope note + hidden toggle */}
       <div className="hidden md:flex items-center gap-3 px-1 z-20">
-        <span className="inline-flex items-center gap-1.5 text-xs text-[var(--color-fg-subtle)]">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+        <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-pending-fg)]" />
           Le unioni tavoli sono valide solo per questa data e turno.
         </span>
         {hiddenTableIds.size > 0 && (
             <div className="ml-auto flex items-center gap-1.5">
                 <button
                     onClick={() => setShowHidden(s => !s)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                        showHidden
-                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border-indigo-200 dark:border-[#4f46e5]/30'
-                            : 'bg-white dark:bg-[var(--color-surface)] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/30 hover:bg-slate-50 dark:hover:bg-slate-500/15'
-                    }`}
+                    className={`h-8 ${HIDDEN_TOGGLE_BASE} ${showHidden ? HIDDEN_TOGGLE_ON : HIDDEN_TOGGLE_OFF}`}
                     title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
                 >
                     {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -1212,7 +1235,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 </button>
                 <button
                     onClick={() => setUnhideAllConfirm(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-white dark:bg-[var(--color-surface)] text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors"
+                    className={`h-8 ${HIDDEN_TOGGLE_BASE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`}
                     title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
                 >
                     <Eye size={14} />
@@ -1223,7 +1246,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       </div>
 
       {/* Toolbar */}
-      <div className="bg-[var(--color-surface)] p-3 sm:p-4 rounded-lg border border-[var(--color-line)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+      <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 sm:p-4 shadow-[var(--ds-shadow-card)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
@@ -1232,14 +1255,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
               }}
-              className={`rounded-full px-4 py-2.5 text-sm font-medium transition whitespace-nowrap border flex items-center gap-2 flex-shrink-0 ${
+              className={`${ROOM_TAB_BASE} ${
                   activeRoomId === room.id
                   ? (room.is_closed || closedRoomIdsForShift.has(room.id))
-                    ? 'bg-[var(--color-fg-muted)] text-[var(--color-fg-on-brand)] border-[var(--color-fg-muted)]'
-                    : 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
+                    ? ROOM_TAB_ACTIVE_CLOSED
+                    : ROOM_TAB_ACTIVE
                   : (room.is_closed || closedRoomIdsForShift.has(room.id))
-                    ? 'bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)] line-through'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] border-[var(--color-line)]'
+                    ? ROOM_TAB_IDLE_CLOSED
+                    : ROOM_TAB_IDLE
               }`}
               title={room.is_closed
                 ? `${room.name} (Chiusa)`
@@ -1254,25 +1277,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {/* Add Room UI - Only shown in edit mode */}
           {canEdit && (isAddingRoom ? (
-              <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
+              <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-left-2">
                   <input
                       autoFocus
                       value={newRoomName}
                       onChange={e => setNewRoomName(e.target.value)}
                       placeholder="Nome sala..."
-                      className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-[var(--color-fg)]"
+                      className={`${dsInput} w-36`}
                       onKeyDown={e => e.key === 'Enter' && handleConfirmAddRoom()}
                   />
                   <button
                     onClick={handleConfirmAddRoom}
-                    className="p-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90"
+                    className={`${dsIconButton} bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-none hover:bg-[var(--ds-action-bg-hover)] hover:text-[var(--ds-action-fg)]`}
                     title="Conferma"
                   >
                       <Check size={16}/>
                   </button>
                   <button
                     onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }}
-                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+                    className={`${dsIconButton} shadow-none`}
                     title="Annulla"
                   >
                       <X size={16}/>
@@ -1281,7 +1304,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           ) : (
             <button
                 onClick={() => setIsAddingRoom(true)}
-                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] border border-[var(--color-line)]"
+                className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
                 title="Aggiungi Nuova Sala"
             >
                 <Plus size={16} />
@@ -1291,16 +1314,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
-        <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] overflow-x-auto shrink-0 w-full sm:w-auto">
-          <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Strumenti</span>
+        <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] overflow-x-auto shrink-0 w-full sm:w-auto">
+          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">Strumenti</span>
 
           <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
-            className={`p-1.5 rounded-md border transition ${
-                isSelectionMode
-                ? 'bg-[var(--color-surface-3)] border-[var(--color-line-strong)] text-[var(--color-fg)]'
-                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-            }`}
+            className={`${dsIconButton} shadow-none ${isSelectionMode ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
             title="Modalità Selezione Multipla"
           >
               <CheckSquare className="h-4 w-4" />
@@ -1308,11 +1327,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <button
             onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
-            className={`p-1.5 rounded-md border transition ${
-                layoutMode === 'manual'
-                ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc]'
-                : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-            }`}
+            className={`${dsIconButton} shadow-none ${layoutMode === 'manual' ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
             title={layoutMode === 'manual' ? 'Layout manuale: trascina per posizionare. Clicca per tornare ad auto-tidy.' : 'Layout auto-tidy: posizioni ordinate per numero. Clicca per attivare drag manuale.'}
           >
               {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
@@ -1321,26 +1336,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {selectedTables.length > 0 && (
               <button
                 onClick={() => setSelectedTables([])}
-                className="p-1.5 rounded-md border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400 transition"
+                className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
                 title="Deseleziona Tutto"
               >
                   <X className="h-4 w-4" />
               </button>
           )}
 
-          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
+          <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Rettangolo">
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Rettangolo">
             <div className="w-6 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Quadrato">
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Quadrato">
             <div className="w-4 h-4 border-2 border-current rounded-sm" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className="p-1.5 bg-[var(--color-surface)] border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] rounded-md text-[var(--color-fg-muted)]" title="Tondo">
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Tondo">
              <div className="w-4 h-4 border-2 border-current rounded-full" />
           </button>
 
-          <div className="h-6 w-px bg-[var(--color-line)] mx-1"></div>
+          <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
           {/* Room Closure Menu: per-shift override + extended (global) closure */}
           {(() => {
@@ -1363,10 +1378,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       setRoomClosureMenuOpen(true);
                     }
                   }}
-                  className={`p-2 rounded-lg border transition-colors flex items-center gap-1 text-xs font-medium ${
+                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     isAnyClosed
-                      ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
-                      : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25'
+                      ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                      : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                   }`}
                   title={`Gestisci chiusura: ${activeRoom.name}`}
                 >
@@ -1381,7 +1396,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       onClick={() => setRoomClosureMenuOpen(false)}
                     />
                     <div
-                      className="fixed z-[61] w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] shadow-lg overflow-hidden"
+                      className="fixed z-[61] w-72 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
                       style={{
                         top: roomClosureAnchor.bottom + 4,
                         left: Math.max(8, Math.min(roomClosureAnchor.right - 288, window.innerWidth - 296)),
@@ -1392,16 +1407,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                           setRoomClosureMenuOpen(false);
                           handleToggleRoomShiftClosed(activeRoom.id);
                         }}
-                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--color-surface-hover)] flex items-start gap-2 border-b border-[var(--color-line)]"
+                        className="w-full text-left px-4 py-3 text-[15px] hover:bg-[var(--ds-surface-row)] flex items-start gap-2.5 border-b border-[var(--ds-border)]"
                       >
                         {isShiftClosed
-                          ? <DoorOpen className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                          : <DoorClosed className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
+                          ? <DoorOpen className="h-4 w-4 mt-0.5 flex-shrink-0 text-[var(--ds-seated-fg)]" />
+                          : <DoorClosed className="h-4 w-4 mt-0.5 flex-shrink-0 text-[var(--ds-pending-fg)]" />}
                         <div>
-                          <div className="font-medium text-[var(--color-fg)]">
+                          <div className="font-medium text-[var(--ds-text-primary)]">
                             {isShiftClosed ? 'Riapri per questo turno' : 'Chiudi solo per questo turno'}
                           </div>
-                          <div className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                          <div className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                             {selectedDate} · {shiftLabel}
                           </div>
                         </div>
@@ -1411,16 +1426,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                           setRoomClosureMenuOpen(false);
                           onToggleRoomClosed(activeRoom.id, !isExtendedClosed);
                         }}
-                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--color-surface-hover)] flex items-start gap-2"
+                        className="w-full text-left px-4 py-3 text-[15px] hover:bg-[var(--ds-surface-row)] flex items-start gap-2.5"
                       >
                         {isExtendedClosed
-                          ? <DoorOpen className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                          : <DoorClosed className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
+                          ? <DoorOpen className="h-4 w-4 mt-0.5 flex-shrink-0 text-[var(--ds-seated-fg)]" />
+                          : <DoorClosed className="h-4 w-4 mt-0.5 flex-shrink-0 text-[var(--ds-pending-fg)]" />}
                         <div>
-                          <div className="font-medium text-[var(--color-fg)]">
+                          <div className="font-medium text-[var(--ds-text-primary)]">
                             {isExtendedClosed ? 'Riapri (chiusura estesa)' : 'Chiusura estesa'}
                           </div>
-                          <div className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                          <div className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                             Chiusa finché non riapri
                           </div>
                         </div>
@@ -1436,27 +1451,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
-            className="p-1.5 rounded-md border border-rose-100 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full px-3 text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
           >
-             <Layout className="h-4 w-4 inline mr-1"/>
-             <Trash2 className="h-4 w-4 inline" />
+             <Layout className="h-4 w-4"/>
+             <Trash2 className="h-4 w-4" />
           </button>
         </div>
         )}
 
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--color-line)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
-            <span className="text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] hidden xl:block">Modifica</span>
+            <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
+            <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">Modifica</span>
 
             {/* Lock/Unlock */}
             <button
                 onClick={handleToggleLock}
-                className={`p-1.5 rounded-md border transition ${
+                className={`${EDIT_ACTION_BASE} ${
                     singleSelectedTable?.is_locked
-                    ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
-                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                    ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                    : EDIT_ACTION_QUIET
                 }`}
                 title={singleSelectedTable?.is_locked ? "Sblocca Tavolo" : "Blocca Tavolo"}
             >
@@ -1466,19 +1481,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {/* Temp Lock (Timer) */}
             <button
                 onClick={handleTempLock}
-                className="p-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-300 hover:border-amber-200 dark:hover:border-amber-500/30 transition flex items-center gap-1"
+                className={`${EDIT_ACTION_BASE} bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-pending-tint)] hover:text-[var(--ds-pending-text)]`}
                 title="Blocca per 15 minuti"
             >
-                <Clock size={16} /> <span className="text-xs font-semibold hidden sm:inline">15m</span>
+                <Clock size={16} /> <span className="hidden sm:inline">15m</span>
             </button>
 
             {/* Table Name Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
-                    <CaseSensitive size={14} className="text-[var(--color-fg-muted)]" />
+                <div className={EDIT_FIELD_WRAP}>
+                    <CaseSensitive size={14} className="text-[var(--ds-text-muted)]" />
                     <input
                         type="text"
-                        className="w-20 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
+                        className="w-20 bg-transparent text-[15px] font-semibold text-[var(--ds-text-primary)] outline-none"
                         value={singleSelectedTable.name}
                         onChange={(e) => handleNameChange(e.target.value)}
                     />
@@ -1487,13 +1502,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
             {/* Seats Edit */}
             {singleSelectedTable && !singleSelectedTable.is_locked && (
-                <div className="flex items-center gap-1 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md px-2 py-1">
-                    <Users size={14} className="text-[var(--color-fg-muted)]" />
+                <div className={EDIT_FIELD_WRAP}>
+                    <Users size={14} className="text-[var(--ds-text-muted)]" />
                     <input
                         type="number"
                         min="1"
                         max="20"
-                        className="w-12 text-sm outline-none text-[var(--color-fg)] font-semibold bg-transparent"
+                        className="w-12 bg-transparent text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] outline-none"
                         value={singleSelectedTable.seats}
                         onChange={(e) => handleSeatsChange(parseInt(e.target.value) || 1)}
                     />
@@ -1509,15 +1524,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         lengthCm: singleSelectedTable.length_cm != null ? String(singleSelectedTable.length_cm) : '',
                         notes: singleSelectedTable.notes || ''
                     })}
-                    className={`flex items-center gap-1 px-2 py-2 rounded-lg border transition-colors ${
+                    className={`${EDIT_ACTION_BASE} ${
                         (singleSelectedTable.notes || singleSelectedTable.width_cm || singleSelectedTable.length_cm)
-                            ? 'bg-indigo-50 dark:bg-[#4f46e5]/15 border-indigo-200 dark:border-[#4f46e5]/30 text-indigo-700 dark:text-[#a5b4fc] hover:bg-indigo-100 dark:hover:bg-[#4f46e5]/25'
-                            : 'bg-white dark:bg-[var(--color-surface)] border-slate-200 dark:border-slate-500/30 text-slate-600 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-[#4f46e5]/15 hover:text-indigo-600 dark:hover:text-[#818cf8] hover:border-indigo-200 dark:hover:border-[#4f46e5]/30'
+                            ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                            : EDIT_ACTION_QUIET
                     }`}
                     title="Dettagli tavolo (dimensioni, note)"
                 >
                     <Info size={16} />
-                    <span className="text-xs font-semibold hidden sm:inline">Dettagli</span>
+                    <span className="hidden sm:inline">Dettagli</span>
                 </button>
             )}
 
@@ -1526,12 +1541,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <button
                     onClick={(e) => handleRotate(e.shiftKey ? -15 : 15)}
                     onContextMenu={(e) => { e.preventDefault(); handleRotate(-15); }}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-md border bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
+                    className={`${EDIT_ACTION_BASE} ${EDIT_ACTION_QUIET}`}
                     title={`Ruota +15° (Shift/click destro per -15°)${singleSelectedTable ? ` — attuale: ${singleSelectedTable.rotation || 0}°` : ''}`}
                 >
                     <RotateCw size={16} />
                     {singleSelectedTable && (singleSelectedTable.rotation || 0) !== 0 && (
-                        <span className="text-xs font-semibold tabular-nums">{singleSelectedTable.rotation}°</span>
+                        <span className="tabular-nums">{singleSelectedTable.rotation}°</span>
                     )}
                 </button>
             )}
@@ -1543,7 +1558,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 font-medium text-sm transition"
+                    className={`${EDIT_ACTION_BASE} bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]`}
                 >
                 <Combine size={16} /> Unisci
                 </button>
@@ -1556,7 +1571,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                         setSelectedTables([]);
                         refreshMerges();
                     }}
-                    className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 hover:bg-amber-100 dark:hover:bg-amber-500/25 font-medium text-sm transition"
+                    className={`${EDIT_ACTION_BASE} bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]`}
                     title={`Dividi tavoli: ${singleSelectedTable.name}`}
                 >
                 <Scissors size={16} /> Dividi
@@ -1572,10 +1587,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                             await handleToggleHide([...selectedTables]);
                             setSelectedTables([]);
                         }}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm ${
+                        className={`${EDIT_ACTION_BASE} ${
                             allHidden
-                                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/25'
-                                : 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-500/30'
+                                ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                                : EDIT_ACTION_QUIET
                         }`}
                         title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
                     >
@@ -1590,7 +1605,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
                  <button
                  onClick={() => setDeleteTablesConfirm([...selectedTables])}
-                 className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-rose-600 text-[#ffffff] hover:bg-rose-700 font-medium text-sm transition"
+                 className={`${EDIT_ACTION_BASE} bg-[var(--ds-critical-solid)] text-[#ffffff] hover:opacity-90`}
                 >
                     <Trash2 size={16} /> Elimina
                 </button>
@@ -1602,32 +1617,33 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Overlap warning banner — flags pre-existing collisions in this room.
           Nothing is moved automatically; the user resolves them by dragging. */}
       {showOverlapBanner && (
-        <div className="bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded-lg px-3 py-2.5 flex items-start gap-2.5 z-20 animate-in fade-in slide-in-from-top-1">
-          <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0 text-xs text-rose-800 dark:text-rose-200">
-            <span className="font-semibold">
-              {overlapPairs.length === 1 ? 'Un tavolo si sovrappone' : `${overlapPairs.length} sovrapposizioni di tavoli`} in questa sala.
-            </span>{' '}
-            <span className="text-rose-700 dark:text-rose-300">
-              Trascina per separarli: {overlapPairs.map(([a, b]) => `${a.name} ↔ ${b.name}`).join(', ')}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDismissedOverlapSig(overlapSig)}
-            className="p-1 rounded-md text-rose-500 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/25 transition-colors flex-shrink-0"
-            aria-label="Ignora avviso"
-            title="Ignora avviso"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <Callout
+          tone="critical"
+          icon={AlertTriangle}
+          className="z-20 animate-in fade-in slide-in-from-top-1"
+          action={
+            <button
+              type="button"
+              onClick={() => setDismissedOverlapSig(overlapSig)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-critical-solid)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              aria-label="Ignora avviso"
+              title="Ignora avviso"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          }
+        >
+          <span className="font-semibold">
+            {overlapPairs.length === 1 ? 'Un tavolo si sovrappone' : `${overlapPairs.length} sovrapposizioni di tavoli`} in questa sala.
+          </span>{' '}
+          Trascina per separarli: {overlapPairs.map(([a, b]) => `${a.name} ↔ ${b.name}`).join(', ')}
+        </Callout>
       )}
 
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--ds-canvas)] rounded-[20px] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
@@ -1665,22 +1681,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
 
           {isLoadingMerges && (
-              <div className="absolute inset-0 z-30 bg-[var(--color-surface-2)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)]">
+              <div className="absolute inset-0 z-30 bg-[var(--ds-canvas)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[16px] shadow-[var(--ds-shadow-card)]">
                       <CookingPotLoader label="Caricamento tavoli…" size={40} />
                   </div>
               </div>
           )}
 
           {currentTables.length === 0 && !isLoadingMerges && (
-              <div className="absolute inset-0 flex items-center justify-center text-[var(--color-fg-muted)] pointer-events-none">
-                  <p className="text-sm">Trascina o aggiungi tavoli in questa sala</p>
+              <div className="absolute inset-0 flex items-center justify-center text-[var(--ds-text-muted)] pointer-events-none">
+                  <p className="text-[15px]">Trascina o aggiungi tavoli in questa sala</p>
               </div>
           )}
 
           {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] px-3 py-1 rounded-full text-xs font-medium pointer-events-none flex items-center gap-2">
-                  <CheckSquare size={12} /> MODALITÀ SELEZIONE ATTIVA
+              <div className="absolute top-4 left-4 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] px-3 py-1.5 rounded-full text-[13px] font-medium pointer-events-none flex items-center gap-2">
+                  <CheckSquare size={12} /> Modalità selezione attiva
               </div>
           )}
 
@@ -1692,7 +1708,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             if (!extended && !shiftOnly) return null;
             const label = extended ? 'Sala Chiusa' : 'Sala Chiusa per il turno';
             return (
-              <div className="absolute top-4 right-4 bg-amber-500 text-[#ffffff] px-3 py-1.5 rounded-full text-xs font-bold shadow-lg pointer-events-none flex items-center gap-1.5 tracking-wide">
+              <div className="absolute top-4 right-4 bg-[var(--ds-pending-solid)] text-[#ffffff] px-3 py-1.5 rounded-full text-[13px] font-semibold shadow-[var(--ds-shadow-raised)] pointer-events-none flex items-center gap-1.5">
                 <DoorClosed size={12} /> {label}
               </div>
             );
@@ -1703,7 +1719,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-md border border-[var(--color-line)] text-xs font-semibold text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition"
+                className="flex h-11 items-center gap-2 px-4 bg-[var(--ds-surface)] rounded-full shadow-[var(--ds-shadow-card)] text-[13px] font-semibold text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 aria-expanded={isLegendOpen}
             >
                 <Info size={14} />
@@ -1711,12 +1727,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </button>
             {isLegendOpen && (
                 <div
-                    className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--color-surface)] p-3 rounded-md border border-[var(--color-line)] shadow-[var(--shadow-overlay)] text-xs space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                    className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[16px] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1">Legenda Stato</div>
+                    <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1">Legenda stato</div>
                     {(['libera', 'attesa', 'inarrivo', 'arrivato', 'uscita', 'noshow'] as TableDisplayStatus[]).map(s => (
-                        <div key={s} className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                        <div key={s} className="flex items-center gap-2 text-[var(--ds-text-secondary)]">
                             <div
                                 className={`w-3 h-3 rounded-sm border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
                                 style={{ background: `var(--tg-${s}-bg)`, borderColor: `var(--tg-${s}-stroke)` }}
@@ -1724,11 +1740,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                             {TABLE_STATUS_LABEL[s]}
                         </div>
                     ))}
-                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)] border-t border-[var(--color-line)] pt-2 mt-1">
-                        <Lock size={12} /> Tavolo Bloccato
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)] border-t border-[var(--ds-border)] pt-2 mt-1">
+                        <Lock size={12} /> Tavolo bloccato
                     </div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-subtle)]">
-                        <Timer size={12} /> Blocco Temporaneo
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)]">
+                        <Timer size={12} /> Blocco temporaneo
                     </div>
                 </div>
             )}
@@ -1737,27 +1753,30 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Alert Modal */}
       {alertModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAlertModal(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-6 text-center">
-              <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${
-                alertModal.type === 'error' ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30' : 'bg-amber-50 dark:bg-amber-500/15 border-amber-100 dark:border-amber-500/30'
-              }`}>
-                <AlertTriangle className={`h-5 w-5 ${
-                  alertModal.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
-                }`} />
-              </div>
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">Attenzione</h3>
-              <p className="text-sm text-[var(--color-fg-muted)] mb-6">{alertModal.message}</p>
-              <button
-                onClick={() => setAlertModal(null)}
-                className="w-full rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition"
-              >
-                OK
-              </button>
+        <ModalShell
+          open={!!alertModal}
+          onClose={() => setAlertModal(null)}
+          title="Attenzione"
+          size="sm"
+          bodyClassName="p-5 sm:p-6"
+          closeOnEscape
+          footer={
+            <button onClick={() => setAlertModal(null)} className={`${dsButton.primary} w-full`}>
+              OK
+            </button>
+          }
+        >
+          <div className="flex items-start gap-3">
+            <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+              alertModal.type === 'error' ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-pending-tint)]'
+            }`}>
+              <AlertTriangle className={`h-5 w-5 ${
+                alertModal.type === 'error' ? 'text-[var(--ds-critical-fg)]' : 'text-[var(--ds-pending-fg)]'
+              }`} />
             </div>
+            <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">{alertModal.message}</p>
           </div>
-        </div>
+        </ModalShell>
       )}
 
       <ConfirmDeleteModal
@@ -1800,9 +1819,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         title="Riattiva tutti i tavoli"
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
-        icon={<Eye className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />}
-        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-100 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
+        icon={<Eye className="h-5 w-5 text-[var(--ds-seated-fg)]" />}
+        iconWrapperClassName="mx-auto w-12 h-12 bg-[var(--ds-seated-tint)] rounded-full flex items-center justify-center mb-4"
+        confirmClassName="rounded-full px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[#ffffff] text-[15px] font-semibold hover:opacity-90 transition-opacity"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {
@@ -1813,65 +1832,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Table Details Modal (dimensions + notes) */}
       {detailsModal && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setDetailsModal(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Dettagli Tavolo {detailsModal.table.name}</h3>
-              <button
-                onClick={() => setDetailsModal(null)}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
-                  <Ruler className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Dimensioni (cm)
-                </label>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Larghezza</label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="es. 80"
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={detailsModal.widthCm}
-                      onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
-                    />
-                  </div>
-                  <span className="text-slate-400 dark:text-slate-500 mt-5">×</span>
-                  <div className="flex-1">
-                    <label className="text-[11px] text-slate-500 dark:text-slate-400 block mb-1">Lunghezza</label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="es. 120"
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={detailsModal.lengthCm}
-                      onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
-                  <StickyNote className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" /> Note
-                </label>
-                <textarea
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-500/30 p-2 bg-slate-50 dark:bg-slate-500/10 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
-                  placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
-                  value={detailsModal.notes}
-                  onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-              <button
-                onClick={() => setDetailsModal(null)}
-                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-              >
+        <ModalShell
+          open={!!detailsModal}
+          onClose={() => setDetailsModal(null)}
+          title={`Dettagli tavolo ${detailsModal.table.name}`}
+          size="sm"
+          bodyClassName="p-5 sm:p-6"
+          footer={
+            <>
+              <button onClick={() => setDetailsModal(null)} className={dsButton.secondary}>
                 Annulla
               </button>
               <button
@@ -1888,13 +1857,63 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   });
                   setDetailsModal(null);
                 }}
-                className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+                className={dsButton.primary}
               >
                 Salva
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <FormCard>
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  <Ruler className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" /> Dimensioni (cm)
+                </span>
+              }
+            >
+              <div className="flex items-end gap-2">
+                <Field label="Larghezza" className="flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="es. 80"
+                    className={dsInput}
+                    value={detailsModal.widthCm}
+                    onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
+                  />
+                </Field>
+                <span className="pb-3 text-[var(--ds-text-muted)]">×</span>
+                <Field label="Lunghezza" className="flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="es. 120"
+                    className={dsInput}
+                    value={detailsModal.lengthCm}
+                    onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </Field>
+            <Field
+              className="mt-4"
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" /> Note
+                </span>
+              }
+            >
+              <textarea
+                rows={3}
+                className={`${dsTextarea} resize-none`}
+                placeholder="es. Tavolo accanto alla finestra, ottimo per cene romantiche"
+                value={detailsModal.notes}
+                onChange={e => setDetailsModal({ ...detailsModal, notes: e.target.value })}
+              />
+            </Field>
+          </FormCard>
+        </ModalShell>
       )}
     </div>
   );
