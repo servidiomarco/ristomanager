@@ -251,6 +251,15 @@ const renderPaymentIcon = (res: Reservation): React.ReactNode => (
 
 // Tooltip label for the booking timestamp icon. Falls back gracefully when
 // created_at is missing (pre-migration rows with no CREATE log to backfill).
+// formatBookedAtBy folds in who took the booking — the card used to carry a
+// separate initials circle for that, one glyph too many on a crowded row.
+const formatBookedAtBy = (res: Reservation): string => {
+  const base = formatBookedAt(res.created_at);
+  if (res.source === ReservationSource.VOICE) return `${base} · presa dall'agente vocale`;
+  if (res.created_by_user_name) return `${base} · presa da ${toTitleCase(res.created_by_user_name)}`;
+  return base;
+};
+
 const formatBookedAt = (createdAt?: string | null): string => {
   if (!createdAt) return 'Data di prenotazione non disponibile';
   const d = new Date(createdAt);
@@ -3036,6 +3045,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const hasWideAttributes = !!turno || preferredMatch || preferredMissed
       || dietary.allergies.length > 0 || dietary.intolerances.length > 0;
 
+    // One set of glyphs, rendered in two spots: beside the name on ≥sm, on
+    // their own row under it below sm — so phone and desktop can't drift.
+    const attrGlyphs = (
+      <>
+        {renderChannelIcon(res)}
+        {renderConfirmationIcon(res)}
+        {matchedNoteIcons.map(m => {
+          const Icon = m.Icon!;
+          return (
+            <span key={m.label} className={ATTR_BADGE} title={m.label} aria-label={m.label}>
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+          );
+        })}
+        {noteText && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
+            className={`${ATTR_BADGE} transition-colors hover:text-[var(--ds-text-primary)]`}
+            title="Nota"
+            aria-label="Nota"
+          >
+            <StickyNote className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {renderPaymentIcon(res)}
+        {menu && (
+          <span className={`${ATTR_BADGE} bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]`} title={menu.name} aria-label={`Menù: ${menu.name}`}>
+            <BookOpen className="h-3.5 w-3.5" />
+          </span>
+        )}
+      </>
+    );
+
     return (
       <div
         key={res.id}
@@ -3066,13 +3109,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <span className="text-[var(--ds-text-muted)]">+{res.children}b</span>
                 ) : null}
               </span>
-              {renderOperatorBadge(res)}
+              {/* Operator folded into the info tooltip — the separate initials
+                  circle was one glyph too many on an already crowded row. */}
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAt(res.created_at), x: e.clientX, y: e.clientY }); }}
+                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAtBy(res), x: e.clientX, y: e.clientY }); }}
                 className="flex-shrink-0 text-[var(--ds-text-subtle)] transition-colors hover:text-[var(--ds-text-primary)]"
-                title={formatBookedAt(res.created_at)}
-                aria-label={formatBookedAt(res.created_at)}
+                title={formatBookedAtBy(res)}
+                aria-label={formatBookedAtBy(res)}
               >
                 <Info className="h-4 w-4" />
               </button>
@@ -3109,39 +3153,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 )}
               </div>
             )}
+
+            {/* Same glyphs as the ≥sm strip, on their own row where the top
+                one has no width to spare. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 sm:hidden">
+              {attrGlyphs}
+            </div>
           </div>
 
-          {/* Attributes, as glyphs. Hidden below sm, where the name needs the
-              width more than the provenance does — everything here is also in
-              the detail drawer. */}
+          {/* Attributes, as glyphs. Beside the name from sm up, where the row
+              has width to spare — below sm they render on their own row in
+              the left column instead. */}
           <div className="hidden flex-shrink-0 items-center gap-1.5 self-start sm:flex">
-            {renderChannelIcon(res)}
-            {renderConfirmationIcon(res)}
-            {matchedNoteIcons.map(m => {
-              const Icon = m.Icon!;
-              return (
-                <span key={m.label} className={ATTR_BADGE} title={m.label} aria-label={m.label}>
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
-              );
-            })}
-            {noteText && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
-                className={`${ATTR_BADGE} transition-colors hover:text-[var(--ds-text-primary)]`}
-                title="Nota"
-                aria-label="Nota"
-              >
-                <StickyNote className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {renderPaymentIcon(res)}
-            {menu && (
-              <span className={`${ATTR_BADGE} bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]`} title={menu.name} aria-label={`Menù: ${menu.name}`}>
-                <BookOpen className="h-3.5 w-3.5" />
-              </span>
-            )}
+            {attrGlyphs}
           </div>
 
           {/* Where they're sitting. Takes the booking's own colour family, so
