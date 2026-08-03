@@ -2566,25 +2566,26 @@ const App: React.FC = () => {
         </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
-        {/* Short fade above the bar so the raised "+" and its ring melt into
-            the scrolling content instead of colliding with it. The bar itself
-            is opaque, so only the strip above its top edge matters. */}
+        {/* Canvas scrim behind the floating bar: solid up to just above the
+            bar's top edge, then fading out over the raised "+". The bar keeps
+            floating on clean canvas — the gap underneath and the strip behind
+            it never show raw cut-off content, which looked broken on Android
+            where no safe-area inset justifies the gap. Sits below the nav
+            (z-20 < z-30) so the bar and the "+" stay untouched. */}
         <div
           aria-hidden
           className="fixed inset-x-0 bottom-0 z-20 pointer-events-none lg:hidden"
           style={{
-            height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
-            background: 'linear-gradient(to top, var(--ds-canvas) 62%, transparent)',
+            height: 'calc(env(safe-area-inset-bottom, 0px) + 136px)',
+            background: 'linear-gradient(to top, var(--ds-canvas) 64%, transparent)',
           }}
         />
-        {/* Flush bottom bar — full width, glued to the screen edge like a
-            native tab bar. A floating card left a see-through gap underneath
-            that looked broken on Android, where there is no safe-area inset
-            to visually justify it. Safe-area becomes internal padding, so on
-            iOS the items still clear the home indicator. */}
+        {/* Floating bottom bar — a card on the canvas, matching the desktop
+            chrome. Offset by the safe-area inset so it clears the iOS home
+            indicator instead of sitting under it. */}
         <nav
-          className="fixed inset-x-0 bottom-0 rounded-t-[24px] border-t border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+          className="fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
           aria-label="Navigazione mobile"
         >
           <div className="flex items-stretch py-2 px-2 gap-1">
@@ -2655,11 +2656,11 @@ const App: React.FC = () => {
               onClick={() => setShowCreateSheet(false)}
             />
             {/* Floating card that sits ABOVE the bottom bar rather than behind
-                it — anchored to the same --ds-bottom-nav-clear the scroll
-                region uses, so it always clears the bar and the raised "+". */}
+                it — anchored to --ds-bottom-nav-sheet, so it always clears
+                the bar and the raised "+". */}
             <div
               className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
-              style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
+              style={{ bottom: 'var(--ds-bottom-nav-sheet)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
                 {[

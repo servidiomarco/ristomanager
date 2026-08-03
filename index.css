@@ -841,12 +841,17 @@ body {
   --ds-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
-/* Clearance for the flush mobile bottom bar: bar height (68px) + the raised
-   "+" overhang + breathing room + the iOS safe-area inset (internal padding
-   of the bar). Exposed as a variable so the bar, the scroll region and any
-   sheet anchored above the bar all derive from ONE number instead of drifting
-   apart. Track this against the bar's markup in App.tsx — they move together. */
-:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 92px); }
+/* Clearance for the floating mobile bottom bar (bar top sits at safe-area +
+   ~84px). Two quotas, tracked against the bar's markup and the canvas scrim
+   in App.tsx — they move together:
+   - --ds-bottom-nav-clear: scroll padding. Matches the scrim height so
+     content at rest sits fully above the fade zone and reads unfaded.
+   - --ds-bottom-nav-sheet: anchor for sheets that pop above the bar
+     ("Crea"), ~20px over the bar's top edge like the original design. */
+:root {
+  --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 136px);
+  --ds-bottom-nav-sheet: calc(env(safe-area-inset-bottom, 0px) + 104px);
+}
 .pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
 @media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
 
