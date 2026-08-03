@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, Wifi, WifiOff, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -20,6 +20,8 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
+import { SegmentedControl, useMediaQuery } from './components/ds';
+import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
@@ -131,10 +133,13 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
   { kind: 'link', label: 'Passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
 
-  // Comunicazioni
-  { kind: 'link', label: 'Conversazioni', Icon: Phone, group: 'comunicazioni', isTab: false, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
-  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: false, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: false, view: ViewState.EMAIL, sidebarCollapse: false },
+  // Comunicazioni — all four are isTab, so the whole group drops out of the
+  // mobile "Altro" sheet. The three channels live behind the Comunicazioni
+  // bottom tab; Notifiche is the top-bar bell on every breakpoint. The sidebar
+  // ignores isTab, so desktop still lists them individually.
+  { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
+  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
@@ -156,6 +161,11 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
+// The Comunicazioni channels, in the order the mobile switcher shows them.
+// Presentation only — each one is still its own ViewState, so deep links from
+// the command palette, notifications and the sidebar are untouched.
+const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL];
+
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
@@ -164,6 +174,13 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // Which Comunicazioni channel the mobile tab reopens on. Declared up here
+  // with its effect: everything below the auth guards runs conditionally, so a
+  // hook placed there changes the hook count once the user logs in.
+  const [lastCommsView, setLastCommsView] = useState<ViewState>(ViewState.CONVERSAZIONI);
+  useEffect(() => {
+    if (COMMS_VIEWS.includes(view)) setLastCommsView(view);
+  }, [view]);
   // Tracks whether we've already applied the user's preferred landing for this
   // session. Reset on logout so the next login re-applies it.
   const appliedPreferredLandingRef = useRef(false);
@@ -374,6 +391,13 @@ const App: React.FC = () => {
   }, [isAuthenticated, canSeeEmail, view]);
 
   const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0);
+  // The bell is a dropdown on pointer-sized screens and a link to the full
+  // page below lg — the same line the sidebar and bottom nav already use.
+  const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const bellOpensPanel = useMediaQuery('(min-width: 1024px)');
+  // Never leave the panel hanging over a screen that shouldn't have one.
+  useEffect(() => { if (!bellOpensPanel) setNotificationsPanelOpen(false); }, [bellOpensPanel]);
   const canSeeNotifications = canAccessView(ViewState.NOTIFICHE);
   useEffect(() => {
     if (!isAuthenticated || !canSeeNotifications) return;
@@ -1504,6 +1528,22 @@ const App: React.FC = () => {
   // Drives the bottom-tab "Altro" button's visibility and active state.
   const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
 
+  // ── Comunicazioni, mobile ────────────────────────────────────────────────
+  // One bottom tab stands in for three views. The channels the user can't
+  // reach drop out, so a single-channel user gets a plain tab with no switcher.
+  const commsChannels = [
+    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', badge: voiceCallsPendingCount },
+    { view: ViewState.MESSAGGI, label: 'Messaggi', badge: messagesUnreadCount },
+    { view: ViewState.EMAIL, label: 'Email', badge: emailUnreadCount },
+  ].filter(c => canAccessView(c.view));
+  const commsBadgeTotal = commsChannels.reduce((n, c) => n + (c.badge || 0), 0);
+  const isCommsView = COMMS_VIEWS.includes(view);
+  // Returning to the tab lands you back on the channel you left, the way the
+  // sheet used to remember nothing and always cost two taps.
+  const commsTargetView = commsChannels.some(c => c.view === lastCommsView)
+    ? lastCommsView
+    : commsChannels[0]?.view;
+
   // Global "+" create menu — identical on every page (not contextual to the view).
   // Each item reuses an existing create flow; items the user can't create are hidden.
   // Two clusters (service actions, then records) rendered with an unlabeled divider.
@@ -1532,7 +1572,7 @@ const App: React.FC = () => {
     .filter(cluster => cluster.length > 0);
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[var(--color-surface-2)] font-sans text-[var(--color-fg)]">
+    <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--color-fg)]">
       {/* Version banner — shows when the running bundle is older than the
           server. Fixed at the top, above every view. */}
       <AppVersionBanner />
@@ -1557,24 +1597,24 @@ const App: React.FC = () => {
 
       {/* Sidebar — blends into page bg */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[72px]' : 'w-64'} bg-[var(--color-sidebar-bg)] border-r border-[var(--color-sidebar-line)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[88px]' : 'w-[264px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
         aria-label="Navigazione principale"
       >
-        <div className={`h-14 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-5'}`}>
+        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-4'}`}>
           <div className="flex items-center">
-            <div className="bg-[var(--color-sidebar-fg-strong)] p-1.5 rounded-md">
-               <ChefHat className="text-[var(--color-sidebar-bg)] h-4 w-4" />
+            <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center">
+               <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
             </div>
-            {!sidebarCollapsed && <span className="ml-2.5 font-semibold text-[15px] text-[var(--color-sidebar-fg-strong)] tracking-tight">RistoCRM</span>}
+            {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">RistoCRM</span>}
           </div>
           {!sidebarCollapsed && (
             <button
               onClick={() => setSidebarCollapsed(true)}
-              className="p-1.5 text-[var(--color-sidebar-fg)] hover:text-[var(--color-sidebar-fg-strong)] hover:bg-[var(--color-sidebar-active-bg)] rounded-md transition-colors"
+              className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] rounded-[12px] transition-colors"
               title="Comprimi"
               aria-label="Comprimi navigazione"
             >
-              <PanelLeftClose size={16} />
+              <PanelLeftClose size={18} />
             </button>
           )}
         </div>
@@ -1583,7 +1623,7 @@ const App: React.FC = () => {
         {sidebarCollapsed && (
           <button
             onClick={() => setSidebarCollapsed(false)}
-            className="mx-auto mt-3 p-2 text-[var(--color-sidebar-fg)] hover:text-[var(--color-sidebar-fg-strong)] hover:bg-[var(--color-sidebar-active-bg)] rounded-md transition-colors"
+            className="mx-auto mt-2 p-2.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] rounded-[12px] transition-colors"
             title="Espandi"
             aria-label="Espandi navigazione"
           >
@@ -1591,7 +1631,7 @@ const App: React.FC = () => {
           </button>
         )}
 
-        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y py-5 space-y-0.5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
+        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y py-2 space-y-0.5 ${sidebarCollapsed ? 'px-3' : 'px-3'}`}>
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
               key={item.label}
@@ -1603,12 +1643,20 @@ const App: React.FC = () => {
             />
           ))}
           {NAV_GROUPS.map(group => {
-            const items = NAV_ITEMS.filter(item => item.group === group.id && canSeeNavItem(item));
+            // Notifiche is presented as the top-bar bell on desktop, so it is
+            // hidden from this list only. The NAV_ITEMS entry stays intact so
+            // the mobile bottom tab, the "Altro" sheet and the command palette
+            // keep working unchanged.
+            const items = NAV_ITEMS.filter(item =>
+              item.group === group.id
+              && canSeeNavItem(item)
+              && item.view !== ViewState.NOTIFICHE
+            );
             if (items.length === 0) return null;
             return (
               <React.Fragment key={group.id}>
                 {!sidebarCollapsed && (
-                  <div className="px-3 pt-5 pb-2 text-[10px] tracking-[0.04em] font-semibold text-[var(--color-sidebar-eyebrow)]">
+                  <div className="px-3 pt-4 pb-1 text-[13px] font-medium text-[var(--ds-text-muted)]">
                     {group.label}
                   </div>
                 )}
@@ -1621,7 +1669,7 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-                        className="group w-full flex items-center justify-center px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors"
+                        className="group w-full flex items-center justify-center px-3 h-10 rounded-[12px] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
                       >
                         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                       </button>
@@ -1632,20 +1680,20 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
                         aria-pressed={theme === 'dark'}
-                        className="group w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)] transition-colors text-sm"
+                        className="group w-full flex items-center justify-between gap-3 px-3 h-10 rounded-[12px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors"
                       >
                         <span className="flex items-center gap-3">
-                          <span className="text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]">
+                          <span className="text-[var(--ds-text-secondary)]">
                             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                           </span>
-                          <span className="font-medium">{item.label}</span>
+                          <span className="font-medium text-[15px] tracking-[-0.01em]">{item.label}</span>
                         </span>
                         <span
                           aria-hidden
-                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-sidebar-fg-strong)]' : 'bg-[var(--color-sidebar-line)]'}`}
+                          className={`relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-sidebar-bg)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
+                            className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                           />
                         </span>
                       </button>
@@ -1674,16 +1722,16 @@ const App: React.FC = () => {
           })}
         </nav>
 
-        <div className={`p-3 space-y-1 ${sidebarCollapsed ? 'px-2' : ''}`}>
-          {/* User Info */}
+        <div className="p-3">
+          {/* User Info — level-2 row inside the level-1 sidebar card */}
           {sidebarCollapsed ? (
-            <div className="flex flex-col items-center gap-2 pt-2">
-              <div className="w-9 h-9 rounded-full bg-[var(--color-sidebar-fg-strong)] flex items-center justify-center text-[var(--color-sidebar-bg)] font-medium text-xs">
+            <div className="flex flex-col items-center gap-2 py-2 rounded-[16px] bg-[var(--ds-surface-row)]">
+              <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
                 {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
               </div>
               <button
                 onClick={logout}
-                className="p-2 text-[var(--color-sidebar-fg)] hover:text-rose-600 hover:bg-[var(--color-sidebar-active-bg)] rounded-md transition-colors"
+                className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[12px] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -1691,17 +1739,17 @@ const App: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-3 px-2 py-2 mt-1">
-              <div className="w-9 h-9 rounded-full bg-[var(--color-sidebar-fg-strong)] flex items-center justify-center text-[var(--color-sidebar-bg)] font-medium text-xs">
+            <div className="flex items-center gap-3 p-3 rounded-[16px] bg-[var(--ds-surface-row)]">
+              <div className="w-10 h-10 shrink-0 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
                 {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[var(--color-sidebar-fg-strong)] truncate">{user?.full_name || 'Utente'}</p>
-                <p className="text-[11px] text-[var(--color-sidebar-fg)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+                <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.01em] truncate">{user?.full_name || 'Utente'}</p>
+                <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
               </div>
               <button
                 onClick={logout}
-                className="p-1.5 text-[var(--color-sidebar-fg)] hover:text-rose-600 hover:bg-[var(--color-sidebar-active-bg)] rounded-md transition-colors"
+                className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[10px] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -1718,14 +1766,15 @@ const App: React.FC = () => {
           on mobile let the whole view drift up under the header (100vh + the
           bottom-nav padding overflowed the visible viewport). Now nothing
           scrolls at the main level, so headers and toolbars stay put. */}
-      <main id="main" className="flex-1 min-w-0 flex flex-col min-h-0 relative bg-[var(--color-surface-2)]">
-        {/* Header — taller on desktop to house the date/time/shift controls */}
-        <header className="flex-shrink-0 h-14 md:h-[72px] bg-[var(--color-surface-2)]/90 backdrop-blur-sm border-b border-[var(--color-line)] z-10 flex items-center justify-between px-4 lg:px-6">
-           <div className="flex items-center gap-2 lg:hidden">
-              <div className="bg-[var(--color-fg)] p-1.5 rounded-md">
-                <ChefHat className="text-[var(--color-fg-on-brand)] h-4 w-4" />
+      <main id="main" className="flex-1 min-w-0 flex flex-col min-h-0 relative bg-[var(--ds-canvas)]">
+        {/* Header — floating rounded card on the canvas (no blur: the design
+            system is opaque, see docs/risto-design-system.md §2.2). */}
+        <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 flex items-center justify-between px-3 md:px-4">
+           <div className="flex items-center gap-2.5 lg:hidden">
+              <div className="bg-[var(--ds-action-bg)] h-9 w-9 rounded-[12px] inline-flex items-center justify-center">
+                <ChefHat className="text-[var(--ds-action-fg)] h-[18px] w-[18px]" />
               </div>
-              <span className="font-semibold text-[15px] tracking-tight text-[var(--color-fg)]">RistoCRM</span>
+              <span className="font-semibold text-[17px] tracking-[-0.015em] text-[var(--ds-text-primary)]">RistoCRM</span>
            </div>
 
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
@@ -1743,29 +1792,24 @@ const App: React.FC = () => {
                backToToday="inline"
              />
 
-             {/* Live time chip — secondary; hidden below xl so it never crowds
-                 the right actions when the sidebar narrows the header. */}
-             <div className="hidden xl:flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-3 py-2 flex-shrink-0">
-               <Clock className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-               <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
-                 {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-               </span>
-             </div>
+             {/* The standalone clock chip is gone — the time now lives inside
+                 the connection pill on the right ("Live 20:43"). */}
 
-             {/* Shift filter — "Tutti" only on Dashboard */}
-             <div className="flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 flex-shrink-0">
+             {/* Shift filter — "Tutti" only on Dashboard. Segmented control:
+                 track at surface-row, active segment raised on surface. */}
+             <div className="flex items-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5 flex-shrink-0">
                {([
-                 { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+                 { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                ] as const).filter(opt => opt.key !== 'ALL' || view === ViewState.DASHBOARD).map(opt => (
                  <button
                    key={opt.key}
                    onClick={() => setGlobalShiftFilter(opt.key)}
-                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                   className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-full text-[15px] font-medium transition-colors ${
                      globalShiftFilter === opt.key
-                       ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                       : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                       ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                       : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                    }`}
                    aria-pressed={globalShiftFilter === opt.key}
                  >
@@ -1791,7 +1835,106 @@ const App: React.FC = () => {
              )}
            </div>
 
+           {/* Right cluster — order is deliberate: Live · Search · Bell · Plus */}
            <div className="ml-auto flex items-center gap-2 flex-shrink-0 pl-2">
+
+              {/* Connection state + current time, merged into one pill.
+                  Connected uses the `seated` family; offline uses `critical`.
+                  The dot pulses, but under prefers-reduced-motion it becomes a
+                  steady colour — the signal is never removed, only the motion. */}
+              <div
+                className={`hidden md:inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
+                  isConnected
+                    ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
+                }`}
+                role="status"
+                aria-live={isConnected ? 'polite' : 'assertive'}
+                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
+              >
+                <span className="relative flex h-2 w-2" aria-hidden>
+                  {isConnected && (
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
+                  )}
+                  <span className={`relative inline-flex h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
+                </span>
+                <span className="whitespace-nowrap tabular-nums">
+                  {isConnected
+                    ? `Live ${currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Offline'}
+                </span>
+              </div>
+
+              {/* Mobile-only status dot */}
+              <span
+                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
+                role="status"
+                aria-live={isConnected ? 'polite' : 'assertive'}
+                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
+                title={isConnected ? 'Connesso' : 'Non connesso'}
+              >
+                {isConnected && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
+                )}
+                <span
+                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
+                  aria-hidden
+                ></span>
+              </span>
+
+              {/* Global search — opens the command palette. Same button surface
+                  as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
+              <button
+                 onClick={() => setPaletteOpen(true)}
+                 className="h-11 w-11 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
+                 aria-label="Cerca (⌘K)"
+                 title="Cerca prenotazioni o clienti (⌘K)"
+              >
+                 <Search className="h-[18px] w-[18px]" />
+              </button>
+
+              {/* Notifications — moved out of the sidebar into the top bar.
+                  On a pointer-sized screen the bell opens a dropdown; below lg
+                  it navigates to the full page, which is the mobile design.
+                  The NAV_ITEMS entry is untouched so the tabs still work. */}
+              {canAccessView(ViewState.NOTIFICHE) && (
+                <button
+                  ref={bellRef}
+                  onClick={() => {
+                    if (bellOpensPanel) setNotificationsPanelOpen(v => !v);
+                    else setView(ViewState.NOTIFICHE);
+                  }}
+                  aria-haspopup={bellOpensPanel ? 'dialog' : undefined}
+                  aria-expanded={bellOpensPanel ? notificationsPanelOpen : undefined}
+                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-full transition-colors ${
+                    notificationsPanelOpen
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                  }`}
+                  aria-label={notificationsUnreadCount > 0 ? `Notifiche, ${notificationsUnreadCount} non lette` : 'Notifiche'}
+                  title="Notifiche"
+                >
+                  <Bell className="h-[18px] w-[18px]" />
+                  {notificationsUnreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
+                      {notificationsUnreadCount > 99 ? '99+' : notificationsUnreadCount}
+                    </span>
+                  )}
+                </button>
+              )}
+              {notificationsPanelOpen && bellOpensPanel && (
+                <NotificationsPanel
+                  anchorRef={bellRef}
+                  onClose={() => setNotificationsPanelOpen(false)}
+                  onSeeAll={() => setView(ViewState.NOTIFICHE)}
+                  onCountsChanged={() => {
+                    notificationsApiService.unreadCount()
+                      .then(({ count }) => setNotificationsUnreadCount(count))
+                      .catch(() => {});
+                  }}
+                />
+              )}
+
               {/* Global "+" create menu — replaces the old Nuova prenotazione + per-view secondary CTAs.
                   Identical on every page; desktop/tablet only (mobile uses the bottom "+" sheet). */}
               {visibleCreateClusters.length > 0 && (
@@ -1802,7 +1945,7 @@ const App: React.FC = () => {
                     aria-haspopup="menu"
                     aria-expanded={showCreateMenu}
                     aria-label="Crea nuovo"
-                    className="inline-flex items-center justify-center h-11 w-11 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 transition-all shadow-[var(--shadow-sm)]"
+                    className="inline-flex items-center justify-center h-11 w-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
                   >
                     <Plus className="h-5 w-5 transition-transform duration-200" style={{ transform: showCreateMenu ? 'rotate(45deg)' : 'none' }} />
                   </button>
@@ -1835,64 +1978,6 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Connection state — full pill on md+, status dot only on mobile */}
-              <div
-                className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
-                  isConnected
-                    ? 'border-[var(--color-line)] text-[var(--color-fg-muted)] bg-[var(--color-surface)]'
-                    : 'border-rose-200 text-rose-700 bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:bg-rose-500/15 animate-pulse'
-                }`}
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                {isConnected ? (
-                  <>
-                    <span className="relative flex h-2 w-2" aria-hidden>
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping"></span>
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                    </span>
-                    <Wifi className="h-3 w-3 text-emerald-600" aria-hidden />
-                  </>
-                ) : (
-                  <WifiOff className="h-3 w-3" aria-hidden />
-                )}
-                <span>{isConnected ? 'Live' : 'Offline'}</span>
-              </div>
-              {/* Mobile-only status dot */}
-              <span
-                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-                title={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                {isConnected && (
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" aria-hidden></span>
-                )}
-                <span
-                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                  aria-hidden
-                ></span>
-              </span>
-
-
-
-               {/* Global search — opens the command palette. Same button
-                   surface as the bell so it's reachable on mobile where the
-                   Cmd/Ctrl+K hotkey doesn't apply. */}
-               <button
-                  onClick={() => setPaletteOpen(true)}
-                  className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                  aria-label="Cerca (⌘K)"
-                  title="Cerca prenotazioni o clienti (⌘K)"
-                >
-                  <Search className="h-4 w-4" />
-               </button>
-
-               {/* Notification bell removed — history now lives in the
-                   dedicated Notifiche page (sidebar + mobile bottom-nav tab). */}
-
            </div>
         </header>
 
@@ -1901,7 +1986,36 @@ const App: React.FC = () => {
             rise-in (see .animate-view-in). pb-20 on mobile clears the fixed
             bottom nav; full-height views (h-full) size to the padding-excluded
             area so they sit neatly between header and nav. */}
-        <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-20 lg:pb-0 animate-view-in">
+        {/* Mobile channel switcher. Comunicazioni is a single bottom tab, so
+            without this, moving between Conversazioni, Messaggi and Email would
+            mean going back out to the bar. Desktop keeps three sidebar entries
+            and never renders it.
+
+            A sibling of the scroll region, not a child: Messaggi and Email are
+            full-height split views, so a bar inside the scroller would push
+            them past the fold. Out here the scroller's flex-1 accounts for it.
+            It sits on a white card because the segmented track is a level-2
+            surface — on the canvas it would be invisible. */}
+        {isCommsView && commsChannels.length > 1 && (
+          // pb-4 is not decoration: the card's shadow falls below it, and the
+          // scroll region underneath now paints an opaque sticky toolbar. With
+          // no gap the shadow gets sliced by a hard horizontal edge.
+          <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
+            <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+              <SegmentedControl
+                value={view}
+                onChange={next => setView(next)}
+                ariaLabel="Tipo di comunicazione"
+                equalWidth={false}
+                options={commsChannels.map(c => ({ value: c.view, label: c.label, badge: c.badge }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* .pb-mobile-nav clears the floating bottom bar (height + 16px offset
+            + safe-area inset) and collapses to 0 at lg, where the bar is gone. */}
+        <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-mobile-nav animate-view-in">
 
         {view === ViewState.DASHBOARD && (
           <Dashboard
@@ -2196,7 +2310,7 @@ const App: React.FC = () => {
                       [ViewState.INVENTARIO]: 'Inventario',
                       [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
                       [ViewState.HACCP]: 'HACCP',
-                      [ViewState.CONVERSAZIONI]: 'Conversazioni',
+                      [ViewState.CONVERSAZIONI]: 'Chiamate',
                       [ViewState.MESSAGGI]: 'Messaggi',
                       [ViewState.EMAIL]: 'Email',
                       [ViewState.NOTIFICHE]: 'Notifiche',
@@ -2452,8 +2566,15 @@ const App: React.FC = () => {
         </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-[var(--color-surface)]/95 backdrop-blur-sm border-t border-[var(--color-line)] lg:hidden z-30" aria-label="Navigazione mobile">
-          <div className="flex items-stretch py-1.5 px-1.5 gap-1">
+        {/* Floating bottom bar — a card on the canvas, matching the desktop
+            chrome. Offset by the safe-area inset so it clears the iOS home
+            indicator instead of sitting under it. */}
+        <nav
+          className="fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+          aria-label="Navigazione mobile"
+        >
+          <div className="flex items-stretch py-2 px-2 gap-1">
             {canAccessView(ViewState.DASHBOARD) && (
               <BottomNavItem
                 icon={<LayoutDashboard size={20} />}
@@ -2485,18 +2606,20 @@ const App: React.FC = () => {
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
                 aria-label="Crea nuovo"
-                className="h-14 w-14 -translate-y-3 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] shadow-[var(--shadow-overlay)] flex items-center justify-center hover:opacity-90 active:scale-95 transition-all ring-4 ring-[var(--color-surface)]"
+                className="h-14 w-14 -translate-y-4 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
               >
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
             </div>
-            {canAccessView(ViewState.NOTIFICHE) && (
+            {/* Comunicazioni replaces the old Notifiche tab, which duplicated
+                the top-bar bell. The badge rolls up all three channels. */}
+            {commsTargetView !== undefined && (
               <BottomNavItem
-                icon={<Bell size={20} />}
-                label="Notifiche"
-                active={view === ViewState.NOTIFICHE}
-                badge={notificationsUnreadCount}
-                onClick={() => setView(ViewState.NOTIFICHE)}
+                icon={<MessagesSquare size={20} />}
+                label="Comunicazioni"
+                active={isCommsView}
+                badge={commsBadgeTotal}
+                onClick={() => setView(commsTargetView)}
               />
             )}
             {altroNavItems.length > 0 && (
@@ -2514,15 +2637,18 @@ const App: React.FC = () => {
         {showCreateSheet && (
           <>
             <div
-              className="fixed inset-0 z-[29] lg:hidden bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)]"
+              className="fixed inset-0 z-[29] lg:hidden bg-[var(--ds-backdrop)]"
               style={{ animation: 'fadeIn 280ms ease-out both' }}
               onClick={() => setShowCreateSheet(false)}
             />
+            {/* Floating card that sits ABOVE the bottom bar rather than behind
+                it — anchored to the same --ds-bottom-nav-clear the scroll
+                region uses, so it always clears the bar and the raised "+". */}
             <div
-              className="fixed left-0 right-0 z-[29] lg:hidden bg-[var(--color-surface)] rounded-t-[20px] border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)]"
-              style={{ bottom: 0, animation: 'slideUpBehindNav 280ms ease-out both' }}
+              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
+              style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
-              <div className="px-6 pt-5 pb-20 grid grid-cols-2 gap-4 justify-items-center" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+              <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
                 {[
                   { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
@@ -2536,10 +2662,10 @@ const App: React.FC = () => {
                     className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
                     style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
                   >
-                    <div className="w-20 h-20 rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center text-[var(--color-fg)]">
+                    <div className="w-20 h-20 rounded-[20px] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
                       {tile.icon}
                     </div>
-                    <span className="text-[12px] font-semibold text-[var(--color-fg)]">{tile.label}</span>
+                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tile.label}</span>
                   </button>
                 ))}
               </div>
@@ -2551,30 +2677,30 @@ const App: React.FC = () => {
         {showMoreMenu && (
           <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Altro">
             <div
-              className="absolute inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)]"
+              className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--color-surface)] rounded-t-2xl border-t border-[var(--color-line)] shadow-[var(--shadow-overlay)] animate-in slide-in-from-bottom duration-200">
-              <div className="flex-shrink-0 bg-[var(--color-surface)] rounded-t-2xl">
-                <div className="flex justify-center pt-2.5 pb-1">
-                  <div className="w-10 h-1 rounded-full bg-[var(--color-line-strong)]" />
+            <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] animate-in slide-in-from-bottom duration-200">
+              <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[28px]">
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
                 </div>
                 <div className="px-4 pb-2 pt-1 flex items-center justify-between">
-                  <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">Altro</h3>
-                  <button onClick={() => setShowMoreMenu(false)} className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-                    <X className="h-4 w-4" />
+                  <h3 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Altro</h3>
+                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
+                    <X className="h-[18px] w-[18px]" />
                   </button>
                 </div>
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
               {/* User identity card */}
-              <div className="mx-4 mb-2 px-3 py-3 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)] flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] flex items-center justify-center text-[12px] font-medium shrink-0">
+              <div className="mx-4 mb-2 p-3 rounded-[16px] bg-[var(--ds-surface-row)] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] flex items-center justify-center text-[13px] font-medium shrink-0">
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--color-fg)] truncate">{user?.full_name || 'Utente'}</p>
-                  <p className="text-[11px] text-[var(--color-fg-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+                  <p className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">{user?.full_name || 'Utente'}</p>
+                  <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
                 </div>
               </div>
               <div className="px-2 pb-2">
@@ -2583,7 +2709,7 @@ const App: React.FC = () => {
                   if (items.length === 0) return null;
                   return (
                     <React.Fragment key={group.id}>
-                      <div className="px-3 pt-3 pb-1 text-[11px] tracking-[0.04em] font-semibold text-[var(--color-fg-subtle)]">
+                      <div className="px-3 pt-4 pb-1 text-[13px] font-medium text-[var(--ds-text-muted)]">
                         {group.label}
                       </div>
                       {items.map(item => {
@@ -2598,16 +2724,16 @@ const App: React.FC = () => {
                         <button
                           key={item.label}
                           onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                          className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                          className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                         >
-                          <item.Icon className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                          <span className="text-sm font-medium text-[var(--color-fg)]">{item.label}</span>
+                          <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
+                          <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
                           {badge > 0 && (
-                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
                               {badge > 99 ? '99+' : badge}
                             </span>
                           )}
-                          <ChevronRight className={`${badge > 0 ? '' : 'ml-auto'} h-4 w-4 text-[var(--color-fg-subtle)]`} />
+                          <ChevronRight className={`${badge > 0 ? '' : 'ml-auto'} h-4 w-4 text-[var(--ds-text-subtle)]`} />
                         </button>
                         );
                       })}
@@ -2615,41 +2741,41 @@ const App: React.FC = () => {
                   );
                 })}
               </div>
-              <div className="px-2 pb-6 pt-1 border-t border-[var(--color-line)]">
+              <div className="px-2 pb-6 pt-2 mt-2 border-t border-[var(--ds-border)]">
                 {NAV_ITEMS.filter(item => item.group === 'sistema' && item.kind === 'link' && canSeeNavItem(item)).map(item => (
                   <button
                     key={item.label}
                     onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                    className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                   >
-                    <item.Icon className="h-5 w-5 text-[var(--color-fg-muted)]" />
-                    <span className="text-sm font-medium text-[var(--color-fg)]">{item.label}</span>
-                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--color-fg-subtle)]" />
+                    <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
+                    <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
+                    <ChevronRight className="ml-auto h-4 w-4 text-[var(--ds-text-subtle)]" />
                   </button>
                 ))}
                 <button
                   type="button"
                   onClick={toggleTheme}
                   aria-pressed={theme === 'dark'}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors"
                 >
-                  {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--color-fg-muted)]" /> : <Moon className="h-5 w-5 text-[var(--color-fg-muted)]" />}
-                  <span className="text-sm font-medium text-[var(--color-fg)]">Modalità scura</span>
+                  {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--ds-text-secondary)]" /> : <Moon className="h-5 w-5 text-[var(--ds-text-secondary)]" />}
+                  <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">Modalità scura</span>
                   <span
                     aria-hidden
-                    className={`ml-auto relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--color-fg)]' : 'bg-[var(--color-line-strong)]'}`}
+                    className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                   >
                     <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`}
+                      className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                     />
                   </span>
                 </button>
                 <button
                   onClick={() => { setShowMoreMenu(false); logout(); }}
-                  className="w-full flex items-center gap-3 px-3 py-3 rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15 transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] text-[var(--ds-critical-text)] transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
-                  <span className="text-sm font-medium">Esci</span>
+                  <span className="text-[15px] font-medium tracking-[-0.01em]">Esci</span>
                 </button>
               </div>
               </div>
@@ -2774,25 +2900,25 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
     onClick={onClick}
     title={collapsed ? label : undefined}
     aria-current={active ? 'page' : undefined}
-    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-md transition-colors duration-150 group ${
+    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 h-10 rounded-[12px] transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] ${
       active
-        ? 'bg-[var(--color-sidebar-active-bg)] text-[var(--color-sidebar-active-fg)]'
-        : 'text-[var(--color-sidebar-fg)] hover:bg-[var(--color-sidebar-active-bg)] hover:text-[var(--color-sidebar-fg-strong)]'
+        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+        : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
     }`}
   >
-    <span className={`relative ${active ? 'text-[var(--color-sidebar-active-fg)]' : 'text-[var(--color-sidebar-fg)] group-hover:text-[var(--color-sidebar-fg-strong)]'}`}>
+    <span className={`relative ${active ? 'text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-secondary)]'}`}>
       {icon}
       {collapsed && badge != null && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-semibold leading-none ring-2 ring-[var(--color-sidebar-bg)]">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[10px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
     </span>
     {!collapsed && (
       <>
-        <span className="font-medium text-[13px] tracking-tight">{label}</span>
+        <span className="font-medium text-[15px] tracking-[-0.01em]">{label}</span>
         {badge != null && badge > 0 && (
-          <span className="ml-auto min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-semibold leading-none">
+          <span className="ml-auto min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums">
             {badge > 99 ? '99+' : badge}
           </span>
         )}
@@ -2806,21 +2932,19 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
   <button
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 rounded-lg ${
-      active
-        ? 'bg-[var(--color-surface-3)] text-[var(--color-fg)]'
-        : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 rounded-[14px] transition-colors ${
+      active ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
     }`}
   >
     <span className="relative">
       {icon}
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-semibold flex items-center justify-center">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
     </span>
-    <span className="text-[10px] font-medium whitespace-nowrap">
+    <span className={`text-[11px] whitespace-nowrap ${active ? 'font-semibold' : 'font-medium'}`}>
       {label}
     </span>
   </button>

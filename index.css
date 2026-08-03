@@ -447,6 +447,22 @@ body {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Edge fades for a horizontally scrolling track. Applied only to the side that
+   still has content behind it — a fade that never lifts veils the option you
+   just scrolled to and makes it read as disabled. */
+.ds-fade-end {
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+}
+.ds-fade-start {
+  mask-image: linear-gradient(to left, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to left, black calc(100% - 24px), transparent);
+}
+.ds-fade-x {
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+}
+
 /* ===========================================================================
    Mobile input zoom guard
    iOS Safari (and some Android browsers) auto-zoom into form fields whose
@@ -722,3 +738,204 @@ body {
   .no-print { display: none !important; }
   @page { size: A4; margin: 1.5cm; }
 }
+
+/* ===========================================================================
+   Design-system tokens (docs/risto-design-system.md)
+   ---------------------------------------------------------------------------
+   Scoped with a --ds- prefix and ADDITIVE ONLY: nothing here overrides an
+   existing --color-* token, so screens that have not been migrated yet keep
+   their current appearance. Chrome (sidebar + top bar) consumes these first;
+   the remaining surfaces adopt them screen by screen during the revamp.
+   ========================================================================= */
+:root {
+  /* Surface depth — canvas is DARKER than cards in light mode */
+  --ds-canvas: #ededf1;
+  --ds-surface: #ffffff;
+  --ds-surface-row: #f4f4f5;
+
+  --ds-border: #e9e9ec;
+  --ds-border-strong: #d4d4d8;
+  --ds-border-focus: #5250c9;
+
+  --ds-text-primary: #111113;
+  --ds-text-secondary: #52525b;
+  --ds-text-muted: #6f6f78;    /* 4.98:1 on surface, 4.53:1 on surface-row — clears AA on BOTH */
+  --ds-text-subtle: #a1a1aa;   /* disabled / decorative only — not AA */
+
+  --ds-action-bg: #111827;
+  --ds-action-bg-hover: #000000;
+  --ds-action-fg: #ffffff;
+
+  /* Semantic families — only the slots chrome needs today */
+  --ds-seated-tint: #ecf5ef;
+  --ds-seated-text: #275238;
+  --ds-seated-solid: #316648;
+  --ds-pending-tint: #fbf4e6;
+  --ds-pending-text: #7a5807;
+  --ds-pending-solid: #b8860b;   /* the reference gold — paired with DARK text (5.80:1).
+                                    White on this fill is only 3.25:1, so amber solids take
+                                    near-black text in BOTH themes. See spec §3.3. */
+  --ds-pending-fg: #111113;
+
+  --ds-arriving-tint: #f0f0fb;
+  --ds-arriving-text: #4340a8;
+  --ds-arriving-solid: #5250c9;
+  --ds-arriving-fg: #ffffff;
+
+  --ds-critical-tint: #fceeeb;
+  --ds-critical-text: #82251b;
+  --ds-critical-solid: #c0392b;
+  --ds-critical-fg: #ffffff;
+
+  /* Elevation — light mode lifts with soft, wide shadows */
+  --ds-backdrop: rgba(11, 11, 13, 0.40);
+
+  --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
+  --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);
+}
+
+.dark {
+  /* Depth runs the OTHER way in dark: canvas darkest, each nested level
+     steps lighter. Shadows barely register, so borders carry the boundaries. */
+  --ds-canvas: #0b0b0d;
+  --ds-surface: #141417;
+  --ds-surface-row: #1c1c20;
+
+  --ds-border: #2a2a30;
+  --ds-border-strong: #3a3a42;
+  --ds-border-focus: #8481de;
+
+  --ds-text-primary: #f4f4f5;
+  --ds-text-secondary: #c4c4cc;
+  --ds-text-muted: #9a9aa4;
+  --ds-text-subtle: #6e6e78;
+
+  /* Primary action inverts — near-black would vanish on a dark canvas */
+  --ds-action-bg: #f4f4f5;
+  --ds-action-bg-hover: #ffffff;
+  --ds-action-fg: #111113;
+
+  --ds-seated-tint: #16271d;
+  --ds-seated-text: #7fb795;
+  --ds-seated-solid: #3e7d5a;
+  --ds-pending-tint: #2a2109;
+  --ds-pending-text: #dfbb6e;
+  --ds-pending-solid: #b8860b;
+  --ds-pending-fg: #111113;
+
+  --ds-arriving-tint: #1a1a2e;
+  --ds-arriving-text: #a5a3e8;
+  --ds-arriving-solid: #5250c9;
+  --ds-arriving-fg: #ffffff;
+
+  --ds-critical-tint: #2b1310;
+  --ds-critical-text: #e28878;
+  --ds-critical-solid: #c0392b;
+  --ds-critical-fg: #ffffff;
+
+  --ds-backdrop: rgba(0, 0, 0, 0.60);
+
+  --ds-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --ds-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Clearance for the floating mobile bottom bar: bar height (68px) + its 16px
+   offset + the raised "+" overhang + the iOS safe-area inset. Exposed as a
+   variable so the bar, the scroll region and any sheet anchored above the bar
+   all derive from ONE number instead of drifting apart. Track this against the
+   bar's own bottom offset in App.tsx — they move together. */
+:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 108px); }
+.pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
+@media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
+
+/* ── Animated hairline frame — "Adesso in sala" ────────────────────────────
+   The live deck is the only tile describing RIGHT NOW, so it needs to outrank
+   the rest of the bento. It used to do that with an inverted near-black fill;
+   now it's a white card and this travelling border carries the emphasis.
+
+   Built as a 1.5px gradient pad with the card inset inside it, so the frame
+   never affects layout (no border-width to subtract) and the corner radius
+   stays true. The angle is animated through a registered custom property —
+   plain custom properties can't be interpolated, so @property is what makes
+   the rotation smooth instead of stepped.
+
+   Degrades cleanly: without @property support the conic-gradient still
+   paints, just frozen at 0deg — a static gradient hairline, never a
+   missing border. */
+@property --ds-live-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.ds-live-frame {
+  padding: 1.5px;
+  border-radius: 24px;
+  background: conic-gradient(
+    from var(--ds-live-angle),
+    var(--ds-border) 0deg,
+    var(--ds-border) 40deg,
+    var(--ds-arriving-solid) 95deg,
+    var(--ds-pending-solid) 150deg,
+    var(--ds-border) 210deg,
+    var(--ds-border) 360deg
+  );
+  animation: ds-live-sweep 7s linear infinite;
+}
+
+.ds-live-card {
+  border-radius: 22.5px; /* 24px frame − 1.5px pad */
+  background: var(--ds-surface);
+}
+
+@keyframes ds-live-sweep {
+  to { --ds-live-angle: 360deg; }
+}
+
+/* Motion here is decorative — the deck reads identically without it. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-live-frame { animation: none; }
+}
+
+/* First-run swipe hint: the top row nudges open far enough to show the action
+   underneath, then settles. A gesture nobody knows about is a gesture nobody
+   uses, and there is no room on a row for a "swipe me" label. Plays once per
+   channel, then never again — see useFirstRunHint. */
+@keyframes ds-swipe-hint {
+  0%   { transform: translateX(0); }
+  30%  { transform: translateX(-46px); }
+  60%  { transform: translateX(-46px); }
+  100% { transform: translateX(0); }
+}
+.ds-swipe-hint { animation: ds-swipe-hint 1500ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* The hint is pure affordance — the row is fully usable by tap without it. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-swipe-hint { animation: none; }
+}
+
+/* Native select chevrons sit hard against the right edge and can't be inset
+   reliably across browsers, so we draw our own. appearance:none removes the
+   platform arrow; the SVG is inlined (no network request) and re-declared for
+   dark mode because a data URI can't inherit currentColor. */
+.ds-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.5rem;
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  background-size: 1rem 1rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f6f78' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+.dark .ds-select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+
+/* The Stepper's value is a real number input so it stays typeable, but the
+   native spinners would collide with the − / + buttons flanking it. */
+.ds-stepper-input::-webkit-outer-spin-button,
+.ds-stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ds-stepper-input { -moz-appearance: textfield; appearance: textfield; }

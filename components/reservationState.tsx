@@ -122,6 +122,83 @@ export const RESERVATION_STATE_META: Record<ReservationStateKey, ReservationStat
   declined:  { label: 'Non confermata', dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
 };
 
+/* ---------------------------------------------------------------------------
+   Design-system projection of the same states.
+
+   The palette above predates the design system and carries a shade per state
+   (amber, booked, emerald, cyan, rose, slate). The design system has four
+   families plus neutral, so each state maps onto one instead of owning a
+   colour. Where two states share a family the label carries the difference:
+   "In uscita" is still a seated party, so it stays green rather than drifting
+   toward the neutral that means "free".
+
+   Kept alongside the legacy map, not instead of it — ReceptionPage still reads
+   `chipClass`, and repainting it from here would be a change nobody asked for.
+   ------------------------------------------------------------------------- */
+
+export type ReservationStateFamily = 'pending' | 'arriving' | 'seated' | 'critical' | 'neutral';
+
+export const RESERVATION_STATE_FAMILY: Record<ReservationStateKey, ReservationStateFamily> = {
+  pending:   'pending',
+  waiting:   'arriving',
+  arriving:  'arriving',
+  arrived:   'seated',
+  departing: 'seated',
+  freed:     'neutral',
+  noshow:    'critical',
+  cancelled: 'critical',
+  declined:  'critical',
+};
+
+interface FamilyClasses {
+  /** Tinted surface + the text colour proven against it. */
+  tint: string;
+  text: string;
+  /** Full-strength fill, for dots and meters. */
+  solid: string;
+}
+
+const FAMILY_CLASSES: Record<ReservationStateFamily, FamilyClasses> = {
+  pending:  { tint: 'bg-[var(--ds-pending-tint)]',  text: 'text-[var(--ds-pending-text)]',   solid: 'bg-[var(--ds-pending-solid)]' },
+  arriving: { tint: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]',  solid: 'bg-[var(--ds-arriving-solid)]' },
+  seated:   { tint: 'bg-[var(--ds-seated-tint)]',   text: 'text-[var(--ds-seated-text)]',    solid: 'bg-[var(--ds-seated-solid)]' },
+  critical: { tint: 'bg-[var(--ds-critical-tint)]', text: 'text-[var(--ds-critical-text)]',  solid: 'bg-[var(--ds-critical-solid)]' },
+  neutral:  { tint: 'bg-[var(--ds-surface-row)]',   text: 'text-[var(--ds-text-secondary)]', solid: 'bg-[var(--ds-text-muted)]' },
+};
+
+/** Tint / text / solid classes for a state, in design-system tokens. */
+export const reservationStateDs = (state: ReservationStateKey): FamilyClasses =>
+  FAMILY_CLASSES[RESERVATION_STATE_FAMILY[state]];
+
+/** The state pill on a reservation card. Same truth as StatusChip, drawn in
+ *  design-system tokens and sentence case. */
+export const DsStatusChip: React.FC<{
+  state: ReservationStateKey;
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
+  /** Rendered after the label — a ChevronDown on pills that open the picker. */
+  trailing?: React.ReactNode;
+  className?: string;
+}> = ({ state, onClick, title, trailing, className = '' }) => {
+  const meta = RESERVATION_STATE_META[state];
+  const ds = reservationStateDs(state);
+  const Tag = onClick ? 'button' : 'span';
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      title={title}
+      className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full px-3 text-[13px] font-medium ${ds.tint} ${ds.text} ${
+        onClick ? 'transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]' : ''
+      } ${className}`}
+    >
+      <PulseDot dotClass={ds.solid} pulse={meta.pulse} />
+      {meta.label}
+      {trailing}
+    </Tag>
+  );
+};
+
 /** States the staff can set by hand ('arriving' is clock-derived only). */
 export const SETTABLE_RESERVATION_STATES: ReservationStateKey[] =
   ['pending', 'waiting', 'arrived', 'departing', 'freed', 'noshow', 'cancelled', 'declined'];
@@ -175,7 +252,7 @@ export const StatusChip: React.FC<StatusChipProps> = ({ state, size = 'md', onCl
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       title={title}
-      className={`inline-flex items-center rounded-full border font-semibold uppercase tracking-wide whitespace-nowrap ${onClick ? 'pressable' : 'transition-colors'} ${sizing} ${meta.chipClass} ${className}`}
+      className={`inline-flex items-center rounded-full border font-semibold tracking-wide whitespace-nowrap ${onClick ? 'pressable' : 'transition-colors'} ${sizing} ${meta.chipClass} ${className}`}
     >
       <PulseDot dotClass={meta.dotClass} pulse={meta.pulse} />
       {meta.label}

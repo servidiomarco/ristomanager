@@ -11,13 +11,10 @@ import {
   Shift
 } from '../types';
 import {
-  Search,
   Users,
   Clock,
   Phone,
-  MapPin,
   MapPinOff,
-  CheckCircle2,
   XCircle,
   Armchair,
   UserPlus,
@@ -26,19 +23,28 @@ import {
   AlertTriangle,
   Star,
   Zap,
-  List,
   LayoutGrid,
   LogOut,
+  StickyNote,
+  Plus,
+  Check,
+  Shuffle,
   X as XIcon
 } from 'lucide-react';
 import { getReservations, getTables, getRooms, updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
-import { StatusChip, PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
+import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
 import { toTitleCase } from '../utils/text';
 import { useNow } from '../hooks/useNow';
+import {
+  ModalShell, FormCard, Field, Stepper, SegmentedControl, SearchField, SectionHeader,
+  StatStrip, StatusPill, Callout, EmptyState, dsIconButton, dsButton, dsInput, dsTextarea,
+} from './ds';
+import type { PillTone } from './ds';
+import type { SectionTone } from './ds';
 
 // Local-date helper (avoid UTC drift)
 const formatLocalDate = (d: Date): string => {
@@ -94,6 +100,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   // Right-pane mode toggle. Lista = reservation detail (default).
   // Mappa = live room map, host taps a table to jump to its booking.
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  // Folded bands, by key. Nothing is folded to start with: on arrival the host
+  // wants the whole service, and it's mid-shift — once "Più tardi" is thirty
+  // rows of people who aren't here yet — that folding one away earns its keep.
+  const [collapsedBands, setCollapsedBands] = useState<Set<string>>(() => new Set());
   const [, setTick] = useState(0);
 
   // Re-render every 60s so the time-band grouping (Adesso / Prossima ora / …) stays accurate.
@@ -161,21 +171,44 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     return list;
   }, [todayReservations, search, statusFilter]);
 
-  // Group by time band
+  // Group by time band.
+  //
+  // "In ritardo" is its own band rather than the top of "Adesso": a party
+  // whose time has passed and who still isn't here is the only row on this
+  // page that needs a decision, and buried among the next hour's bookings it
+  // reads as just another upcoming one. Sorted most-overdue first — that's the
+  // order the host will work through them.
+  //
+  // Only for today, and only for parties still expected: a booking already
+  // seated, departed or marked no-show can't be late.
   const grouped = useMemo(() => {
-    const now = new Date();
+    const now = isViewingToday ? nowTick : Date.now();
+    const inRitardo: Reservation[] = [];
     const adesso: Reservation[] = [];
     const prossima: Reservation[] = [];
     const piuTardi: Reservation[] = [];
     for (const r of filtered) {
       const t = parseReservationTime(r.reservation_time);
-      const diffMin = (t.getTime() - now.getTime()) / 60_000;
-      if (diffMin < 60) adesso.push(r);
+      const diffMin = (t.getTime() - now) / 60_000;
+      const stillExpected = (r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.WAITING
+        && r.reservation_status !== ReservationStatus.NO_SHOW;
+      if (isViewingToday && diffMin < 0 && stillExpected) inRitardo.push(r);
+      else if (diffMin < 60) adesso.push(r);
       else if (diffMin < 180) prossima.push(r);
       else piuTardi.push(r);
     }
-    return { adesso, prossima, piuTardi };
-  }, [filtered]);
+    inRitardo.sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+    return { inRitardo, adesso, prossima, piuTardi };
+  }, [filtered, isViewingToday, nowTick]);
+
+  /** Counts beside each filter chip. Derived from the unfiltered day so the
+   *  numbers say what's there, not what survived the chip you already picked. */
+  const filterCounts = useMemo(() => ({
+    all: todayReservations.length,
+    waiting: todayReservations.filter(r => (r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.WAITING).length,
+    arrived: todayReservations.filter(r => isSeated(r)).length,
+    noTable: todayReservations.filter(r => !r.table_id).length,
+  }), [todayReservations]);
 
   // "In arrivo adesso" — the bookings whose party is due right now (from
   // T−20′ until they show up). Most-overdue first: that's who's probably
@@ -269,6 +302,12 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   // One-tap check-in from the "In arrivo adesso" rail: mark arrived, focus
   // the booking, and — if it has no table yet — jump straight into the
   // table picker so seating happens in the same motion (walk-in pattern).
+  const toggleBand = (key: string) => setCollapsedBands(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
   const handleQuickArrive = async (r: Reservation) => {
     if (navigator.vibrate) navigator.vibrate(30);
     setSelectedReservationId(r.id);
@@ -374,27 +413,30 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   // initial load doesn't cause visual reflow when data actually arrives.
   // Slight per-card variance keeps the group looking like real content.
   const renderCardSkeleton = (key: string, variant: 'wide' | 'narrow' = 'wide') => (
+    // Shaped like the row it stands in for: clock column, name, then the two
+    // controls on the right. A skeleton that doesn't match causes a jump.
     <div
       key={key}
       aria-hidden="true"
-      className="w-full rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3 min-h-[88px] motion-safe:animate-pulse"
+      className="flex w-full items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse"
     >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="h-5 w-14 rounded bg-[var(--color-surface-3)]" />
-        <div className="h-4 w-16 rounded-full bg-[var(--color-surface-3)]" />
+      <div className="w-[58px] flex-shrink-0 space-y-1">
+        <div className="h-4 w-11 rounded bg-[var(--ds-surface-row)]" />
+        <div className="h-2.5 w-14 rounded bg-[var(--ds-surface-row)]" />
       </div>
-      <div className={`h-4 rounded bg-[var(--color-surface-3)] mb-2 ${variant === 'wide' ? 'w-3/5' : 'w-2/5'}`} />
-      <div className="flex items-center gap-3">
-        <div className="h-3 w-10 rounded bg-[var(--color-surface-3)]" />
-        <div className="h-3 w-24 rounded bg-[var(--color-surface-3)]" />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className={`h-4 rounded bg-[var(--ds-surface-row)] ${variant === 'wide' ? 'w-3/5' : 'w-2/5'}`} />
+        <div className="h-3 w-24 rounded bg-[var(--ds-surface-row)]" />
       </div>
+      <div className="h-11 w-14 flex-shrink-0 rounded-[12px] bg-[var(--ds-surface-row)]" />
+      <div className="h-11 w-11 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] sm:w-28" />
     </div>
   );
 
   const renderListSkeleton = () => (
     <>
       <div className="mb-3">
-        <div className="h-3 w-32 rounded bg-[var(--color-surface-3)] mb-2 motion-safe:animate-pulse" aria-hidden="true" />
+        <div className="mb-2 ml-1 h-3 w-32 rounded bg-[var(--ds-border)] motion-safe:animate-pulse" aria-hidden="true" />
         <div className="space-y-2">
           {renderCardSkeleton('sk-1', 'wide')}
           {renderCardSkeleton('sk-2', 'narrow')}
@@ -402,7 +444,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         </div>
       </div>
       <div className="mb-3">
-        <div className="h-3 w-24 rounded bg-[var(--color-surface-3)] mb-2 motion-safe:animate-pulse" aria-hidden="true" />
+        <div className="mb-2 ml-1 h-3 w-24 rounded bg-[var(--ds-border)] motion-safe:animate-pulse" aria-hidden="true" />
         <div className="space-y-2">
           {renderCardSkeleton('sk-4', 'wide')}
           {renderCardSkeleton('sk-5', 'narrow')}
@@ -411,277 +453,455 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     </>
   );
 
-  const renderCard = (r: Reservation) => {
+  /** Time band a row belongs to, for the colour of its clock column. */
+  type RowBand = 'late' | 'soon' | 'later';
+
+  /**
+   * One booking, one line. The host reads down the left edge — time, then who,
+   * then where — and acts on the right edge without ever moving their eye back.
+   *
+   * The check-in button is on the row itself. It used to live only in the
+   * arrivals rail and in the detail panel, which meant seating someone from the
+   * list cost a tap to select, a glance to confirm the right record opened, and
+   * a second tap. At the door that's three seconds too many.
+   */
+  const renderCard = (r: Reservation, band: RowBand = 'later') => {
     const isSelected = r.id === selectedReservationId;
     const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
-    // Shared, time-aware badge — same visual language as the reservations
-    // list and the floor map (an imminent booking pulses as "In arrivo").
-    // Time-derived states only apply when viewing today's service.
-    const timedState = isViewingToday ? getTimedReservationState(r, nowTick) : getReservationState(r);
+    // A table smaller than the party is the mistake worth catching before the
+    // guests are walking to it, so the chip says so rather than just naming it.
+    const tooSmall = !!table && typeof table.seats === 'number' && table.seats > 0 && table.seats < (r.guests || 0);
+    const seated = isSeated(r);
+    const noShow = r.reservation_status === ReservationStatus.NO_SHOW;
+    const minsLate = Math.round((nowTick - parseReservationTime(r.reservation_time).getTime()) / 60_000);
+
+    const clock =
+      band === 'late' ? 'text-[var(--ds-critical-text)]'
+      : band === 'soon' ? 'text-[var(--ds-pending-text)]'
+      : 'text-[var(--ds-text-primary)]';
 
     return (
-      <button
+      <div
         key={r.id}
         onClick={() => setSelectedReservationId(r.id)}
-        className={`w-full text-left rounded-2xl border p-3 transition-colors min-h-[88px] ${
-          isSelected
-            ? 'bg-indigo-50 border-indigo-300 dark:bg-indigo-500/15 dark:border-indigo-500/50 shadow-sm'
-            : 'bg-[var(--color-surface-2)] border-[var(--color-line)] hover:bg-[var(--color-surface-3)]'
+        className={`flex w-full cursor-pointer items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-shadow ${
+          isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
         }`}
       >
-        <div className="flex items-center justify-between gap-2 mb-1.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-lg font-semibold text-[var(--color-fg)] tabular-nums">
-              {formatHHMM(r.reservation_time)}
-            </span>
-            {r.customer_is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 flex-shrink-0" />}
+        {/* When */}
+        <div className="w-[58px] flex-shrink-0 text-left">
+          <div className={`text-[15px] font-semibold tabular-nums ${clock}`}>
+            {formatHHMM(r.reservation_time)}
           </div>
-          <StatusChip state={timedState} size="sm" />
-        </div>
-        <div className="text-base font-medium text-[var(--color-fg)] truncate mb-0.5">
-          {toTitleCase(r.customer_name) || 'Senza nome'}
-        </div>
-        <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
-          <span className="inline-flex items-center gap-1">
-            <Users className="h-3.5 w-3.5" />
-            {r.guests}{r.children ? `+${r.children}` : ''}
-          </span>
-          {r.phone && (
-            <span className="inline-flex items-center gap-1 truncate">
-              <Phone className="h-3.5 w-3.5" />
-              {formatPhone(r.phone)}
-            </span>
+          {band !== 'later' && (
+            <div className={`text-[11px] font-medium ${clock}`}>
+              {band === 'late' ? 'in ritardo' : 'in arrivo'}
+            </div>
           )}
         </div>
-        {table && (
-          <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 text-sm font-semibold">
-            <MapPin className="h-3.5 w-3.5" />
-            {table.name}
-          </div>
-        )}
-      </button>
-    );
-  };
 
-  const renderGroup = (title: string, items: Reservation[]) => {
-    if (items.length === 0) return null;
-    return (
-      <div className="mb-4">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-fg-muted)] px-1 mb-2">
-          {title} · {items.length}
+        {/* Who */}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+              {toTitleCase(r.customer_name) || 'Senza nome'}
+            </span>
+            {r.customer_is_vip && (
+              <span
+                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]"
+                title="Cliente VIP"
+                aria-label="Cliente VIP"
+              >
+                <Star className="h-3 w-3 fill-current" />
+              </span>
+            )}
+            {stripDietaryNote(r.notes) && (
+              <span
+                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]"
+                title={stripDietaryNote(r.notes)}
+                aria-label="Ha una nota"
+              >
+                <StickyNote className="h-3 w-3" />
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 flex items-center gap-3 text-[13px] text-[var(--ds-text-muted)]">
+            <span className="inline-flex items-center gap-1">
+              <Users className="h-3.5 w-3.5" aria-hidden />
+              {r.guests}{r.children ? `+${r.children}` : ''}
+            </span>
+            {r.phone && (
+              <span className="hidden min-w-0 items-center gap-1 sm:inline-flex">
+                <Phone className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                <span className="truncate">{formatPhone(r.phone)}</span>
+              </span>
+            )}
+          </div>
         </div>
-        <div className="space-y-2">{items.map(renderCard)}</div>
+
+        {/* Where */}
+        {table ? (
+          <div
+            className={`flex h-11 min-w-[56px] flex-shrink-0 flex-col items-center justify-center rounded-[12px] px-2.5 ${
+              tooSmall
+                ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+            }`}
+            title={tooSmall
+              ? `Tavolo ${table.name}: ${table.seats} posti per ${r.guests} coperti`
+              : `Tavolo ${table.name}`}
+          >
+            <span className="text-[15px] font-semibold leading-none tabular-nums">{table.name}</span>
+            {tooSmall && <span className="mt-0.5 text-[10px] leading-none">{table.seats} posti</span>}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setSelectedReservationId(r.id); setShowTablePicker(true); }}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[12px] border border-dashed border-[var(--ds-pending-solid)] px-3 text-[13px] font-medium text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]"
+            title="Assegna un tavolo"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden /> tavolo
+          </button>
+        )}
+
+        {/* Act. Solid green only for the parties already late — everyone else
+            gets the quiet tint, so the eye goes to the row that needs it. */}
+        {!seated && !noShow && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
+            aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
+            title={minsLate > 0 ? `Atteso ${minsLate} minuti fa` : 'Segna come arrivato'}
+            className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full text-[14px] font-semibold transition-opacity disabled:opacity-50 sm:px-4 ${
+              band === 'late'
+                ? 'w-11 bg-[var(--ds-seated-solid)] text-white hover:opacity-90 sm:w-auto'
+                : 'w-11 bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:opacity-80 sm:w-auto'
+            }`}
+          >
+            <Check className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">Arrivato</span>
+          </button>
+        )}
+        {(seated || noShow) && (
+          <StatusPill tone={noShow ? 'critical' : 'positive'} className="h-11 flex-shrink-0 rounded-full px-3">
+            {noShow ? 'No-show' : r.arrival_status === ArrivalStatus.DEPARTING ? 'In uscita' : 'Arrivato'}
+          </StatusPill>
+        )}
       </div>
     );
   };
 
+  const renderGroup = (
+    key: string,
+    title: string,
+    items: Reservation[],
+    tone: SectionTone,
+    band: RowBand,
+    hint?: string,
+  ) => {
+    if (items.length === 0) return null;
+    const covers = items.reduce((s, r) => s + (r.guests || 0), 0);
+    const expanded = !collapsedBands.has(key);
+    return (
+      <div key={key}>
+        <SectionHeader
+          tone={tone}
+          onToggle={() => toggleBand(key)}
+          expanded={expanded}
+          meta={`${items.length} · ${covers} coperti${hint ? ` · ${hint}` : ''}`}
+        >
+          {title}
+        </SectionHeader>
+        {expanded && (
+          <div className="space-y-2 pb-3">{items.map(r => renderCard(r, band))}</div>
+        )}
+      </div>
+    );
+  };
+
+  const shiftLabel = globalShiftFilter === 'LUNCH' ? 'Pranzo'
+    : globalShiftFilter === 'DINNER' ? 'Cena'
+    : 'Tutti i turni';
+  const dateLabel = globalDate.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+
+  const walkInButton = (
+    <button
+      type="button"
+      onClick={() => setShowWalkIn(true)}
+      className={`${dsButton.primary} flex-shrink-0`}
+      title="Cliente senza prenotazione"
+    >
+      <Zap className="h-4 w-4" aria-hidden />
+      Registra walk-in
+    </button>
+  );
+
+  /* The door queue. Parties due now, most overdue first, each one tap from
+     seated. On desktop it's a column that's always there — "who's at the
+     door" is half of what this page is for, and it shouldn't need scrolling
+     to. On a phone it's gone: every row in the list carries the same check-in
+     button, and a horizontal scroller spent a third of the screen showing
+     three of them. */
+  const allaPorta = (
+    <section className="flex min-h-0 flex-1 flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <div className="mb-3 flex flex-shrink-0 items-center gap-2">
+        <PulseDot dotClass="bg-[var(--ds-critical-solid)]" pulse={arrivingNow.length > 0} sizeClass="h-2 w-2" />
+        <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Alla porta</h2>
+        <span
+          className="text-[13px] text-[var(--ds-text-muted)]"
+          title="Prenotazioni attese in questo momento: da 20 minuti prima dell'orario in poi"
+        >
+          {arrivingNow.length === 1 ? '1 atteso ora' : `${arrivingNow.length} attesi ora`}
+        </span>
+        <button
+          type="button"
+          onClick={loadAll}
+          className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+          aria-label="Aggiorna"
+          title="Aggiorna"
+        >
+          <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
+        {arrivingNow.length === 0 ? (
+          <p className="py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
+            Nessuno atteso in questo momento.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {arrivingNow.map(r => {
+              const start = parseReservationTime(r.reservation_time).getTime();
+              const late = nowTick > start;
+              const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
+              return (
+                <li key={r.id}>
+                  {/* The row selects; the circle seats. Two targets, because
+                      mixing them is how a host checks in the wrong party. */}
+                  <div
+                    className={`flex items-center gap-3 rounded-[14px] p-3 transition-colors ${
+                      late ? 'bg-[var(--ds-critical-tint)]' : 'hover:bg-[var(--ds-surface-row)]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReservationId(r.id)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                        {toTitleCase(r.customer_name) || 'Senza nome'}
+                      </div>
+                      <div className={`truncate text-[13px] ${late ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}`}>
+                        {formatHHMM(r.reservation_time)} · {r.guests} · {table ? `tav. ${table.name}` : 'senza tavolo'}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleQuickArrive(r)}
+                      aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
+                      title="Segna come arrivato"
+                      className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-85 disabled:opacity-50 ${
+                        late
+                          ? 'bg-[var(--ds-seated-solid)] text-white'
+                          : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                      }`}
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+
   return (
-    <div className="h-full flex flex-col bg-[var(--color-surface)]">
-      {/* Top header. Desktop: title · centred stats · Walk-in · refresh on one
-          row. Mobile: title + actions on row 1, a compact 4-up stats strip on
-          row 2 (the centred desktop stats overflow a phone). */}
-      <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
-        <div className="px-4 py-3 flex items-center gap-3">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="pressable p-2 -ml-1 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
-              aria-label="Indietro"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-          )}
-          <h1 className="text-lg lg:text-xl font-semibold text-[var(--color-fg)]">Reception</h1>
-
-          {/* Desktop centred stats */}
-          <div className="hidden lg:flex flex-1 items-center justify-center gap-6 text-sm">
-            <HeaderStat value={stats.count} label="Prenotazioni" />
-            <HeaderStat value={stats.guests} label="Coperti" />
-            <HeaderStat value={stats.arrived} label="Arrivati" tone="emerald" />
-            <HeaderStat value={stats.noTable} label="Senza tavolo" tone={stats.noTable > 0 ? 'amber' : undefined} />
-          </div>
-
-          {/* Mobile spacer pushes the actions to the right */}
-          <div className="flex-1 lg:hidden" />
-
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)]">
+      {/* The phone has no room for the global date control, so the page names
+          the service it's showing. On desktop the top bar already does. */}
+      <div className="flex flex-shrink-0 items-center gap-3 px-4 pt-4 lg:hidden">
+        {onBack && (
           <button
-            onClick={() => setShowWalkIn(true)}
-            className="pressable inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm shadow-sm flex-shrink-0"
-            title="Cliente senza prenotazione"
+            onClick={onBack}
+            className={dsIconButton}
+            aria-label="Indietro"
           >
-            <Zap className="h-4 w-4" />
-            Walk-in
+            <ChevronLeft className="h-4 w-4" />
           </button>
-          <button
-            onClick={loadAll}
-            className="pressable p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0"
-            aria-label="Aggiorna"
-            title="Aggiorna"
-          >
-            <RefreshCw className={`h-5 w-5 ${busy ? 'animate-spin' : ''}`} />
-          </button>
+        )}
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            Reception
+          </h1>
+          <p className="truncate text-[13px] capitalize text-[var(--ds-text-muted)]">
+            {dateLabel} · {shiftLabel}
+          </p>
         </div>
-
-        {/* Mobile stats strip */}
-        <div className="grid grid-cols-4 gap-2 px-4 pb-3 lg:hidden">
-          <HeaderStat value={stats.count} label="Prenot." compact />
-          <HeaderStat value={stats.guests} label="Coperti" compact />
-          <HeaderStat value={stats.arrived} label="Arrivati" tone="emerald" compact />
-          <HeaderStat value={stats.noTable} label="Senza tav." tone={stats.noTable > 0 ? 'amber' : undefined} compact />
-        </div>
+        <button
+          type="button"
+          onClick={loadAll}
+          className={dsIconButton}
+          aria-label="Aggiorna"
+          title="Aggiorna"
+        >
+          <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowWalkIn(true)}
+          className={`${dsButton.primary} flex-shrink-0 px-4`}
+          title="Cliente senza prenotazione"
+        >
+          <Zap className="h-4 w-4" aria-hidden />
+          Walk-in
+        </button>
       </div>
 
       {error && (
-        <div className="flex-shrink-0 bg-rose-50 border-b border-rose-200 text-rose-700 dark:bg-rose-500/10 dark:border-rose-500/30 dark:text-rose-300 px-4 py-2 text-sm flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-          <span>{error}</span>
+        <div className="flex-shrink-0 px-4 pt-3 lg:px-6">
+          <Callout tone="critical" icon={AlertTriangle}>{error}</Callout>
         </div>
       )}
 
-      {/* "In arrivo adesso" — one-tap check-in rail. The next parties due at
-          the door, most overdue first; a single tap seats them. */}
-      {arrivingNow.length > 0 && (
-        <div className="flex-shrink-0 border-b border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2.5">
-          <div className="flex items-center gap-2 mb-2 px-1">
-            <PulseDot dotClass="bg-booked-600" pulse sizeClass="h-2 w-2" />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
-              In arrivo adesso
-            </span>
-            <span className="text-[11px] text-[var(--color-fg-subtle)] tabular-nums">· {arrivingNow.length}</span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-            {arrivingNow.map(r => {
-              const start = new Date(r.reservation_time).getTime();
-              const deltaMin = Math.round((nowTick - start) / 60_000);
-              const table = r.table_id ? tables.find(t => t.id === r.table_id) : null;
-              return (
-                <div
-                  key={r.id}
-                  className={`flex-shrink-0 flex items-center gap-3 pl-3.5 pr-2 py-2 rounded-2xl border transition-colors cursor-pointer ${
-                    r.id === selectedReservationId
-                      ? 'bg-booked-50 border-booked-300 dark:bg-booked-600/25 dark:border-booked-600/50'
-                      : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:border-[var(--color-line-strong)]'
-                  }`}
-                  onClick={() => setSelectedReservationId(r.id)}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-base font-bold text-[var(--color-fg)] tabular-nums">{formatHHMM(r.reservation_time)}</span>
-                      <span className={`text-[11px] font-semibold tabular-nums ${
-                        deltaMin > 5 ? 'text-rose-600 dark:text-rose-400' : 'text-[var(--color-fg-subtle)]'
-                      }`}>
-                        {deltaMin > 0 ? `+${deltaMin}′` : deltaMin < 0 ? `tra ${-deltaMin}′` : 'ora'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-[var(--color-fg)] max-w-[180px]">
-                      <span className="font-medium truncate">{toTitleCase(r.customer_name) || 'Senza nome'}</span>
-                      <span className="text-xs text-[var(--color-fg-muted)] flex items-center gap-0.5 flex-none">
-                        <Users className="h-3 w-3" />{r.guests}
-                      </span>
-                      {table && (
-                        <span className="text-xs font-semibold text-[var(--color-fg-muted)] flex-none">· {table.name}</span>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
-                    aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
-                    className="flex-none inline-flex items-center gap-1.5 h-11 px-3.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 active:scale-95 transition disabled:opacity-50"
-                  >
-                    <CheckCircle2 className="h-4.5 w-4.5" />
-                    Arrivato
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-6 lg:pb-4 lg:pt-4">
+        {/* LEFT — the service, in order */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-shrink-0 space-y-3 px-4 pt-3 lg:px-0 lg:pt-0">
+            <StatStrip
+              layout="stacked"
+              stats={[
+                { value: stats.count, label: 'prenotazioni' },
+                { value: stats.guests, label: 'coperti' },
+                // Tone only once there's something to report: a green "0
+                // arrivati" claims a win before service has started.
+                { value: stats.arrived, label: 'arrivati', tone: stats.arrived > 0 ? 'positive' : 'neutral' },
+                { value: stats.noTable, label: 'senza tavolo', tone: stats.noTable > 0 ? 'pending' : 'neutral' },
+              ]}
+            />
 
-      {/* Desktop: 40/60 split. Mobile: the list is full-width and tapping a
-          card opens the detail as a full-screen drawer (below). */}
-      <div className="flex-1 flex min-h-0">
-        {/* LEFT — full width on mobile, 40% on desktop */}
-        <div className="w-full lg:w-2/5 lg:min-w-[320px] flex flex-col lg:border-r border-[var(--color-line)] bg-[var(--color-surface)]">
-          <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--color-line)]">
-            {/* Lista / Mappa toggle — controls the right pane so the host can
-                check the floor at any time without leaving the list view. */}
-            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)]">
-              {([
-                ['list', 'Lista', <List key="l" className="h-4 w-4" />],
-                ['map', 'Mappa', <LayoutGrid key="m" className="h-4 w-4" />]
-              ] as const).map(([key, label, icon]) => (
-                <button
-                  key={key}
-                  onClick={() => setViewMode(key)}
-                  className={`inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-                    viewMode === key
-                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-sm'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                  aria-pressed={viewMode === key}
-                >
-                  {icon}
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-muted)]" />
-              <input
-                type="text"
+            <div className="flex items-center gap-2">
+              <SearchField
                 value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Cerca nome o telefono…"
-                className="w-full pl-10 pr-3 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 text-base"
+                onChange={setSearch}
+                placeholder="Cerca nome o telefono"
+                ariaLabel="Cerca prenotazioni"
+                className="min-w-0 flex-1"
               />
+              {/* Lista / Mappa switches the canvas, not the filter, so it sits
+                  apart from the status chips rather than beside them. */}
+              <div className="hidden flex-shrink-0 sm:block">
+                <SegmentedControl
+                  value={viewMode}
+                  onChange={(next) => setViewMode(next)}
+                  ariaLabel="Vista"
+                  equalWidth={false}
+                  options={[
+                    { value: 'list' as const, label: 'Lista' },
+                    { value: 'map' as const, label: 'Mappa' },
+                  ]}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')}
+                className={`${dsIconButton} sm:hidden`}
+                aria-label="Mappa sala"
+                title="Mappa sala"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
             </div>
-            <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
-              {([
-                ['all', 'Tutte'],
-                ['waiting', 'Confermate'],
-                ['arrived', 'Arrivati'],
-                ['noTable', 'Senza tavolo']
-              ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setStatusFilter(key)}
-                  className={`flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border whitespace-nowrap ${
-                    statusFilter === key
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+
+            <SegmentedControl
+              value={statusFilter}
+              onChange={(next) => setStatusFilter(next)}
+              ariaLabel="Filtra prenotazioni"
+              overflow="scroll"
+              options={[
+                { value: 'all' as const, label: 'Tutte', badge: filterCounts.all, badgeTone: 'neutral' },
+                { value: 'waiting' as const, label: 'In attesa', badge: filterCounts.waiting, badgeTone: 'neutral' },
+                { value: 'arrived' as const, label: 'Arrivati', badge: filterCounts.arrived, badgeTone: 'neutral' },
+                { value: 'noTable' as const, label: 'Senza tavolo', badge: filterCounts.noTable, badgeTone: 'neutral' },
+              ]}
+            />
           </div>
 
-          <div className="flex-1 overflow-y-auto px-3 pt-3 pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-3 lg:-mx-3 lg:px-3">
             {isInitialLoading && reservations.length === 0 ? (
               renderListSkeleton()
             ) : filtered.length === 0 ? (
-              <div className="text-center text-sm text-[var(--color-fg-muted)] py-10">
+              <EmptyState icon={UserPlus}>
                 Nessuna prenotazione corrisponde ai filtri.
-              </div>
+              </EmptyState>
             ) : (
               <>
-                {renderGroup('Adesso · prossima ora', grouped.adesso)}
-                {renderGroup('Tra 1–3 ore', grouped.prossima)}
-                {renderGroup('Più tardi', grouped.piuTardi)}
+                {renderGroup('inRitardo', 'In ritardo', grouped.inRitardo, 'attention', 'late', 'attesi e non ancora arrivati')}
+                {renderGroup('adesso', 'Adesso · prossima ora', grouped.adesso, 'pending', 'soon')}
+                {renderGroup('prossima', 'Tra 1–3 ore', grouped.prossima, 'info', 'later')}
+                {renderGroup('piuTardi', 'Più tardi', grouped.piuTardi, 'muted', 'later')}
               </>
             )}
           </div>
         </div>
 
-        {/* RIGHT 60% — detail (desktop inline) */}
-        <div className="hidden lg:flex flex-1 flex-col bg-[var(--color-surface)] min-w-0">
-          {!selectedReservation ? (
-            <EmptyState count={filtered.length} />
-          ) : (
+        {/* RIGHT — the detail of what's selected, over the door queue, over
+            the one button this page exists to offer. */}
+        <aside className="hidden w-[340px] flex-shrink-0 flex-col gap-4 lg:flex xl:w-[380px]">
+          {selectedReservation && (
+            <DetailPanel
+              reservation={selectedReservation}
+              table={selectedTable}
+              busy={busy}
+              onClose={() => setSelectedReservationId(null)}
+              onAssignTable={() => setShowTablePicker(true)}
+              onRemoveTable={handleRemoveTable}
+              onMarkArrived={handleMarkArrived}
+              onMarkWaiting={handleMarkWaiting}
+              onMarkNoShow={handleMarkNoShow}
+              onMarkDeparting={handleMarkDeparting}
+              onFreeTable={handleFreeTable}
+            />
+          )}
+          {allaPorta}
+          {walkInButton}
+        </aside>
+      </div>
+
+      {/* Mobile detail drawer — full-screen over the list; a back chevron
+          returns to the list. Sits above the bottom nav (z-30). */}
+      {selectedReservation && (
+        <div
+          className="animate-view-in fixed inset-0 z-40 flex flex-col bg-[var(--ds-canvas)] lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        >
+          {/* A card, not a flush bar — the header is built from the same block
+              as everything under it. Its bottom padding is load-bearing: the
+              scrolling region below is opaque and would otherwise slice the
+              shadow off with a hard line. */}
+          <div className="flex flex-shrink-0 items-center gap-3 px-4 pb-4 pt-4">
+            <div className="flex flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+              <button
+                onClick={() => setSelectedReservationId(null)}
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+                aria-label="Torna alla lista"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                Dettaglio
+              </span>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
             <DetailPanel
               reservation={selectedReservation}
               table={selectedTable}
@@ -694,36 +914,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               onMarkDeparting={handleMarkDeparting}
               onFreeTable={handleFreeTable}
             />
-          )}
-        </div>
-      </div>
-
-      {/* Mobile detail drawer — full-screen over the list; a back chevron
-          returns to the list. Sits above the bottom nav (z-30). */}
-      {selectedReservation && (
-        <div className="lg:hidden fixed inset-0 z-40 flex flex-col bg-[var(--color-surface)] animate-view-in">
-          <div className="flex-shrink-0 flex items-center gap-2 px-3 h-14 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
-            <button
-              onClick={() => setSelectedReservationId(null)}
-              className="pressable p-2 -ml-1 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
-              aria-label="Torna alla lista"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <span className="font-semibold text-[var(--color-fg)]">Dettaglio prenotazione</span>
           </div>
-          <DetailPanel
-            reservation={selectedReservation}
-            table={selectedTable}
-            busy={busy}
-            onAssignTable={() => setShowTablePicker(true)}
-            onRemoveTable={handleRemoveTable}
-            onMarkArrived={handleMarkArrived}
-            onMarkWaiting={handleMarkWaiting}
-            onMarkNoShow={handleMarkNoShow}
-            onMarkDeparting={handleMarkDeparting}
-            onFreeTable={handleFreeTable}
-          />
         </div>
       )}
 
@@ -782,144 +973,87 @@ interface WalkInModalProps {
 
 const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) => {
   const [name, setName] = useState('');
-  const [guests, setGuests] = useState(2);
+  const [guests, setGuests] = useState<number | undefined>(2);
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  const canSubmit = name.trim().length > 0 && guests > 0;
+  const canSubmit = name.trim().length > 0 && !!guests && guests > 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4"
-      onClick={() => { if (!busy) onCancel(); }}
-    >
-      <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-          <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-[var(--color-fg)]" />
-            <h3 className="text-lg font-semibold text-[var(--color-fg)]">Walk-in</h3>
-          </div>
-          <button
-            onClick={onCancel}
-            className="p-2 rounded-xl hover:bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]"
-            aria-label="Chiudi"
-          >
-            <XIcon className="h-5 w-5" />
+    <ModalShell
+      open
+      onClose={() => { if (!busy) onCancel(); }}
+      title="Walk-in"
+      size="sm"
+      bodyClassName="p-4 sm:p-6"
+      footer={
+        <>
+          <button type="button" onClick={onCancel} disabled={busy} className={dsButton.quiet}>
+            Annulla
           </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <p className="text-sm text-[var(--color-fg-muted)]">
-            Crea una prenotazione "adesso" già marcata come arrivata. Subito dopo potrai assegnare il tavolo.
-          </p>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
-              Nome cliente <span className="text-rose-500">*</span>
-            </label>
+          <button
+            type="button"
+            onClick={() => onSubmit({ name, guests: guests ?? 1, phone, notes })}
+            disabled={busy || !canSubmit}
+            className={dsButton.primary}
+          >
+            Crea e assegna tavolo
+          </button>
+        </>
+      }
+    >
+      <FormCard>
+        <div className="space-y-5">
+          <Field label="Nome cliente" htmlFor="walkin-name" required>
             <input
+              id="walkin-name"
               autoFocus
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Es. Mario Rossi"
-              className="w-full px-3 py-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
+              className={dsInput}
             />
-          </div>
+          </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
-                Coperti <span className="text-rose-500">*</span>
-              </label>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setGuests(g => Math.max(1, g - 1))}
-                  className="w-11 h-11 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-xl font-semibold hover:bg-[var(--color-surface-3)]"
-                  aria-label="Meno"
-                >−</button>
-                <div className="flex-1 text-center text-2xl font-bold text-[var(--color-fg)] tabular-nums">{guests}</div>
-                <button
-                  type="button"
-                  onClick={() => setGuests(g => g + 1)}
-                  className="w-11 h-11 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-xl font-semibold hover:bg-[var(--color-surface-3)]"
-                  aria-label="Più"
-                >+</button>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
-                Telefono
-              </label>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Coperti" required>
+              <Stepper value={guests} onChange={setGuests} min={1} ariaLabel="Coperti" required />
+            </Field>
+            <Field label="Telefono" htmlFor="walkin-phone">
               <input
+                id="walkin-phone"
                 type="tel"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="Opzionale"
-                className="w-full h-11 px-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
+                className={dsInput}
               />
-            </div>
+            </Field>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-fg)] mb-1.5">
-              Note
-            </label>
+          <Field label="Note" htmlFor="walkin-notes">
             <textarea
+              id="walkin-notes"
               value={notes}
               onChange={e => setNotes(e.target.value)}
               placeholder="Allergie, preferenze, …"
               rows={2}
-              className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-base focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 resize-none"
+              className={`${dsTextarea} resize-none`}
             />
-          </div>
+          </Field>
         </div>
-
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            className="px-4 py-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-3)] disabled:opacity-50"
-          >
-            Annulla
-          </button>
-          <button
-            onClick={() => onSubmit({ name, guests, phone, notes })}
-            disabled={busy || !canSubmit}
-            className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Crea e assegna tavolo
-          </button>
-        </div>
-      </div>
-    </div>
+      </FormCard>
+    </ModalShell>
   );
 };
-
-const EmptyState: React.FC<{ count: number }> = ({ count }) => (
-  <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-    <div className="w-20 h-20 rounded-full bg-[var(--color-surface-2)] border border-[var(--color-line)] flex items-center justify-center mb-4">
-      <UserPlus className="h-10 w-10 text-[var(--color-fg-muted)]" />
-    </div>
-    <h2 className="text-xl font-semibold text-[var(--color-fg)] mb-1">
-      {count > 0 ? 'Seleziona una prenotazione' : 'Nessuna prenotazione'}
-    </h2>
-    <p className="text-sm text-[var(--color-fg-muted)] max-w-sm">
-      {count > 0
-        ? 'Tocca un nome nell\'elenco a sinistra per vedere i dettagli e assegnare il tavolo.'
-        : 'Per oggi non risultano prenotazioni. Quando arriveranno i clienti compariranno qui.'}
-    </p>
-  </div>
-);
 
 interface DetailPanelProps {
   reservation: Reservation;
   table: Table | null;
   busy: boolean;
+  /** Desktop only — dismisses the card and leaves the door queue in place. */
+  onClose?: () => void;
   onAssignTable: () => void;
   onRemoveTable: () => void;
   onMarkArrived: () => void;
@@ -929,10 +1063,19 @@ interface DetailPanelProps {
   onFreeTable: () => void;
 }
 
+/**
+ * What to do with the booking you just picked.
+ *
+ * One primary action, sized so it can be hit without looking, and the rest as
+ * quiet secondaries below it. The old panel gave seven buttons the same weight
+ * and the same 80px height, so the one you needed — seat them — had to be
+ * hunted for among six you didn't.
+ */
 const DetailPanel: React.FC<DetailPanelProps> = ({
   reservation,
   table,
   busy,
+  onClose,
   onAssignTable,
   onRemoveTable,
   onMarkArrived,
@@ -944,215 +1087,217 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const arr = reservation.arrival_status || ArrivalStatus.WAITING;
   const noShow = reservation.reservation_status === ReservationStatus.NO_SHOW;
   const seated = isSeated(reservation);
+  const tooSmall = !!table && typeof table.seats === 'number' && table.seats > 0
+    && table.seats < (reservation.guests || 0);
+  const notes = stripDietaryNote(reservation.notes);
 
   return (
-    <div className="flex-1 flex flex-col overflow-y-auto">
-      {/* Info header. Compact on mobile so the action buttons stay in view even
-          with notes: smaller name, single meta row, table as a horizontal bar.
-          Desktop keeps the roomy layout with the big square table card. */}
-      <div className="flex-shrink-0 px-5 lg:px-8 pt-4 lg:pt-8 pb-4 lg:pb-6 border-b border-[var(--color-line)]">
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 lg:gap-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 lg:gap-3 mb-1.5 lg:mb-2">
-              <h2 className="text-2xl lg:text-3xl font-bold text-[var(--color-fg)] truncate">
-                {toTitleCase(reservation.customer_name) || 'Senza nome'}
-              </h2>
-              {reservation.customer_is_vip && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 text-xs font-semibold flex-shrink-0">
-                  <Star className="h-3.5 w-3.5 fill-current" /> VIP
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-x-4 gap-y-1 text-sm lg:text-base text-[var(--color-fg-muted)] flex-wrap">
-              <span className="inline-flex items-center gap-1.5 lg:gap-2">
-                <Clock className="h-4 w-4 flex-shrink-0" />
-                <span className="font-semibold text-[var(--color-fg)]">
-                  {formatHHMM(reservation.reservation_time)}
-                </span>
-              </span>
-              <span className="inline-flex items-center gap-1.5 lg:gap-2">
-                <Users className="h-4 w-4 flex-shrink-0" />
-                <span className="font-semibold text-[var(--color-fg)] whitespace-nowrap">
-                  {reservation.guests}{reservation.children ? ` +${reservation.children} bimbi` : ''} coperti
-                </span>
-              </span>
-              {reservation.phone && (
-                <a
-                  href={`tel:${reservation.phone}`}
-                  className="inline-flex items-center gap-1.5 lg:gap-2 text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  <Phone className="h-4 w-4 flex-shrink-0" />
-                  <span className="font-semibold">{formatPhone(reservation.phone)}</span>
-                </a>
-              )}
-            </div>
+    <section className="flex-shrink-0 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+              {toTitleCase(reservation.customer_name) || 'Senza nome'}
+            </h2>
+            {reservation.customer_is_vip && (
+              <StatusPill tone="pending" title="Cliente VIP">
+                <Star className="h-3 w-3 fill-current" aria-hidden /> VIP
+              </StatusPill>
+            )}
           </div>
-          {table ? (
-            <div className="flex-shrink-0 w-full lg:w-auto flex flex-row lg:flex-col items-center justify-between lg:justify-center gap-3 lg:gap-0 px-4 lg:px-6 py-2.5 lg:py-4 rounded-xl lg:rounded-2xl bg-indigo-50 border border-indigo-200 dark:bg-indigo-500/15 dark:border-indigo-500/40">
-              <div className="flex items-baseline lg:flex-col lg:items-center gap-2 lg:gap-0">
-                <span className="text-[10px] uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold lg:mb-1">Tavolo</span>
-                <span className="text-2xl lg:text-4xl font-extrabold text-indigo-700 dark:text-indigo-200 tabular-nums leading-none">
-                  {table.name}
-                </span>
-              </div>
-              <div className="text-xs text-indigo-600 dark:text-indigo-300 lg:mt-1">
-                {table.seats} posti
-              </div>
-            </div>
-          ) : (
-            <div className="flex-shrink-0 w-full lg:w-auto px-4 lg:px-6 py-2.5 lg:py-4 rounded-xl lg:rounded-2xl bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-sm font-medium text-center">
-              Nessun tavolo assegnato
-            </div>
-          )}
+          <p className="mt-0.5 truncate text-[14px] text-[var(--ds-text-muted)]">
+            {formatHHMM(reservation.reservation_time)} · {reservation.guests}
+            {reservation.children ? ` +${reservation.children} bimbi` : ''} coperti
+            {reservation.phone ? ` · ${formatPhone(reservation.phone)}` : ''}
+          </p>
         </div>
-
-        {/* Customer notes / preferences */}
-        {(reservation.notes || reservation.customer_dietary_notes || reservation.customer_preferences_notes) && (
-          <div className="mt-3 lg:mt-5 space-y-1.5 lg:space-y-2">
-            <DietaryChips notes={reservation.notes} />
-            {stripDietaryNote(reservation.notes) && (
-              <NotesLine label="Note prenotazione" text={stripDietaryNote(reservation.notes)} />
-            )}
-            {reservation.customer_dietary_notes && (
-              <NotesLine label="Dieta / allergie" text={reservation.customer_dietary_notes} tone="amber" />
-            )}
-            {reservation.customer_preferences_notes && (
-              <NotesLine label="Preferenze cliente" text={reservation.customer_preferences_notes} />
-            )}
-          </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Chiudi dettaglio"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
         )}
       </div>
 
-      {/* Action buttons — big touch targets */}
-      <div className="flex-shrink-0 px-5 lg:px-8 py-4 lg:py-6">
-        <div className="grid grid-cols-2 gap-2.5 lg:gap-4">
-          <ActionButton
-            primary
+      {/* Where they're sitting — the one fact the host is holding in their head
+          while they walk the party across the room. */}
+      {table ? (
+        <div
+          className={`mt-4 flex items-center gap-3 rounded-[16px] px-4 py-3 ${
+            tooSmall
+              ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+              : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+          }`}
+        >
+          <span className="text-[28px] font-semibold leading-none tabular-nums">{table.name}</span>
+          <div className="min-w-0 text-[13px] leading-tight">
+            <div className="font-medium">Tavolo</div>
+            <div>{table.seats} posti{tooSmall ? ` · meno dei ${reservation.guests} coperti` : ''}</div>
+          </div>
+        </div>
+      ) : (
+        <Callout tone="pending" className="mt-4">Nessun tavolo assegnato</Callout>
+      )}
+
+      {/* The action you came here for. */}
+      <div className="mt-4 space-y-2">
+        {seated ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onFreeTable}
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            <Armchair className="h-5 w-5" aria-hidden />
+            Tavolo liberato
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy || noShow}
+            onClick={onMarkArrived}
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            <Check className="h-5 w-5" aria-hidden />
+            Arrivato
+          </button>
+        )}
+
+        {/* Everything else, equal and quiet. Only the ones that apply to the
+            current state are rendered — the same rule as before. */}
+        <div className="grid grid-cols-3 gap-2">
+          <SecondaryAction
             disabled={busy}
             onClick={onAssignTable}
-            icon={<MapPin className="h-6 w-6" />}
-            label={table ? 'Cambia tavolo' : 'Assegna tavolo'}
+            icon={<Shuffle className="h-4 w-4" />}
+            label={table ? 'Cambia' : 'Assegna'}
           />
           {table && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onRemoveTable}
-              icon={<MapPinOff className="h-6 w-6" />}
-              label="Rimuovi tavolo"
-              variant="neutral"
-            />
-          )}
-          {seated ? (
-            <ActionButton
-              disabled={busy}
-              onClick={onFreeTable}
-              icon={<Armchair className="h-6 w-6" />}
-              label="Tavolo liberato"
-              variant="neutral"
-            />
-          ) : (
-            <ActionButton
-              disabled={busy || noShow}
-              onClick={onMarkArrived}
-              icon={<CheckCircle2 className="h-6 w-6" />}
-              label="Arrivato"
-              variant="success"
+              icon={<MapPinOff className="h-4 w-4" />}
+              label="Rimuovi"
             />
           )}
           {arr === ArrivalStatus.WAITING && !noShow && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onMarkNoShow}
-              icon={<XCircle className="h-6 w-6" />}
+              icon={<XCircle className="h-4 w-4" />}
               label="No-show"
-              variant="danger"
+              tone="critical"
             />
           )}
           {arr === ArrivalStatus.ARRIVED && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onMarkDeparting}
-              icon={<LogOut className="h-6 w-6" />}
+              icon={<LogOut className="h-4 w-4" />}
               label="In uscita"
-              variant="info"
             />
           )}
           {arr === ArrivalStatus.DEPARTING && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onMarkArrived}
-              icon={<CheckCircle2 className="h-6 w-6" />}
-              label="Annulla in uscita"
-              variant="neutral"
+              icon={<Check className="h-4 w-4" />}
+              label="Ancora a tavola"
             />
           )}
           {arr === ArrivalStatus.ARRIVED && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onMarkWaiting}
-              icon={<Clock className="h-6 w-6" />}
+              icon={<Clock className="h-4 w-4" />}
               label="In attesa"
-              variant="neutral"
             />
           )}
           {noShow && (
-            <ActionButton
+            <SecondaryAction
               disabled={busy}
               onClick={onMarkArrived}
-              icon={<CheckCircle2 className="h-6 w-6" />}
+              icon={<Check className="h-4 w-4" />}
               label="Annulla no-show"
-              variant="neutral"
             />
           )}
         </div>
       </div>
-    </div>
+
+      {/* Anything the kitchen or the host needs to know before seating them. */}
+      {(notes || reservation.customer_dietary_notes || reservation.customer_preferences_notes
+        || reservation.notes) && (
+        <div className="mt-4 space-y-2 border-t border-[var(--ds-border)] pt-4">
+          <DietaryChips notes={reservation.notes} />
+          {notes && <NotesLine label="Note prenotazione" text={notes} />}
+          {reservation.customer_dietary_notes && (
+            <NotesLine label="Dieta / allergie" text={reservation.customer_dietary_notes} tone="pending" />
+          )}
+          {reservation.customer_preferences_notes && (
+            <NotesLine label="Preferenze cliente" text={reservation.customer_preferences_notes} />
+          )}
+        </div>
+      )}
+
+      {/* On a phone the panel is the whole screen, so the number is worth a
+          real tap target rather than a line of grey text up in the header. */}
+      {reservation.phone && (
+        <a
+          href={`tel:${reservation.phone}`}
+          className="mt-3 flex items-center gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3 lg:hidden"
+        >
+          <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+            <Phone className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[12px] text-[var(--ds-text-muted)]">Telefono</span>
+            <span className="block truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+              {formatPhone(reservation.phone)}
+            </span>
+          </span>
+        </a>
+      )}
+    </section>
   );
 };
 
-const NotesLine: React.FC<{ label: string; text: string; tone?: 'amber' }> = ({ label, text, tone }) => (
-  <div className={`text-[13px] lg:text-sm px-3 py-1.5 lg:py-2 rounded-lg lg:rounded-xl border ${
-    tone === 'amber'
-      ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200'
-      : 'bg-[var(--color-surface-2)] border-[var(--color-line)] text-[var(--color-fg)]'
+const NotesLine: React.FC<{ label: string; text: string; tone?: 'pending' }> = ({ label, text, tone }) => (
+  <div className={`rounded-[12px] px-3 py-2 text-[13px] ${
+    tone === 'pending'
+      ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
   }`}>
-    <span className="text-[10px] uppercase tracking-wider font-semibold opacity-70 mr-2">{label}</span>
+    <span className="mr-2 font-semibold">{label}</span>
     {text}
   </div>
 );
 
-interface ActionButtonProps {
+const SecondaryAction: React.FC<{
   onClick: () => void;
   disabled?: boolean;
   icon: React.ReactNode;
   label: string;
-  primary?: boolean;
-  variant?: 'success' | 'danger' | 'neutral' | 'info';
-}
-
-const ActionButton: React.FC<ActionButtonProps> = ({ onClick, disabled, icon, label, primary, variant }) => {
-  let cls = 'bg-[var(--color-surface-2)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-3)]';
-  if (primary) {
-    cls = 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700';
-  } else if (variant === 'success') {
-    cls = 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700';
-  } else if (variant === 'danger') {
-    cls = 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700';
-  } else if (variant === 'info') {
-    // "In uscita" — cyan, matching the departing table state on the map.
-    cls = 'bg-cyan-700 text-white border-cyan-700 hover:bg-cyan-800';
-  }
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`pressable flex items-center justify-center gap-2.5 lg:gap-3 px-4 py-3.5 lg:py-5 rounded-xl lg:rounded-2xl border text-base lg:text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed min-h-[60px] lg:min-h-[80px] ${cls}`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-};
+  tone?: 'neutral' | 'critical';
+}> = ({ onClick, disabled, icon, label, tone = 'neutral' }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    title={label}
+    className={`inline-flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-[14px] px-2 py-2 text-[12px] font-medium transition-opacity hover:opacity-80 disabled:opacity-50 ${
+      tone === 'critical'
+        ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
+        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
+    }`}
+  >
+    {icon}
+    <span className="w-full truncate text-center">{label}</span>
+  </button>
+);
 
 interface TablePickerProps {
   reservation: Reservation;
@@ -1252,43 +1397,47 @@ const TablePicker: React.FC<TablePickerProps> = ({
   }, [roomTables, occupiedTableIds, reservation.table_id, reservation.guests]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
-      {/* Header — compact, party-size hint sits where the host's eye lands. */}
-      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
-        <div className="min-w-0 flex items-baseline gap-3 flex-wrap">
-          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
-            Tavolo per
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--ds-canvas)]">
+      {/* Header — who this table is for, and how many of them. The party size
+          sits where the host's eye lands, because that's what they're matching
+          against every glyph below. */}
+      <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] text-[var(--ds-text-muted)]">Tavolo per</p>
+            <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+              {toTitleCase(reservation.customer_name) || 'Senza nome'}
+            </h2>
           </div>
-          <div className="text-xl font-bold text-[var(--color-fg)] truncate">
-            {toTitleCase(reservation.customer_name) || 'Senza nome'}
-          </div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] text-sm font-semibold text-[var(--color-fg)]">
-            <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
+          <StatusPill tone="neutral" className="h-8 px-3 text-[13px]">
+            <Users className="h-3.5 w-3.5" aria-hidden />
             {reservation.guests} coperti
-          </div>
+          </StatusPill>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            aria-label="Chiudi"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
         </div>
-        <button
-          onClick={onCancel}
-          disabled={busy}
-          aria-label="Chiudi"
-          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] inline-flex items-center justify-center"
-        >
-          <XIcon className="h-5 w-5" />
-        </button>
       </div>
 
-      {/* Room tabs + scan summary on the same row to save vertical space. */}
-      <div className="flex-shrink-0 px-6 py-3 flex items-center justify-between gap-4 border-b border-[var(--color-line)] flex-wrap">
+      {/* Room tabs and the scan summary share a row — vertical space here is
+          the floor plan's, not the chrome's. */}
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-4 pb-3 sm:px-6">
         {visibleRooms.length > 1 ? (
-          <div className="flex gap-1.5 overflow-x-auto">
+          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {visibleRooms.map(room => (
               <button
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
-                className={`px-4 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
+                aria-pressed={room.id === activeRoom?.id}
+                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors ${
                   room.id === activeRoom?.id
-                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-transparent'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                    : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
                 }`}
               >
                 {room.name}
@@ -1296,12 +1445,12 @@ const TablePicker: React.FC<TablePickerProps> = ({
             ))}
           </div>
         ) : <div />}
-        <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
-          <LegendDot tone="emerald" label={`${counts.ideal} adatti`} />
-          <LegendDot tone="slate" label={`${counts.big} grandi`} />
-          <LegendDot tone="rose" label={`${counts.occupied} occupati`} />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[var(--ds-text-muted)]">
+          <LegendDot tone="seated" label={`${counts.ideal} adatti`} />
+          <LegendDot tone="neutral" label={`${counts.big} grandi`} />
+          <LegendDot tone="critical" label={`${counts.occupied} occupati`} />
           {reservation.table_id && (
-            <LegendDot tone="amber" label="tocca occupato → scambia" />
+            <LegendDot tone="pending" label="tocca occupato → scambia" />
           )}
         </div>
       </div>
@@ -1309,7 +1458,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
       {/* Canvas. Floor-dot background so the room reads as space, not a card. */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 overflow-hidden flex items-center justify-center"
+        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',
@@ -1345,30 +1494,30 @@ const TablePicker: React.FC<TablePickerProps> = ({
               let haloClass = '';
               let glyphOpacity = 'opacity-100';
               let grayscale = '';
-              let badge: { text: string; tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber' } | null = null;
+              let badge: { text: string; tone: PillTone } | null = null;
 
               if (state === 'current') {
-                haloClass = 'ring-2 ring-indigo-500 shadow-[0_0_0_4px_rgba(99,102,241,0.18)]';
-                badge = { text: 'Attuale', tone: 'indigo' };
+                haloClass = 'ring-2 ring-[var(--ds-arriving-solid)]';
+                badge = { text: 'Attuale', tone: 'info' };
               } else if (state === 'occupied') {
                 if (swappable) {
-                  haloClass = 'ring-2 ring-amber-400/70 hover:ring-amber-500 hover:shadow-[0_8px_24px_-8px_rgba(245,158,11,0.45)]';
+                  haloClass = 'ring-2 ring-[var(--ds-pending-solid)] hover:ring-[3px]';
                   glyphOpacity = 'opacity-80';
-                  badge = { text: 'Scambia', tone: 'amber' };
+                  badge = { text: 'Scambia', tone: 'pending' };
                 } else {
-                  haloClass = 'ring-1 ring-rose-300';
+                  haloClass = 'ring-1 ring-[var(--ds-critical-solid)]';
                   glyphOpacity = 'opacity-50';
-                  badge = { text: 'Occupato', tone: 'rose' };
+                  badge = { text: 'Occupato', tone: 'critical' };
                 }
               } else if (state === 'tooSmall') {
                 haloClass = '';
                 glyphOpacity = 'opacity-40';
                 grayscale = 'grayscale';
-                badge = { text: `${t.seats} posti`, tone: 'slate' };
+                badge = { text: `${t.seats} posti`, tone: 'neutral' };
               } else if (state === 'ideal') {
-                haloClass = 'ring-2 ring-emerald-400/70 hover:ring-emerald-500 hover:shadow-[0_8px_24px_-8px_rgba(16,185,129,0.45)]';
+                haloClass = 'ring-2 ring-[var(--ds-seated-solid)] hover:ring-[3px]';
               } else if (state === 'big') {
-                haloClass = 'ring-1 ring-slate-300 hover:ring-slate-400';
+                haloClass = 'ring-1 ring-[var(--ds-border-strong)] hover:ring-2';
               }
 
               const handleClick = () => {
@@ -1411,16 +1560,10 @@ const TablePicker: React.FC<TablePickerProps> = ({
                     </div>
                   </div>
                   {badge && (
-                    <span
-                      className={`absolute left-1/2 -translate-x-1/2 -bottom-3 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shadow-sm border ${
-                        badge.tone === 'rose'    ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:border-rose-500/40'
-                      : badge.tone === 'slate'   ? 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30'
-                      : badge.tone === 'indigo'  ? 'bg-indigo-600 text-white border-indigo-600'
-                      : badge.tone === 'amber'   ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/40'
-                                                 : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      }`}
-                    >
-                      {badge.text}
+                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2">
+                      <StatusPill tone={badge.tone} className="h-5 px-2 text-[10px] font-semibold shadow-[var(--ds-shadow-card)]">
+                        {badge.text}
+                      </StatusPill>
                     </span>
                   )}
                 </button>
@@ -1465,88 +1608,66 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
   const tableName = (id?: number | null) =>
     tables.find(t => t.id === id)?.name ?? '—';
   return (
-    <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4">
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md overflow-hidden">
-        <div className="p-4 border-b border-[var(--color-line)]">
-          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold mb-1">
-            Conferma scambio tavoli
-          </div>
-          <div className="text-lg font-bold text-[var(--color-fg)]">
-            Inverti i due tavoli?
-          </div>
-        </div>
-        <div className="p-5 space-y-3">
-          <SwapRow
-            name={toTitleCase(source.customer_name) || 'Senza nome'}
-            from={tableName(source.table_id)}
-            to={tableName(target.table_id)}
-          />
-          <SwapRow
-            name={toTitleCase(target.customer_name) || 'Senza nome'}
-            from={tableName(target.table_id)}
-            to={tableName(source.table_id)}
-          />
-        </div>
-        <div className="p-4 bg-[var(--color-surface-2)] flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            className="px-4 h-10 rounded-xl border border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] font-medium disabled:opacity-50"
-          >
+    // z-[60] on purpose: this sits over the table picker, which is already at
+    // z-50 — the host has to be able to check both parties before an exchange
+    // that moves two bookings at once.
+    <ModalShell
+      open
+      onClose={() => { if (!busy) onCancel(); }}
+      title="Inverti i due tavoli?"
+      subtitle="Le due prenotazioni si scambiano il posto"
+      size="sm"
+      className="z-[60]"
+      bodyClassName="p-4 sm:p-6"
+      footer={
+        <>
+          <button type="button" onClick={onCancel} disabled={busy} className={dsButton.quiet}>
             Annulla
           </button>
-          <button
-            onClick={onConfirm}
-            disabled={busy}
-            className="px-4 h-10 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold disabled:opacity-50 inline-flex items-center gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
+          <button type="button" onClick={onConfirm} disabled={busy} className={dsButton.primary}>
+            <RefreshCw className="h-4 w-4" aria-hidden />
             Inverti tavoli
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-2 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+        <SwapRow
+          name={toTitleCase(source.customer_name) || 'Senza nome'}
+          from={tableName(source.table_id)}
+          to={tableName(target.table_id)}
+        />
+        <SwapRow
+          name={toTitleCase(target.customer_name) || 'Senza nome'}
+          from={tableName(target.table_id)}
+          to={tableName(source.table_id)}
+        />
       </div>
-    </div>
+    </ModalShell>
   );
 };
 
 const SwapRow: React.FC<{ name: string; from: string; to: string }> = ({ name, from, to }) => (
-  <div className="flex items-center gap-2 text-sm">
-    <div className="flex-1 min-w-0 truncate font-medium text-[var(--color-fg)]">{name}</div>
-    <span className="px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] text-[var(--color-fg-muted)] text-xs font-semibold tabular-nums">
-      {from}
-    </span>
-    <span className="text-[var(--color-fg-muted)]">→</span>
-    <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold tabular-nums dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/40">
-      {to}
-    </span>
+  <div className="flex items-center gap-2 text-[14px]">
+    <div className="min-w-0 flex-1 truncate font-medium text-[var(--ds-text-primary)]">{name}</div>
+    <StatusPill tone="neutral" className="text-[12px] tabular-nums">{from}</StatusPill>
+    <span className="text-[var(--ds-text-muted)]" aria-label="diventa">→</span>
+    <StatusPill tone="positive" className="text-[12px] tabular-nums">{to}</StatusPill>
   </div>
 );
 
-// Reception KPI — shared by the desktop centred row and the mobile 4-up strip
-// so the two never drift. `compact` shrinks it for the phone layout.
-const HeaderStat: React.FC<{ value: number; label: string; tone?: 'emerald' | 'amber'; compact?: boolean }> = ({ value, label, tone, compact }) => {
-  const valueColor = tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400'
-    : tone === 'amber' ? 'text-amber-600 dark:text-amber-400'
-    : 'text-[var(--color-fg)]';
-  return (
-    <div className={compact ? 'text-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-line)] py-1.5' : 'text-center'}>
-      <div className={`${compact ? 'text-xl' : 'text-2xl'} font-bold tabular-nums ${valueColor}`}>{value}</div>
-      <div className={`${compact ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-wider text-[var(--color-fg-muted)]`}>{label}</div>
-    </div>
-  );
-};
-
-const LegendDot: React.FC<{ tone: 'emerald' | 'slate' | 'rose' | 'indigo' | 'amber' | 'cyan'; label: string }> = ({ tone, label }) => {
+/** A dot plus a count. The tone names a family, not a colour, so the legend
+ *  can't drift from the halos and glyphs it's explaining. */
+const LegendDot: React.FC<{ tone: 'seated' | 'arriving' | 'pending' | 'critical' | 'neutral'; label: string }> = ({ tone, label }) => {
   const dot =
-    tone === 'emerald' ? 'bg-emerald-500'
-    : tone === 'rose'  ? 'bg-rose-400'
-    : tone === 'indigo' ? 'bg-indigo-500'
-    : tone === 'amber' ? 'bg-amber-400'
-    : tone === 'cyan'  ? 'bg-cyan-600'
-                       : 'bg-slate-300';
+    tone === 'seated'   ? 'bg-[var(--ds-seated-solid)]'
+    : tone === 'critical' ? 'bg-[var(--ds-critical-solid)]'
+    : tone === 'arriving' ? 'bg-[var(--ds-arriving-solid)]'
+    : tone === 'pending'  ? 'bg-[var(--ds-pending-solid)]'
+                          : 'bg-[var(--ds-border-strong)]';
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
-      <span className={`w-2 h-2 rounded-full ${dot}`} />
+      <span className={`h-2 w-2 rounded-full ${dot}`} />
       {label}
     </span>
   );
@@ -1632,38 +1753,40 @@ const RoomMap: React.FC<RoomMapProps> = ({
   }, [roomTables, reservationByTableId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--color-surface)]">
-      {/* Header — mirrors the TablePicker shell so the two views feel paired. */}
-      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 bg-[var(--color-surface-2)]">
-        <div className="min-w-0 flex items-baseline gap-3 flex-wrap">
-          <div className="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)] font-semibold">
-            Stato sala
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--ds-canvas)]">
+      {/* Header — the same shell as the TablePicker, so the two full-screen
+          floor views read as one pair rather than two separate features. */}
+      <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] text-[var(--ds-text-muted)]">Stato sala</p>
+            <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+              {activeRoom?.name || 'Sala'}
+            </h2>
           </div>
-          <div className="text-xl font-bold text-[var(--color-fg)] truncate">
-            {activeRoom?.name || 'Sala'}
-          </div>
+          <button
+            onClick={onClose}
+            aria-label="Chiudi"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Chiudi"
-          className="h-10 w-10 flex-shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] inline-flex items-center justify-center"
-        >
-          <XIcon className="h-5 w-5" />
-        </button>
       </div>
 
-      {/* Room tabs + stats on a single header row */}
-      <div className="flex-shrink-0 px-6 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-4 flex-wrap">
+      {/* Room tabs and the live tally on one row */}
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-4 pb-3 sm:px-6">
         {visibleRooms.length > 1 ? (
-          <div className="flex gap-1.5 overflow-x-auto">
+          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {visibleRooms.map(room => (
               <button
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
-                className={`px-4 h-9 rounded-full text-sm font-medium whitespace-nowrap border transition-colors ${
+                aria-pressed={room.id === activeRoom?.id}
+                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors ${
                   room.id === activeRoom?.id
-                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-transparent'
-                    : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                    : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
                 }`}
               >
                 {room.name}
@@ -1671,17 +1794,17 @@ const RoomMap: React.FC<RoomMapProps> = ({
             ))}
           </div>
         ) : <div />}
-        <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
-          <LegendDot tone="emerald" label={`${stats.arrived} arrivati`} />
-          {stats.departing > 0 && <LegendDot tone="cyan" label={`${stats.departing} in uscita`} />}
-          <LegendDot tone="indigo" label={`${stats.waiting} in attesa`} />
-          <LegendDot tone="slate" label={`${stats.free} liberi`} />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[var(--ds-text-muted)]">
+          <LegendDot tone="seated" label={`${stats.arrived} arrivati`} />
+          {stats.departing > 0 && <LegendDot tone="pending" label={`${stats.departing} in uscita`} />}
+          <LegendDot tone="arriving" label={`${stats.waiting} in attesa`} />
+          <LegendDot tone="neutral" label={`${stats.free} liberi`} />
         </div>
       </div>
 
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 overflow-hidden flex items-center justify-center"
+        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',
@@ -1712,20 +1835,22 @@ const RoomMap: React.FC<RoomMapProps> = ({
                 const firstName = toTitleCase(res.customer_name)?.split(' ')[0] || 'Ospite';
                 switch (status) {
                   case 'arrivato':
-                    haloClass = 'ring-2 ring-emerald-400/70';
+                    haloClass = 'ring-2 ring-[var(--ds-seated-solid)]';
                     caption = `${firstName} · ${res.guests}p`;
                     break;
                   case 'uscita':
-                    haloClass = 'ring-2 ring-cyan-400/70';
+                    // Still a seated party, so still the seated family — the
+                    // caption carries the difference, not a fifth colour.
+                    haloClass = 'ring-2 ring-[var(--ds-seated-text)]';
                     caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`;
                     break;
                   case 'noshow':
-                    haloClass = 'ring-2 ring-rose-400/70';
+                    haloClass = 'ring-2 ring-[var(--ds-critical-solid)]';
                     caption = 'No-show';
                     break;
                   case 'inarrivo':
                   case 'attesa':
-                    haloClass = 'ring-2 ring-indigo-400/70';
+                    haloClass = 'ring-2 ring-[var(--ds-arriving-solid)]';
                     caption = `${formatHHMM(res.reservation_time)} · ${firstName}`;
                     break;
                 }
@@ -1765,7 +1890,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     </div>
                   </div>
                   {caption && (
-                    <span className="absolute left-1/2 -translate-x-1/2 -bottom-3 px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap shadow-sm border bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] tabular-nums">
+                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]">
                       {caption}
                     </span>
                   )}

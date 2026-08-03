@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowLeft, Search, X, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
@@ -9,6 +9,11 @@ import {
 } from '../services/emailApiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
+import {
+  ModalShell, FormCard, Field, SearchField, Callout, SplitPane, SectionHeader,
+  Avatar, EmptyState, SwipeRow, useFirstRunHint, PanePlaceholder, PaneHeader, CountBadge,
+  dsInput, dsTextarea, dsButton, dsIconButton,
+} from './ds';
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return '';
@@ -45,9 +50,11 @@ const formatDayHeader = (iso: string): string => {
 const statusIcon = (m: EmailMessage) => {
   if (m.direction !== 'outbound') return null;
   const s = (m.status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
-  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />;
-  return <Clock className="w-3.5 h-3.5 text-slate-400" />;
+  // On a filled bubble these ride on currentColor rather than a second colour
+  // fighting the fill.
+  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label="Consegnato" />;
+  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label="Non consegnato" />;
+  return <Clock className="h-3.5 w-3.5" aria-label="In invio" />;
 };
 
 const displayName = (t: EmailThreadSummary): string =>
@@ -58,9 +65,8 @@ const EmailPage: React.FC = () => {
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [threadsError, setThreadsError] = useState<string | null>(null);
 
-  const [searchOpen, setSearchOpen] = useState(false);
+  // Always-visible search, matching the other two Comunicazioni channels.
   const [searchQuery, setSearchQuery] = useState('');
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
@@ -205,10 +211,6 @@ const EmailPage: React.FC = () => {
     });
   }, [threads, searchQuery]);
 
-  useEffect(() => {
-    if (searchOpen) requestAnimationFrame(() => searchInputRef.current?.focus());
-  }, [searchOpen]);
-
   const openReply = () => {
     if (!selected) return;
     const last = messages[messages.length - 1];
@@ -278,269 +280,311 @@ const EmailPage: React.FC = () => {
     return out;
   }, [messages]);
 
-  return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-56px)] md:h-[calc(100vh-72px)] bg-[var(--color-bg)]">
-      {/* Sidebar list */}
-      <aside className={`${selectedKey ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-80 lg:w-96 border-r border-[var(--color-line)] bg-[var(--color-surface)]`}>
-        <header className="flex items-center gap-2 h-14 px-4 border-b border-[var(--color-line)]">
-          {searchOpen ? (
-            <>
-              <Search className="w-4 h-4 text-[var(--color-fg-muted)] shrink-0" />
-              <input
-                ref={searchInputRef}
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Cerca nome, email, oggetto…"
-                className="flex-1 bg-transparent outline-none text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)]"
-                onKeyDown={e => { if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery(''); }}}
-              />
-              <button type="button" onClick={() => { setSearchOpen(false); setSearchQuery(''); }} className="p-1 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="w-4 h-4" />
-              </button>
-            </>
-          ) : (
-            <>
-              <h1 className="text-base font-semibold text-[var(--color-fg)] flex-1">Email</h1>
-              <button type="button" onClick={() => setSearchOpen(true)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" title="Cerca">
-                <Search className="w-4 h-4" />
-              </button>
-              <button type="button" onClick={loadThreads} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" title="Aggiorna">
-                <RefreshCw className={`w-4 h-4 ${threadsLoading ? 'animate-spin' : ''}`} />
-              </button>
-              <button type="button" onClick={() => { setNewEmailOpen(true); setSubject(''); setBodyText(''); setNewRecipient(''); }} className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700">
-                <Mail className="w-3.5 h-3.5" /> Nuova
-              </button>
-            </>
-          )}
-        </header>
+  // A thread wants attention when the customer replied and nobody has opened
+  // it. Derived from threads already loaded — the section only reorders.
+  const needsAttention = (t: EmailThreadSummary) =>
+    t.unread_count > 0 && t.last_direction !== 'outbound';
+  const customerReplies = visibleThreads.filter(needsAttention);
+  const restOfThreads = visibleThreads.filter(t => !needsAttention(t));
+  const swipeHint = useFirstRunHint('ds-swipe-hint-email');
 
-        <div className="flex-1 overflow-y-auto">
-          {threadsLoading ? (
-            <SkeletonInboxList count={7} />
-          ) : threadsError ? (
-            <div className="p-4 text-sm text-rose-600">{threadsError}</div>
-          ) : visibleThreads.length === 0 ? (
-            <div className="p-6 text-center text-sm text-[var(--color-fg-muted)]">
-              {searchQuery ? 'Nessun risultato' : 'Nessuna email al momento.'}
+  const markThreadRead = useCallback(async (emailKey: string) => {
+    try {
+      await emailApiService.markThreadRead(emailKey);
+      setThreads(prev => prev.map(t =>
+        t.email_key === emailKey ? { ...t, unread_count: 0 } : t
+      ));
+    } catch { /* badge stays stale until the next refresh */ }
+  }, []);
+
+  const renderThread = (t: EmailThreadSummary, hint: boolean) => {
+    const active = selectedKey === t.email_key;
+    const outbound = t.last_direction === 'outbound';
+    return (
+      <SwipeRow
+        key={t.email_key}
+        hint={hint}
+        left={t.unread_count > 0 ? {
+          label: 'Letto',
+          tone: 'confirm',
+          icon: <Check className="h-4 w-4" aria-hidden />,
+          onAction: () => markThreadRead(t.email_key),
+        } : undefined}
+        right={{
+          label: 'Rispondi',
+          tone: 'primary',
+          icon: <ArrowRight className="h-4 w-4" aria-hidden />,
+          onAction: () => { setSelectedKey(t.email_key); },
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedKey(t.email_key)}
+          className={`flex w-full gap-3 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+            active ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
+          }`}
+        >
+          <Avatar name={t.customer_name || t.email} icon={t.customer_name ? undefined : Mail} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{displayName(t)}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(t.last_sent_at)}</span>
+                {t.unread_count > 0 && (
+                  <CountBadge tone="alert" count={t.unread_count} />
+                )}
+              </span>
             </div>
+            {t.customer_name && (
+              <div className="truncate text-[13px] text-[var(--ds-text-muted)]">{t.email}</div>
+            )}
+            {t.last_subject && (
+              <div className="truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">{t.last_subject}</div>
+            )}
+            <p className="mt-0.5 flex items-center gap-1 truncate text-[14px] text-[var(--ds-text-muted)]">
+              <span aria-hidden>{outbound ? '↗' : '↙'}</span>
+              <span className="truncate">{outbound ? `Tu: ${t.last_body}` : t.last_body}</span>
+            </p>
+          </div>
+        </button>
+      </SwipeRow>
+    );
+  };
+
+  return (
+    <>
+      <SplitPane
+        detailOpen={!!selectedKey}
+        toolbar={
+          <div className="space-y-3">
+            {/* No visible page title: the sidebar and the mobile switcher
+                both already name this screen. */}
+            <h1 className="sr-only">Email</h1>
+            <div className="flex items-center gap-2">
+              <SearchField
+                className="min-w-0 flex-1"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Cerca mittente, oggetto…"
+              />
+              <button
+                type="button"
+                onClick={loadThreads}
+                className={dsIconButton}
+                title="Aggiorna"
+                aria-label="Aggiorna"
+              >
+                <RefreshCw className={`h-4 w-4 ${threadsLoading ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNewEmailOpen(true); setSubject(''); setBodyText(''); setNewRecipient(''); }}
+                className={`${dsButton.primary} flex-shrink-0 max-lg:w-11 max-lg:px-0`}
+                aria-label="Nuova email"
+                title="Nuova email"
+              >
+                <Mail className="h-4 w-4" />
+                <span className="max-lg:hidden">Nuova</span>
+              </button>
+            </div>
+          </div>
+        }
+        list={
+          threadsLoading ? (
+            <SkeletonInboxList count={7} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+          ) : threadsError ? (
+            <Callout tone="critical" icon={AlertTriangle}>{threadsError}</Callout>
+          ) : visibleThreads.length === 0 ? (
+            <EmptyState icon={Mail}>
+              {searchQuery ? 'Nessun risultato' : 'Nessuna email al momento.'}
+            </EmptyState>
           ) : (
-            <ul>
-              {visibleThreads.map(t => {
-                const active = selectedKey === t.email_key;
-                return (
-                  <li key={t.email_key}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedKey(t.email_key)}
-                      className={`w-full text-left px-4 py-3 border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition ${active ? 'bg-indigo-50 dark:bg-indigo-500/10' : ''}`}
-                    >
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`inline-flex w-2 h-2 rounded-full ${t.unread_count > 0 ? 'bg-indigo-500' : 'bg-transparent'}`} />
-                        {t.last_direction === 'outbound' ? (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-300 shrink-0"
-                            title="Ultima email inviata da noi"
-                          >
-                            <ArrowUpRight className="w-3 h-3" />
-                          </span>
-                        ) : (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300 shrink-0"
-                            title="Ultima email ricevuta dal cliente"
-                          >
-                            <ArrowDownLeft className="w-3 h-3" />
-                          </span>
-                        )}
-                        <span className="font-semibold text-[13px] text-[var(--color-fg)] truncate flex-1">{displayName(t)}</span>
-                        <span className="text-[11px] text-[var(--color-fg-subtle)] tabular whitespace-nowrap">{formatRelative(t.last_sent_at)}</span>
-                      </div>
-                      {t.customer_name && (
-                        <div className="text-[11px] text-[var(--color-fg-muted)] truncate mb-0.5">{t.email}</div>
-                      )}
-                      {t.last_subject && (
-                        <div className="text-[12px] font-medium text-[var(--color-fg)] truncate">{t.last_subject}</div>
-                      )}
-                      <div className="text-[12px] text-[var(--color-fg-muted)] line-clamp-1">
-                        {t.last_direction === 'outbound' && <span className="text-[var(--color-fg-subtle)]">Tu: </span>}
-                        {t.last_body}
-                      </div>
-                      {t.unread_count > 0 && (
-                        <span className="inline-flex items-center h-4 px-1.5 mt-1 rounded-full bg-indigo-600 text-white text-[10px] font-semibold">
-                          {t.unread_count}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      </aside>
+            <div className="space-y-1">
+              {customerReplies.length > 0 && (
+                <>
+                  <SectionHeader tone="positive">Risposte dei clienti</SectionHeader>
+                  <div className="space-y-2 pb-2">
+                    {customerReplies.map((t, i) => renderThread(t, swipeHint && i === 0))}
+                  </div>
+                </>
+              )}
+              {restOfThreads.length > 0 && (
+                <>
+                  <SectionHeader>Tutte le email</SectionHeader>
+                  <div className="space-y-2">
+                    {restOfThreads.map((t, i) => renderThread(t, swipeHint && customerReplies.length === 0 && i === 0))}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        }
+        detail={
+          selected ? (
+            <>
+              <PaneHeader
+                onBack={() => setSelectedKey(null)}
+                backLabel="Torna alle email"
+                title={displayName(selected)}
+                subtitle={selected.email}
+                actions={
+                  <button type="button" onClick={openReply} className={dsButton.secondary}>
+                    Rispondi
+                  </button>
+                }
+              />
 
-      {/* Thread */}
-      <section className={`${selectedKey ? 'flex' : 'hidden md:flex'} flex-col flex-1 min-w-0 bg-[var(--color-bg)]`}>
-        {selected ? (
-          <>
-            <header className="flex items-center gap-2 h-14 px-4 border-b border-[var(--color-line)] bg-[var(--color-surface)]">
-              <button type="button" onClick={() => setSelectedKey(null)} className="md:hidden p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]">
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-[var(--color-fg)] truncate">{displayName(selected)}</div>
-                <div className="text-[11px] text-[var(--color-fg-muted)] truncate">{selected.email}</div>
-              </div>
-              <button type="button" onClick={openReply} className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-xs font-medium hover:bg-[var(--color-surface-hover)]">
-                Rispondi
-              </button>
-            </header>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {msgLoading ? (
-                <SkeletonEmailThread count={4} />
-              ) : msgError ? (
-                <div className="text-sm text-rose-600">{msgError}</div>
-              ) : (
-                grouped.map(group => (
-                  <div key={group.day} className="space-y-2">
-                    <div className="text-center">
-                      <span className="text-[10px] tracking-wider uppercase font-semibold text-[var(--color-fg-subtle)]">{group.day}</span>
-                    </div>
-                    {group.items.map(m => {
-                      const isOut = m.direction === 'outbound';
-                      const isReply = !isOut && !!m.in_reply_to;
-                      const DirIcon = isOut ? ArrowUpRight : isReply ? Reply : ArrowDownLeft;
-                      const dirLabel = isOut ? 'Uscita' : isReply ? 'Risposta' : 'Entrata';
-                      return (
-                        <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${isOut ? 'bg-indigo-600 text-white' : 'bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg)]'}`}>
-                            <div className={`flex items-center gap-1 mb-1 text-[10px] font-semibold uppercase tracking-wider ${isOut ? 'text-indigo-100' : 'text-[var(--color-fg-muted)]'}`}>
-                              <DirIcon className="w-3 h-3" />
-                              <span>{dirLabel}</span>
-                            </div>
-                            {m.subject && (
-                              <div className={`text-[13px] font-semibold mb-1.5 ${isOut ? 'text-white' : 'text-[var(--color-fg)]'}`}>
-                                {m.subject}
+              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="space-y-4 px-4 pb-4 sm:px-6 lg:px-8">
+                {msgLoading ? (
+                  <SkeletonEmailThread count={4} />
+                ) : msgError ? (
+                  <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
+                ) : (
+                  grouped.map(group => (
+                    <div key={group.day} className="space-y-2">
+                      <div className="flex justify-center">
+                        <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">{group.day}</span>
+                      </div>
+                      {group.items.map(m => {
+                        const isOut = m.direction === 'outbound';
+                        const isReply = !isOut && !!m.in_reply_to;
+                        const DirIcon = isOut ? ArrowUpRight : isReply ? Reply : ArrowDownLeft;
+                        const dirLabel = isOut ? 'Uscita' : isReply ? 'Risposta' : 'Entrata';
+                        return (
+                          <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                              className={`max-w-[85%] rounded-[18px] px-4 py-3 md:max-w-[70%] ${
+                                isOut
+                                  ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                                  : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                              }`}
+                            >
+                              <div className={`mb-1 flex items-center gap-1 text-[12px] font-medium ${isOut ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
+                                <DirIcon className="h-3.5 w-3.5" aria-hidden />
+                                <span>{dirLabel}</span>
                               </div>
-                            )}
-                            <p className="text-[14px] whitespace-pre-wrap leading-relaxed">{m.body}</p>
-                            <div className={`flex items-center gap-1 mt-1.5 text-[11px] ${isOut ? 'text-indigo-100' : 'text-[var(--color-fg-muted)]'}`}>
-                              <span className="tabular">{formatTime(m.sent_at)}</span>
-                              {statusIcon(m)}
-                              {m.error_message && (
-                                <span className="text-rose-200">· {m.error_message}</span>
+                              {m.subject && (
+                                <div className="mb-1.5 text-[15px] font-semibold">{m.subject}</div>
                               )}
+                              <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{m.body}</p>
+                              <div className={`mt-1.5 flex items-center gap-1.5 text-[12px] ${isOut ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
+                                <span className="tabular-nums">{formatTime(m.sent_at)}</span>
+                                {statusIcon(m)}
+                                {m.error_message && <span>· {m.error_message}</span>}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Reply composer */}
-            <div className="border-t border-[var(--color-line)] p-3 bg-[var(--color-surface)]">
-              <input
-                type="text"
-                value={subject}
-                onChange={e => setSubject(e.target.value.slice(0, 200))}
-                placeholder="Oggetto"
-                className="w-full mb-2 px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
-              <div className="flex items-end gap-2">
-                <textarea
-                  ref={composerRef}
-                  value={bodyText}
-                  onChange={e => setBodyText(e.target.value.slice(0, 5000))}
-                  rows={3}
-                  placeholder="Scrivi la risposta…"
-                  className="flex-1 px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-fg)] resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendReply}
-                  disabled={!subject.trim() || !bodyText.trim() || sending}
-                  className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  Invia
-                </button>
+                        );
+                      })}
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
               </div>
-              {sendError && (
-                <p className="mt-1.5 text-[12px] text-rose-600">{sendError}</p>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center flex-1 text-[var(--color-fg-muted)] text-sm">
-            <Mail className="w-8 h-8 mb-2 text-[var(--color-fg-subtle)]" />
-            Seleziona una conversazione dalla lista.
-          </div>
-        )}
-      </section>
-
-      {/* New email modal */}
-      {newEmailOpen && (
-        <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={() => !sending && setNewEmailOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-[var(--color-line)] flex items-center gap-2">
-              <Mail className="h-4 w-4 text-indigo-600" />
-              <h3 className="text-lg font-semibold text-[var(--color-fg)]">Nuova email</h3>
-            </div>
-            <div className="p-5 space-y-3 overflow-y-auto">
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] block mb-1.5">Destinatario</label>
-                <input
-                  type="email"
-                  value={newRecipient}
-                  onChange={e => setNewRecipient(e.target.value)}
-                  placeholder="cliente@esempio.com"
-                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  autoFocus
-                />
               </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] block mb-1.5">Oggetto</label>
+
+              {/* Reply composer: subject and body as cards, send inside the body. */}
+              <div className="flex-shrink-0 space-y-2 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
                 <input
                   type="text"
                   value={subject}
                   onChange={e => setSubject(e.target.value.slice(0, 200))}
-                  placeholder="Es. Promemoria prenotazione"
-                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  placeholder="Oggetto"
+                  aria-label="Oggetto"
+                  className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
+                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <textarea
+                    ref={composerRef}
+                    value={bodyText}
+                    onChange={e => setBodyText(e.target.value.slice(0, 5000))}
+                    rows={2}
+                    placeholder="Scrivi la risposta…"
+                    aria-label="Risposta"
+                    className="max-h-48 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendReply}
+                    disabled={!subject.trim() || !bodyText.trim() || sending}
+                    aria-label="Invia risposta"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] transition-all hover:brightness-95 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </button>
+                </div>
+                {sendError && (
+                  <p className="px-1 text-[13px] text-[var(--ds-critical-text)]">{sendError}</p>
+                )}
               </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] block mb-1.5">Messaggio</label>
-                <textarea
-                  value={bodyText}
-                  onChange={e => setBodyText(e.target.value.slice(0, 5000))}
-                  rows={8}
-                  placeholder="Ciao, ci scriviamo per…"
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-fg)] resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-              </div>
-              {sendError && <p className="text-[12px] text-rose-600">{sendError}</p>}
-            </div>
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
-              <button type="button" onClick={() => setNewEmailOpen(false)} disabled={sending} className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={handleSendNew}
-                disabled={!newRecipient.trim() || !subject.trim() || !bodyText.trim() || sending}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Invio…</> : <><Send className="w-4 h-4" /> Invia</>}
-              </button>
-            </div>
+            </>
+          ) : (
+            <PanePlaceholder icon={Mail}>Seleziona una conversazione dalla lista</PanePlaceholder>
+          )
+        }
+      />
+
+      {/* New email modal */}
+      <ModalShell
+        open={newEmailOpen}
+        onClose={() => { if (!sending) setNewEmailOpen(false); }}
+        title="Nuova email"
+        bodyClassName="p-4 sm:p-5"
+        footer={
+          <>
+            <button type="button" onClick={() => setNewEmailOpen(false)} disabled={sending} className={dsButton.quiet}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={handleSendNew}
+              disabled={!newRecipient.trim() || !subject.trim() || !bodyText.trim() || sending}
+              className={dsButton.primary}
+            >
+              {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</> : <><Send className="h-4 w-4" /> Invia</>}
+            </button>
+          </>
+        }
+      >
+        <FormCard>
+          <div className="flex flex-col gap-4">
+            <Field label="Destinatario" htmlFor="new-email-to">
+              <input
+                id="new-email-to"
+                type="email"
+                value={newRecipient}
+                onChange={e => setNewRecipient(e.target.value)}
+                placeholder="cliente@esempio.com"
+                className={dsInput}
+                autoFocus
+              />
+            </Field>
+            <Field label="Oggetto" htmlFor="new-email-subject">
+              <input
+                id="new-email-subject"
+                type="text"
+                value={subject}
+                onChange={e => setSubject(e.target.value.slice(0, 200))}
+                placeholder="Es. Promemoria prenotazione"
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Messaggio" htmlFor="new-email-body">
+              <textarea
+                id="new-email-body"
+                value={bodyText}
+                onChange={e => setBodyText(e.target.value.slice(0, 5000))}
+                rows={8}
+                placeholder="Ciao, ci scriviamo per…"
+                className={`${dsTextarea} resize-y`}
+              />
+            </Field>
+            {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
           </div>
-        </div>
-      )}
-    </div>
+        </FormCard>
+      </ModalShell>
+    </>
   );
 };
 

@@ -15,12 +15,13 @@ import { SkeletonKpiRow, SkeletonReservationCard } from './SkeletonCards';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, Utensils, BarChart3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
 import { useTodos } from '../contexts/TodosContext';
 import { CookingPotLoader } from './CookingPotLoader';
+import { ArrivalsTimeline } from './ArrivalsTimeline';
 
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
   [TodoCategory.GENERAL]: 'bg-slate-400',
@@ -76,18 +77,6 @@ const SHOPPING_CATEGORY_LABELS: Record<ShoppingCategory, string> = {
   'ALTRO': 'Altro'
 };
 
-const SHOPPING_CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
-  'CUCINA': <ChefHat className="h-4 w-4" />,
-  'BAR': <Coffee className="h-4 w-4" />,
-  'ALTRO': <Package className="h-4 w-4" />
-};
-
-const SHOPPING_CATEGORY_COLORS: Record<ShoppingCategory, string> = {
-  'CUCINA': 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-500/30',
-  'BAR': 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30',
-  'ALTRO': 'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-500/30'
-};
-
 // Room name → lucide icon. Scalable: extend the map for new rooms or fall back to MapPin.
 const ROOM_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
   veranda: Trees,
@@ -102,33 +91,106 @@ const getRoomIcon = (name: string): React.ComponentType<{ className?: string }> 
   return ROOM_ICON_BY_NAME[key] || MapPin;
 };
 
-const KPI_TONES = {
-  amber: {
-    bg: 'bg-amber-50 dark:bg-amber-500/10',
-    chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
-    value: 'text-[var(--color-fg)]',
-  },
-  blue: {
-    bg: 'bg-blue-50 dark:bg-blue-500/10',
-    chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
-    value: 'text-[var(--color-fg)]',
-  },
-  rose: {
-    bg: 'bg-rose-50 dark:bg-rose-500/10',
-    chip: 'bg-rose-100 text-rose-600 dark:bg-rose-500/25 dark:text-rose-300',
-    value: 'text-rose-600 dark:text-rose-300',
-  },
+// One metric inside the "Adesso in sala" deck. Neutral by default; only the
+// state that needs a glance-level colour ("In arrivo") gets tinted, so the
+// deck stays calm and the tint keeps its meaning.
+const LiveTile: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  sub: string;
+  tone?: 'neutral' | 'arriving';
+  dot?: React.ReactNode;
+}> = ({ label, value, sub, tone = 'neutral', dot }) => {
+  const arriving = tone === 'arriving';
+  return (
+    <div className={`min-w-0 rounded-[16px] px-4 py-3.5 ${arriving ? 'bg-[var(--ds-arriving-tint)]' : 'bg-[var(--ds-surface-row)]'}`}>
+      <div className={`flex items-center gap-1.5 text-[13px] font-medium ${arriving ? 'text-[var(--ds-arriving-text)]' : 'text-[var(--ds-text-secondary)]'}`}>
+        {dot}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className={`mt-1 text-[28px] sm:text-[32px] leading-none font-bold tabular-nums tracking-[-0.02em] ${arriving ? 'text-[var(--ds-arriving-text)]' : 'text-[var(--ds-text-primary)]'}`}>
+        {value}
+      </div>
+      <div className={`mt-2 text-[13px] truncate ${arriving ? 'text-[var(--ds-arriving-text)]' : 'text-[var(--ds-text-muted)]'}`}>
+        {sub}
+      </div>
+    </div>
+  );
+};
+
+// Lunch/dinner split rendered as one bar. `total` is the denominator the bar
+// fills against — for share bars that's lunch+dinner (always full), for the
+// Tavoli capacity bar it's the table count (leaves a remainder). `other` is the
+// neutral bucket for records with no shift set.
+const ShiftBar: React.FC<{ lunch: number; dinner: number; total: number; other?: number }> = ({ lunch, dinner, total, other = 0 }) => {
+  const pct = (n: number) => (total > 0 ? Math.max(0, Math.min(100, (n / total) * 100)) : 0);
+  return (
+    <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-[var(--ds-surface-row)]" aria-hidden>
+      {lunch > 0 && (
+        <div className="h-full rounded-full bg-[var(--ds-pending-solid)]" style={{ width: `${pct(lunch)}%` }} />
+      )}
+      {dinner > 0 && (
+        <div className="h-full rounded-full bg-[var(--ds-arriving-solid)]" style={{ width: `${pct(dinner)}%` }} />
+      )}
+      {other > 0 && (
+        <div className="h-full rounded-full bg-[var(--ds-border-strong)]" style={{ width: `${pct(other)}%` }} />
+      )}
+    </div>
+  );
+};
+
+// A per-shift line under the bar: tinted service icon + plain-language detail.
+const SHIFT_ROW_STYLES = {
+  lunch: { chip: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]', icon: <Sun className="h-3.5 w-3.5" /> },
+  dinner: { chip: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]', icon: <Sunset className="h-3.5 w-3.5" /> },
+  other: { chip: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]', icon: <HelpCircle className="h-3.5 w-3.5" /> },
 } as const;
 
-const KpiBlock: React.FC<{ tone: keyof typeof KPI_TONES; icon: React.ReactNode; value: number | string }> = ({ tone, icon, value }) => {
-  const t = KPI_TONES[tone];
+const ShiftRow: React.FC<{ shift: keyof typeof SHIFT_ROW_STYLES; children: React.ReactNode }> = ({ shift, children }) => {
+  const s = SHIFT_ROW_STYLES[shift];
   return (
-    <div className={`flex-1 min-w-0 rounded-xl ${t.bg} px-3 py-3 flex flex-col justify-between min-h-[78px] sm:min-h-[88px]`}>
-      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${t.chip}`}>
-        {icon}
+    <div className="flex items-center gap-2.5 min-w-0">
+      <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${s.chip}`}>
+        {s.icon}
       </span>
-      <span className={`tabular text-[24px] sm:text-[28px] leading-none font-semibold self-end ${t.value}`}>{value}</span>
+      <span className="text-[13px] text-[var(--ds-text-secondary)] truncate">{children}</span>
     </div>
+  );
+};
+
+// Shared shell for the four KPI cards. Renders as a button only when there's
+// somewhere to navigate — keeps the non-interactive cards out of the tab order.
+const KpiCard: React.FC<{
+  title: string;
+  icon: React.ReactNode;
+  onClick?: () => void;
+  children: React.ReactNode;
+}> = ({ title, icon, onClick, children }) => {
+  const inner = (
+    <>
+      <div className="flex items-center gap-2.5">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+          {icon}
+        </span>
+        <h3 className="text-[15px] sm:text-[16px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+          {title}
+        </h3>
+      </div>
+      {children}
+    </>
+  );
+  const shell =
+    'bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4';
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${shell} text-left hover:bg-[var(--ds-surface-row)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-canvas)]`}
+    >
+      {inner}
+    </button>
+  ) : (
+    <div className={shell}>{inner}</div>
   );
 };
 
@@ -451,6 +513,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     }
   }, [pendingModalRes, onUpdateReservation]);
 
+  // Inline confirm/decline from the "Da confermare" list. Mirrors the modal's
+  // logic, except a booking with an unpaid deposit still routes INTO the modal
+  // so the guard — and its "Conferma comunque" escape hatch — can't be skipped
+  // by the shortcut.
+  const [inlinePendingBusy, setInlinePendingBusy] = useState<number | null>(null);
+  const handleInlinePending = useCallback(async (res: Reservation, action: 'confirm' | 'decline') => {
+    if (!onUpdateReservation) return;
+    if (action === 'confirm' && hasUnpaidDeposit(res)) {
+      setPendingModalRes(res);
+      setUnpaidDepositWarn(true);
+      return;
+    }
+    setInlinePendingBusy(res.id);
+    try {
+      await onUpdateReservation({
+        ...res,
+        reservation_status: action === 'confirm' ? ReservationStatus.CONFIRMED : ReservationStatus.DECLINED,
+      });
+    } catch {
+      // Toast already shown by handleUpdateReservation in App.
+    } finally {
+      setInlinePendingBusy(null);
+    }
+  }, [onUpdateReservation]);
+
   const todayStr = new Date().toISOString().split('T')[0];
 
   const todaysTodos = todos.filter(t => t.dueDate === todayStr && !t.completed);
@@ -518,6 +605,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     return { coperti, kg: Math.max(1, Math.ceil(coperti / 10)) };
   }, [selectedDayReservations, banquetMenus, selectedDateStr]);
 
+
   // Calculate stats for selected day (skip tables in closed rooms)
   const openRoomIds = useMemo(
     () => new Set((Array.isArray(rooms) ? rooms : []).filter(r => !r.is_closed).map(r => r.id)),
@@ -562,10 +650,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     };
   }, [isToday, selectedDayReservations, nowTick, openTableIds, totalTables]);
 
-  // Banchetti scheduled for the selected day
-  const banquetsToday = Array.isArray(banquetMenus)
-    ? banquetMenus.filter(m => m.event_date === selectedDateStr).length
-    : 0;
+  // Banchetti scheduled for the selected day, split the same way the other KPI
+  // cards are. `shift` is optional on a banquet and the form lets you save
+  // without picking one, so unassigned events get their own bucket rather than
+  // being quietly dropped — otherwise the rows wouldn't add up to the headline.
+  const dayBanquets = useMemo(
+    () => (Array.isArray(banquetMenus) ? banquetMenus.filter(m => m.event_date === selectedDateStr) : []),
+    [banquetMenus, selectedDateStr]
+  );
+  const banquetsToday = dayBanquets.length;
+  const sumGuests = (list: BanquetMenu[]) => list.reduce((acc, m) => acc + (m.guests || 0), 0);
+  const lunchBanquets = dayBanquets.filter(m => m.shift === Shift.LUNCH);
+  const dinnerBanquets = dayBanquets.filter(m => m.shift === Shift.DINNER);
+  const unassignedBanquets = dayBanquets.filter(m => m.shift !== Shift.LUNCH && m.shift !== Shift.DINNER);
 
   // Reservations by shift for selected day (only those on open-room tables for KPI math)
   const lunchReservations = selectedDayReservations.filter(r => r.shift === Shift.LUNCH);
@@ -597,6 +694,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
   const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
   const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
+
+  // Rows for the arrivals timeline — the selected day, narrowed by the global
+  // meal filter so it agrees with every other card on the page.
+  const timelineReservations = useMemo(() => selectedDayReservations.filter(r => {
+    if (globalShiftFilter === 'LUNCH') return r.shift === Shift.LUNCH;
+    if (globalShiftFilter === 'DINNER') return r.shift === Shift.DINNER;
+    return true;
+  }), [selectedDayReservations, globalShiftFilter]);
+
+  // Distinct tables in use across the day. A table booked at BOTH lunch and
+  // dinner counts once here but twice in the per-shift rows, so the headline
+  // can legitimately read lower than the two rows added together.
+  const bookedTableIds = new Set([...lunchTableIds, ...dinnerTableIds]);
+
+  // Pending bookings for the SELECTED DAY only — the "Da confermare" section
+  // further down deliberately spans the whole DB, but the KPI card describes
+  // the day you're looking at.
+  const selectedDayPendingCount = selectedDayReservations.filter(
+    r => r.reservation_status === ReservationStatus.PENDING
+  ).length;
 
   // Reservations with notes/allergens for selected day, follows the global meal filter.
   const reservationNotes = useMemo(() => {
@@ -762,8 +879,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     return `${monday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
   }, [selectedDate]);
 
+  // Service window: lunch 11:00–15:30, dinner 18:00–23:30. Lives at component
+  // scope because the chip that renders it now sits in the live deck, while the
+  // greeting block that used to own it is higher up the tree.
+  const serviceState = useMemo(() => {
+    const minutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+    if (minutes >= 11 * 60 && minutes < 15 * 60 + 30) return { text: 'Servizio pranzo · In corso', kind: 'lunch' as const };
+    if (minutes >= 18 * 60 && minutes < 23 * 60 + 30) return { text: 'Servizio cena · In corso', kind: 'dinner' as const };
+    return { text: 'Fuori servizio', kind: 'off' as const };
+  }, [currentTime]);
+
+  // One 16px gutter everywhere, matching the m-4 on the header and sidebar
+  // cards — so the bento column lines up with the chrome instead of sitting
+  // 20px inside it (it was 32px before). No breakpoint ramp: the gutter is a constant of the shell,
+  // not something that should grow with the viewport. pt-0 because the header's
+  // own bottom margin already supplies the 12px above.
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 lg:space-y-8 bg-[var(--color-surface-2)]">
+    <div className="px-4 pt-0 pb-4 space-y-4">
       {/* Header with Calendar Navigation */}
       {(() => {
         const hour = currentTime.getHours();
@@ -789,39 +921,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           || (user?.role ? roleLabels[user.role] : null)
           || capitalizedEmail
           || 'Utente';
-        // Service window: lunch 11:00-15:30, dinner 18:00-23:30
-        const minutes = hour * 60 + currentTime.getMinutes();
-        const inLunch = minutes >= 11 * 60 && minutes < 15 * 60 + 30;
-        const inDinner = minutes >= 18 * 60 && minutes < 23 * 60 + 30;
-        const serviceLabel = inLunch
-          ? { text: 'Servizio pranzo · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
-          : inDinner
-          ? { text: 'Servizio cena · In corso', dot: 'bg-emerald-500', color: 'text-emerald-700 dark:text-emerald-300' }
-          : { text: 'Fuori servizio', dot: 'bg-[var(--color-fg-subtle)]', color: 'text-[var(--color-fg-muted)]' };
+        // The greeting is the page title, not a bento box — it gets more air
+        // than the uniform 16px gutter so it doesn't read as crammed between
+        // the header card and the live deck.
         return (
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 py-2 md:py-4">
             <div className="flex items-center justify-between w-full gap-4">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${serviceLabel.dot}`} aria-hidden />
-                  <span className={`text-[12px] font-medium ${serviceLabel.color}`}>
-                    {serviceLabel.text}
-                  </span>
-                </div>
-                <h1 className="text-[22px] sm:text-[28px] lg:text-[32px] font-semibold text-[var(--color-fg)] tracking-tight mt-1.5">
+                {/* The service status used to sit here as an eyebrow; it now
+                    rides in the "Adesso in sala" header, where the rest of the
+                    right-now state already lives. */}
+                <h1 className="text-[22px] sm:text-[28px] lg:text-[34px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.02em] leading-[1.1]">
                   {greeting}, {firstName}.
                 </h1>
               </div>
               {todaysTodos.length > 0 && (
                 <button
                   onClick={() => onNavigateToAttivita?.()}
-                  className="inline-flex items-center gap-2 p-2.5 rounded-xl text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex-shrink-0 self-end"
+                  className="inline-flex items-center gap-2 md:gap-2.5 pl-4 md:pl-5 pr-1.5 h-11 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors flex-shrink-0 self-center"
                   aria-label={`${todaysTodos.length} attività di oggi`}
                   title="Attività di oggi"
                 >
-                  <ListTodo className="h-7 w-7" />
-                  <span className="hidden md:inline text-sm font-semibold">Attività di oggi</span>
-                  <span className="tabular inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 rounded-full text-[11px] font-bold bg-violet-500 text-[#ffffff]">
+                  {/* Mobile shows the icon; md+ shows the full label. */}
+                  <ListTodo className="h-5 w-5 md:hidden text-[var(--ds-text-secondary)]" aria-hidden />
+                  <span className="hidden md:inline text-[15px] font-semibold tracking-[-0.01em] whitespace-nowrap">Attività di oggi</span>
+                  {/* KNOWN DEVIATION (see spec §3.3): white on amber is 3.25:1. At 16px
+                      regular this is below WCAG's large-text threshold, so it does not meet
+                      the 4.5:1 AA floor. Deliberate product decision. Switching the
+                      foreground to var(--ds-pending-fg) would restore 5.80:1 at any size. */}
+                  <span className="inline-flex items-center justify-center min-w-[32px] h-8 px-2 rounded-full text-[16px] font-normal leading-none tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
                     {todaysTodos.length}
                   </span>
                 </button>
@@ -829,7 +957,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
-            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden">
+            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden bg-[var(--ds-surface)] rounded-[24px] shadow-[var(--ds-shadow-card)] p-3">
               <DateNavigator
                 value={selectedDateStr}
                 onChange={(dateOnly) => {
@@ -840,27 +968,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               />
 
               {/* Separate time chip — always shows live current time */}
-              <div className="flex items-center gap-1.5 bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] px-4 h-10 flex-shrink-0">
-                <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <span className="tabular font-medium text-sm text-[var(--color-fg)] whitespace-nowrap">
+              <div className="flex items-center gap-1.5 bg-[var(--ds-surface-row)] rounded-full px-4 h-10 flex-shrink-0">
+                <Clock className="h-4 w-4 text-[var(--ds-text-secondary)] flex-shrink-0" />
+                <span className="tabular-nums font-semibold text-[15px] tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">
                   {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
 
               {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
-              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
+              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5">
                 {([
-                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                   { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
                   { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
                 ] as const).map(opt => (
                   <button
                     key={opt.key}
                     onClick={() => setGlobalShiftFilter(opt.key)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex-1 md:flex-none ${
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-[15px] font-medium transition-colors flex-1 md:flex-none ${
                       globalShiftFilter === opt.key
-                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                     }`}
                     aria-pressed={globalShiftFilter === opt.key}
                   >
@@ -875,86 +1003,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
       })()}
 
-      {/* "Adesso in sala" — the live command deck. Inverted brand surface so
-          the one tile describing RIGHT NOW dominates the bento hierarchy
-          (near-black in light mode, flips to white in dark). Counts come from
-          the shared time-derivation engine, so this always agrees with the
-          floor map and the Reception rail. */}
+      {/* "Adesso in sala" — the live command deck. It's the only tile that
+          describes RIGHT NOW, so it has to outrank the rest of the bento; the
+          animated hairline frame (.ds-live-frame) does that job now that the
+          surface is white. Counts come from the shared time-derivation engine,
+          so this always agrees with the floor map and the Reception rail. */}
       {liveService && (
-        <div
-          className="rounded-2xl bg-[var(--color-brand)] text-[var(--color-brand-fg)] shadow-[var(--shadow-md)] overflow-hidden"
-          style={{ animation: 'tileIn .35s ease-out both' }}
-        >
-          <div className="px-5 lg:px-6 pt-4 pb-1 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <PulseDot dotClass="bg-emerald-500" pulse sizeClass="h-2 w-2" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-brand-fg)]/60">
+        <div className="ds-live-frame shadow-[var(--ds-shadow-card)]">
+          <div className="ds-live-card overflow-hidden" style={{ animation: 'tileIn .35s ease-out both' }}>
+            <div className="px-4 sm:px-5 pt-4 pb-3 flex items-center gap-2.5 min-w-0">
+              <PulseDot dotClass="bg-[var(--ds-seated-solid)]" pulse sizeClass="h-2 w-2" />
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">
                 Adesso in sala
+              </h2>
+              {/* Service hue follows the DS convention: pranzo amber, cena
+                  indigo, fuori servizio neutral. */}
+              <span
+                className={`inline-flex flex-shrink-0 items-center px-2.5 h-7 rounded-full text-[13px] font-medium whitespace-nowrap ${
+                  serviceState.kind === 'lunch'
+                    ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                    : serviceState.kind === 'dinner'
+                    ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
+                }`}
+              >
+                {serviceState.text}
               </span>
             </div>
-            <span className="text-[11px] tabular-nums text-[var(--color-brand-fg)]/50">
-              {new Date(nowTick).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
 
-          {/* Hairline dividers via gap-px over a translucent ground — they
-              stay correct when the grid wraps 4→2 columns. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-[var(--color-brand-fg)]/10 mt-2">
-            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> In sala
-              </div>
-              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.seatedGuests}</div>
-              <div className="text-[11px] text-[var(--color-brand-fg)]/50">{liveService.seatedTables} {liveService.seatedTables === 1 ? 'tavolo' : 'tavoli'}</div>
-            </div>
-            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
-                <PulseDot dotClass="bg-booked-300 dark:bg-booked-600" pulse={liveService.arriving.length > 0} />
-                In arrivo
-              </div>
-              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.arriving.length}</div>
-              <div className="text-[11px] text-[var(--color-brand-fg)]/50">nei prossimi 20 min</div>
-            </div>
-            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 dark:bg-cyan-600" /> In uscita
-              </div>
-              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.departingCount}</div>
-              <div className="text-[11px] text-[var(--color-brand-fg)]/50">turnover in vista</div>
-            </div>
-            <div className="bg-[var(--color-brand)] px-5 lg:px-6 py-4">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-brand-fg)]/60">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand-fg)]/30" /> Tavoli liberi
-              </div>
-              <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">{liveService.freeTables}</div>
-              <div className="text-[11px] text-[var(--color-brand-fg)]/50">su {totalTables}</div>
+            <div className="px-4 sm:px-5 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <LiveTile
+                label="In sala"
+                value={liveService.seatedGuests}
+                sub={`${liveService.seatedTables} ${liveService.seatedTables === 1 ? 'tavolo' : 'tavoli'}`}
+              />
+              <LiveTile
+                tone="arriving"
+                label="In arrivo"
+                value={liveService.arriving.length}
+                sub="entro 20 min"
+                dot={<PulseDot dotClass="bg-[var(--ds-arriving-solid)]" pulse={liveService.arriving.length > 0} />}
+              />
+              <LiveTile
+                label="In uscita"
+                value={liveService.departingCount}
+                sub="turnover in vista"
+              />
+              <LiveTile
+                label="Tavoli liberi"
+                value={`${liveService.freeTables}/${totalTables}`}
+                sub="tavoli disponibili"
+              />
             </div>
           </div>
-
-          {/* Chi sta per entrare — tap deep-links the booking in Prenotazioni */}
-          {liveService.arriving.length > 0 && (
-            <div className="border-t border-[var(--color-brand-fg)]/10 px-5 lg:px-6 py-2.5 flex items-center gap-2 overflow-x-auto scrollbar-hide">
-              {liveService.arriving.slice(0, 6).map(r => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => onOpenReservationInList?.(r.id)}
-                  className="flex-none inline-flex items-center gap-2 pl-2.5 pr-3 py-1.5 rounded-full bg-[var(--color-brand-fg)]/10 hover:bg-[var(--color-brand-fg)]/20 transition-colors"
-                >
-                  <span className="text-xs font-bold tabular-nums">{getRomeTimePart(r.reservation_time)}</span>
-                  <span className="text-xs font-medium truncate max-w-[120px]">{toTitleCase(r.customer_name)}</span>
-                  <span className="text-[11px] text-[var(--color-brand-fg)]/60 inline-flex items-center gap-0.5">
-                    <UsersIcon className="h-3 w-3" />{r.guests}
-                  </span>
-                </button>
-              ))}
-              {liveService.arriving.length > 6 && (
-                <span className="flex-none text-[11px] text-[var(--color-brand-fg)]/50">
-                  +{liveService.arriving.length - 6} altri
-                </span>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -964,518 +1065,626 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       ) : (() => {
         const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
         const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
-        const cols = (showLunch && showDinner) ? 'grid-cols-2' : 'grid-cols-1';
 
-        // One tinted block per active meal — matches Prenotazioni & banchetti style.
-        // Shift identity comes from the bg tone + icon (no "Pranzo"/"Cena" label).
-        // Attesi and Arrivati sit side-by-side inside the block.
-        const renderShiftBreakdown = (
-          shift: 'lunch' | 'dinner',
-          attesiValue: number,
-          arrivatiValue: number,
-        ) => {
-          const tone = shift === 'lunch' ? KPI_TONES.amber : KPI_TONES.blue;
-          const icon = shift === 'lunch' ? <Sun className="h-3.5 w-3.5" /> : <Sunset className="h-3.5 w-3.5" />;
-          return (
-            <div key={shift} className={`min-w-0 rounded-xl ${tone.bg} p-3 sm:p-4 flex flex-col gap-3`}>
-              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tone.chip}`}>
-                {icon}
-              </span>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] text-[var(--color-fg-muted)]">Attesi</div>
-                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{attesiValue}</div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[11px] text-[var(--color-fg-muted)]">Arrivati</div>
-                  <div className="tabular text-2xl sm:text-3xl font-semibold text-[var(--color-fg)] leading-none mt-1">{arrivatiValue}</div>
-                </div>
-              </div>
-            </div>
-          );
-        };
+        // Only the active shifts feed the headline and the bar, so each card
+        // always describes exactly what the filter claims it does.
+        const pick = (l: number, d: number) => (showLunch ? l : 0) + (showDinner ? d : 0);
+        const guestsTotal = pick(lunchExpectedGuests, dinnerExpectedGuests);
+        const resTotal = pick(lunchReservations.length, dinnerReservations.length);
+
+        // Tavoli fills against room capacity rather than against itself, so the
+        // empty remainder means something. Segments are rescaled to the DISTINCT
+        // table count — otherwise a table booked at both services would be drawn
+        // twice and the bar would overrun the headline.
+        const tablesShown = showLunch && showDinner
+          ? bookedTableIds.size
+          : (showLunch ? lunchTableIds.size : dinnerTableIds.size);
+        const segSum = pick(lunchTableIds.size, dinnerTableIds.size);
+        const segScale = segSum > 0 ? tablesShown / segSum : 0;
+
+        // Unassigned-shift banquets belong to the whole day, so they're only in
+        // scope when no shift filter is applied — that keeps the rows summing to
+        // the headline in every filter state.
+        const banquetsShown = showLunch && showDinner
+          ? dayBanquets
+          : (showLunch ? lunchBanquets : dinnerBanquets);
+
+        const headline = 'tabular text-[30px] sm:text-[34px] leading-none font-bold tracking-[-0.02em] text-[var(--ds-text-primary)]';
+        const qualifier = 'text-[14px] text-[var(--ds-text-muted)]';
 
         return (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Ospiti */}
-            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Ospiti</h3>
-              <div className={`grid ${cols} gap-4 sm:gap-5`}>
-                {showLunch && renderShiftBreakdown('lunch', lunchExpectedGuests, lunchArrivedGuests)}
-                {showDinner && renderShiftBreakdown('dinner', dinnerExpectedGuests, dinnerArrivedGuests)}
+            <KpiCard title="Ospiti" icon={<UsersIcon className="h-4 w-4" />}>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className={headline}>{guestsTotal}</span>
+                <span className={qualifier}>attesi oggi</span>
               </div>
-            </div>
+              <ShiftBar
+                lunch={showLunch ? lunchExpectedGuests : 0}
+                dinner={showDinner ? dinnerExpectedGuests : 0}
+                total={guestsTotal}
+              />
+              <div className="flex flex-col gap-2.5 mt-auto">
+                {showLunch && <ShiftRow shift="lunch">{lunchExpectedGuests} attesi · {lunchArrivedGuests} arrivati</ShiftRow>}
+                {showDinner && <ShiftRow shift="dinner">{dinnerExpectedGuests} attesi · {dinnerArrivedGuests} arrivati</ShiftRow>}
+              </div>
+            </KpiCard>
 
             {/* Tavoli */}
-            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3">
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Tavoli</h3>
-              <div className={`grid ${cols} gap-4 sm:gap-5`}>
-                {showLunch && renderShiftBreakdown('lunch', lunchTableIds.size, lunchArrivedTableIds.size)}
-                {showDinner && renderShiftBreakdown('dinner', dinnerTableIds.size, dinnerArrivedTableIds.size)}
+            <KpiCard title="Tavoli" icon={<LayoutGrid className="h-4 w-4" />}>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className={headline}>{tablesShown}</span>
+                <span className={qualifier}>prenotati su {totalTables}</span>
               </div>
-            </div>
+              <ShiftBar
+                lunch={showLunch ? lunchTableIds.size * segScale : 0}
+                dinner={showDinner ? dinnerTableIds.size * segScale : 0}
+                total={totalTables}
+              />
+              <div className="flex flex-col gap-2.5 mt-auto">
+                {showLunch && <ShiftRow shift="lunch">{lunchTableIds.size} tavoli · {lunchArrivedTableIds.size} seduti</ShiftRow>}
+                {showDinner && <ShiftRow shift="dinner">{dinnerTableIds.size} tavoli · {dinnerArrivedTableIds.size} seduti</ShiftRow>}
+              </div>
+            </KpiCard>
 
             {/* Prenotazioni */}
-            <button
-              type="button"
-              onClick={onNavigateToReservations}
-              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Prenotazioni</h3>
-              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
-                {showLunch && (
-                  <KpiBlock tone="amber" icon={<Sun className="h-3.5 w-3.5" />} value={lunchReservations.length} />
-                )}
-                {showDinner && (
-                  <KpiBlock tone="blue" icon={<Sunset className="h-3.5 w-3.5" />} value={dinnerReservations.length} />
-                )}
+            <KpiCard title="Prenotazioni" icon={<Calendar className="h-4 w-4" />} onClick={onNavigateToReservations}>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className={headline}>{resTotal}</span>
+                <span className={qualifier}>
+                  {selectedDayPendingCount > 0 ? `${selectedDayPendingCount} da confermare` : 'oggi'}
+                </span>
               </div>
-            </button>
+              <ShiftBar
+                lunch={showLunch ? lunchReservations.length : 0}
+                dinner={showDinner ? dinnerReservations.length : 0}
+                total={resTotal}
+              />
+              <div className="flex flex-col gap-2.5 mt-auto">
+                {showLunch && <ShiftRow shift="lunch">{lunchReservations.length} a pranzo</ShiftRow>}
+                {showDinner && <ShiftRow shift="dinner">{dinnerReservations.length} a cena</ShiftRow>}
+              </div>
+            </KpiCard>
 
             {/* Banchetti */}
-            <button
-              type="button"
-              onClick={onNavigateToBanquets}
-              className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] p-4 sm:p-5 flex flex-col gap-3 text-left hover:bg-[var(--color-surface-hover)] transition-colors"
-            >
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-fg)] tracking-tight">Banchetti</h3>
-              <div className="flex flex-wrap gap-2 flex-1 items-stretch">
-                <KpiBlock tone="rose" icon={<Calendar className="h-3.5 w-3.5" />} value={banquetsToday} />
-              </div>
-            </button>
+            <KpiCard title="Banchetti" icon={<Utensils className="h-4 w-4" />} onClick={onNavigateToBanquets}>
+              {banquetsShown.length > 0 ? (
+                <>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className={headline}>{banquetsShown.length}</span>
+                    <span className={qualifier}>
+                      {banquetsShown.length === 1 ? 'evento oggi' : 'eventi oggi'}
+                    </span>
+                  </div>
+                  <ShiftBar
+                    lunch={showLunch ? lunchBanquets.length : 0}
+                    dinner={showDinner ? dinnerBanquets.length : 0}
+                    other={showLunch && showDinner ? unassignedBanquets.length : 0}
+                    total={banquetsShown.length}
+                  />
+                  <div className="flex flex-col gap-2.5 mt-auto">
+                    {showLunch && lunchBanquets.length > 0 && (
+                      <ShiftRow shift="lunch">
+                        {lunchBanquets.length} {lunchBanquets.length === 1 ? 'evento' : 'eventi'} · {sumGuests(lunchBanquets)} ospiti
+                      </ShiftRow>
+                    )}
+                    {showDinner && dinnerBanquets.length > 0 && (
+                      <ShiftRow shift="dinner">
+                        {dinnerBanquets.length} {dinnerBanquets.length === 1 ? 'evento' : 'eventi'} · {sumGuests(dinnerBanquets)} ospiti
+                      </ShiftRow>
+                    )}
+                    {showLunch && showDinner && unassignedBanquets.length > 0 && (
+                      <ShiftRow shift="other">
+                        {unassignedBanquets.length} senza turno · {sumGuests(unassignedBanquets)} ospiti
+                      </ShiftRow>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 min-h-[92px] rounded-[16px] bg-[var(--ds-surface-row)] flex items-end p-4">
+                    <span className="block h-1 w-6 rounded-full bg-[var(--ds-border-strong)]" />
+                  </div>
+                  <span className="text-[14px] text-[var(--ds-text-muted)]">
+                    {banquetsToday > 0 ? 'Nessun banchetto in questo turno' : 'Nessun banchetto oggi'}
+                  </span>
+                </>
+              )}
+            </KpiCard>
           </div>
         );
       })()}
 
-      {/* Row 1: Stato Tavoli + Note & Allergeni + Da confermare.
-          Tablet landscape (lg): 2 columns — Stato Tavoli full-width, then
-          Note + Da confermare side by side (~half each) so their inner cards
-          have room. The dense 4-column layout returns only at xl (1280+). */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 lg:gap-8">
-      {/* Stato Tavoli — Pranzo / Cena side by side */}
-      <div className="lg:col-span-2 bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-        <h2 className="text-base lg:text-lg font-semibold mb-4 text-[var(--color-fg)]">Stato Tavoli</h2>
-
-        <div className={`grid grid-cols-1 ${globalShiftFilter === 'ALL' ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-4 lg:gap-5`}>
-          {([
-            {
-              key: 'lunch',
-              label: 'Pranzo',
-              icon: <Sun className="h-4 w-4" />,
-              chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300',
-              barFill: 'bg-amber-500',
-              roomBar: 'bg-amber-400',
-              cardBg: 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-500/[0.06] dark:border-amber-500/20',
-              divider: 'border-amber-200/60 dark:border-amber-500/20',
-              occupancy: lunchOccupancy,
-              occupiedTables: lunchTableIds.size,
-              reservations: lunchReservations,
-              reservationCount: lunchReservations.length,
-              guestCount: lunchReservations.reduce((acc, r) => acc + r.guests, 0),
-            },
-            {
-              key: 'dinner',
-              label: 'Cena',
-              icon: <Sunset className="h-4 w-4" />,
-              chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300',
-              barFill: 'bg-blue-500',
-              roomBar: 'bg-blue-400',
-              cardBg: 'bg-blue-50/40 border-blue-200/60 dark:bg-blue-500/[0.06] dark:border-blue-500/20',
-              divider: 'border-blue-200/60 dark:border-blue-500/20',
-              occupancy: dinnerOccupancy,
-              occupiedTables: dinnerTableIds.size,
-              reservations: dinnerReservations,
-              reservationCount: dinnerReservations.length,
-              guestCount: dinnerReservations.reduce((acc, r) => acc + r.guests, 0),
-            },
-          ] as const)
-            .filter(m => globalShiftFilter === 'ALL' || globalShiftFilter === (m.key === 'lunch' ? 'LUNCH' : 'DINNER'))
-            .map(meal => {
-            const roomStats = rooms.filter(room => !room.is_closed).map(room => {
-              const roomTables = tables.filter(t => t.room_id === room.id);
-              const roomTableIds = new Set(roomTables.map(t => t.id));
-              const occupied = meal.reservations.filter(r => r.table_id && roomTableIds.has(r.table_id))
-                .reduce((set, r) => { set.add(r.table_id!); return set; }, new Set<number>()).size;
-              const total = roomTables.length;
-              const pct = total > 0 ? Math.round((occupied / total) * 100) : 0;
-              return { id: room.id, name: room.name, occupied, total, pct };
-            }).sort((a, b) => b.pct - a.pct);
-
-            return (
-              <div
-                key={meal.key}
-                className={`rounded-xl border ${meal.cardBg} p-4 sm:p-5 flex flex-col gap-4`}
-              >
-                {/* Header: meal chip + label + total tavoli */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${meal.chip}`}>
-                      {meal.icon}
-                    </span>
-                    <span className="text-[15px] font-semibold text-[var(--color-fg)] tracking-tight">{meal.label}</span>
-                  </div>
-                  <span className="tabular text-xs text-[var(--color-fg-muted)] whitespace-nowrap">{meal.occupiedTables}/{totalTables} tavoli</span>
-                </div>
-
-                {/* Big % + bar with threshold ticks + annotations */}
-                <div>
-                  <div className="flex items-end gap-2">
-                    <span className="tabular text-3xl font-semibold leading-none text-[var(--color-fg)]">{meal.occupancy}%</span>
-                    <span className="text-sm text-[var(--color-fg-muted)] mb-0.5">occupazione</span>
-                  </div>
-                  <div className="relative mt-2 h-2 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
-                    <div className={`absolute inset-y-0 left-0 ${meal.barFill} rounded-full transition-all duration-500`} style={{ width: `${meal.occupancy}%` }} />
-                    {/* threshold ticks */}
-                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '40%' }} aria-hidden />
-                    <span className="absolute top-0 bottom-0 w-px bg-[var(--color-line-strong)]/60" style={{ left: '80%' }} aria-hidden />
-                  </div>
-                  <div className="relative mt-1.5 h-3 text-[10px] text-[var(--color-fg-subtle)]">
-                    <span className="absolute left-0">Calmo</span>
-                    <span className="absolute" style={{ left: '40%', transform: 'translateX(-50%)' }}>Pieno</span>
-                    <span className="absolute right-0">Sold out</span>
-                  </div>
-                  <p className="tabular text-xs text-[var(--color-fg-muted)] mt-2">
-                    {meal.reservationCount} prenotazioni · {meal.guestCount} ospiti
-                  </p>
-                </div>
-
-                {/* Per-room rows */}
-                <div className={`border-t ${meal.divider} pt-3 space-y-1.5`}>
-                  {roomStats.map(room => {
-                    const Icon = getRoomIcon(room.name);
-                    return (
-                      <div key={room.id} className="flex items-center gap-3">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
-                          <Icon className="h-3.5 w-3.5" />
-                        </span>
-                        <span className="text-sm text-[var(--color-fg)] flex-shrink-0 w-20 truncate">{room.name}</span>
-                        <div className="flex-1 h-1.5 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
-                          <div className={`h-full ${meal.roomBar} rounded-full transition-all duration-500`} style={{ width: `${room.pct}%` }} />
-                        </div>
-                        <span className="tabular text-xs text-[var(--color-fg-muted)] w-12 text-right flex-shrink-0">{room.occupied}/{room.total}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+      {/* Row 1: Timeline arrivi — the reception's working view — with the two
+          action lists (Da confermare, Note & allergeni) stacked beside it. */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 xl:h-[440px]">
+        <div className="xl:col-span-2 min-w-0 flex min-h-0">
+          <ArrivalsTimeline
+            reservations={timelineReservations}
+            tables={tables}
+            rooms={rooms}
+            banquetMenus={banquetMenus}
+            selectedDateStr={selectedDateStr}
+            nowTick={nowTick}
+            onUpdateReservation={onUpdateReservation}
+            onConfirmPending={setPendingModalRes}
+            onNavigateToReservations={onNavigateToReservations}
+          />
         </div>
-      </div>
-
-      {/* Note & Allergeni */}
-      <div className="lg:col-span-1 bg-[var(--color-surface)] p-4 lg:p-5 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="flex items-center mb-3 gap-2">
-            <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">
-              Note &amp; Allergeni
-            </h2>
-          </div>
-          {reservationNotes.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-center py-8">
-              <div>
-                <StickyNote className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-                <p className="text-xs text-[var(--color-fg-subtle)]">
-                  Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
-              {reservationNotes.map(({ reservation, table, room, allergens }) => {
-                const isLunch = reservation.shift === Shift.LUNCH;
-                const time = getRomeTimePart(reservation.reservation_time);
-                const circleBg = isLunch ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-indigo-100 dark:bg-[#4f46e5]/20 text-indigo-700 dark:text-[#a5b4fc]';
-                const isExpanded = expandedNoteIds.has(reservation.id);
-                const noteText = stripDietaryNote(reservation.notes);
-                const isTruncatable = noteText.length > 80;
-                return (
-                  <div key={reservation.id} className="border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                    {/* Row 1: Table circle + Name/Time + Warning */}
-                    <div className="flex items-center gap-3">
-                      <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${circleBg}`}>
-                        {table ? table.name.replace(/[^0-9]/g, '') || table.name.charAt(0) : '–'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</p>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                          <span className="text-xs text-[var(--color-fg-muted)]">{time || '—'}</span>
-                          {room && (
-                            <>
-                              <span className="text-[var(--color-fg-subtle)] text-xs mx-0.5">·</span>
-                              <span className="text-xs text-[var(--color-fg-muted)] truncate">{room.name}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      {!table && (
-                        <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30">
-                          <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                          <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 whitespace-nowrap">Non assegnato</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Row 2: Allergie (rose) + Intolleranze (amber) chips */}
-                    <DietaryChips notes={reservation.notes} presets={allergenPresets} size="sm" className="mt-2.5" />
-
-                    {/* Row 3: Notes (truncatable) */}
-                    {noteText && (
-                      <div className="mt-2">
-                        <p className="text-xs text-[var(--color-fg-muted)] leading-relaxed whitespace-pre-wrap break-words">
-                          {isTruncatable && !isExpanded ? noteText.slice(0, 80) + '…' : noteText}
-                        </p>
-                        {isTruncatable && (
-                          <button
-                            onClick={() => setExpandedNoteIds(prev => {
-                              const next = new Set(prev);
-                              if (next.has(reservation.id)) next.delete(reservation.id);
-                              else next.add(reservation.id);
-                              return next;
-                            })}
-                            className="text-[11px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] mt-1 transition-colors"
-                          >
-                            {isExpanded ? 'Mostra meno' : 'Mostra tutto'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
+        <div className="flex flex-col gap-4 min-w-0 min-h-0">
       {/* Da confermare — pending reservations across the whole DB (not just
-          today), ordered by reservation time ascending. Click opens a quick
-          confirm/decline modal; full editing lives in Prenotazioni.
-          When non-empty the card wears an amber accent (background + border
-          + ring) so it reads as "needs attention" at a glance; empty stays
-          neutral so an idle Dashboard doesn't scream. */}
-      <div className={`lg:col-span-1 p-4 lg:p-5 rounded-2xl border shadow-[var(--shadow-sm)] flex flex-col ${
-        pendingReservations.length > 0
-          ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-200 dark:bg-amber-500/[0.08] dark:border-amber-500/40 dark:ring-amber-500/20'
-          : 'bg-[var(--color-surface)] border-[var(--color-line)]'
-      }`}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Da confermare</h2>
+          today), ordered by reservation time ascending. Confirm/decline act in
+          place; a booking with an unpaid deposit still routes into the modal so
+          the guard holds. Full editing lives in Prenotazioni. */}
+      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Da confermare</h2>
           {pendingReservations.length > 0 && (
-            <span className="text-sm font-bold min-w-[28px] h-7 inline-flex items-center justify-center px-2 rounded-full bg-amber-500 text-white shadow-sm dark:bg-amber-500 dark:text-white tabular">
+            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full text-[14px] font-semibold tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
               {pendingReservations.length}
             </span>
           )}
         </div>
         {isInitialLoading && reservations.length === 0 ? (
-          <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+          <div className="space-y-2">
             <SkeletonReservationCard variant="wide" />
             <SkeletonReservationCard variant="narrow" />
-            <SkeletonReservationCard variant="wide" />
           </div>
         ) : pendingReservations.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-center py-8">
-            <div>
-              <CheckCircle2 className="h-8 w-8 text-emerald-500/70 mx-auto mb-2" />
-              <p className="text-xs text-[var(--color-fg-subtle)]">Nessuna prenotazione da confermare</p>
-            </div>
+          <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+            <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
+            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione da confermare</p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {pendingReservations.map(res => {
               const source = res.source || ReservationSource.MANUAL;
-              const channel = source === ReservationSource.WHATSAPP
-                ? { Icon: MessageCircle, label: 'WhatsApp', cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' }
-                : source === ReservationSource.GOOGLE
-                ? { Icon: Globe, label: 'Web', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' }
-                : source === ReservationSource.VOICE
-                ? { Icon: Mic, label: 'Agente vocale', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' }
-                : { Icon: PhoneIcon, label: 'Telefono', cls: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]' };
-              // The DB stores reservation_time as timestamptz (serialized with a
-              // Z suffix). Reading the raw ISO time shows the UTC hour (e.g. a
-              // 20:30 Rome web booking rendered as 18:30). Convert to Europe/Rome
-              // explicitly — same as every other card in the app.
-              const resDate = new Date(res.reservation_time);
-              const dateLabel = !Number.isNaN(resDate.getTime())
-                ? resDate.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', timeZone: 'Europe/Rome' })
-                : '';
+              const channelLabel = source === ReservationSource.WHATSAPP ? 'WhatsApp'
+                : source === ReservationSource.GOOGLE ? 'Google'
+                : source === ReservationSource.VOICE ? 'Agente vocale'
+                : 'Telefono';
+              // reservation_time is timestamptz; read it in Europe/Rome or a
+              // 20:30 booking renders as its UTC hour.
               const timeLabel = getRomeTimePart(res.reservation_time);
+              const busy = inlinePendingBusy === res.id;
               return (
-                <button
-                  key={res.id}
-                  type="button"
-                  onClick={() => setPendingModalRes(res)}
-                  className="w-full text-left border border-[var(--color-line)] rounded-lg p-3 bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${channel.cls}`} title={`Canale: ${channel.label}`}>
-                      <channel.Icon className="h-4 w-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-fg)] truncate">{toTitleCase(res.customer_name) || '—'}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--color-fg-muted)] tabular">
-                        <Clock className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                        <span>{dateLabel} · {timeLabel}</span>
-                        <span className="text-[var(--color-fg-subtle)] mx-0.5">·</span>
-                        <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
-                      </div>
-                    </div>
-                    <PaymentBadge reservation={res} />
-                    <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-                  </div>
-                </button>
+                <div key={res.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setPendingModalRes(res)}
+                    className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-lg"
+                  >
+                    <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
+                      {toTitleCase(res.customer_name) || '—'}
+                    </p>
+                    <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
+                      {timeLabel} · {res.guests || 0} coperti · {channelLabel}
+                    </p>
+                  </button>
+                  <PaymentBadge reservation={res} />
+                  <button
+                    type="button"
+                    disabled={busy || !onUpdateReservation}
+                    onClick={() => handleInlinePending(res, 'decline')}
+                    className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:brightness-95 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    aria-label={`Rifiuta la prenotazione di ${toTitleCase(res.customer_name)}`}
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !onUpdateReservation}
+                    onClick={() => handleInlinePending(res, 'confirm')}
+                    className="flex-shrink-0 h-9 px-3.5 rounded-full text-[14px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {busy ? '…' : 'Conferma'}
+                  </button>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+      {/* Note & Allergeni */}
+      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+            Note &amp; allergeni
+          </h2>
+          {reservationNotes.length > 0 && (
+            <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]">{reservationNotes.length}</span>
+          )}
+        </div>
+        {reservationNotes.length === 0 ? (
+          <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+            <StickyNote className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
+            <p className="text-[14px] text-[var(--ds-text-muted)]">
+              Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
+            {reservationNotes.map(({ reservation, table, room, allergens }) => {
+              const time = getRomeTimePart(reservation.reservation_time);
+              const isExpanded = expandedNoteIds.has(reservation.id);
+              const noteText = stripDietaryNote(reservation.notes);
+              const isTruncatable = noteText.length > 80;
+              // "T31" when seated, "senza tavolo" when not — the unassigned
+              // case is the one the kitchen needs to chase, so it says so in
+              // words rather than hiding behind a dash.
+              const tableLabel = table
+                ? `T${table.name.replace(/[^0-9]/g, '') || table.name}`
+                : 'senza tavolo';
+              const meta = [tableLabel, time || '—', room?.name].filter(Boolean).join(' · ');
+              return (
+                <div key={reservation.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+                    <span className={`text-[13px] ${table ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-pending-text)] font-medium'}`}>
+                      {meta}
+                    </span>
+                    <span className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
+                      {toTitleCase(reservation.customer_name)}
+                    </span>
+                  </div>
+
+                  <DietaryChips notes={reservation.notes} presets={allergenPresets} size="sm" className="mt-2" />
+
+                  {noteText && (
+                    <div className="mt-1.5">
+                      <p className="text-[13px] text-[var(--ds-text-secondary)] leading-relaxed whitespace-pre-wrap break-words">
+                        {isTruncatable && !isExpanded ? noteText.slice(0, 80) + '…' : noteText}
+                      </p>
+                      {isTruncatable && (
+                        <button
+                          onClick={() => setExpandedNoteIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(reservation.id)) next.delete(reservation.id);
+                            else next.add(reservation.id);
+                            return next;
+                          })}
+                          className="text-[13px] font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] mt-1 transition-colors"
+                        >
+                          {isExpanded ? 'Mostra meno' : 'Mostra tutto'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+        </div>
       </div>
 
-      {/* Row 2: Affluenza — merged Orario + Settimana with shared shift filter */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-        {/* Header: title, view tabs, shift filter */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Affluenza</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex gap-2">
-              {([
-                { key: 'ORARIO', label: 'Orario' },
-                { key: 'SETTIMANA', label: 'Settimana' },
-              ] as const).map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => setAffluenceTab(t.key)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors border ${
-                    affluenceTab === t.key
-                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                      : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
+      {/* Row 2: Stato tavoli, then Affluenza — full width each. The heatmap
+          needs the horizontal room to breathe; at half width its cells were
+          scrolling almost immediately. */}
+      <div className="flex flex-col gap-4">
+      {/* Stato tavoli — one row per room, both services side by side, so a
+          room's whole day reads in a single glance. Closed rooms stay hidden,
+          as they always have. */}
+      {(() => {
+        const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+        const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+
+        const roomStats = rooms.filter(room => !room.is_closed).map(room => {
+          const roomTableIds = new Set(tables.filter(t => t.room_id === room.id).map(t => t.id));
+          const seatedIn = (list: Reservation[]) =>
+            new Set(list.filter(r => r.table_id && roomTableIds.has(r.table_id)).map(r => r.table_id!)).size;
+          return {
+            id: room.id,
+            name: room.name,
+            total: roomTableIds.size,
+            lunch: seatedIn(lunchReservations),
+            dinner: seatedIn(dinnerReservations),
+          };
+        }).sort((a, b) => (b.lunch + b.dinner) - (a.lunch + a.dinner));
+
+        // Tables busy at least once in the visible services.
+        const busyIds = new Set<number>([
+          ...(showLunch ? lunchTableIds : []),
+          ...(showDinner ? dinnerTableIds : []),
+        ]);
+        const dayPct = totalTables > 0 ? Math.round((busyIds.size / totalTables) * 100) : 0;
+
+        const miniBar = (value: number, total: number, shift: 'lunch' | 'dinner') => (
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`text-[13px] w-14 flex-shrink-0 ${shift === 'lunch' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-arriving-text)]'}`}>
+              {shift === 'lunch' ? 'pranzo' : 'cena'}
+            </span>
+            <div className="flex-1 min-w-0 h-2 rounded-full bg-[var(--ds-surface)] overflow-hidden">
+              <div
+                className={`h-full rounded-full ${shift === 'lunch' ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-arriving-solid)]'}`}
+                style={{ width: `${total > 0 ? Math.min(100, (value / total) * 100) : 0}%` }}
+              />
             </div>
+          </div>
+        );
+
+        return (
+          <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+                <LayoutGrid className="h-4 w-4" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Stato tavoli</h2>
+                <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
+                  {busyIds.size} tavoli su {totalTables} impegnati
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-baseline gap-2">
+                <span className="tabular text-[30px] sm:text-[34px] leading-none font-bold tracking-[-0.02em] text-[var(--ds-text-primary)]">{dayPct}%</span>
+                <span className="text-[14px] text-[var(--ds-text-muted)]">occupazione giornaliera</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {showLunch && (
+                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-full text-[13px] font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                    <Sun className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                    Pranzo {lunchOccupancy}% · {lunchTableIds.size} tavoli
+                  </span>
+                )}
+                {showDinner && (
+                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-full text-[13px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                    <Sunset className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                    Cena {dinnerOccupancy}% · {dinnerTableIds.size} tavoli
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <ShiftBar
+                lunch={showLunch ? lunchTableIds.size : 0}
+                dinner={showDinner ? dinnerTableIds.size : 0}
+                total={totalTables}
+              />
+              {/* Named anchors, not just a percentage — "Pieno" means something
+                  to a host mid-service in a way that "50%" does not. */}
+              <div className="flex justify-between mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                <span>Calmo</span>
+                <span>Pieno</span>
+                <span>Sold out</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 max-h-[340px] overflow-y-auto scrollbar-hide -mx-1 px-1">
+              {roomStats.map(room => {
+                const Icon = getRoomIcon(room.name);
+                return (
+                  <div key={room.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
+                    <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-semibold text-[var(--ds-text-primary)] w-20 sm:w-24 flex-shrink-0 truncate">
+                      {room.name}
+                    </span>
+                    <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                      {showLunch && miniBar(room.lunch, room.total, 'lunch')}
+                      {showDinner && miniBar(room.dinner, room.total, 'dinner')}
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col gap-1.5 items-end w-12 text-[14px] font-semibold tabular-nums">
+                      {showLunch && (
+                        <span className={room.lunch > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-subtle)]'}>
+                          {room.lunch}/{room.total}
+                        </span>
+                      )}
+                      {showDinner && (
+                        <span className={room.dinner > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-subtle)]'}>
+                          {room.dinner}/{room.total}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+      {/* Affluenza — coperti per fascia oraria, grouped by service. One aligned
+          time axis per service instead of one per room, so the same 21:00 sits
+          in the same column for every sala. */}
+      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-6 flex flex-col gap-5 min-w-0">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+              <BarChart3 className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Affluenza</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
+                Coperti per fascia · {globalShiftFilter === 'LUNCH' ? 'pranzo' : globalShiftFilter === 'DINNER' ? 'cena' : 'entrambi i servizi'}
+              </p>
+            </div>
+          </div>
+          <div className="inline-flex p-1 rounded-full bg-[var(--ds-surface-row)] flex-shrink-0">
+            {([
+              { key: 'ORARIO', label: 'Orario' },
+              { key: 'SETTIMANA', label: 'Settimana' },
+            ] as const).map(t => (
+              <button
+                key={t.key}
+                onClick={() => setAffluenceTab(t.key)}
+                className={`px-3.5 h-8 text-[14px] font-medium rounded-full whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  affluenceTab === t.key
+                    ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                    : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {affluenceTab === 'ORARIO' && (() => {
           const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
           const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
-          const cellColor = (p: number, isLunch: boolean) => {
-            if (p === 0) return 'bg-[var(--color-surface-3)]';
-            if (isLunch) {
-              if (p < 25) return 'bg-amber-200 dark:bg-amber-500/30';
-              if (p < 50) return 'bg-amber-300 dark:bg-amber-500/45';
-              if (p < 75) return 'bg-amber-400 dark:bg-amber-500/65';
-              return 'bg-amber-500 dark:bg-amber-500/85';
-            }
-            if (p < 25) return 'bg-blue-200 dark:bg-blue-500/30';
-            if (p < 50) return 'bg-blue-300 dark:bg-blue-500/45';
-            if (p < 75) return 'bg-blue-400 dark:bg-blue-500/65';
-            return 'bg-blue-500 dark:bg-blue-500/85';
-          };
 
-          const renderShift = (
-            shift: 'lunch' | 'dinner',
-            slots: { time: string; guests: number; percentage: number }[],
-            total: number,
-            pct: number,
-            roomMax: number,
-          ) => {
+          const renderService = (shift: 'lunch' | 'dinner') => {
             const isLunch = shift === 'lunch';
             const tone = isLunch
-              ? { chip: 'bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300', icon: <Sun className="h-3 w-3" />, label: 'Pranzo', text: 'text-amber-900 dark:text-amber-100' }
-              : { chip: 'bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300', icon: <Sunset className="h-3 w-3" />, label: 'Cena', text: 'text-blue-900 dark:text-blue-100' };
+              ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', solid: 'var(--ds-pending-solid)', icon: <Sun className="h-3.5 w-3.5" />, label: 'Pranzo' }
+              : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', solid: 'var(--ds-arriving-solid)', icon: <Sunset className="h-3.5 w-3.5" />, label: 'Cena' };
+
+            const all = timeSlotAffluence.roomTimeSlots;
+            if (all.length === 0) return null;
+            const slotsOf = (r: typeof all[number]) => isLunch ? r.lunchSlots : r.dinnerSlots;
+            const totalOf = (r: typeof all[number]) => isLunch ? r.totalLunchGuests : r.totalDinnerGuests;
+            const pctOf = (r: typeof all[number]) => isLunch ? r.lunchPercentage : r.dinnerPercentage;
+
+            const active = all.filter(r => totalOf(r) > 0);
+            const idle = all.filter(r => totalOf(r) === 0);
+            const slots = slotsOf(all[0]) || [];
+            if (slots.length === 0) return null;
+
+            const serviceTotal = all.reduce((acc, r) => acc + totalOf(r), 0);
+            const range = `${slots[0].time} – ${slots[slots.length - 1].time}`;
+            // Peak = the busiest slot across every room in this service.
+            const perSlot = slots.map((_, i) => all.reduce((acc, r) => acc + (slotsOf(r)[i]?.guests || 0), 0));
+            const peakIdx = perSlot.indexOf(Math.max(...perSlot));
+            const peak = perSlot[peakIdx] > 0 ? slots[peakIdx].time : null;
+
+            // Intensity ramp painted as an overlay rather than a colour scale,
+            // so the whole ramp derives from the one token per service.
+            const intensity = (pct: number) => pct === 0 ? 0 : pct < 25 ? 0.18 : pct < 50 ? 0.38 : pct < 75 ? 0.62 : 0.92;
+            // Amber stays dark-on-light at full strength (spec §3.3); indigo
+            // is dark enough to flip to white.
+            const cellText = (pct: number) =>
+              pct === 0 ? 'text-[var(--ds-text-subtle)]'
+              : intensity(pct) >= 0.62 && !isLunch ? 'text-white'
+              : tone.text;
 
             return (
-              <div className="flex items-center gap-2">
-                {/* Fixed left chip */}
-                <span className={`inline-flex h-5 w-5 items-center justify-center rounded ${tone.chip} flex-shrink-0 self-end mb-[6px]`} aria-label={tone.label}>
-                  {tone.icon}
-                </span>
-                {/* Scrollable middle: labels + cells */}
-                <div className="flex-1 min-w-0 overflow-x-auto">
-                  <div className="flex flex-col gap-1" style={{ minWidth: `${slots.length * 44}px` }}>
-                    <div className="flex gap-1">
-                      {slots.map(s => (
-                        <span key={s.time} className="tabular text-[10px] text-[var(--color-fg-subtle)] text-center flex-1 min-w-[40px]">{s.time}</span>
-                      ))}
-                    </div>
-                    <div className="flex gap-1">
-                      {slots.map(slot => (
-                        <div
-                          key={slot.time}
-                          className={`relative flex-1 min-w-[40px] ${cellColor(slot.percentage, isLunch)} rounded h-7 sm:h-8 flex items-center justify-center transition-colors`}
-                          title={`${slot.time} · ${slot.guests} ospiti (${slot.percentage}%)`}
+              <div key={shift} className={`rounded-[16px] p-4 sm:p-5 flex flex-col gap-4 min-w-0 ${tone.wash}`}>
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
+                    {tone.icon}
+                  </span>
+                  <h3 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{tone.label}</h3>
+                  <span className={`text-[13px] ${tone.text}`}>
+                    {range} · {serviceTotal} coperti{peak ? ` · picco alle ${peak}` : ''}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+                  <div style={{ minWidth: `${168 + slots.length * 64 + 92}px` }} className="flex flex-col gap-2.5">
+                    <div className="flex gap-2 items-center">
+                      <div className="w-[168px] flex-shrink-0" />
+                      {slots.map((s, i) => (
+                        <span
+                          key={s.time}
+                          className={`flex-1 min-w-[56px] text-center text-[12px] tabular-nums ${i === peakIdx && peak ? `font-semibold ${tone.text}` : 'text-[var(--ds-text-muted)]'}`}
                         >
-                          <span className={`tabular text-[11px] font-semibold ${slot.guests > 0 ? tone.text : 'text-[var(--color-fg-subtle)]'}`}>
-                            {slot.guests}
+                          {s.time}
+                        </span>
+                      ))}
+                      <div className="w-[92px] flex-shrink-0" />
+                    </div>
+
+                    {active.map(room => {
+                      const Icon = getRoomIcon(room.roomName);
+                      return (
+                        <div key={room.roomId} className="flex gap-2 items-center">
+                          <div className="w-[168px] flex-shrink-0 flex items-center gap-2 min-w-0">
+                            <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[14px] font-semibold text-[var(--ds-text-primary)] truncate">{room.roomName}</div>
+                              <div className="text-[12px] text-[var(--ds-text-muted)] truncate">max {room.maxCapacity} coperti</div>
+                            </div>
+                          </div>
+                          {slotsOf(room).map(slot => (
+                            <div
+                              key={slot.time}
+                              className="relative flex-1 min-w-[56px] h-11 rounded-[12px] bg-[var(--ds-surface)] overflow-hidden flex items-center justify-center"
+                              title={`${room.roomName} · ${slot.time} · ${slot.guests} coperti (${slot.percentage}%)`}
+                            >
+                              {slot.percentage > 0 && (
+                                <span className="absolute inset-0" style={{ backgroundColor: tone.solid, opacity: intensity(slot.percentage) }} aria-hidden />
+                              )}
+                              <span className={`relative tabular-nums text-[13px] font-semibold ${cellText(slot.percentage)}`}>
+                                {slot.guests}
+                              </span>
+                            </div>
+                          ))}
+                          <span className="w-[92px] flex-shrink-0 text-right text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
+                            {totalOf(room)}/{room.maxCapacity} <span className="font-semibold text-[var(--ds-text-primary)]">{pctOf(room)}%</span>
                           </span>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
+
+                    {idle.length > 0 && (
+                      <div className="flex gap-2 items-center">
+                        <div className="w-[168px] flex-shrink-0 text-[14px] font-medium text-[var(--ds-text-muted)] truncate">
+                          {active.length === 0 ? 'Tutte le sale' : 'Altre sale'}
+                        </div>
+                        <div className="flex-1 h-11 rounded-[12px] bg-[var(--ds-surface)]/60 flex items-center justify-center text-[13px] text-[var(--ds-text-muted)] px-3 text-center">
+                          Nessuna prenotazione a {isLunch ? 'pranzo' : 'cena'}
+                        </div>
+                        <span className="w-[92px] flex-shrink-0 text-right text-[13px] text-[var(--ds-text-muted)]">—</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                {/* Fixed right total */}
-                <span className="tabular text-[11px] text-[var(--color-fg-muted)] w-20 text-right flex-shrink-0 self-end mb-[6px]">{total}/{roomMax} · {pct}%</span>
               </div>
             );
           };
 
+          const lunchGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
+          const dinnerGuests = dinnerReservations.reduce((acc, r) => acc + r.guests, 0);
+          const shownGuests = (showLunch ? lunchGuests : 0) + (showDinner ? dinnerGuests : 0);
+          const shownCapacity = timeSlotAffluence.totalCapacity * ((showLunch ? 1 : 0) + (showDinner ? 1 : 0));
+
           return (
             <>
-              <div className="space-y-3 max-h-[460px] overflow-y-auto">
-                {timeSlotAffluence.roomTimeSlots.map(room => {
-                  const Icon = getRoomIcon(room.roomName);
-                  return (
-                    <div key={room.roomId} className="border border-[var(--color-line)] rounded-md p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex-shrink-0">
-                            <Icon className="h-3.5 w-3.5" />
-                          </span>
-                          <h3 className="font-medium text-sm text-[var(--color-fg)] truncate">{room.roomName}</h3>
-                        </div>
-                        <span className="tabular text-xs text-[var(--color-fg-subtle)] flex-shrink-0">Max {room.maxCapacity} coperti</span>
-                      </div>
-                      {showLunch && renderShift('lunch', room.lunchSlots, room.totalLunchGuests, room.lunchPercentage, room.maxCapacity)}
-                      {showDinner && renderShift('dinner', room.dinnerSlots, room.totalDinnerGuests, room.dinnerPercentage, room.maxCapacity)}
-                    </div>
-                  );
-                })}
+              <div className="flex flex-col gap-3">
+                {showLunch && renderService('lunch')}
+                {showDinner && renderService('dinner')}
               </div>
 
-              {/* Totals */}
-              <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                 {showLunch && (
-                  <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
-                          <Sun className="h-3 w-3" />
-                        </span>
-                        Totale Pranzo
+                  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                    <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                        <Sun className="h-3.5 w-3.5" />
                       </span>
-                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                        {lunchReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                      </span>
-                    </div>
+                      <span className="truncate">Totale pranzo</span>
+                    </span>
+                    <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
+                      {lunchGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.totalCapacity}</span>
+                    </span>
                   </div>
                 )}
                 {showDinner && (
-                  <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
-                          <Sunset className="h-3 w-3" />
-                        </span>
-                        Totale Cena
+                  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                    <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                        <Sunset className="h-3.5 w-3.5" />
                       </span>
-                      <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                        {dinnerReservations.reduce((acc, r) => acc + r.guests, 0)}/{timeSlotAffluence.totalCapacity}
-                      </span>
-                    </div>
+                      <span className="truncate">Totale cena</span>
+                    </span>
+                    <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
+                      {dinnerGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.totalCapacity}</span>
+                    </span>
                   </div>
                 )}
+                <div className="rounded-[16px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] p-3 flex items-center justify-between gap-2 min-w-0">
+                  <span className="text-[14px] font-medium truncate">Totale giornata</span>
+                  <span className="tabular text-[17px] font-bold flex-shrink-0">
+                    {shownGuests}<span className="text-[14px] font-normal opacity-60">/{shownCapacity}</span>
+                  </span>
+                </div>
               </div>
             </>
           );
@@ -1492,7 +1701,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
                   <Tooltip
                     cursor={{ fill: 'var(--color-surface-hover)' }}
-                    contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)', borderRadius: '8px', fontSize: '12px' }}
+                    contentStyle={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: '12px', fontSize: '13px' }}
                     labelStyle={{ color: 'var(--color-fg-muted)' }}
                     formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
                     labelFormatter={(label, payload) => {
@@ -1511,110 +1720,111 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </ResponsiveContainer>
             </div>
 
-            {/* Totals — same pattern as Orario */}
-            <div className={`mt-4 pt-3 border-t border-[var(--color-line)] grid gap-3 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+            {/* Totals — same tiles as Orario, so toggling tabs doesn't change
+                the shape of the card's footer. */}
+            <div className={`grid gap-2 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH') && (
-                <div className="rounded-md p-2.5 border border-amber-200/60 bg-amber-50/40 dark:bg-amber-500/[0.06] dark:border-amber-500/20">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300">
-                        <Sun className="h-3 w-3" />
-                      </span>
-                      Totale Pranzo (settimana)
+                <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                  <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
+                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                      <Sun className="h-3.5 w-3.5" />
                     </span>
-                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
-                    </span>
-                  </div>
+                    <span className="truncate">Totale pranzo (settimana)</span>
+                  </span>
+                  <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
+                    {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)}
+                  </span>
                 </div>
               )}
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER') && (
-                <div className="rounded-md p-2.5 border border-blue-200/60 bg-blue-50/40 dark:bg-blue-500/[0.06] dark:border-blue-500/20">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg)]">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-600 dark:bg-blue-500/25 dark:text-blue-300">
-                        <Sunset className="h-3 w-3" />
-                      </span>
-                      Totale Cena (settimana)
+                <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                  <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
+                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                      <Sunset className="h-3.5 w-3.5" />
                     </span>
-                    <span className="tabular text-sm font-semibold text-[var(--color-fg)]">
-                      {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)} ospiti
-                    </span>
-                  </div>
+                    <span className="truncate">Totale cena (settimana)</span>
+                  </span>
+                  <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
+                    {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)}
+                  </span>
                 </div>
               )}
             </div>
           </>
         )}
       </div>
+      </div>
 
 
-      {/* Row 3: Attività + Spesa del giorno + Sotto Scorta */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        {/* Attività — compact summary */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Attività</h2>
-              <p className="tabular text-xs text-[var(--color-fg-muted)]">
+      {/* Row 3: Attività + Spesa + Sotto scorta */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Attività */}
+        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Attività</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                 {overdueTodos.length > 0 && (
-                  <span className="text-rose-600 dark:text-rose-400 font-medium">{overdueTodos.length} scadute</span>
+                  <span className="text-[var(--ds-critical-text)] font-semibold">{overdueTodos.length} scadute</span>
                 )}
-                {overdueTodos.length > 0 && (todaysTodos.length > 0 || pendingCount > 0) && <span> · </span>}
+                {overdueTodos.length > 0 && todaysTodos.length > 0 && <span> · </span>}
                 {todaysTodos.length > 0 && <span>{todaysTodos.length} oggi</span>}
-                {overdueTodos.length === 0 && todaysTodos.length === 0 && (
-                  <span>{pendingCount} da fare</span>
-                )}
+                {overdueTodos.length === 0 && todaysTodos.length === 0 && <span>{pendingCount} da fare</span>}
               </p>
             </div>
             {onNavigateToAttivita && (
               <button
                 onClick={onNavigateToAttivita}
-                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
               >
-                Apri <ChevronRight className="h-3.5 w-3.5" />
+                Apri <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
             )}
           </div>
 
           {overdueTodos.length > 0 && (
-            <div className="mb-3 p-2.5 bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 rounded-lg">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
-                <p className="text-xs text-rose-700 dark:text-rose-300 truncate">
-                  {overdueTodos.slice(0, 2).map(t => t.title).join(', ')}{overdueTodos.length > 2 ? '…' : ''}
-                </p>
-              </div>
+            <div className="rounded-[16px] bg-[var(--ds-critical-tint)] px-3 py-2.5 flex items-center gap-2.5 min-w-0">
+              <AlertTriangle className="h-4 w-4 text-[var(--ds-critical-text)] flex-shrink-0" aria-hidden />
+              <p className="text-[13px] text-[var(--ds-critical-text)] truncate flex-1 min-w-0">
+                {overdueTodos[0].title}
+              </p>
+              {overdueTodos.length > 1 && (
+                <span className="flex-shrink-0 text-[13px] font-semibold tabular-nums text-[var(--ds-critical-text)]">
+                  +{overdueTodos.length - 1}
+                </span>
+              )}
             </div>
           )}
 
-          <div className="flex-1 space-y-1.5 mb-3 min-h-[120px]">
+          <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {urgentTasks.length === 0 ? (
-              <div className="py-6 text-center">
-                <CheckCircle2 className="h-7 w-7 text-emerald-500 mx-auto mb-2" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Tutto sotto controllo</p>
+              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+                <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
+                <p className="text-[14px] text-[var(--ds-text-muted)]">Tutto sotto controllo</p>
               </div>
             ) : (
               urgentTasks.map(todo => {
-                const isOverdue = todo.dueDate && todo.dueDate < todayStr;
+                const isOverdue = !!todo.dueDate && todo.dueDate < todayStr;
+                const isToday = todo.dueDate === todayStr;
                 return (
-                  <div
-                    key={todo.id}
-                    className="group flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors"
-                  >
+                  <div key={todo.id} className="flex items-center gap-2.5 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
                     <button
                       onClick={() => handleToggleTodo(todo.id)}
-                      className="flex-shrink-0 w-4 h-4 rounded-full border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] transition-colors"
-                      aria-label="Completa attività"
+                      className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      aria-label={`Completa: ${todo.title}`}
                     />
-                    <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]} flex-shrink-0`} />
-                    <span className="flex-1 min-w-0 text-sm text-[var(--color-fg)] truncate">{todo.title}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${CATEGORY_DOT_COLORS[todo.category]}`} aria-hidden />
+                    <span className="flex-1 min-w-0 text-[15px] text-[var(--ds-text-primary)] truncate">{todo.title}</span>
                     {todo.priority !== TodoPriority.LOW && (
-                      <Flag className={`h-3 w-3 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} />
+                      <Flag className={`h-3.5 w-3.5 flex-shrink-0 ${PRIORITY_COLORS[todo.priority]}`} aria-hidden />
                     )}
                     {todo.dueDate && (
-                      <span className={`tabular text-[11px] flex-shrink-0 ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-[var(--color-fg-subtle)]'}`}>
-                        {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                      <span className={`text-[13px] font-semibold tabular-nums flex-shrink-0 ${
+                        isOverdue ? 'text-[var(--ds-critical-text)]'
+                        : isToday ? 'text-[var(--ds-text-muted)] font-normal'
+                        : 'text-[var(--ds-pending-text)]'
+                      }`}>
+                        {isToday ? 'oggi' : new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
                       </span>
                     )}
                   </div>
@@ -1623,332 +1833,303 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             )}
           </div>
 
-          {/* Quick-add inline */}
-          <div className="border-t border-[var(--color-line)] pt-3">
-            <div className="flex items-center gap-2">
-              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-              <input
-                type="text"
-                value={newTaskTitle}
-                onChange={e => setNewTaskTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTask(); } }}
-                placeholder="Nuova attività…"
-                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleAddTask}
-                disabled={!newTaskTitle.trim() || isAddingTask}
-                aria-label="Aggiungi attività"
-                className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-              >
-                {isAddingTask ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-              </button>
-            </div>
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="text"
+              value={newTaskTitle}
+              onChange={e => setNewTaskTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTask(); } }}
+              placeholder="Nuova attività…"
+              className="flex-1 min-w-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            />
+            <button
+              type="button"
+              onClick={handleAddTask}
+              disabled={!newTaskTitle.trim() || isAddingTask}
+              aria-label="Aggiungi attività"
+              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {isAddingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
+            </button>
           </div>
         </div>
 
-        {/* Spesa — compact summary */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Spesa</h2>
-              <p className="tabular text-xs text-[var(--color-fg-muted)]">{checkedItems}/{totalItems} completati</p>
+        {/* Spesa */}
+        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Spesa</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">{checkedItems} di {totalItems} completati</p>
             </div>
             {onNavigateToShoppingList && (
               <button
                 onClick={onNavigateToShoppingList}
-                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
               >
-                Apri <ChevronRight className="h-3.5 w-3.5" />
+                Apri <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
             )}
           </div>
 
-          {/* Pane del giorno */}
-          <div className="mb-3 flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/25 text-amber-600 dark:text-amber-300 flex-shrink-0">
-              <Wheat className="h-4 w-4" />
+          {/* Pane del giorno — the estimate, and a one-tap way to act on it */}
+          <div className="rounded-[16px] bg-[var(--ds-pending-tint)] p-3 flex items-center gap-3 min-w-0">
+            <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface)] text-[var(--ds-pending-text)]">
+              <Wheat className="h-5 w-5" aria-hidden />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-[var(--color-fg)]">
-                Pane{' '}
-                {breadEstimate.coperti > 0 ? (
-                  <span className="tabular font-semibold text-amber-700 dark:text-amber-300">{breadEstimate.kg} kg</span>
-                ) : (
-                  <span className="text-[var(--color-fg-subtle)]">— nessuna prenotazione</span>
-                )}
+              <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
+                {breadEstimate.coperti > 0 ? `Pane ${breadEstimate.kg} kg` : 'Pane — nessuna prenotazione'}
               </p>
-              <p className="text-[11px] text-[var(--color-fg-muted)]">
+              <p className="text-[13px] text-[var(--ds-pending-text)] truncate">
                 {breadEstimate.coperti > 0
                   ? `${breadEstimate.coperti} coperti · 1 kg ogni 10`
-                  : 'Si aggiorna in base alle prenotazioni del giorno'}
+                  : 'Si aggiorna in base alle prenotazioni'}
               </p>
             </div>
           </div>
 
-          {/* Category counts */}
-          <div className="flex-1 mb-3 min-h-[120px]">
+          <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {totalItems === 0 ? (
-              <div className="py-6 text-center">
-                <ShoppingCart className="h-7 w-7 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Lista vuota</p>
+              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+                <ShoppingCart className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
+                <p className="text-[14px] text-[var(--ds-text-muted)]">Lista vuota</p>
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <>
                 {(['CUCINA', 'BAR', 'ALTRO'] as ShoppingCategory[]).map(cat => {
                   const items = shoppingByCategory[cat];
                   if (items.length === 0) return null;
                   const remaining = items.filter(i => !i.checked).length;
                   return (
-                    <div key={cat} className="flex items-center gap-2 px-2 py-1.5 rounded-md">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${SHOPPING_CATEGORY_COLORS[cat]}`}>
-                        {SHOPPING_CATEGORY_ICONS[cat]}
+                    <div key={cat} className="flex items-center gap-2 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[13px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] flex-shrink-0">
                         {SHOPPING_CATEGORY_LABELS[cat]}
                       </span>
-                      <span className="tabular text-xs text-[var(--color-fg-muted)] ml-auto">
+                      <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)] ml-auto flex-shrink-0">
                         {remaining}/{items.length} da prendere
                       </span>
                     </div>
                   );
                 })}
-                {/* Latest 3 items preview */}
-                <div className="pt-1 space-y-0.5">
-                  {shoppingItems
-                    .filter(i => !i.checked)
-                    .slice(-3)
-                    .reverse()
-                    .map(item => (
-                      <div key={item.id} className="group flex items-center gap-2 px-2 py-1 rounded-md hover:bg-[var(--color-surface-hover)] transition-colors">
-                        <button
-                          onClick={() => handleToggleShoppingItem(item.id)}
-                          className="flex-shrink-0 w-3.5 h-3.5 rounded border border-[var(--color-line-strong)] hover:border-[var(--color-fg)] transition-colors"
-                          aria-label="Completa"
-                        />
-                        <span className="flex-1 min-w-0 text-sm text-[var(--color-fg)] truncate">{item.name}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
+                {shoppingItems.filter(i => !i.checked).slice(-3).reverse().map(item => (
+                  <div key={item.id} className="flex items-center gap-2.5 px-3 py-1.5 min-w-0">
+                    <button
+                      onClick={() => handleToggleShoppingItem(item.id)}
+                      className="flex-shrink-0 w-5 h-5 rounded-[6px] border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      aria-label={`Completa: ${item.name}`}
+                    />
+                    <span className="flex-1 min-w-0 text-[15px] text-[var(--ds-text-primary)] truncate">{item.name}</span>
+                  </div>
+                ))}
+              </>
             )}
           </div>
 
-          {/* Quick-add inline */}
-          <div className="border-t border-[var(--color-line)] pt-3">
-            <div className="flex items-center gap-2">
-              <Plus className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
-              <input
-                type="text"
-                value={newItemName}
-                onChange={e => setNewItemName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShoppingItem(); } }}
-                placeholder="Aggiungi prodotto…"
-                className="flex-1 min-w-0 bg-transparent text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
-              />
-              <select
-                value={newItemCategory}
-                onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
-                className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-2 py-1 text-xs font-medium text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-fg)] flex-shrink-0"
-              >
-                <option value="CUCINA">Cucina</option>
-                <option value="BAR">Bar</option>
-                <option value="ALTRO">Altro</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleAddShoppingItem}
-                disabled={!newItemName.trim() || isAddingShoppingItem}
-                aria-label="Aggiungi prodotto"
-                className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-              >
-                {isAddingShoppingItem ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-              </button>
-            </div>
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="text"
+              value={newItemName}
+              onChange={e => setNewItemName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShoppingItem(); } }}
+              placeholder="Aggiungi prodotto…"
+              className="flex-1 min-w-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            />
+            <select
+              value={newItemCategory}
+              onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
+              className="flex-shrink-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              aria-label="Categoria"
+            >
+              <option value="CUCINA">Cucina</option>
+              <option value="BAR">Bar</option>
+              <option value="ALTRO">Altro</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleAddShoppingItem}
+              disabled={!newItemName.trim() || isAddingShoppingItem}
+              aria-label="Aggiungi prodotto"
+              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {isAddingShoppingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
+            </button>
           </div>
         </div>
 
-        {/* Sotto Scorta (Low Stock) */}
-        <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Sotto Scorta</h2>
-              <p className="tabular text-xs text-[var(--color-fg-muted)]">
-                {lowStockLoading ? 'Caricamento…' : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} ≤ 5`}
+        {/* Sotto scorta — sorted by criticality: empty first, then closest to
+            the threshold. Rows go red at zero, amber while merely low, which is
+            what signals the ordering now that the caption is gone. */}
+        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Sotto scorta</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
+                {lowStockLoading
+                  ? 'Caricamento…'
+                  : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} sotto soglia${
+                      lowStockItems.filter(i => i.total_quantity <= 0).length > 0
+                        ? ` · ${lowStockItems.filter(i => i.total_quantity <= 0).length} esauriti`
+                        : ''
+                    }`}
               </p>
             </div>
             <button
               type="button"
               onClick={onNavigateToInventario}
-              className="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors"
+              className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
               title="Vai all'inventario"
             >
-              Apri
+              Apri <ArrowRight className="h-4 w-4" aria-hidden />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto max-h-[300px] space-y-1.5">
+          <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {lowStockLoading ? (
               <div className="py-8 text-center">
                 <CookingPotLoader label="Caricamento..." size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
-              <div className="py-8 text-center">
-                <Package className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-                <p className="text-[var(--color-fg-subtle)] text-sm">Tutte le scorte sono in regola</p>
+              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+                <Package className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
+                <p className="text-[14px] text-[var(--ds-text-muted)]">Tutte le scorte sono in regola</p>
               </div>
             ) : (
-              lowStockItems.map(item => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-2 px-3 py-2 rounded-md bg-rose-50 dark:bg-red-950/20 border border-rose-100 dark:border-red-900/40"
-                >
-                  <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-rose-700 dark:text-rose-300 truncate">{item.name}</div>
-                    {(item.category_name || item.area) && (
-                      <div className="text-[11px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70 truncate">
-                        {[item.area, item.category_name].filter(Boolean).join(' · ')}
+              [...lowStockItems]
+                .sort((a, b) => a.total_quantity - b.total_quantity)
+                .map(item => {
+                  const isOut = item.total_quantity <= 0;
+                  const tone = isOut
+                    ? { wash: 'bg-[var(--ds-critical-tint)]', text: 'text-[var(--ds-critical-text)]' }
+                    : { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]' };
+                  return (
+                    <div key={item.id} className={`flex items-center gap-3 rounded-[14px] px-3 py-2.5 min-w-0 ${tone.wash}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">{item.name}</div>
+                        {(item.category_name || item.area) && (
+                          <div className={`text-[13px] truncate ${tone.text}`}>
+                            {[item.area, item.category_name].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-sm font-semibold tabular-nums text-rose-700 dark:text-rose-300">
-                      {Number.isInteger(item.total_quantity) ? item.total_quantity : item.total_quantity.toFixed(1)}
+                      <div className="text-right flex-shrink-0">
+                        <div className={`text-[20px] font-bold tabular-nums leading-none ${tone.text}`}>
+                          {Number.isInteger(item.total_quantity) ? item.total_quantity : item.total_quantity.toFixed(1)}
+                        </div>
+                        {item.unit && (
+                          <div className="text-[12px] text-[var(--ds-text-muted)] mt-0.5">{item.unit}</div>
+                        )}
+                      </div>
                     </div>
-                    {item.unit && (
-                      <div className="text-[10px] uppercase tracking-wide text-rose-500/80 dark:text-rose-400/70">{item.unit}</div>
-                    )}
-                  </div>
-                </div>
-              ))
+                  );
+                })
             )}
           </div>
+
         </div>
       </div>
 
-      {/* Row 4: Staff Presence */}
-      <div className="bg-[var(--color-surface)] p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)]">
-        <div className="mb-4">
-          <h2 className="text-base lg:text-lg font-semibold text-[var(--color-fg)]">Personale in Servizio</h2>
-        </div>
+      {/* Row 4: Personale in servizio — follows the page's shift filter, like
+          every other card. "Tutti" shows both services side by side; picking
+          one shows just that roster. The live service is marked with a pulse so
+          it still stands out when both are on screen. */}
+      {(() => {
+        const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
+        const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
+        const shownTotal =
+          (showLunch ? staffPresence.lunch.sala.length + staffPresence.lunch.cucina.length : 0) +
+          (showDinner ? staffPresence.dinner.sala.length + staffPresence.dinner.cucina.length : 0);
 
-        {staffLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <CookingPotLoader label="Caricamento..." size={40} />
-          </div>
-        ) : (
-          (() => {
-            const renderChip = (s: StaffMember, _isLive: boolean) => {
-              const initials = `${(s.name || '').charAt(0)}${(s.surname || '').charAt(0)}`.toUpperCase();
-              return (
-                <div
-                  key={s.id}
-                  className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] text-xs text-[var(--color-fg)]"
-                  title={s.role ? `${toTitleCase(s.name)} ${toTitleCase(s.surname)} · ${s.role}` : `${toTitleCase(s.name)} ${toTitleCase(s.surname)}`}
-                >
-                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] flex items-center justify-center text-[10px] font-semibold">
-                    {initials}
+        const renderService = (shiftKey: 'lunch' | 'dinner') => {
+          const isLunch = shiftKey === 'lunch';
+          const data = staffPresence[shiftKey];
+          const total = data.sala.length + data.cucina.length;
+          const isLive = liveShift === shiftKey;
+          const tone = isLunch
+            ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', icon: <Sun className="h-3.5 w-3.5" />, label: 'Pranzo', end: '15:30' }
+            : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', icon: <Sunset className="h-3.5 w-3.5" />, label: 'Cena', end: '23:30' };
+          const groups = [
+            { label: 'Sala', people: data.sala },
+            { label: 'Cucina', people: data.cucina },
+          ].filter(g => g.people.length > 0);
+
+          return (
+            <div key={shiftKey} className={`rounded-[16px] p-4 flex flex-col gap-3 min-w-0 ${tone.wash}`}>
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
+                  {tone.icon}
+                </span>
+                <h3 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{tone.label}</h3>
+                {isLive && (
+                  <span className="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 h-6 rounded-full bg-[var(--ds-surface)] text-[12px] font-medium text-[var(--ds-seated-text)]">
+                    <PulseDot dotClass="bg-[var(--ds-seated-solid)]" pulse />
+                    in corso
                   </span>
-                  <span className="truncate max-w-[8rem]">{toTitleCase(s.name)}</span>
-                </div>
-              );
-            };
-
-            const renderShiftCard = (
-              shiftKey: 'lunch' | 'dinner',
-              label: string,
-              icon: React.ReactNode,
-              iconWrap: string,
-              cardWash: string,
-              liveAccent: string,
-              restBorder: string,
-            ) => {
-              const data = staffPresence[shiftKey];
-              const total = data.sala.length + data.cucina.length;
-              const isLive = liveShift === shiftKey;
-              return (
-                <div
-                  className={`relative rounded-lg p-4 transition ${
-                    isLive ? `border ${cardWash} ${liveAccent} shadow-[var(--shadow-sm)]` : `border ${restBorder}`
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconWrap}`}>{icon}</div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-sm font-semibold text-[var(--color-fg)]">{label}</span>
-                      <span className="tabular text-xs text-[var(--color-fg-muted)]">({total})</span>
-                    </div>
-                    {isLive && (
-                      <span className="inline-flex items-center gap-1.5 ml-auto text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                        <span className="relative flex h-1.5 w-1.5">
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        </span>
-                        In corso
-                      </span>
-                    )}
-                  </div>
-                  <div className="space-y-2.5">
-                    <div>
-                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
-                        Sala <span className="tabular text-[var(--color-fg-subtle)]">({data.sala.length})</span>
-                      </div>
-                      {data.sala.length === 0 ? (
-                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {data.sala.map(s => renderChip(s, isLive))}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-medium text-[var(--color-fg-muted)] mb-1.5">
-                        Cucina <span className="tabular text-[var(--color-fg-subtle)]">({data.cucina.length})</span>
-                      </div>
-                      {data.cucina.length === 0 ? (
-                        <p className="text-xs text-[var(--color-fg-subtle)] italic">Nessuno</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {data.cucina.map(s => renderChip(s, isLive))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            };
-
-            const showLunchPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
-            const showDinnerPersonale = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
-            return (
-              <div className={`grid grid-cols-1 ${(showLunchPersonale && showDinnerPersonale) ? 'md:grid-cols-2' : 'md:grid-cols-1'} gap-4`}>
-                {showLunchPersonale && renderShiftCard(
-                  'lunch',
-                  'Pranzo',
-                  <Sun className="h-4 w-4 text-amber-700 dark:text-amber-300" />,
-                  'bg-amber-100 dark:bg-amber-500/20',
-                  'bg-amber-50 dark:bg-amber-500/10',
-                  'border-amber-300/70 ring-1 ring-amber-200/60 dark:ring-amber-400/20',
-                  'bg-amber-50 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20',
                 )}
-                {showDinnerPersonale && renderShiftCard(
-                  'dinner',
-                  'Cena',
-                  <Sunset className="h-4 w-4 text-blue-600 dark:text-blue-400" />,
-                  'bg-blue-100 dark:bg-blue-500/20',
-                  'bg-blue-50 dark:bg-blue-500/10',
-                  'border-blue-300/70 ring-1 ring-blue-200/60 dark:ring-blue-400/20',
-                  'bg-blue-50 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/20',
-                )}
+                <span className={`text-[13px] ${tone.text}`}>
+                  {total} in turno{isLive ? ` · fine ${tone.end}` : ''}
+                </span>
               </div>
-            );
-          })()
-        )}
-      </div>
+
+              {groups.length === 0 ? (
+                <p className="text-[14px] text-[var(--ds-text-muted)] py-2">Nessuno in turno</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {groups.map(g => (
+                    <div key={g.label} className="flex items-start gap-3 min-w-0">
+                      <span className="text-[13px] text-[var(--ds-text-muted)] w-20 flex-shrink-0 pt-2">
+                        {g.label} · {g.people.length}
+                      </span>
+                      <div className="flex flex-wrap gap-2 min-w-0">
+                        {g.people.map(s => {
+                          const initials = `${(s.name || '').charAt(0)}${(s.surname || '').charAt(0)}`.toUpperCase();
+                          return (
+                            <span
+                              key={s.id}
+                              className="inline-flex items-center gap-2 pl-1.5 pr-3 h-9 rounded-full bg-[var(--ds-surface)] text-[14px] text-[var(--ds-text-primary)]"
+                              title={s.role ? `${toTitleCase(s.name)} ${toTitleCase(s.surname)} · ${s.role}` : `${toTitleCase(s.name)} ${toTitleCase(s.surname)}`}
+                            >
+                              <span className="flex-shrink-0 h-6 w-6 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] flex items-center justify-center text-[11px] font-semibold">
+                                {initials}
+                              </span>
+                              <span className="truncate max-w-[10rem]">{toTitleCase(s.name)}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        return (
+          <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+            <div className="flex items-baseline gap-2.5 flex-wrap">
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                Personale in servizio
+              </h2>
+              <span className="text-[13px] text-[var(--ds-text-muted)]">{shownTotal} in turno</span>
+            </div>
+
+            {staffLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <CookingPotLoader label="Caricamento..." size={40} />
+              </div>
+            ) : (
+              <div className={`grid gap-3 ${showLunch && showDinner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+                {showLunch && renderService('lunch')}
+                {showDinner && renderService('dinner')}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* AI Report Section */}
       {report && (
-        <div className="bg-[var(--color-surface)] p-4 sm:p-5 lg:p-6 rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-sm)] animate-fade-in">
+        <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)] animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>

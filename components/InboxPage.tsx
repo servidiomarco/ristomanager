@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowLeft, Search, X } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -10,6 +10,12 @@ import {
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
+import {
+  SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
+  Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
+  PaneHeader,
+} from './ds';
+import type { PillTone } from './ds';
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return '';
@@ -57,17 +63,19 @@ const windowRemainingLabel = (lastInboundAt: string | null | undefined): string 
   return `${h}h ${m}m`;
 };
 
-const channelBadgeCls = (channel: MessageChannel): string =>
-  channel === 'whatsapp'
-    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-    : 'bg-sky-50 text-sky-700 ring-1 ring-sky-200';
+// The two channels stay visually distinct, mapped onto the palette we have:
+// WhatsApp keeps green, SMS takes indigo in place of the old sky blue.
+const channelTone = (channel: MessageChannel): PillTone =>
+  channel === 'whatsapp' ? 'positive' : 'info';
 
+// Delivery state on an outbound bubble. The bubble is already filled, so these
+// ride on currentColor rather than a second colour fighting the fill.
 const statusIcon = (m: InboxMessage) => {
   if (m.direction !== 'outbound') return null;
   const s = (m.status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
-  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />;
-  return <Clock className="w-3.5 h-3.5 text-slate-400" />;
+  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label="Consegnato" />;
+  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label="Non consegnato" />;
+  return <Clock className="h-3.5 w-3.5" aria-label="In invio" />;
 };
 
 const displayName = (c: ConversationSummary): string =>
@@ -77,13 +85,11 @@ const InboxPage: React.FC = () => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [convLoading, setConvLoading] = useState(true);
   const [convError, setConvError] = useState<string | null>(null);
-  // Search bar in the conversations sidebar header. Toggled by the icon; the
-  // input replaces the "Messaggi" title while open. Query matches name,
-  // phone (raw + digits), or the last message body — case-insensitive, no
-  // debounce (the list is client-side already).
-  const [searchOpen, setSearchOpen] = useState(false);
+  // Search over the conversation list. Always visible rather than behind a
+  // toggle: on a list you filter before you scroll. Matches name, phone (raw +
+  // digits) or the last message body — case-insensitive, no debounce (the list
+  // is filtered client-side already).
   const [searchQuery, setSearchQuery] = useState('');
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
@@ -324,214 +330,205 @@ const InboxPage: React.FC = () => {
     });
   }, [conversations, searchQuery]);
 
-  // Autofocus the search input when it opens; also close it on Esc so the
-  // keyboard-first workflow feels right.
-  useEffect(() => {
-    if (searchOpen) {
-      const t = setTimeout(() => searchInputRef.current?.focus(), 20);
-      return () => clearTimeout(t);
-    }
-  }, [searchOpen]);
+  // A thread is "da rispondere" when the customer wrote last and nobody has
+  // read it. Derived from rows already loaded; the section just pins them up
+  // top instead of leaving them scattered through the timeline.
+  const needsReply = (c: ConversationSummary) =>
+    (c.unread_count || 0) > 0 && c.last_direction !== 'outbound';
+  const replyQueue = filteredConversations.filter(needsReply);
+  const restOfInbox = filteredConversations.filter(c => !needsReply(c));
+  const swipeHint = useFirstRunHint('ds-swipe-hint-messaggi');
+
+  const markConversationRead = useCallback(async (phoneDigits: string) => {
+    try {
+      await messagesApiService.markRead(phoneDigits);
+      setConversations(prev => prev.map(c =>
+        c.phone_digits === phoneDigits ? { ...c, unread_count: 0 } : c
+      ));
+    } catch { /* badge stays stale until the next refresh */ }
+  }, []);
+
+  const renderConversation = (c: ConversationSummary, hint: boolean) => {
+    const active = c.phone_digits === selectedKey;
+    const unread = c.unread_count || 0;
+    const whatsapp = c.last_channel === 'whatsapp';
+    return (
+      <SwipeRow
+        key={c.phone_digits}
+        hint={hint}
+        left={unread > 0 ? {
+          label: 'Letto',
+          tone: 'confirm',
+          icon: <Check className="h-4 w-4" aria-hidden />,
+          onAction: () => markConversationRead(c.phone_digits),
+        } : undefined}
+        right={{
+          label: 'Rispondi',
+          tone: 'primary',
+          icon: <ArrowRight className="h-4 w-4" aria-hidden />,
+          onAction: () => setSelectedKey(c.phone_digits),
+        }}
+      >
+        <button
+          onClick={() => setSelectedKey(c.phone_digits)}
+          className={`flex w-full gap-3 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+            active ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
+          }`}
+        >
+          <Avatar
+            name={c.customer_name || undefined}
+            badge={
+              <span className={`inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-semibold leading-none ring-2 ring-[var(--ds-surface)] ${
+                whatsapp
+                  ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                  : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+              }`}>
+                {whatsapp ? 'WA' : 'SMS'}
+              </span>
+            }
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`truncate text-[15px] text-[var(--ds-text-primary)] ${unread > 0 ? 'font-semibold' : 'font-medium'}`}>
+                {displayName(c)}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(c.last_sent_at)}</span>
+                {unread > 0 && (
+                  <CountBadge tone="alert" count={unread} />
+                )}
+              </span>
+            </div>
+            <p className={`mt-0.5 flex items-center gap-1 truncate text-[14px] ${unread > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}`}>
+              <span aria-hidden>{c.last_direction === 'outbound' ? '↗' : '↙'}</span>
+              <span className="truncate">{c.last_body}</span>
+            </p>
+          </div>
+        </button>
+      </SwipeRow>
+    );
+  };
 
   return (
-    <div className="flex h-full bg-[var(--color-bg)]">
-      {/* Sidebar: conversations */}
-      <aside
-        className={`${selectedKey ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-[var(--color-line)] flex-col bg-[var(--color-surface)]`}
-      >
-        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
-          {searchOpen ? (
-            <>
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <Search className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      setSearchQuery('');
-                      setSearchOpen(false);
-                    }
-                  }}
-                  placeholder="Cerca per nome, telefono o testo…"
-                  className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)]"
-                />
-              </div>
-              <button
-                onClick={() => { setSearchQuery(''); setSearchOpen(false); }}
-                className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] flex-shrink-0"
-                title="Chiudi ricerca"
-                aria-label="Chiudi ricerca"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 min-w-0">
-                <MessageCircle className="w-5 h-5 text-[var(--color-fg-muted)]" />
-                <h2 className="font-semibold text-[15px] text-[var(--color-fg)]">Messaggi</h2>
-                {totalUnread > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 text-[11px] font-semibold rounded-full bg-rose-500 text-white">
-                    {totalUnread}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => setSearchOpen(true)}
-                  className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
-                  title="Cerca"
-                  aria-label="Cerca"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => { setConvLoading(true); loadConversations(); }}
-                  className="p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
-                  title="Aggiorna"
-                  aria-label="Aggiorna"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {convLoading ? (
-            <SkeletonInboxList count={7} />
-          ) : convError ? (
-            <div className="p-4 text-[13px] text-rose-600">{convError}</div>
-          ) : conversations.length === 0 ? (
-            <div className="p-6 text-center text-[13px] text-[var(--color-fg-muted)]">
-              Nessuna conversazione.<br />
-              I messaggi in arrivo appariranno qui.
-            </div>
-          ) : filteredConversations.length === 0 ? (
-            <div className="p-6 text-center text-[13px] text-[var(--color-fg-muted)]">
-              Nessun risultato per <span className="font-medium text-[var(--color-fg)]">"{searchQuery.trim()}"</span>.
-            </div>
-          ) : (
-            <ul>
-              {filteredConversations.map(c => {
-                const active = c.phone_digits === selectedKey;
-                const unread = c.unread_count || 0;
-                return (
-                  <li key={c.phone_digits}>
-                    <button
-                      onClick={() => setSelectedKey(c.phone_digits)}
-                      className={`w-full text-left px-4 py-3 border-b border-[var(--color-line)] transition-colors ${active ? 'bg-[var(--color-surface-2)]' : 'hover:bg-[var(--color-surface-2)]'}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`truncate text-[14px] ${unread > 0 ? 'font-semibold text-[var(--color-fg)]' : 'font-medium text-[var(--color-fg)]'}`}>
-                              {displayName(c)}
-                            </span>
-                            <span className={`px-1.5 py-0.5 text-[10px] rounded ${channelBadgeCls(c.last_channel)}`}>
-                              {c.last_channel === 'whatsapp' ? 'WA' : 'SMS'}
-                            </span>
-                          </div>
-                          <p className={`text-[13px] truncate mt-0.5 ${unread > 0 ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]'}`}>
-                            {c.last_direction === 'outbound' ? '↗ ' : ''}{c.last_body}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          <span className="text-[11px] text-[var(--color-fg-subtle)]">{formatRelative(c.last_sent_at)}</span>
-                          {unread > 0 && (
-                            <span className="min-w-[18px] h-[18px] px-1 text-[10px] font-semibold rounded-full bg-rose-500 text-white flex items-center justify-center">
-                              {unread}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      </aside>
-
-      {/* Main pane: timeline + composer */}
-      <main className={`${selectedKey ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0`}>
-        {!selected ? (
-          <div className="flex-1 flex items-center justify-center text-center px-6">
-            <div className="max-w-md">
-              <MessageCircle className="w-12 h-12 mx-auto text-[var(--color-fg-subtle)] mb-3" />
-              <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-1">Nessuna conversazione selezionata</h3>
-              <p className="text-[13px] text-[var(--color-fg-muted)]">
-                Seleziona una conversazione dalla lista per vedere lo storico dei messaggi.
-              </p>
-            </div>
+    <SplitPane
+      detailOpen={!!selectedKey}
+      toolbar={
+        <div className="space-y-3">
+          {/* No visible page title: the sidebar and the mobile switcher both
+              name this screen, and both already carry the unread count. */}
+          <h2 className="sr-only">Messaggi{totalUnread > 0 ? `, ${totalUnread} non letti` : ''}</h2>
+          <div className="flex items-center gap-2">
+            <SearchField
+              className="min-w-0 flex-1"
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Cerca nome o numero…"
+            />
+            <button
+              onClick={() => { setConvLoading(true); loadConversations(); }}
+              className={dsIconButton}
+              title="Aggiorna"
+              aria-label="Aggiorna"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
           </div>
+        </div>
+      }
+      list={
+        convLoading ? (
+          <SkeletonInboxList count={7} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+        ) : convError ? (
+          <Callout tone="critical" icon={AlertTriangle}>{convError}</Callout>
+        ) : conversations.length === 0 ? (
+          <EmptyState icon={MessageCircle}>
+            Nessuna conversazione. I messaggi in arrivo appariranno qui.
+          </EmptyState>
+        ) : filteredConversations.length === 0 ? (
+          <EmptyState icon={MessageCircle}>
+            Nessun risultato per "{searchQuery.trim()}".
+          </EmptyState>
+        ) : (
+          <div className="space-y-1">
+            {replyQueue.length > 0 && (
+              <>
+                <SectionHeader tone="positive">Da rispondere</SectionHeader>
+                <div className="space-y-2 pb-2">
+                  {replyQueue.map((c, i) => renderConversation(c, swipeHint && i === 0))}
+                </div>
+              </>
+            )}
+            {restOfInbox.length > 0 && (
+              <>
+                <SectionHeader>Tutti i messaggi</SectionHeader>
+                <div className="space-y-2">
+                  {restOfInbox.map((c, i) => renderConversation(c, swipeHint && replyQueue.length === 0 && i === 0))}
+                </div>
+              </>
+            )}
+          </div>
+        )
+      }
+      detail={
+        !selected ? (
+          <PanePlaceholder icon={MessageCircle}>Seleziona una conversazione dalla lista</PanePlaceholder>
         ) : (
           <>
-            <div className="px-4 py-3 border-b border-[var(--color-line)] flex items-center justify-between bg-[var(--color-surface)]">
-              <div className="flex items-center gap-2 min-w-0">
-                <button
-                  onClick={() => setSelectedKey(null)}
-                  className="md:hidden p-1.5 rounded hover:bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]"
-                  title="Torna alle conversazioni"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <h3 className="font-semibold text-[15px] text-[var(--color-fg)] truncate">{displayName(selected)}</h3>
-                    <span className={`px-1.5 py-0.5 text-[10px] rounded ${channelBadgeCls(selected.last_channel)}`}>
-                      {selected.last_channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
-                    </span>
-                  </div>
-                  {selected.phone && (
-                    <p className="text-[12px] text-[var(--color-fg-muted)] truncate">{selected.phone}</p>
-                  )}
-                </div>
-              </div>
-              {waWindowOpen && preferredChannel === 'whatsapp' && (
-                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                  <Clock className="w-3 h-3" /> Finestra WA: {windowRemaining}
-                </span>
-              )}
-            </div>
+            <PaneHeader
+              onBack={() => setSelectedKey(null)}
+              backLabel="Torna alle conversazioni"
+              title={displayName(selected)}
+              subtitle={selected.phone || undefined}
+              badge={
+                <StatusPill tone={channelTone(selected.last_channel)}>
+                  {selected.last_channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
+                </StatusPill>
+              }
+              actions={waWindowOpen && preferredChannel === 'whatsapp' ? (
+                <StatusPill tone="positive" className="hidden sm:inline-flex">
+                  <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
+                </StatusPill>
+              ) : undefined}
+            />
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 bg-[var(--color-bg)]">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
+            <div className="px-4 pb-4 sm:px-6 lg:px-8">
               {msgLoading ? (
-                <div className="flex items-center justify-center h-32"><CookingPotLoader /></div>
+                <div className="flex h-32 items-center justify-center"><CookingPotLoader /></div>
               ) : msgError ? (
-                <div className="p-4 text-[13px] text-rose-600">{msgError}</div>
+                <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
               ) : messages.length === 0 ? (
-                <div className="text-center text-[13px] text-[var(--color-fg-muted)] mt-8">
+                <p className="mt-8 text-center text-[14px] text-[var(--ds-text-muted)]">
                   Nessun messaggio ancora.
-                </div>
+                </p>
               ) : (
-                <div className="space-y-4 max-w-3xl mx-auto">
+                <div className="mx-auto max-w-3xl space-y-4">
                   {grouped.map(g => (
                     <div key={g.day} className="space-y-2">
                       <div className="flex justify-center">
-                        <span className="px-2 py-0.5 text-[11px] rounded-full bg-[var(--color-surface-2)] text-[var(--color-fg-muted)]">
+                        <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
                           {formatDayHeader(g.day)}
                         </span>
                       </div>
                       {g.items.map(m => {
                         const outbound = m.direction === 'outbound';
-                        const bubbleCls = outbound
-                          ? 'bg-emerald-500 text-white'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg)] ring-1 ring-[var(--color-line)]';
                         return (
                           <div key={m.id} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[80%] rounded-2xl px-3 py-2 ${bubbleCls}`}>
-                              <p className="text-[14px] whitespace-pre-wrap break-words">{m.body}</p>
-                              <div className={`flex items-center gap-1 justify-end mt-1 text-[11px] ${outbound ? 'text-emerald-100' : 'text-[var(--color-fg-subtle)]'}`}>
-                                <span>{formatTime(m.sent_at)}</span>
+                            {/* Ours is the filled bubble, theirs is plain
+                                surface — the same side assignment the page
+                                already used, now on tokens. */}
+                            <div
+                              className={`max-w-[80%] rounded-[18px] px-3.5 py-2 ${
+                                outbound
+                                  ? 'rounded-br-[6px] bg-[var(--ds-seated-solid)] text-white'
+                                  : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                              }`}
+                            >
+                              <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
+                              <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
+                                <span className="tabular-nums">{formatTime(m.sent_at)}</span>
                                 {statusIcon(m)}
-                                <span className={`ml-1 px-1 rounded text-[10px] ${outbound ? 'bg-emerald-600/40' : 'bg-[var(--color-surface-2)]'}`}>
+                                <span className={`rounded-full px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
                                   {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
                                 </span>
                               </div>
@@ -545,90 +542,86 @@ const InboxPage: React.FC = () => {
                 </div>
               )}
             </div>
+            </div>
 
-            <div className="border-t border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3">
-              <div className="max-w-3xl mx-auto space-y-2">
+            <div className="flex-shrink-0 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-3xl space-y-2">
                 {!waWindowOpen && preferredChannel === 'whatsapp' && (
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-amber-50 text-amber-800 ring-1 ring-amber-200 text-[12.5px]">
-                    <span className="flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                      Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
-                    </span>
-                    <button
-                      onClick={() => setPreferredChannel('sms')}
-                      className="font-semibold underline hover:no-underline whitespace-nowrap"
-                    >
-                      Passa a SMS
-                    </button>
-                  </div>
+                  <Callout
+                    tone="pending"
+                    icon={AlertTriangle}
+                    action={
+                      <button
+                        onClick={() => setPreferredChannel('sms')}
+                        className="whitespace-nowrap font-semibold underline underline-offset-4 hover:no-underline"
+                      >
+                        Passa a SMS
+                      </button>
+                    }
+                  >
+                    Finestra 24h WhatsApp chiusa: il cliente deve scrivere per primo.
+                  </Callout>
                 )}
-                {sendError && (
-                  <div className="px-3 py-2 rounded-lg bg-rose-50 text-rose-700 ring-1 ring-rose-200 text-[12.5px]">
-                    {sendError}
-                  </div>
-                )}
+                {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
 
-                {/* Segmented channel toggle above the composer, iOS-style. */}
+                {/* Channel toggle. The raised-pill treatment is the app's
+                    segmented control; the coloured dot keeps the channel
+                    legible without repainting the whole pill. */}
                 <div className="flex items-center gap-2">
-                  <div className="inline-flex rounded-full bg-[var(--color-surface-2)] p-0.5 text-[11px] font-semibold">
-                    <button
-                      onClick={() => setPreferredChannel('whatsapp')}
-                      className={`px-3 py-1 rounded-full transition-colors ${preferredChannel === 'whatsapp' ? 'bg-emerald-500 text-white shadow-sm' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                    >
-                      WhatsApp
-                    </button>
-                    <button
-                      onClick={() => setPreferredChannel('sms')}
-                      className={`px-3 py-1 rounded-full transition-colors ${preferredChannel === 'sms' ? 'bg-sky-500 text-white shadow-sm' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-                    >
-                      SMS
-                    </button>
-                  </div>
+                  <SegmentedControl
+                    value={preferredChannel}
+                    onChange={next => setPreferredChannel(next)}
+                    ariaLabel="Canale di invio"
+                    equalWidth={false}
+                    size="sm"
+                    options={[
+                      { value: 'whatsapp' as MessageChannel, label: 'WhatsApp', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden /> },
+                      { value: 'sms' as MessageChannel, label: 'SMS', icon: <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-arriving-solid)]" aria-hidden /> },
+                    ]}
+                  />
                   {preferredChannel === 'whatsapp' && waWindowOpen && (
-                    <span className="text-[11px] text-[var(--color-fg-subtle)] flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> {windowRemaining} rimanenti
+                    <span className="flex items-center gap-1 text-[13px] text-[var(--ds-text-muted)]">
+                      <Clock className="h-3.5 w-3.5" aria-hidden /> {windowRemaining} rimanenti
                     </span>
                   )}
                 </div>
 
-                {/* Composer: pill-shaped textarea with a floating send button. */}
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 flex items-end rounded-2xl bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] focus-within:ring-2 focus-within:ring-emerald-500 transition-shadow px-4 py-2.5">
-                    <textarea
-                      ref={composerRef}
-                      value={composerText}
-                      onChange={e => setComposerText(e.target.value)}
-                      onKeyDown={handleComposerKeyDown}
-                      placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
-                        ? 'Finestra chiusa — passa a SMS'
-                        : 'Scrivi un messaggio…'}
-                      rows={1}
-                      disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
-                      className="flex-1 resize-none max-h-40 bg-transparent border-0 text-[14px] leading-snug text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none disabled:opacity-60"
-                    />
-                  </div>
+                {/* Composer: one card, send button inside the field. */}
+                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <textarea
+                    ref={composerRef}
+                    value={composerText}
+                    onChange={e => setComposerText(e.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
+                      ? 'Finestra chiusa — passa a SMS'
+                      : 'Scrivi un messaggio…'}
+                    rows={1}
+                    disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
+                    className="max-h-40 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none disabled:opacity-60"
+                  />
                   <button
                     onClick={handleSend}
                     disabled={!composerText.trim() || sending || (preferredChannel === 'whatsapp' && !waWindowOpen)}
                     aria-label="Invia messaggio"
-                    className={`flex-shrink-0 h-11 w-11 rounded-full flex items-center justify-center text-white transition-all shadow-sm disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-fg-subtle)] disabled:cursor-not-allowed disabled:shadow-none ${
+                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
                       preferredChannel === 'whatsapp'
-                        ? 'bg-emerald-500 hover:bg-emerald-600 active:scale-95'
-                        : 'bg-sky-500 hover:bg-sky-600 active:scale-95'
+                        ? 'bg-[var(--ds-seated-solid)] hover:brightness-95 active:scale-95'
+                        : 'bg-[var(--ds-arriving-solid)] hover:brightness-95 active:scale-95'
                     }`}
                   >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="text-[11px] text-[var(--color-fg-subtle)] px-1">
-                  Invio con <kbd className="px-1 py-0.5 rounded bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] font-mono text-[10px]">Enter</kbd>, a capo con <kbd className="px-1 py-0.5 rounded bg-[var(--color-surface-2)] ring-1 ring-[var(--color-line)] font-mono text-[10px]">Shift+Enter</kbd>
+                <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
+                  Invio con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>, a capo con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>
                 </p>
               </div>
             </div>
           </>
-        )}
-      </main>
-    </div>
+        )
+      }
+    />
   );
 };
 

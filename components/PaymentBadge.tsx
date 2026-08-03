@@ -43,31 +43,35 @@ export const PaymentBadge: React.FC<{ reservation: Reservation; size?: 'sm' | 'm
         const sentTs = formatPaymentTs(res.latest_payment_created_at);
         const paidTs = res.latest_payment_completed_at ? formatPaymentTs(res.latest_payment_completed_at) : null;
 
-        let cls = 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300';
+        // One family per outcome, not a shade per status: paid is settled
+        // (green), a live link is in flight (indigo), an unpaid one is waiting
+        // on the guest (amber), and anything that went wrong is red. An
+        // expired link is nothing more than history, so it stays neutral.
+        let cls = 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
         let label = 'Stato pagamento';
         switch (linkStatus) {
             case 'COMPLETED':
-                cls = 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400';
+                cls = 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]';
                 label = 'Pagato';
                 break;
             case 'AUTHORISED':
-                cls = 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400';
+                cls = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
                 label = 'Autorizzato';
                 break;
             case 'PENDING':
-                cls = 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400';
+                cls = 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]';
                 label = 'In attesa di pagamento';
                 break;
             case 'FAILED':
-                cls = 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400';
+                cls = 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]';
                 label = 'Pagamento fallito';
                 break;
             case 'CANCELLED':
-                cls = 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400';
+                cls = 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]';
                 label = 'Pagamento annullato';
                 break;
             case 'EXPIRED':
-                cls = 'bg-slate-100 text-slate-500 dark:bg-slate-500/15 dark:text-slate-400';
+                cls = 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]';
                 label = 'Link scaduto';
                 break;
         }
@@ -95,7 +99,7 @@ export const PaymentBadge: React.FC<{ reservation: Reservation; size?: 'sm' | 'm
             : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto'
             : 'Rimborsato';
         return (
-            <span className={`${base} bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400`} title={label} aria-label={label}>
+            <span className={`${base} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title={label} aria-label={label}>
                 <CreditCard className={icon} />
             </span>
         );
