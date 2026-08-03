@@ -3574,6 +3574,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
                 [row.payment_request_id]
             );
             updatedPr = prUpd.rows[0] || null;
+            if (updatedPr?.reservation_id) broadcastReservationsUpdatedByIds([updatedPr.reservation_id]).catch(() => {});
         }
 
         // Il conto torna incassabile per la parte rimborsata solo se la
@@ -4924,6 +4925,11 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         try { socketService?.broadcastToAll('paymentRequest:created', paymentRequest); }
         catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
+        // The booking card's payment badge reads latest_payment_* off the
+        // reservation row: without this nudge the icon only appeared after a
+        // full page reload.
+        broadcastReservationsUpdatedByIds([reservation.id]).catch(() => {});
+
         res.status(201).json(paymentRequest);
     } catch (err: any) {
         console.error('POST /payments/requests error:', err);
@@ -5129,6 +5135,10 @@ async function applyPaymentOrderTransition(
 
     try { socketService?.broadcastToAll('paymentRequest:updated', row); }
     catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
+
+    // Keep the booking card's payment badge live on webhook transitions
+    // (paid/failed/expired land without any operator action).
+    if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
 
     const isFirstCompletion = markCompleted && !wasCompleted;
     const billSplitId: number | null = row.table_bill_split_id ?? null;
@@ -5465,6 +5475,8 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
 
         try { socketService?.broadcastToAll('paymentRequest:updated', row); }
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
+
+        if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
 
         if (req.user) {
             LogService.logActivity(
