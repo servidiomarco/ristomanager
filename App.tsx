@@ -2566,20 +2566,6 @@ const App: React.FC = () => {
         </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
-        {/* Canvas scrim behind the floating bar: solid up to just above the
-            bar's top edge, then fading out over the raised "+". The bar keeps
-            floating on clean canvas — the gap underneath and the strip behind
-            it never show raw cut-off content, which looked broken on Android
-            where no safe-area inset justifies the gap. Sits below the nav
-            (z-20 < z-30) so the bar and the "+" stay untouched. */}
-        <div
-          aria-hidden
-          className="fixed inset-x-0 bottom-0 z-20 pointer-events-none lg:hidden"
-          style={{
-            height: 'calc(env(safe-area-inset-bottom, 0px) + 136px)',
-            background: 'linear-gradient(to top, var(--ds-canvas) 64%, transparent)',
-          }}
-        />
         {/* Floating bottom bar — a card on the canvas, matching the desktop
             chrome. Offset by the safe-area inset so it clears the iOS home
             indicator instead of sitting under it. */}
@@ -2656,11 +2642,11 @@ const App: React.FC = () => {
               onClick={() => setShowCreateSheet(false)}
             />
             {/* Floating card that sits ABOVE the bottom bar rather than behind
-                it — anchored to --ds-bottom-nav-sheet, so it always clears
-                the bar and the raised "+". */}
+                it — anchored to the same --ds-bottom-nav-clear the scroll
+                region uses, so it always clears the bar and the raised "+". */}
             <div
               className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
-              style={{ bottom: 'var(--ds-bottom-nav-sheet)', animation: 'slideUpBehindNav 280ms ease-out both' }}
+              style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
                 {[
