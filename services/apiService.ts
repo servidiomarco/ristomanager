@@ -802,11 +802,24 @@ export interface RoomOccupancyCap {
   percent: number;              // 1-100
   basis: OccupancyBasis;        // TABLES = tavoli, SEATS = coperti
 }
+// Blocca l'agente vocale sulla *data richiesta* dal cliente (es. festività a
+// menù fisso gestite a mano): Sofia resta attiva per tutte le altre date, ma
+// per quella invita a richiamare negli orari indicati per parlare con un
+// operatore. Diverso dalle sospensioni programmate, che silenziano Sofia
+// mentre la finestra è in corso.
+export interface VoiceDateBlock {
+  date: string;                             // YYYY-MM-DD (Europe/Rome)
+  shift: 'LUNCH' | 'DINNER' | 'ALL';        // ALL = intera giornata
+  // Testo libero letto da Sofia ("dalle 9:00 alle 12:00"); se assente dice
+  // "negli orari di apertura del ristorante".
+  callback_hours?: string;
+}
 export interface ChannelSettings {
   voice_large_group_threshold: number;
   voice_bookings_suspension_callback_time: string;
   voice_bookings_suspension_schedule: ScheduledSuspension[];
   public_bookings_blocks: PublicBookingBlock[];
+  voice_bookings_date_blocks: VoiceDateBlock[];
   room_occupancy_caps: RoomOccupancyCap[];
 }
 

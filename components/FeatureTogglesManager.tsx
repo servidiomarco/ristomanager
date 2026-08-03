@@ -10,6 +10,7 @@ import {
     ChannelSettings,
     ScheduledSuspension,
     PublicBookingBlock,
+    VoiceDateBlock,
     RoomOccupancyCap,
     RoomOccupancyRow,
     RoomOccupancyShift,
@@ -110,6 +111,11 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [blocksDraft, setBlocksDraft] = useState<PublicBookingBlock[]>([]);
     const [savingBlocks, setSavingBlocks] = useState(false);
 
+    // Blocchi dell'agente vocale sulla data richiesta (giorni "solo operatore",
+    // es. festività a menù fisso). Stesso pattern draft dei blocchi web.
+    const [voiceBlocksDraft, setVoiceBlocksDraft] = useState<VoiceDateBlock[]>([]);
+    const [savingVoiceBlocks, setSavingVoiceBlocks] = useState(false);
+
     // Limiti di occupazione per sala. `occupancy` è solo informativo (quanto
     // è piena ogni sala oggi) e serve anche a elencare le sale disponibili,
     // dato che il draft contiene solo quelle con un limite attivo.
@@ -139,6 +145,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
                 setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
                 setBlocksDraft(channelsData.public_bookings_blocks ?? []);
+                setVoiceBlocksDraft(channelsData.voice_bookings_date_blocks ?? []);
                 setCapsDraft(channelsData.room_occupancy_caps ?? []);
                 // L'occupazione è un di più: se fallisce mostriamo comunque i
                 // limiti, senza le percentuali live accanto.
@@ -324,6 +331,48 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         }
     };
 
+    // Blocchi voce sulla data richiesta: stesse operazioni draft dei blocchi
+    // web, con in più il testo libero "quando richiamare" letto da Sofia.
+    const addVoiceBlockRow = () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        setVoiceBlocksDraft(prev => [...prev, { date: `${y}-${m}-${day}`, shift: 'ALL' }]);
+    };
+    const removeVoiceBlockRow = (idx: number) => {
+        setVoiceBlocksDraft(prev => prev.filter((_, i) => i !== idx));
+    };
+    const updateVoiceBlockRow = (idx: number, patch: Partial<VoiceDateBlock>) => {
+        setVoiceBlocksDraft(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+    };
+    const saveVoiceBlocks = async () => {
+        if (!channels || !canEdit || savingVoiceBlocks) return;
+        for (const [i, row] of voiceBlocksDraft.entries()) {
+            if (!ISO_DATE_RE.test(row.date)) {
+                showToast(`Blocco #${i + 1}: data non valida`, 'error'); return;
+            }
+            if (row.shift !== 'LUNCH' && row.shift !== 'DINNER' && row.shift !== 'ALL') {
+                showToast(`Blocco #${i + 1}: turno non valido`, 'error'); return;
+            }
+            if (row.callback_hours && row.callback_hours.length > 120) {
+                showToast(`Blocco #${i + 1}: testo "quando richiamare" troppo lungo (max 120 caratteri)`, 'error'); return;
+            }
+        }
+        setSavingVoiceBlocks(true);
+        try {
+            const updated = await updateChannelSettings({ voice_bookings_date_blocks: voiceBlocksDraft });
+            setChannels(updated);
+            setVoiceBlocksDraft(updated.voice_bookings_date_blocks ?? []);
+            showToast('Giorni bloccati per Sofia aggiornati', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento blocchi', 'error');
+        } finally {
+            setSavingVoiceBlocks(false);
+        }
+    };
+
     // Riempimento di un turno: "chiusa" quando la sala non apre (per sempre o
     // solo per quel turno), altrimenti la percentuale, in ambra se ha già
     // raggiunto il limite.
@@ -396,6 +445,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
     const blocksDirty = JSON.stringify(channels.public_bookings_blocks ?? []) !== JSON.stringify(blocksDraft);
+    const voiceBlocksDirty = JSON.stringify(channels.voice_bookings_date_blocks ?? []) !== JSON.stringify(voiceBlocksDraft);
     // Il backend riordina i cap per room_id: confronta ordinato, altrimenti
     // togliere e rimettere lo stesso limite lascerebbe il tasto Salva acceso.
     const sortCaps = (list: RoomOccupancyCap[]) => [...list].sort((a, b) => a.room_id - b.room_id);
@@ -646,6 +696,98 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             >
                                                 {savingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva programma
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                                <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] font-medium">
+                                                    <CalendarClock className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                                                    <span>Giorni gestiti solo da operatore</span>
+                                                </div>
+                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                                    Sofia non prende prenotazioni <em>per</em> questi giorni (o turni), qualunque sia il momento della chiamata: utile quando c'è un menù fisso o un evento che vuoi gestire a mano. Al cliente che chiede una data bloccata Sofia dice che se ne occupa lo staff e lo invita a richiamare negli orari indicati. Le altre date restano prenotabili normalmente. I blocchi già passati spariscono da soli.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={addVoiceBlockRow}
+                                                disabled={!canEdit || savingVoiceBlocks}
+                                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                            >
+                                                <Plus className="h-3.5 w-3.5" />
+                                                Aggiungi
+                                            </button>
+                                        </div>
+
+                                        <div className="mt-3 space-y-2">
+                                            {voiceBlocksDraft.length === 0 ? (
+                                                <p className="text-[12px] text-[var(--color-fg-subtle)] italic py-1">
+                                                    Nessun giorno bloccato. Sofia prenota per qualsiasi data.
+                                                </p>
+                                            ) : (
+                                                voiceBlocksDraft.map((row, idx) => {
+                                                    const inPast = row.date && row.date < todayKey;
+                                                    return (
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-500/[0.08]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                            <input
+                                                                type="date"
+                                                                value={row.date}
+                                                                min={todayKey}
+                                                                onChange={(e) => updateVoiceBlockRow(idx, { date: e.target.value })}
+                                                                disabled={!canEdit || savingVoiceBlocks}
+                                                                className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            />
+                                                            <select
+                                                                value={row.shift}
+                                                                onChange={(e) => updateVoiceBlockRow(idx, { shift: e.target.value as VoiceDateBlock['shift'] })}
+                                                                disabled={!canEdit || savingVoiceBlocks}
+                                                                className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            >
+                                                                <option value="ALL">Intera giornata</option>
+                                                                <option value="LUNCH">Solo pranzo</option>
+                                                                <option value="DINNER">Solo cena</option>
+                                                            </select>
+                                                            <span className="text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap" title="Quando Sofia invita a richiamare per parlare con un operatore">richiamare</span>
+                                                            <input
+                                                                type="text"
+                                                                value={row.callback_hours ?? ''}
+                                                                onChange={(e) => updateVoiceBlockRow(idx, { callback_hours: e.target.value })}
+                                                                placeholder="es. dalle 9:00 alle 12:00"
+                                                                maxLength={120}
+                                                                disabled={!canEdit || savingVoiceBlocks}
+                                                                className="flex-1 min-w-[160px] h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50 placeholder:text-[var(--color-fg-subtle)]"
+                                                            />
+                                                            {inPast && (
+                                                                <span className="text-[11px] text-amber-700 dark:text-amber-300">Data già passata</span>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeVoiceBlockRow(idx)}
+                                                                disabled={!canEdit || savingVoiceBlocks}
+                                                                className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15 disabled:opacity-50 transition-colors"
+                                                                aria-label="Rimuovi giorno bloccato"
+                                                                title="Rimuovi"
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+
+                                        <div className="mt-3 flex items-center justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={saveVoiceBlocks}
+                                                disabled={!canEdit || savingVoiceBlocks || !voiceBlocksDirty}
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            >
+                                                {savingVoiceBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                                Salva blocchi
                                             </button>
                                         </div>
                                     </div>

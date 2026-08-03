@@ -1017,6 +1017,23 @@ app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
             message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
         });
     }
+    // Operator-blocked target date (fixed-menu holidays etc.): Sofia must not
+    // book it — she reads back the callback invitation instead. Checked before
+    // availability so the caller never hears table counts for a blocked day.
+    {
+        const voiceShift = rawShift as 'LUNCH' | 'DINNER';
+        const dateBlock = findVoiceDateBlock(normalizedDate, voiceShift, await getVoiceDateBlocks());
+        if (dateBlock) {
+            console.log('[ElevenLabs] check-availability blocked date', { date: normalizedDate, shift: rawShift, block: dateBlock });
+            return res.json({
+                available: false,
+                free_tables_count: 0,
+                error: 'date_blocked',
+                date_readback: formatItalianDateReadback(normalizedDate),
+                message: buildVoiceDateBlockMessage(normalizedDate, voiceShift, dateBlock),
+            });
+        }
+    }
     // Large-group handoff. Case in point: on 2026-07-17 the agent told a
     // caller that no tables were free for 11 people at lunch on 2026-07-24,
     // when in fact every room was empty — findAvailability filters by
@@ -1156,6 +1173,21 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             error: 'invalid_shift',
             message: 'Il turno non è valido. Può indicare se si tratta di pranzo o cena?'
         });
+    }
+    // Defense-in-depth mirror of the date-block guard in check-availability:
+    // an LLM that skips the availability step must still not be able to book
+    // a date the operator reserved for manual handling.
+    {
+        const voiceShift = rawShift as 'LUNCH' | 'DINNER';
+        const dateBlock = findVoiceDateBlock(normalizedDate, voiceShift, await getVoiceDateBlocks());
+        if (dateBlock) {
+            console.log('[ElevenLabs] create-reservation blocked date', { date: normalizedDate, shift: rawShift, block: dateBlock, conversation_id: conversationId });
+            return res.json({
+                success: false,
+                error: 'date_blocked',
+                message: buildVoiceDateBlockMessage(normalizedDate, voiceShift, dateBlock),
+            });
+        }
     }
     // Constrain the booking time to the restaurant's slot grid so voice
     // bookings round-trip through the manual edit form without falling back
@@ -13112,7 +13144,7 @@ async function getPublicBookingBlocks(): Promise<PublicBookingBlock[]> {
 // Purge blocks whose date is already in the past so the settings screen
 // doesn't accumulate stale rows over time. Runs opportunistically at read
 // time — cheap since the array is small.
-function pruneExpiredBlocks(blocks: PublicBookingBlock[]): PublicBookingBlock[] {
+function pruneExpiredBlocks<T extends { date: string }>(blocks: T[]): T[] {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
     return blocks.filter(b => b.date >= today);
 }
@@ -13126,6 +13158,57 @@ function isPublicBookingBlocked(date: string, shift: 'LUNCH' | 'DINNER', blocks:
         if (b.shift === 'ALL' || b.shift === shift) return true;
     }
     return false;
+}
+
+// Voice-booking block on the *requested* date: unlike the scheduled
+// suspensions (which silence Sofia while the window is running), this blocks
+// the target date the caller asks for — e.g. a fixed-menu holiday the staff
+// wants to handle personally. Sofia stays on the phone and takes any other
+// date; for a blocked one she invites the caller to ring back in the hours
+// the operator wrote in `callback_hours`.
+const VOICE_DATE_BLOCKS_KEY = 'voice_bookings_date_blocks';
+type VoiceDateBlock = { date: string; shift: 'LUNCH' | 'DINNER' | 'ALL'; callback_hours?: string };
+
+function isValidVoiceDateBlock(e: any): e is VoiceDateBlock {
+    if (!e || typeof e !== 'object') return false;
+    if (typeof e.date !== 'string' || !ISO_DATE_RE.test(e.date)) return false;
+    if (typeof e.shift !== 'string' || !PUBLIC_BLOCK_SHIFTS.has(e.shift)) return false;
+    if (e.callback_hours !== undefined && typeof e.callback_hours !== 'string') return false;
+    return true;
+}
+
+async function getVoiceDateBlocks(): Promise<VoiceDateBlock[]> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [VOICE_DATE_BLOCKS_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        if (typeof raw !== 'string' || !raw.trim()) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(isValidVoiceDateBlock);
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${VOICE_DATE_BLOCKS_KEY}:`, err);
+        return [];
+    }
+}
+
+function findVoiceDateBlock(date: string, shift: 'LUNCH' | 'DINNER', blocks: VoiceDateBlock[]): VoiceDateBlock | null {
+    for (const b of blocks) {
+        if (b.date !== date) continue;
+        if (b.shift === 'ALL' || b.shift === shift) return b;
+    }
+    return null;
+}
+
+// What Sofia reads to the caller when the requested date is blocked. The
+// date readback keeps weekday+day coherent (same reason as check-availability);
+// callback_hours is operator-written free text ("dalle 9:00 alle 12:00").
+function buildVoiceDateBlockMessage(date: string, shift: 'LUNCH' | 'DINNER', block: VoiceDateBlock): string {
+    const shiftLabel = block.shift === 'ALL' ? '' : (shift === 'LUNCH' ? ' a pranzo' : ' a cena');
+    const when = block.callback_hours?.trim() || 'negli orari di apertura del ristorante';
+    return `Per ${formatItalianDateReadback(date)}${shiftLabel} le prenotazioni vengono gestite personalmente dal nostro staff, quindi non posso registrarla io. La invitiamo a richiamare ${when} per parlare con un operatore. Grazie!`;
 }
 
 function isValidScheduleEntry(e: any): e is ScheduledSuspension {
@@ -13190,20 +13273,23 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
 
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getVoiceDateBlocks(),
             getRoomOccupancyCaps(),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
+        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
         });
     } catch (err) {
@@ -13273,6 +13359,48 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
         // Chronological order for stable UI display.
         deduped.sort((a, b) => (a.date === b.date ? a.shift.localeCompare(b.shift) : a.date.localeCompare(b.date)));
         updates.push({ key: PUBLIC_BOOKINGS_BLOCKS_KEY, column: 'text_value', value: JSON.stringify(deduped) });
+    }
+
+    if (body.voice_bookings_date_blocks !== undefined) {
+        if (!Array.isArray(body.voice_bookings_date_blocks)) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: 'voice_bookings_date_blocks must be an array',
+            });
+        }
+        const normalizedVoiceBlocks: VoiceDateBlock[] = [];
+        const seenVoice = new Set<string>();
+        for (const entry of body.voice_bookings_date_blocks) {
+            if (!entry || typeof entry !== 'object') {
+                return res.status(400).json({ error: 'invalid_value', message: 'Each voice block entry must be an object' });
+            }
+            const date = String(entry.date ?? '').trim();
+            const shift = String(entry.shift ?? '').trim().toUpperCase();
+            const callbackHours = entry.callback_hours === undefined || entry.callback_hours === null
+                ? ''
+                : String(entry.callback_hours).trim();
+            if (!ISO_DATE_RE.test(date)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Voice block date must be YYYY-MM-DD (got "${date}")` });
+            }
+            if (!PUBLIC_BLOCK_SHIFTS.has(shift)) {
+                return res.status(400).json({ error: 'invalid_value', message: `Voice block shift must be LUNCH, DINNER or ALL (got "${shift}")` });
+            }
+            if (callbackHours.length > 120) {
+                return res.status(400).json({ error: 'invalid_value', message: 'Voice block callback_hours must be at most 120 characters' });
+            }
+            // Same dedupe rules as the web blocks: (date, shift) unique, and a
+            // day-wide ALL entry subsumes the per-shift ones on that date.
+            const key = `${date}|${shift}`;
+            if (seenVoice.has(key)) continue;
+            seenVoice.add(key);
+            const normalizedEntry: VoiceDateBlock = { date, shift: shift as VoiceDateBlock['shift'] };
+            if (callbackHours) normalizedEntry.callback_hours = callbackHours;
+            normalizedVoiceBlocks.push(normalizedEntry);
+        }
+        const voiceDaysWithAll = new Set(normalizedVoiceBlocks.filter(b => b.shift === 'ALL').map(b => b.date));
+        const voiceDeduped = normalizedVoiceBlocks.filter(b => !(voiceDaysWithAll.has(b.date) && b.shift !== 'ALL'));
+        voiceDeduped.sort((a, b) => (a.date === b.date ? a.shift.localeCompare(b.shift) : a.date.localeCompare(b.date)));
+        updates.push({ key: VOICE_DATE_BLOCKS_KEY, column: 'text_value', value: JSON.stringify(voiceDeduped) });
     }
 
     if (body.room_occupancy_caps !== undefined) {
@@ -13379,19 +13507,22 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, roomCaps] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
+            getVoiceDateBlocks(),
             getRoomOccupancyCaps(),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
+        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
             voice_bookings_suspension_schedule: suspensionSchedule,
             public_bookings_blocks: publicBlocks,
+            voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
         });
     } catch (err) {
