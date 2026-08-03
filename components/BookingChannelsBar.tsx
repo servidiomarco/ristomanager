@@ -13,8 +13,10 @@ import { useAuth } from '../contexts/AuthContext';
 
 // Full-shift time windows in Europe/Rome. Mirror the LUNCH_SLOTS/DINNER_SLOTS
 // grid used everywhere else; a click on the voice icon books a suspension
-// covering the whole service window on the selected date.
-const SHIFT_WINDOWS: Record<'LUNCH' | 'DINNER', { start: string; end: string }> = {
+// covering the whole service window on the selected date. Exported: the
+// Settings suspension rows offer the same Pranzo/Cena shortcut, and the two
+// UIs must agree on what "a shift" means to recognize each other's entries.
+export const SHIFT_WINDOWS: Record<'LUNCH' | 'DINNER', { start: string; end: string }> = {
     LUNCH: { start: '12:30', end: '14:30' },
     DINNER: { start: '19:30', end: '23:30' },
 };

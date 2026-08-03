@@ -16,9 +16,23 @@ import {
     getRoomsOccupancy,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { SHIFT_WINDOWS } from './BookingChannelsBar';
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The shift shown in a suspension row is derived from its times, never stored:
+// an entry whose window matches a full service reads as Pranzo/Cena (including
+// the ones created from the reception header's channel toggles), anything else
+// is a custom window.
+type SuspensionShift = 'LUNCH' | 'DINNER' | 'CUSTOM';
+function suspensionShiftOf(row: ScheduledSuspension): SuspensionShift {
+    for (const shift of ['LUNCH', 'DINNER'] as const) {
+        const w = SHIFT_WINDOWS[shift];
+        if (row.start_time === w.start && row.end_time === w.end) return shift;
+    }
+    return 'CUSTOM';
+}
 
 function todayISO(): string {
     // Local date, not UTC, so the picker default matches the user's calendar day.
@@ -219,7 +233,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const addScheduleRow = () => {
         setScheduleDraft(prev => [
             ...prev,
-            { date: todayISO(), start_time: '12:00', end_time: '15:00', callback_time: '15:00' },
+            { date: todayISO(), start_time: SHIFT_WINDOWS.LUNCH.start, end_time: SHIFT_WINDOWS.LUNCH.end, callback_time: SHIFT_WINDOWS.LUNCH.end },
         ]);
     };
     const removeScheduleRow = (idx: number) => {
@@ -227,6 +241,19 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     };
     const updateScheduleRow = (idx: number, patch: Partial<ScheduledSuspension>) => {
         setScheduleDraft(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+    };
+    const setScheduleRowShift = (idx: number, shift: SuspensionShift) => {
+        if (shift === 'CUSTOM') {
+            // Nudge the start so the times stop matching a full shift and the
+            // row stays in "fascia oraria" mode with the inputs visible.
+            setScheduleDraft(prev => prev.map((row, i) => {
+                if (i !== idx || suspensionShiftOf(row) === 'CUSTOM') return row;
+                return { ...row, start_time: '12:00', end_time: '15:00', callback_time: row.callback_time ?? '15:00' };
+            }));
+            return;
+        }
+        const w = SHIFT_WINDOWS[shift];
+        updateScheduleRow(idx, { start_time: w.start, end_time: w.end, callback_time: w.end });
     };
     const saveSchedule = async () => {
         if (!channels || !canEdit || savingSchedule) return;
@@ -523,7 +550,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             <span>Sospensioni programmate</span>
                                         </label>
                                         <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-3 leading-relaxed">
-                                            Attiva la sospensione automaticamente in una o più finestre programmate (data + fascia oraria). Quando l'orario corrente entra in una finestra, Sofia annuncia la sospensione e invita il cliente a richiamare dopo l'orario di fine di quella finestra. Il toggle immediato qui sopra ha comunque la precedenza se acceso.
+                                            Attiva la sospensione automaticamente in una o più finestre programmate: scegli il giorno e un turno intero (pranzo o cena), oppure una fascia oraria personalizzata. Quando l'orario corrente entra in una finestra, Sofia annuncia la sospensione e invita il cliente a richiamare dopo l'orario di fine di quella finestra. Il toggle immediato qui sopra ha comunque la precedenza se acceso.
                                         </p>
                                         {scheduleDraft.length === 0 ? (
                                             <p className="text-[12px] text-[var(--color-fg-subtle)] italic mb-3">Nessuna sospensione programmata.</p>
@@ -531,6 +558,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             <div className="space-y-2 mb-3">
                                                 {scheduleDraft.map((row, idx) => {
                                                     const isPast = row.date < todayKey;
+                                                    const rowShift = suspensionShiftOf(row);
                                                     return (
                                                         <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
                                                             <input
@@ -540,22 +568,41 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                                 disabled={!canEdit || savingSchedule}
                                                                 className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
                                                             />
-                                                            <span className="text-[12px] text-[var(--color-fg-muted)]">dalle</span>
-                                                            <input
-                                                                type="time"
-                                                                value={row.start_time}
-                                                                onChange={(e) => updateScheduleRow(idx, { start_time: e.target.value })}
+                                                            <select
+                                                                value={rowShift}
+                                                                onChange={(e) => setScheduleRowShift(idx, e.target.value as SuspensionShift)}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
-                                                            />
-                                                            <span className="text-[12px] text-[var(--color-fg-muted)]">alle</span>
-                                                            <input
-                                                                type="time"
-                                                                value={row.end_time}
-                                                                onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
-                                                                disabled={!canEdit || savingSchedule}
-                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
-                                                            />
+                                                                aria-label="Turno della sospensione"
+                                                                className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            >
+                                                                <option value="LUNCH">Pranzo</option>
+                                                                <option value="DINNER">Cena</option>
+                                                                <option value="CUSTOM">Fascia oraria</option>
+                                                            </select>
+                                                            {rowShift === 'CUSTOM' ? (
+                                                                <>
+                                                                    <span className="text-[12px] text-[var(--color-fg-muted)]">dalle</span>
+                                                                    <input
+                                                                        type="time"
+                                                                        value={row.start_time}
+                                                                        onChange={(e) => updateScheduleRow(idx, { start_time: e.target.value })}
+                                                                        disabled={!canEdit || savingSchedule}
+                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                    />
+                                                                    <span className="text-[12px] text-[var(--color-fg-muted)]">alle</span>
+                                                                    <input
+                                                                        type="time"
+                                                                        value={row.end_time}
+                                                                        onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
+                                                                        disabled={!canEdit || savingSchedule}
+                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                    />
+                                                                </>
+                                                            ) : (
+                                                                <span className="text-[12px] text-[var(--color-fg-muted)] tabular whitespace-nowrap" title="Finestra coperta dal turno">
+                                                                    {row.start_time}–{row.end_time}
+                                                                </span>
+                                                            )}
                                                             <span className="text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap" title="Orario che Sofia comunica al cliente per richiamare">richiamare dopo le</span>
                                                             <input
                                                                 type="time"
