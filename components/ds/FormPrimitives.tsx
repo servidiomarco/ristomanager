@@ -90,7 +90,7 @@ export const Stepper: React.FC<{
     'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[20px] font-medium leading-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   const current = value ?? min;
   return (
-    <div className="flex items-center gap-2" role="group" aria-label={ariaLabel}>
+    <div className="flex items-center gap-1.5" role="group" aria-label={ariaLabel}>
       <button
         type="button"
         onClick={() => onChange(Math.max(min, current - 1))}
@@ -117,7 +117,11 @@ export const Stepper: React.FC<{
           const n = parseInt(raw, 10);
           onChange(Number.isNaN(n) ? undefined : Math.max(min, Math.min(max, n)));
         }}
-        className="ds-stepper-input h-11 min-w-0 flex-1 rounded-full bg-[var(--ds-surface-row)] px-3 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        // min-w-[40px] over min-w-0: on narrow phone columns (~360px CSS
+        // viewport, e.g. OPPO/Xiaomi at default display scale) flex squeezed
+        // the field until the digit itself clipped. px-1 is enough — the
+        // value is centered, the pill shape does the framing.
+        className="ds-stepper-input h-11 min-w-[40px] flex-1 rounded-full bg-[var(--ds-surface-row)] px-1 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       />
       <button
         type="button"
