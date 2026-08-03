@@ -1332,6 +1332,15 @@ const TablePicker: React.FC<TablePickerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
+  // On phones the floor plan scales down until the glyphs collapse into each
+  // other, so the picker switches to a list — same states, same actions.
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
+  useEffect(() => {
+    const onResize = () => setIsPhone(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(entries => {
@@ -1341,7 +1350,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [isPhone]);
 
   const visibleRooms = rooms.filter(r => !r.is_closed);
   const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
@@ -1395,6 +1404,50 @@ const TablePicker: React.FC<TablePickerProps> = ({
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomTables, occupiedTableIds, reservation.table_id, reservation.guests]);
+
+  // Everything the two renderers need to know about a table, in one place, so
+  // the map and the phone list can't disagree on what's tappable.
+  const decorate = (t: Table) => {
+    const state = bucketize(t);
+    // Swap is offered only when *we* already have a table to give away.
+    // Without it the swap would be a one-way reassignment, which the
+    // server (correctly) refuses.
+    const occupantRes = state === 'occupied' ? reservationByTableId.get(t.id) : null;
+    const swappable = state === 'occupied' && !!reservation.table_id && !!occupantRes;
+    const disabled = state === 'tooSmall' || (state === 'occupied' && !swappable);
+    const onTap = () => {
+      if (disabled) return;
+      if (swappable && occupantRes) {
+        setSwapCandidate(occupantRes);
+      } else {
+        onSelect(t.id);
+      }
+    };
+    return { state, occupantRes, swappable, disabled, onTap };
+  };
+
+  // List order: best options first, dead options last. Within a group the
+  // smallest table wins — least wasted seats for this party.
+  const STATE_RANK: Record<TableState, number> = { current: 0, ideal: 1, big: 2, occupied: 3, tooSmall: 4 };
+  const listTables = useMemo(() => {
+    if (!isPhone) return [];
+    return [...roomTables].sort((a, b) => {
+      const ra = STATE_RANK[bucketize(a)];
+      const rb = STATE_RANK[bucketize(b)];
+      if (ra !== rb) return ra - rb;
+      if (a.seats !== b.seats) return a.seats - b.seats;
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPhone, roomTables, occupiedTableIds, reservation.table_id, reservation.guests]);
+
+  const LIST_PILL: Record<TableState, { text: string; tone: PillTone }> = {
+    current: { text: 'Attuale', tone: 'info' },
+    ideal: { text: 'Adatto', tone: 'positive' },
+    big: { text: 'Grande', tone: 'neutral' },
+    occupied: { text: 'Occupato', tone: 'critical' },
+    tooSmall: { text: 'Piccolo', tone: 'neutral' },
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--ds-canvas)]">
@@ -1455,7 +1508,48 @@ const TablePicker: React.FC<TablePickerProps> = ({
         </div>
       </div>
 
-      {/* Canvas. Floor-dot background so the room reads as space, not a card. */}
+      {/* Phone: the same picker as a list. One row per table, best fits on
+          top, with the occupant's name on occupied rows so a swap is an
+          informed choice, not a guess. */}
+      {isPhone ? (
+        <div className="mx-4 mb-4 min-h-0 flex-1 overflow-y-auto rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+          <div className="flex flex-col gap-1">
+            {listTables.map(t => {
+              const { state, occupantRes, disabled, onTap } = decorate(t);
+              const pill = state === 'occupied' && !disabled
+                ? { text: 'Scambia', tone: 'pending' as PillTone }
+                : LIST_PILL[state];
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={onTap}
+                  disabled={busy || disabled}
+                  className={`flex w-full items-center gap-3 rounded-[16px] p-3 text-left transition-colors ${
+                    disabled
+                      ? 'cursor-not-allowed opacity-45'
+                      : 'hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)]'
+                  } ${state === 'current' ? 'ring-2 ring-inset ring-[var(--ds-arriving-solid)]' : ''}`}
+                >
+                  <div className={`w-14 flex-shrink-0 ${state === 'tooSmall' ? 'grayscale' : ''}`}>
+                    <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">Tavolo {t.name}</p>
+                    <p className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                      {t.seats} posti
+                      {t.max_seats && t.max_seats !== t.seats ? ` · max ${t.max_seats}` : ''}
+                      {occupantRes ? ` · ${toTitleCase(occupantRes.customer_name)}` : ''}
+                    </p>
+                  </div>
+                  <StatusPill tone={pill.tone}>{pill.text}</StatusPill>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+      /* Canvas. Floor-dot background so the room reads as space, not a card. */
       <div
         ref={containerRef}
         className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
@@ -1473,13 +1567,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
             }}
           >
             {roomTables.map(t => {
-              const state = bucketize(t);
-              // Swap is offered only when *we* already have a table to give away.
-              // Without it the swap would be a one-way reassignment, which the
-              // server (correctly) refuses.
-              const occupantRes = state === 'occupied' ? reservationByTableId.get(t.id) : null;
-              const swappable = state === 'occupied' && !!reservation.table_id && !!occupantRes;
-              const disabled = state === 'tooSmall' || (state === 'occupied' && !swappable);
+              const { state, swappable, disabled, onTap } = decorate(t);
               const dim = getGlyphDimensions(t.shape, t.seats);
               const glyphW = dim.width * scale;
               const glyphH = dim.height * scale;
@@ -1520,19 +1608,10 @@ const TablePicker: React.FC<TablePickerProps> = ({
                 haloClass = 'ring-1 ring-[var(--ds-border-strong)] hover:ring-2';
               }
 
-              const handleClick = () => {
-                if (disabled) return;
-                if (swappable && occupantRes) {
-                  setSwapCandidate(occupantRes);
-                } else {
-                  onSelect(t.id);
-                }
-              };
-
               return (
                 <button
                   key={t.id}
-                  onClick={handleClick}
+                  onClick={onTap}
                   disabled={busy || disabled}
                   className={`absolute transition-all duration-150 ${
                     disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
@@ -1572,6 +1651,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Swap confirmation — sits over the picker so the host can verify the
           two parties before committing the atomic exchange. */}
