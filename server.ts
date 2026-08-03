@@ -12629,10 +12629,13 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
 // call is recent enough to still be actionable (last 7 days). Surfaces as a
 // badge on the sidebar phone icon. Must be declared before `/voice-calls/:id`
 // so Express doesn't route "pending-count" into the :id handler.
+// Distinct on the last 10 phone digits so the badge matches the Chiamate
+// list, which collapses repeated attempts from the same number into one
+// card; calls without a phone still count one each.
 app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (_req, res) => {
     try {
         const result = await queryWithRetry(
-            `SELECT COUNT(*)::int AS count
+            `SELECT COUNT(DISTINCT COALESCE(NULLIF(right(regexp_replace(phone, '\\D', '', 'g'), 10), ''), 'call-' || id))::int AS count
              FROM voice_calls
              WHERE reservation_id IS NULL
                AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')

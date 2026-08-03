@@ -106,9 +106,13 @@ interface CallDetailProps {
   // (e.g. the quick-create reservation flow links the call in background).
   // A change refetches the detail so badges update without a page reload.
   refreshTick?: number;
+  // Other still-pending calls from the same number (the list groups repeated
+  // attempts into one card): "Segna ricontattato" must clear them too, or
+  // they'd resurface as a new pending card after the refetch.
+  siblingPendingIds?: number[];
 }
 
-const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick }) => {
+const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick, siblingPendingIds }) => {
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +194,11 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
     setSaveError(null);
     try {
       const updated = await voiceCallsApiService.updateFollowUp(callId, patch);
+      if (patch.status === 'CONTACTED' && siblingPendingIds?.length) {
+        await Promise.all(siblingPendingIds.map(id =>
+          voiceCallsApiService.updateFollowUp(id, { status: 'CONTACTED' })
+        ));
+      }
       setDetail(prev => prev ? {
         ...prev,
         follow_up_status: updated.follow_up_status,
@@ -203,7 +212,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
     } finally {
       setSaving(false);
     }
-  }, [callId, onFollowUpChanged]);
+  }, [callId, onFollowUpChanged, siblingPendingIds]);
 
   useEffect(() => {
     return () => {
@@ -764,10 +773,12 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
 
   // Swipe-right on a pending call. Same endpoint the detail modal's
   // "Ricontattato" button uses — the gesture is a shortcut to it,
-  // not a new path.
-  const markContacted = useCallback(async (call: VoiceCallSummary) => {
+  // not a new path. Takes the whole group: when the same number called
+  // twice, marking the visible card must clear the hidden attempts too,
+  // or they'd resurface as still-pending on the next fetch.
+  const markContacted = useCallback(async (calls: VoiceCallSummary[]) => {
     try {
-      await voiceCallsApiService.updateFollowUp(call.id, { status: 'CONTACTED' });
+      await Promise.all(calls.map(c => voiceCallsApiService.updateFollowUp(c.id, { status: 'CONTACTED' })));
       await fetchItems();
       onFollowUpChanged?.();
     } catch (err) {
@@ -799,7 +810,26 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   const handledCalls = visibleItems.filter(c => !needsCallback(c));
   const swipeHint = useFirstRunHint('ds-swipe-hint-chiamate');
 
-  const renderCall = (item: VoiceCallSummary, hint: boolean) => {
+  // Same number, several missed attempts → one card. Grouped on the last 10
+  // digits (same rule as the reservation phone lookups: staff numbers without
+  // +39 must match E.164 caller ids); calls without a phone stay individual.
+  // The card shows the newest attempt; list order follows it.
+  const pendingGroups = (() => {
+    const groups: VoiceCallSummary[][] = [];
+    const byPhone = new Map<string, VoiceCallSummary[]>();
+    for (const c of pendingCalls) {
+      const key = (c.phone || '').replace(/\D/g, '').slice(-10);
+      if (!key) { groups.push([c]); continue; }
+      const existing = byPhone.get(key);
+      if (existing) { existing.push(c); continue; }
+      const group: VoiceCallSummary[] = [c];
+      byPhone.set(key, group);
+      groups.push(group);
+    }
+    return groups;
+  })();
+
+  const renderCall = (item: VoiceCallSummary, hint: boolean, group: VoiceCallSummary[] = [item]) => {
     const resBadge = reservationStatusBadge(item.reservation_status);
     const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
     const pending = needsCallback(item);
@@ -812,7 +842,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           label: 'Ricontattato',
           tone: 'confirm',
           icon: <Check className="h-4 w-4" aria-hidden />,
-          onAction: () => markContacted(item),
+          onAction: () => markContacted(group),
         } : undefined}
         right={tel ? {
           label: 'Richiama',
@@ -862,6 +892,14 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 <StatusPill tone={item.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
                   <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
                   {item.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+                </StatusPill>
+              )}
+              {group.length > 1 && (
+                <StatusPill
+                  tone="pending"
+                  title={`Lo stesso numero ha chiamato ${group.length} volte — "Ricontattato" le segna tutte`}
+                >
+                  {group.length} chiamate
                 </StatusPill>
               )}
               {/* Handoff reason badge: shown alongside the follow-up status so
@@ -1030,7 +1068,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                       Da ricontattare
                     </SectionHeader>
                     <div className="space-y-2 pb-2">
-                      {pendingCalls.map((c, i) => renderCall(c, swipeHint && i === 0))}
+                      {pendingGroups.map((group, i) => renderCall(group[0], swipeHint && i === 0, group))}
                     </div>
                   </>
                 )}
@@ -1060,6 +1098,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
               onCreateReservation={onCreateReservationFromCall}
               onOpenCustomerProfile={onOpenCustomerProfile}
               refreshTick={refreshTick}
+              siblingPendingIds={(pendingGroups.find(g => g.some(c => c.id === selectedId)) ?? [])
+                .filter(c => c.id !== selectedId)
+                .map(c => c.id)}
             />
           ) : (
             <PanePlaceholder icon={Phone}>Seleziona una chiamata dalla lista</PanePlaceholder>
