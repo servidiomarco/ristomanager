@@ -132,9 +132,9 @@
   --shadow-overlay: 0 24px 48px -12px rgba(17, 24, 39, 0.18);
 
   /* ---------- Type ---------- */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
                Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
 
   /* ---------- Motion ---------- */
   /* One spring-ish curve for every micro-interaction, so taps, sheets and
@@ -435,7 +435,9 @@ html { font-family: var(--font-sans); }
 body {
   background: var(--color-surface-2);
   color: var(--color-fg);
-  font-feature-settings: "ss01", "cv11"; /* Inter improvements */
+  /* Match Inter's apparent size: Hanken Grotesk's x-height is ~0.50 vs Inter's
+     ~0.545, so normalize to Inter's x-height aspect (+~9%). */
+  font-size-adjust: 0.545;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
