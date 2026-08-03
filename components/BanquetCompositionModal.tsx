@@ -32,59 +32,59 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
     : [];
 
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+        <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{banquet.name}</h2>
+            <h2 className="text-[16px] font-semibold text-[var(--ds-text-primary)] truncate">{banquet.name}</h2>
             <div className="flex items-center gap-2 flex-wrap mt-1.5">
               {banquet.event_date && (
-                <span className="inline-flex items-center gap-1 text-xs text-slate-600">
-                  <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+                <span className="inline-flex items-center gap-1 text-[13px] text-[var(--ds-text-secondary)]">
+                  <Calendar className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
                   {formatItalianDate(banquet.event_date)}
                 </span>
               )}
               {banquet.shift === Shift.LUNCH && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                <span className="inline-flex items-center gap-1 text-[13px] font-semibold bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-1.5 py-0.5 rounded">
                   <Sun className="h-3 w-3" /> Pranzo
                 </span>
               )}
               {banquet.shift === Shift.DINNER && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                <span className="inline-flex items-center gap-1 text-[13px] font-semibold bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded">
                   <Moon className="h-3 w-3" /> Cena
                 </span>
               )}
               {banquet.guests != null && banquet.guests > 0 && (
-                <span className="inline-flex items-center gap-1 text-xs text-slate-600">
-                  <Users className="h-3.5 w-3.5 text-indigo-500" />
+                <span className="inline-flex items-center gap-1 text-[13px] text-[var(--ds-text-secondary)]">
+                  <Users className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
                   <span className="font-semibold">{banquet.guests}</span> coperti
                   {banquet.children != null && banquet.children > 0 && (
-                    <span className="text-slate-500">({banquet.children} bambin{banquet.children === 1 ? 'o' : 'i'})</span>
+                    <span className="text-[var(--ds-text-muted)]">({banquet.children} bambin{banquet.children === 1 ? 'o' : 'i'})</span>
                   )}
                 </span>
               )}
               {canViewBanquetPrice && (
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--ds-text-primary)]">
                   €{banquet.price_per_person}/pax
                   {banquet.children_price != null && (
-                    <span className="text-indigo-500">· €{banquet.children_price}/bambino</span>
+                    <span className="text-[var(--ds-text-muted)]">· €{banquet.children_price}/bambino</span>
                   )}
                 </span>
               )}
             </div>
             {banquet.description && (
-              <p className="text-sm text-slate-500 mt-2 line-clamp-2">{banquet.description}</p>
+              <p className="text-sm text-[var(--ds-text-muted)] mt-2 line-clamp-2">{banquet.description}</p>
             )}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0 ml-3">
             <button
               type="button"
               onClick={() => printBanquet(banquet, dishes, { showPrice: canViewBanquetPrice })}
-              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+              className="p-1.5 rounded-lg text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               title="Stampa"
             >
               <Printer className="h-4 w-4" />
@@ -92,7 +92,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={() => printBanquet(banquet, dishes, { kitchenMode: true })}
-              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+              className="p-1.5 rounded-lg text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               title="Stampa per cucina"
             >
               <ChefHat className="h-4 w-4" />
@@ -100,7 +100,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+              className="p-1.5 rounded-lg text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               title="Chiudi"
             >
               <X className="h-5 w-5" />
@@ -111,7 +111,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <div>
-            <h3 className="text-xs font-semibold tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 flex items-center gap-1.5">
               <Utensils className="h-3.5 w-3.5" />
               Composizione del menù
             </h3>
@@ -123,8 +123,8 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                     .filter((d): d is Dish => !!d);
                   if (items.length === 0) return null;
                   return (
-                    <div key={`${course.name}-${idx}`} className="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
-                      <h4 className="text-sm font-semibold text-indigo-600 mb-2">{course.name}</h4>
+                    <div key={`${course.name}-${idx}`} className="border border-[var(--ds-border)] rounded-lg p-3 bg-[var(--ds-surface-row)]">
+                      <h4 className="mb-2 text-[15px] font-semibold text-[var(--ds-text-primary)]">{course.name}</h4>
                       <ul className="space-y-2">
                         {items.map(d => (
                           <li key={d.id} className="flex items-center gap-3">
@@ -132,17 +132,17 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                               <img
                                 src={d.photo_url}
                                 alt={d.name}
-                                className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                                className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-[var(--ds-border)]"
                               />
                             ) : (
-                              <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">
-                                <ImageIcon className="h-5 w-5 text-slate-300" />
+                              <div className="h-12 w-12 rounded-lg bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
+                                <ImageIcon className="h-5 w-5 text-[var(--ds-text-subtle)]" />
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm text-slate-700 font-medium truncate">{d.name}</div>
+                              <div className="text-sm text-[var(--ds-text-primary)] font-medium truncate">{d.name}</div>
                               {d.allergens && d.allergens.length > 0 && (
-                                <div className="text-[10px] text-rose-600 font-medium mt-0.5">
+                                <div className="text-[10px] text-[var(--ds-critical-text)] font-medium mt-0.5">
                                   {d.allergens.join(', ')}
                                 </div>
                               )}
@@ -151,7 +151,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                         ))}
                       </ul>
                       {course.notes && course.notes.trim() && (
-                        <p className="text-xs italic text-slate-600 mt-2 whitespace-pre-wrap">{course.notes}</p>
+                        <p className="text-xs italic text-[var(--ds-text-secondary)] mt-2 whitespace-pre-wrap">{course.notes}</p>
                       )}
                     </div>
                   );
@@ -165,48 +165,48 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                       <img
                         src={d.photo_url}
                         alt={d.name}
-                        className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                        className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-[var(--ds-border)]"
                       />
                     ) : (
-                      <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">
-                        <ImageIcon className="h-5 w-5 text-slate-300" />
+                      <div className="h-12 w-12 rounded-lg bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
+                        <ImageIcon className="h-5 w-5 text-[var(--ds-text-subtle)]" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm text-slate-700 font-medium truncate">{d.name}</div>
-                      {d.category && <div className="text-[10px] text-slate-400">{d.category}</div>}
+                      <div className="text-sm text-[var(--ds-text-primary)] font-medium truncate">{d.name}</div>
+                      {d.category && <div className="text-[10px] text-[var(--ds-text-subtle)]">{d.category}</div>}
                     </div>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-slate-400 italic">Nessun piatto selezionato.</p>
+              <p className="text-sm text-[var(--ds-text-subtle)] italic">Nessun piatto selezionato.</p>
             )}
           </div>
 
           {/* Notes */}
           {(banquet.notes_courses || banquet.notes_service || banquet.notes_mise_en_place) && (
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <h3 className="text-xs font-semibold tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+            <div className="space-y-2 pt-2 border-t border-[var(--ds-border)]">
+              <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 flex items-center gap-1.5">
                 <StickyNote className="h-3.5 w-3.5" />
                 Note operative
               </h3>
               {banquet.notes_courses && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Portate (Cucina)</h4>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_courses}</p>
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                  <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Portate (Cucina)</h4>
+                  <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_courses}</p>
                 </div>
               )}
               {banquet.notes_service && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Servizio (Sala)</h4>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_service}</p>
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                  <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Servizio (Sala)</h4>
+                  <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_service}</p>
                 </div>
               )}
               {banquet.notes_mise_en_place && (
-                <div className="border-l-3 border-l-amber-400 bg-amber-50/50 rounded-r-lg p-2.5 border border-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:border-l-amber-500">
-                  <h4 className="text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-300 mb-1">Mise en Place</h4>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{banquet.notes_mise_en_place}</p>
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                  <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Mise en Place</h4>
+                  <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_mise_en_place}</p>
                 </div>
               )}
             </div>

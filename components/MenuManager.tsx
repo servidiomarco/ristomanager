@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Leaf, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, Eye, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -14,6 +14,11 @@ import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
+import {
+  SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
+  ModalShell, FormCard, Field, Stepper, useMediaQuery,
+  dsInput, dsSelect, dsTextarea, dsButton, dsIconButton,
+} from './ds';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -68,6 +73,68 @@ const computeBanquetPaymentStatus = (menu: BanquetMenu): BanquetPaymentStatus =>
     return 'PARTIAL';
 };
 
+/* ── Date bucketing for the banquet list ──────────────────────────────────
+   Four buckets, not the three the mockup shows: an event later than this
+   month still has to land somewhere, and dropping it silently would make the
+   list quietly lie about how many banquets exist. */
+type BanquetGroupKey = 'week' | 'month' | 'later' | 'past';
+
+const BANQUET_GROUP_LABEL: Record<BanquetGroupKey, string> = {
+  week:  'Questa settimana',
+  month: 'Questo mese',
+  later: 'Più avanti',
+  past:  'Passati',
+};
+
+// Monday-based, matching the Italian week the restaurant plans around.
+const endOfCurrentWeek = (from: Date): string => {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const offsetToSunday = (7 - (d.getDay() || 7)); // getDay(): 0 = Sunday
+  d.setDate(d.getDate() + offsetToSunday);
+  return formatLocalDate(d);
+};
+
+const endOfCurrentMonth = (from: Date): string =>
+  formatLocalDate(new Date(from.getFullYear(), from.getMonth() + 1, 0));
+
+const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, monthEnd: string): BanquetGroupKey => {
+  const date = menu.event_date;
+  // No date yet: it is still being planned, so it belongs with what is coming
+  // rather than disappearing into the past.
+  if (!date) return 'week';
+  if (date < today) return 'past';
+  if (date <= weekEnd) return 'week';
+  if (date <= monthEnd) return 'month';
+  return 'later';
+};
+
+/* ── Form steps ───────────────────────────────────────────────────────────
+   The same six sections the form has always had, regrouped into five screens
+   (cliente and evento share one). Steps never gate each other: you can jump
+   anywhere from the header, and the required-field check still runs once, on
+   save, exactly as it did when this was a single scroll. */
+const BANQUET_STEPS = [
+  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto' },
+  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo' },
+  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva' },
+  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati' },
+  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala' },
+] as const;
+
+// Category filters on Piatti alla carta. There are more of these than a
+// SegmentedControl should hold, so they stay individual pills on a wrapping row.
+// 32px, the dense-desktop touch target — these sit in a filter row above a
+// grid, not in a primary action position, and at 44px they outweighed the
+// cards they filter.
+const DISH_FILTER_BASE =
+  'inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+const DISH_FILTER_ON = 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]';
+const DISH_FILTER_OFF =
+  'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]';
+
+const formatEuro = (n: number): string =>
+  new Intl.NumberFormat('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(n));
+
 interface MenuManagerProps {
   dishes: Dish[];
   banquetMenus: BanquetMenu[];
@@ -117,8 +184,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   type BanquetSortBy = 'date-asc' | 'date-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc';
   const [banquetSortBy, setBanquetSortBy] = useState<BanquetSortBy>('date-asc');
   const [showBanquetSortModal, setShowBanquetSortModal] = useState(false);
-  const [expandedBanquetGroups, setExpandedBanquetGroups] = useState<Set<'upcoming' | 'past'>>(new Set(['upcoming']));
-  const toggleBanquetGroup = (key: 'upcoming' | 'past') => {
+  // Everything ahead is open by default; the past is collapsed because it only
+  // gets longer and you almost never come here for it.
+  const [expandedBanquetGroups, setExpandedBanquetGroups] = useState<Set<BanquetGroupKey>>(
+    new Set<BanquetGroupKey>(['week', 'month', 'later'])
+  );
+  const toggleBanquetGroup = (key: BanquetGroupKey) => {
     setExpandedBanquetGroups(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
@@ -126,6 +197,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
   };
   const [searchTerm, setSearchTerm] = useState('');
+  const [banquetSearchTerm, setBanquetSearchTerm] = useState('');
+  const [dishViewMode, setDishViewMode] = useState<'GRID' | 'LIST'>('GRID');
+  // The inline detail panel needs real width to sit beside a grid. Below lg the
+  // same selection opens DishDetailModal instead, so the dish is never
+  // unreachable — only presented differently.
+  const dishPanelFits = useMediaQuery('(min-width: 1024px)');
+  const detailPanelOpen = dishPanelFits && activeTab === 'DISHES';
+  // Which step of the create/edit wizard is showing. Steps never gate each
+  // other — validation still runs once, on save.
+  const [banquetStep, setBanquetStep] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
@@ -185,6 +266,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [banquetDraftBanner, setBanquetDraftBanner] = useState<{ savedAt: number } | null>(null);
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
+  // Each step starts at its own top. Without this you leave step 3 scrolled to
+  // the bottom and arrive at step 4 already halfway down it. ModalShell owns
+  // the scroll container, so we pull a sentinel at the top of the body into
+  // view instead of scrolling an element we do not hold.
+  const banquetFormScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    banquetFormScrollRef.current?.scrollIntoView({ block: 'start' });
+  }, [banquetStep]);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
 
@@ -407,6 +496,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setBanquetFormErrors([]);
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
+    setBanquetStep(0);
     setIsBanquetFormOpen(true);
   };
 
@@ -427,6 +517,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       notes_courses: '', notes_service: '', notes_mise_en_place: '',
       table_ids: []
     });
+    setBanquetStep(0);
     setIsBanquetFormOpen(true);
 
     const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
@@ -437,6 +528,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsBanquetFormOpen(false);
     setBanquetFormErrors([]);
     setBanquetDraftBanner(null);
+    // Always reopen on the first step. Landing back on "Note operative"
+    // because that is where you closed it reads as a broken form.
+    setBanquetStep(0);
   };
 
   const handleRestoreBanquetDraft = () => {
@@ -609,16 +703,51 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         case 'guests-desc': return (Number(b.guests) || 0) - (Number(a.guests) || 0);
       }
     };
-    const upcoming: BanquetMenu[] = [];
-    const past: BanquetMenu[] = [];
+    const now = new Date();
+    const weekEnd = endOfCurrentWeek(now);
+    const monthEnd = endOfCurrentMonth(now);
+
+    // Name and description only. The client is a customer_id reference and the
+    // customers list is not loaded on this screen, so searching by client name
+    // would mean a fetch this list does not otherwise need. The event type
+    // ("Battesimo", "Comunione") lives in description, which is what you
+    // actually reach for.
+    const q = banquetSearchTerm.trim().toLowerCase();
+    const matches = (b: BanquetMenu) => {
+      if (!q) return true;
+      return (b.name || '').toLowerCase().includes(q)
+        || (b.description || '').toLowerCase().includes(q);
+    };
+
+    const buckets: Record<BanquetGroupKey, BanquetMenu[]> = { week: [], month: [], later: [], past: [] };
     for (const b of banquetMenus) {
-      if (b.event_date && b.event_date < today) past.push(b);
-      else upcoming.push(b);
+      if (!matches(b)) continue;
+      buckets[banquetGroupFor(b, today, weekEnd, monthEnd)].push(b);
     }
-    upcoming.sort(compare);
-    past.sort(compare);
-    return { upcoming, past };
-  }, [banquetMenus, banquetSortBy]);
+    // The past reads newest-first whatever the sort says: an explicit "prima →
+    // dopo" is about planning ahead, and applying it backwards buries the
+    // event that just happened at the bottom of a very long list.
+    (Object.keys(buckets) as BanquetGroupKey[]).forEach(k => {
+      buckets[k].sort(k === 'past' && banquetSortBy === 'date-asc'
+        ? (a, b) => (b.event_date || '').localeCompare(a.event_date || '')
+        : compare);
+    });
+    return buckets;
+  }, [banquetMenus, banquetSortBy, banquetSearchTerm]);
+
+  // Header figures. All three come from data already loaded — nothing new is
+  // fetched to show them.
+  const banquetKpis = useMemo(() => {
+    const today = formatLocalDate(new Date());
+    const upcoming = banquetMenus.filter(b => !b.event_date || b.event_date >= today);
+    const covers = upcoming.reduce((s, b) => s + (Number(b.guests) || 0), 0);
+    const outstanding = upcoming.reduce((s, b) => {
+      const due = computeBanquetTotalDue(b);
+      const paid = Number(b.total_paid || 0);
+      return s + Math.max(0, due - paid);
+    }, 0);
+    return { count: upcoming.length, covers, outstanding };
+  }, [banquetMenus]);
 
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
     { value: 'date-asc',    label: 'Data evento (prima → dopo)' },
@@ -638,55 +767,84 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      {/* Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-6">
-        <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-          <button
-              onClick={() => setActiveTab('BANQUETS')}
-              className={`px-4 py-2.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'BANQUETS' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
-          >
-              Menu Banchetti
-          </button>
-          <button
-              onClick={() => setActiveTab('DISHES')}
-              className={`px-4 py-2.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${activeTab === 'DISHES' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
-          >
-              Piatti alla Carta
-          </button>
-        </div>
+      {/* Tabs + header figures */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-5">
+        <SegmentedControl<'BANQUETS' | 'DISHES'>
+          value={activeTab}
+          onChange={setActiveTab}
+          ariaLabel="Sezione"
+          equalWidth={false}
+          options={[
+            { value: 'BANQUETS', label: 'Menu banchetti' },
+            { value: 'DISHES', label: 'Piatti alla carta' },
+          ]}
+        />
         {activeTab === 'BANQUETS' && (
-          <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5 self-start sm:self-auto flex-shrink-0">
-            <button
-              onClick={() => setBanquetView('LIST')}
-              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${banquetView === 'LIST' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-            >
-              <ListIcon className="h-4 w-4" /> Lista
-            </button>
-            <button
-              onClick={() => setBanquetView('CALENDAR')}
-              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${banquetView === 'CALENDAR' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'}`}
-            >
-              <Calendar className="h-4 w-4" /> Calendario
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone="info" className="h-8 px-3">
+              <span className="font-semibold tabular-nums">{banquetKpis.count}</span>
+              <span className="font-normal">in arrivo</span>
+            </StatusPill>
+            <StatusPill tone="neutral" className="h-8 px-3">
+              <span className="font-semibold tabular-nums">{banquetKpis.covers}</span>
+              <span className="font-normal">coperti prenotati</span>
+            </StatusPill>
+            {canViewBanquetPrice && banquetKpis.outstanding > 0 && (
+              <StatusPill tone="pending" className="h-8 px-3">
+                <span className="font-semibold tabular-nums">€ {formatEuro(banquetKpis.outstanding)}</span>
+                <span className="font-normal">da incassare</span>
+              </StatusPill>
+            )}
+          </div>
+        )}
+        {activeTab === 'DISHES' && (
+          <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
+            <SearchField
+              value={searchTerm}
+              onChange={setSearchTerm}
+              placeholder="Cerca piatto o ingrediente..."
+              ariaLabel="Cerca piatto"
+              className="min-w-0 flex-1 sm:max-w-sm"
+            />
+            {/* Icon-only: the two modes are self-evident from the glyphs, and
+                the labels were competing with the search beside them. */}
+            <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1">
+              {([
+                { value: 'GRID' as const, label: 'Griglia', Icon: LayoutGrid },
+                { value: 'LIST' as const, label: 'Elenco', Icon: ListIcon },
+              ]).map(({ value, label, Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setDishViewMode(value)}
+                  aria-pressed={dishViewMode === value}
+                  title={label}
+                  aria-label={label}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    dishViewMode === value
+                      ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                      : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
       {activeTab === 'DISHES' && (
           <>
-            <div className="flex flex-col md:flex-row md:items-center gap-3 mb-6">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center mb-5">
               {dishCategories.length > 0 && (
-                <div className="flex flex-wrap gap-2 flex-1">
+                <div className="flex flex-1 flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setCategoryFilter(null)}
-                    className={`px-4 py-2.5 rounded-full text-sm font-medium border transition ${
-                      categoryFilter === null
-                        ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
-                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                    }`}
+                    className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                   >
-                    Tutte ({dishes.length})
+                    Tutte <span className="tabular-nums opacity-70">{dishes.length}</span>
                   </button>
                   {dishCategories.map(cat => {
                     const count = dishes.filter(d => d.category === cat).length;
@@ -696,324 +854,577 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         key={cat}
                         type="button"
                         onClick={() => setCategoryFilter(isActive ? null : cat)}
-                        className={`px-4 py-2.5 rounded-full text-sm font-medium border transition ${
-                          isActive
-                            ? 'bg-[var(--color-fg)] text-white border-[var(--color-fg)]'
-                            : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
-                        }`}
+                        className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                       >
-                        {cat} ({count})
+                        {cat} <span className="tabular-nums opacity-70">{count}</span>
                       </button>
                     );
                   })}
                 </div>
               )}
-              <div className="relative h-10 md:w-72 md:flex-shrink-0">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
-                <input
-                  type="search"
-                  placeholder="Cerca piatto per nome o categoria..."
-                  className="w-full h-full pl-9 pr-9 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                    aria-label="Cancella ricerca"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+              <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
+                {dishes.length} piatti · {dishes.filter(d => d.allergens.length > 0).length} con allergeni · {dishes.filter(d => !d.photo_url).length} senza foto
+              </span>
             </div>
 
-            {/* Dish List */}
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left min-w-[640px]">
-                <thead className="bg-[var(--color-surface-3)] border-b border-[var(--color-line)]">
-                    <tr>
-                    <th className="px-4 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] w-16">Foto</th>
-                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Nome Piatto</th>
-                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Categoria</th>
-                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Prezzo</th>
-                    <th className="px-6 py-3 text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Allergeni</th>
-                    <th className="px-6 py-3 text-right text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Azioni</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {filteredDishes.map((dish) => (
-                    <tr key={dish.id} className="border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition">
-                        <td className="px-4 py-3">
-                        {dish.photo_url ? (
-                            <img
-                                src={dish.photo_url}
-                                alt={dish.name}
-                                className="w-10 h-10 rounded-md object-cover border border-[var(--color-line)]"
-                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                            />
-                        ) : (
-                            <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] border border-[var(--color-line)] flex items-center justify-center">
-                                <ImageIcon className="h-4 w-4 text-[var(--color-fg-subtle)]" />
-                            </div>
-                        )}
-                        </td>
-                        <td className="px-6 py-3">
-                        <div className="font-medium text-[var(--color-fg)]">{dish.name}</div>
-                        <div className="text-xs text-[var(--color-fg-muted)] truncate max-w-xs">{dish.description}</div>
-                        </td>
-                        <td className="px-6 py-3">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
-                            {dish.category}
-                        </span>
-                        </td>
-                        <td className="px-6 py-3 text-sm font-medium text-[var(--color-fg)]">
-                        € {Number(dish.price).toFixed(2)}
-                        </td>
-                        <td className="px-6 py-3">
-                        <div className="flex flex-wrap gap-1">
-                            {dish.allergens.length > 0 ? dish.allergens.map(a => (
-                                <span key={a} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30">
-                                    {a}
+            {filteredDishes.length === 0 ? (
+              <EmptyState icon={Utensils}>
+                {searchTerm || categoryFilter
+                  ? 'Nessun piatto corrisponde ai filtri.'
+                  : 'Non hai ancora aggiunto piatti alla carta.'}
+              </EmptyState>
+            ) : (
+              <div className="flex gap-4">
+                <div className="min-w-0 flex-1">
+                  {dishViewMode === 'GRID' ? (
+                    <div className={`grid gap-4 ${detailPanelOpen ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'}`}>
+                      {filteredDishes.map(dish => {
+                        const isSelected = viewDish?.id === dish.id;
+                        return (
+                          <button
+                            key={dish.id}
+                            type="button"
+                            onClick={() => setViewDish(isSelected ? null : dish)}
+                            className={`flex flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                              isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
+                            }`}
+                          >
+                            <div className="relative">
+                              {dish.photo_url ? (
+                                <img
+                                  src={dish.photo_url}
+                                  alt=""
+                                  className="h-32 w-full object-cover"
+                                  onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                                />
+                              ) : (
+                                <div className="flex h-32 w-full items-center justify-center bg-[var(--ds-surface-row)]">
+                                  <ImageIcon className="h-6 w-6 text-[var(--ds-text-subtle)]" aria-hidden />
+                                </div>
+                              )}
+                              <span className="absolute left-2 top-2 rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
+                                {dish.category}
+                              </span>
+                              {dish.allergens.length > 0 && (
+                                <span
+                                  className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-solid)] px-2 py-0.5 text-[11px] font-semibold text-[#ffffff]"
+                                  title={`${dish.allergens.length} allergeni: ${dish.allergens.join(', ')}`}
+                                >
+                                  <Info className="h-3 w-3" aria-hidden />
+                                  <span className="tabular-nums">{dish.allergens.length}</span>
                                 </span>
-                            )) : <span className="text-xs text-[var(--color-fg-subtle)]">-</span>}
-                        </div>
-                        </td>
-                        <td className="px-6 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                            <button
-                                onClick={() => setViewDish(dish)}
-                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                                title="Visualizza piatto"
-                            >
-                                <Eye className="h-4 w-4" />
-                            </button>
-                            {canEdit && (
-                            <>
-                            <button
-                                onClick={() => handleEditDish(dish)}
-                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                                title="Modifica"
-                            >
-                                <Edit2 className="h-4 w-4" />
-                            </button>
-                            <button
-                                onClick={() => setDeleteDishConfirm(dish)}
-                                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400"
-                                title="Elimina"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </button>
-                            </>
+                              )}
+                            </div>
+                            <div className="flex flex-1 flex-col p-3">
+                              <h3 className="text-[15px] font-semibold leading-tight text-[var(--ds-text-primary)]">{dish.name}</h3>
+                              {dish.description && (
+                                <p className="mt-1 line-clamp-2 text-[13px] text-[var(--ds-text-muted)]">{dish.description}</p>
+                              )}
+                              <div className="mt-auto flex items-center justify-between pt-3">
+                                <span className="text-[19px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                                  € {Number(dish.price).toFixed(2)}
+                                </span>
+                                {canEdit && (
+                                  <span className="flex items-center gap-1">
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
+                                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
+                                      className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
+                                      title="Modifica"
+                                    >
+                                      <Edit2 className="h-4 w-4" />
+                                    </span>
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
+                                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
+                                      className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                                      title="Elimina"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                      {filteredDishes.map((dish, i) => {
+                        const isSelected = viewDish?.id === dish.id;
+                        return (
+                          <button
+                            key={dish.id}
+                            type="button"
+                            onClick={() => setViewDish(isSelected ? null : dish)}
+                            className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                              i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                            } ${isSelected ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                          >
+                            {dish.photo_url ? (
+                              <img
+                                src={dish.photo_url}
+                                alt=""
+                                className="h-11 w-11 flex-shrink-0 rounded-[12px] object-cover"
+                                onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                              />
+                            ) : (
+                              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface-row)]">
+                                <ImageIcon className="h-4 w-4 text-[var(--ds-text-subtle)]" aria-hidden />
+                              </div>
                             )}
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</div>
+                              <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                                {[dish.category, dish.description].filter(Boolean).join(' · ')}
+                              </div>
+                            </div>
+                            <div className="hidden flex-shrink-0 flex-wrap items-center justify-end gap-1 md:flex md:w-64">
+                              {dish.allergens.length > 0 ? dish.allergens.map(a => (
+                                <StatusPill key={a} tone="critical">{a}</StatusPill>
+                              )) : (
+                                <span className="text-[13px] text-[var(--ds-text-subtle)]">nessun allergene</span>
+                              )}
+                            </div>
+                            <span className="flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                              € {Number(dish.price).toFixed(2)}
+                            </span>
+                            {canEdit && (
+                              <span className="flex flex-shrink-0 items-center gap-1">
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
+                                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
+                                  className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
+                                  title="Modifica"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </span>
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
+                                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
+                                  className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                                  title="Elimina"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </span>
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Detail panel. Desktop only — below lg the same dish opens in
+                    DishDetailModal as a sheet, because a 320px column beside a
+                    grid leaves neither readable. */}
+                {detailPanelOpen && viewDish && (
+                  <aside className="hidden w-80 flex-shrink-0 flex-col self-start overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] lg:flex">
+                    <div className="relative">
+                      {viewDish.photo_url ? (
+                        <img src={viewDish.photo_url} alt="" className="h-40 w-full object-cover" />
+                      ) : (
+                        <div className="flex h-40 w-full items-center justify-center bg-[var(--ds-surface-row)]">
+                          <ImageIcon className="h-7 w-7 text-[var(--ds-text-subtle)]" aria-hidden />
                         </div>
-                        </td>
-                    </tr>
-                    ))}
-                </tbody>
-                </table>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setViewDish(null)}
+                        className={`${dsIconButton} absolute right-2 top-2 h-9 w-9`}
+                        aria-label="Chiudi dettaglio"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-1 flex-col gap-4 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-[20px] font-semibold leading-tight tracking-[-0.015em] text-[var(--ds-text-primary)]">
+                          {viewDish.name}
+                        </h3>
+                        <span className="flex-shrink-0 text-[20px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                          € {Number(viewDish.price).toFixed(2)}
+                        </span>
+                      </div>
+                      <div>
+                        <StatusPill tone="neutral"><Tag className="h-3 w-3" />{viewDish.category}</StatusPill>
+                      </div>
+                      {viewDish.description && (
+                        <p className="text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{viewDish.description}</p>
+                      )}
+                      <div>
+                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-critical-text)]">Allergeni</h4>
+                        {viewDish.allergens.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {viewDish.allergens.map(a => (
+                              <StatusPill key={a} tone="critical">{a}</StatusPill>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[13px] text-[var(--ds-text-muted)]">Nessun allergene dichiarato.</p>
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Usato nei banchetti</h4>
+                        {(() => {
+                          const used = banquetMenus.filter(m => {
+                            if (m.courses && m.courses.length > 0) {
+                              return m.courses.some(c => c.dish_ids.includes(viewDish.id));
+                            }
+                            return m.dish_ids.includes(viewDish.id);
+                          });
+                          if (used.length === 0) {
+                            return (
+                              <p className="rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
+                                Non ancora inserito in un menu banchetto.
+                              </p>
+                            );
+                          }
+                          return (
+                            <ul className="space-y-1">
+                              {used.slice(0, 6).map(m => (
+                                <li key={m.id} className="truncate rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)]">
+                                  {m.name}
+                                  {m.event_date && (
+                                    <span className="text-[var(--ds-text-muted)]">
+                                      {' · '}
+                                      {new Date(m.event_date + 'T00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                              {used.length > 6 && (
+                                <li className="px-3 text-[13px] text-[var(--ds-text-muted)]">e altri {used.length - 6}</li>
+                              )}
+                            </ul>
+                          );
+                        })()}
+                      </div>
+                      {canEdit && (
+                        <div className="mt-auto flex items-center gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditDish(viewDish)}
+                            className={`${dsButton.primary} flex-1`}
+                          >
+                            <Edit2 className="h-4 w-4" /> Modifica piatto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteDishConfirm(viewDish)}
+                            className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                            title="Elimina piatto"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </aside>
+                )}
               </div>
-            </div>
+            )}
           </>
       )}
 
       {activeTab === 'BANQUETS' && (
         <div className="space-y-6">
-          {banquetView === 'LIST' && banquetMenus.length > 0 && (
-            <div className="flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => setShowBanquetSortModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 h-9 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors text-xs font-medium text-[var(--color-fg-muted)]"
-                aria-label="Ordina banchetti"
-              >
-                <ArrowUpDown className="h-3.5 w-3.5" />
-                <span>{BANQUET_SORT_OPTIONS.find(o => o.value === banquetSortBy)?.label}</span>
-              </button>
+          {banquetMenus.length > 0 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {banquetView === 'LIST' && (
+                <SearchField
+                  value={banquetSearchTerm}
+                  onChange={setBanquetSearchTerm}
+                  placeholder="Cerca banchetto o tipo evento..."
+                  ariaLabel="Cerca banchetto"
+                  className="sm:flex-1 sm:min-w-0"
+                />
+              )}
+              <div className="flex items-center gap-2 sm:flex-shrink-0">
+                <SegmentedControl<'LIST' | 'CALENDAR'>
+                  value={banquetView}
+                  onChange={setBanquetView}
+                  ariaLabel="Vista banchetti"
+                  size="sm"
+                  equalWidth={false}
+                  options={[
+                    { value: 'LIST', label: 'Lista', icon: <ListIcon className="h-4 w-4" /> },
+                    { value: 'CALENDAR', label: 'Calendario', icon: <Calendar className="h-4 w-4" /> },
+                  ]}
+                />
+                {banquetView === 'LIST' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowBanquetSortModal(true)}
+                    className={`${dsIconButton} ml-auto h-9 w-9`}
+                    aria-label="Ordina banchetti"
+                    title={BANQUET_SORT_OPTIONS.find(o => o.value === banquetSortBy)?.label}
+                  >
+                    <ArrowUpDown className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {banquetView === 'LIST' && (() => {
             const renderBanquetCard = (menu: BanquetMenu) => {
-                const timeStatus = computeBanquetTimeStatus(menu);
-                const cardAccent = timeStatus === 'PAST'
-                  ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
-                  : 'border-l-4 border-l-emerald-400 dark:border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-500/10';
+                const isPast = computeBanquetTimeStatus(menu) === 'PAST';
+                const paymentStatus = computeBanquetPaymentStatus(menu);
+                const due = computeBanquetTotalDue(menu);
+                const paid = Number(menu.total_paid || 0);
+                const outstanding = Math.max(0, due - paid);
+                // Guard the divide: a banquet with no price yet has due = 0, and
+                // 0/0 would paint a full bar on something nobody has paid for.
+                const paidRatio = due > 0 ? Math.min(1, paid / due) : 0;
+
+                const courseCount = menu.courses && menu.courses.length > 0 ? menu.courses.length : null;
+                const dishCount = menu.courses && menu.courses.length > 0
+                  ? menu.courses.reduce((sum, c) => sum + c.dish_ids.length, 0)
+                  : menu.dish_ids.length;
+
+                const eventDate = menu.event_date ? new Date(menu.event_date + 'T00:00') : null;
+                const isLunch = menu.shift === Shift.LUNCH;
+                const tileTone = !menu.shift
+                  ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
+                  : isLunch
+                    ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                    : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
+
                 return (
-                  <div key={menu.id} className={`rounded-lg border border-[var(--color-line)] flex flex-col hover:shadow-[var(--shadow-sm)] transition-shadow ${cardAccent}`}>
-                      <div className="p-4 flex-1">
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                              <div className="min-w-0">
-                                  <h3 className="font-semibold text-[15px] text-[var(--color-fg)] leading-tight truncate">{menu.name}</h3>
-                                  {menu.description && (
-                                    <p className="text-xs text-[var(--color-fg-muted)] line-clamp-1 mt-0.5">{menu.description}</p>
-                                  )}
-                              </div>
-                              <div className="flex items-center gap-1 flex-shrink-0">
-                                  <button
-                                      onClick={() => setViewBanquet(menu)}
-                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                                      title="Visualizza piatti"
-                                  >
-                                      <Eye className="h-4 w-4" />
-                                  </button>
-                                  {canManageBanquetPayments && (
-                                  <button
-                                      onClick={() => setPaymentsBanquet(menu)}
-                                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-600 dark:hover:text-emerald-400"
-                                      title="Pagamenti"
-                                  >
-                                      <Wallet className="h-4 w-4" />
-                                  </button>
-                                  )}
-                                  {canEdit && (
-                                  <div className="relative">
-                                      <button
-                                          type="button"
-                                          onClick={() => setCardMenuOpenId(cardMenuOpenId === menu.id ? null : menu.id)}
-                                          className="p-1.5 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                          aria-label="Altre azioni"
-                                      >
-                                          <MoreHorizontal className="h-4 w-4" />
-                                      </button>
-                                      {cardMenuOpenId === menu.id && (
-                                          <div
-                                              ref={cardMenuRef}
-                                              className="absolute right-0 top-full mt-1 w-40 bg-[var(--color-surface)] rounded-lg shadow-[var(--shadow-overlay)] border border-[var(--color-line)] py-1 z-30 animate-in fade-in slide-in-from-top-1 duration-100"
-                                          >
-                                              <button
-                                                  type="button"
-                                                  onClick={() => { setCardMenuOpenId(null); printBanquet(menu, dishes, { showPrice: canViewBanquetPrice }); }}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                              >
-                                                  <Printer className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                                                  Stampa / PDF
-                                              </button>
-                                              <button
-                                                  type="button"
-                                                  onClick={() => { setCardMenuOpenId(null); printBanquet(menu, dishes, { kitchenMode: true }); }}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                              >
-                                                  <ChefHat className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                                                  Stampa per cucina
-                                              </button>
-                                              <button
-                                                  type="button"
-                                                  onClick={() => { setCardMenuOpenId(null); handleEditBanquet(menu); }}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                                              >
-                                                  <Edit2 className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                                                  Modifica
-                                              </button>
-                                              <button
-                                                  type="button"
-                                                  onClick={() => { setCardMenuOpenId(null); setDeleteBanquetConfirm(menu); }}
-                                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition-colors"
-                                              >
-                                                  <Trash2 className="h-3.5 w-3.5" />
-                                                  Elimina
-                                              </button>
-                                          </div>
+                  <div
+                    key={menu.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setViewBanquet(menu)}
+                    onKeyDown={e => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setViewBanquet(menu); }
+                    }}
+                    // Raised only while its own menu is open. Grid siblings paint
+                    // in DOM order, so without this the dropdown slides under the
+                    // next card instead of over it.
+                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
+                  >
+                      <div className="flex items-start gap-3">
+                          {/* Date tile — the thing you scan a banquet list for. */}
+                          <div className={`flex h-[76px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] ${tileTone}`}>
+                              {eventDate ? (
+                                <>
+                                  <span className="text-[11px] font-semibold leading-none">
+                                    {ITALIAN_WEEKDAYS[(eventDate.getDay() + 6) % 7]}
+                                  </span>
+                                  <span className="text-[24px] font-bold leading-tight tabular-nums">{eventDate.getDate()}</span>
+                                  <span className="text-[11px] leading-none">
+                                    {ITALIAN_MONTHS[eventDate.getMonth()].slice(0, 3).toLowerCase()}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="px-1 text-center text-[11px] font-medium leading-tight">Senza data</span>
+                              )}
+                              {menu.shift && (
+                                isLunch ? <Sun className="mt-1 h-3.5 w-3.5" aria-label="Pranzo" />
+                                        : <Sunset className="mt-1 h-3.5 w-3.5" aria-label="Cena" />
+                              )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                      <h3 className="flex items-center gap-1.5 truncate text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                                        <span className="truncate">{menu.name}</span>
+                                        {(menu.table_ids?.length ?? 0) > 0 && (
+                                          <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-subtle)]" aria-label="Tavoli assegnati" />
+                                        )}
+                                      </h3>
+                                      {menu.description && (
+                                        <p className="mt-0.5 line-clamp-1 text-[13px] text-[var(--ds-text-muted)]">{menu.description}</p>
                                       )}
                                   </div>
+                                  <div className="flex flex-shrink-0 items-center gap-1">
+                                      {canManageBanquetPayments && (
+                                      <button
+                                          onClick={e => { e.stopPropagation(); setPaymentsBanquet(menu); }}
+                                          className={`${dsIconButton} h-9 w-9 shadow-none ${
+                                            paymentStatus === 'PAID'
+                                              ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)] hover:text-[var(--ds-seated-text)]'
+                                              : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]'
+                                          }`}
+                                          title="Pagamenti"
+                                      >
+                                          <Wallet className="h-4 w-4" />
+                                      </button>
+                                      )}
+                                      {canEdit && (
+                                      // Ref wraps the trigger as well as the menu.
+                                      // With it on the menu alone, mousedown on the
+                                      // trigger counted as "outside", closed the
+                                      // menu, and the click then reopened it — so
+                                      // the dots never appeared to close.
+                                      <div className="relative" ref={cardMenuOpenId === menu.id ? cardMenuRef : undefined}>
+                                          <button
+                                              type="button"
+                                              onClick={e => { e.stopPropagation(); setCardMenuOpenId(cardMenuOpenId === menu.id ? null : menu.id); }}
+                                              className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
+                                              aria-label="Altre azioni"
+                                          >
+                                              <MoreHorizontal className="h-4 w-4" />
+                                          </button>
+                                          {cardMenuOpenId === menu.id && (
+                                              <div
+                                                  className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] animate-in fade-in slide-in-from-top-1 duration-100"
+                                              >
+                                                  <button
+                                                      type="button"
+                                                      onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); printBanquet(menu, dishes, { showPrice: canViewBanquetPrice }); }}
+                                                      className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                                  >
+                                                      <Printer className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
+                                                      Stampa / PDF
+                                                  </button>
+                                                  <button
+                                                      type="button"
+                                                      onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); printBanquet(menu, dishes, { kitchenMode: true }); }}
+                                                      className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                                  >
+                                                      <ChefHat className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
+                                                      Stampa per cucina
+                                                  </button>
+                                                  <button
+                                                      type="button"
+                                                      onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); handleEditBanquet(menu); }}
+                                                      className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                                  >
+                                                      <Edit2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
+                                                      Modifica
+                                                  </button>
+                                                  <button
+                                                      type="button"
+                                                      onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); setDeleteBanquetConfirm(menu); }}
+                                                      className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+                                                  >
+                                                      <Trash2 className="h-3.5 w-3.5" />
+                                                      Elimina
+                                                  </button>
+                                              </div>
+                                          )}
+                                      </div>
+                                      )}
+                                  </div>
+                              </div>
+
+                              {/* Three figures, one strip — the shape repeats on every
+                                  card so the eye lands on the same spot each time. */}
+                              <div className="mt-3 flex items-stretch rounded-[16px] bg-[var(--ds-surface-row)]">
+                                  <div className="flex-1 px-3 py-2 text-center">
+                                      <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                                        {menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—'}
+                                      </div>
+                                      <div className="text-[11px] text-[var(--ds-text-muted)]">coperti</div>
+                                  </div>
+                                  {canViewBanquetPrice && (
+                                    <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                        <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                                          € {Number(menu.price_per_person) || 0}
+                                        </div>
+                                        <div className="text-[11px] text-[var(--ds-text-muted)]">a persona</div>
+                                    </div>
                                   )}
+                                  <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                      <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                                        {courseCount != null ? `${courseCount}/${dishCount}` : dishCount}
+                                      </div>
+                                      <div className="text-[11px] text-[var(--ds-text-muted)]">
+                                        {courseCount != null ? 'portate/piatti' : 'piatti'}
+                                      </div>
+                                  </div>
                               </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-wrap mb-2">
-                              {menu.event_date && (
-                                <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full">
-                                  <Calendar className="h-3 w-3" />
-                                  {new Date(menu.event_date + 'T00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
-                                </div>
-                              )}
-                              {menu.shift === Shift.LUNCH && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-2 py-0.5 rounded-full">
-                                  <Sun className="h-3 w-3" /> Pranzo
-                                </span>
-                              )}
-                              {menu.shift === Shift.DINNER && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border border-indigo-100 dark:border-[#4f46e5]/30 px-2 py-0.5 rounded-full">
-                                  <Sunset className="h-3 w-3" /> Cena
-                                </span>
-                              )}
-                              {canManageBanquetPayments && (() => {
-                                const status = computeBanquetPaymentStatus(menu);
-                                if (status === 'PAID') return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-500/30 px-2 py-0.5 rounded-full">
-                                    <Check className="h-3 w-3" /> Pagato
-                                  </span>
-                                );
-                                if (status === 'PARTIAL') return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-2 py-0.5 rounded-full">
-                                    <Wallet className="h-3 w-3" /> Acconto
-                                  </span>
-                                );
-                                return (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-2 py-0.5 rounded-full">
-                                    <Wallet className="h-3 w-3" /> Da pagare
-                                  </span>
-                                );
-                              })()}
-                              {canViewBanquetPrice && (
-                                <span className="inline-flex items-center text-[11px] font-semibold text-[var(--color-fg)] bg-[var(--color-surface-3)] border border-[var(--color-line)] px-2 py-0.5 rounded-full">
-                                  €{menu.price_per_person}/pax
-                                </span>
-                              )}
-                              {canViewBanquetPrice && menu.discount_type && menu.discount_value != null && Number(menu.discount_value) > 0 && (
-                                <span className="inline-flex items-center text-[11px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/15 border border-violet-100 dark:border-violet-500/30 px-2 py-0.5 rounded-full">
-                                  Sconto {menu.discount_type === 'PERCENT' ? `${Number(menu.discount_value)}%` : `€${Number(menu.discount_value).toFixed(2)}`}
-                                </span>
-                              )}
-                          </div>
-                          <div className="text-xs text-[var(--color-fg-muted)]">
-                              {menu.courses && menu.courses.length > 0 ? (
-                                <span>{menu.courses.length} portate · {menu.courses.reduce((sum, c) => sum + c.dish_ids.length, 0)} piatti</span>
-                              ) : (
-                                <span>{menu.dish_ids.length} piatti</span>
-                              )}
-                              {menu.guests != null && Number(menu.guests) > 0 && (
-                                <span> · {Number(menu.guests)} coperti</span>
-                              )}
-                              {canViewBanquetPrice && menu.deposit_amount != null && Number(menu.deposit_amount) > 0 && (
-                                <span> · Acconto €{Number(menu.deposit_amount).toFixed(2)}</span>
-                              )}
-                          </div>
                       </div>
+
+                      {/* Payment line + how far along the money is. */}
+                      {canViewBanquetPrice && due > 0 && (
+                        <div className="mt-3">
+                            <div className="text-[13px]">
+                                {outstanding > 0 ? (
+                                  <>
+                                    <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
+                                    <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                                    {paid > 0 && (
+                                      <span className="text-[var(--ds-text-muted)]"> · acconto € {formatEuro(paid)}</span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">€ {formatEuro(due)}</span>
+                                    <span className="text-[var(--ds-text-muted)]"> saldato</span>
+                                  </>
+                                )}
+                            </div>
+                            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
+                                <div
+                                  className={`h-full rounded-full ${outstanding > 0 ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
+                                  style={{ width: `${Math.round(paidRatio * 100)}%` }}
+                                />
+                            </div>
+                        </div>
+                      )}
                   </div>
                 );
             };
+            const GROUP_TONE: Record<BanquetGroupKey, 'attention' | 'pending' | 'info' | 'muted'> = {
+              week: 'attention', month: 'pending', later: 'info', past: 'muted',
+            };
+            const visibleGroups = (['week', 'month', 'later', 'past'] as BanquetGroupKey[])
+              .map(key => ({ key, items: groupedBanquets[key] }))
+              .filter(g => g.items.length > 0);
+
             return (
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {banquetMenus.length === 0 && (
-                  <div className="text-center py-12 text-[var(--color-fg-muted)]">
+                  <EmptyState icon={BookOpen}>
                     Non hai ancora creato menu per banchetti.
-                  </div>
+                  </EmptyState>
                 )}
-                {([
-                  { key: 'upcoming' as const, label: 'Prossimi', dotClass: 'bg-emerald-500', items: groupedBanquets.upcoming },
-                  { key: 'past' as const,     label: 'Passati',  dotClass: 'bg-slate-400',  items: groupedBanquets.past },
-                ]).filter(g => g.items.length > 0).map(group => {
+                {banquetMenus.length > 0 && visibleGroups.length === 0 && (
+                  <EmptyState icon={Search}>
+                    Nessun banchetto per «{banquetSearchTerm}».
+                  </EmptyState>
+                )}
+                {visibleGroups.map(group => {
                   const totalGuests = group.items.reduce((s, b) => s + (Number(b.guests) || 0), 0);
+                  const totalOutstanding = group.items.reduce((s, b) => {
+                    return s + Math.max(0, computeBanquetTotalDue(b) - Number(b.total_paid || 0));
+                  }, 0);
                   const isOpen = expandedBanquetGroups.has(group.key);
                   return (
                     <div key={group.key}>
-                      <button
-                        type="button"
-                        onClick={() => toggleBanquetGroup(group.key)}
-                        className="w-full flex items-center gap-2.5 px-3 py-3 bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors mb-3"
+                      <SectionHeader
+                        tone={GROUP_TONE[group.key]}
+                        onToggle={() => toggleBanquetGroup(group.key)}
+                        expanded={isOpen}
+                        meta={
+                          <>
+                            {group.items.length} {group.items.length === 1 ? 'banchetto' : 'banchetti'}
+                            {totalGuests > 0 && ` · ${totalGuests} coperti`}
+                            {canViewBanquetPrice && totalOutstanding > 0 && ` · € ${formatEuro(totalOutstanding)} da incassare`}
+                          </>
+                        }
                       >
-                        <div className={`w-2.5 h-2.5 rounded-full ${group.dotClass}`} />
-                        <span className="text-sm font-semibold text-[var(--color-fg)]">{group.label}</span>
-                        <span className="text-xs text-[var(--color-fg-muted)] font-medium">
-                          {group.items.length} {group.items.length === 1 ? 'banchetto' : 'banchetti'}
-                          {totalGuests > 0 && ` · ${totalGuests} coperti`}
-                        </span>
-                        <ChevronDown className={`h-4 w-4 text-[var(--color-fg-subtle)] ml-auto transition-transform ${isOpen ? '' : '-rotate-90'}`} />
-                      </button>
+                        {BANQUET_GROUP_LABEL[group.key]}
+                      </SectionHeader>
                       {isOpen && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                        <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2">
                           {group.items.map(renderBanquetCard)}
                         </div>
                       )}
@@ -1037,219 +1448,307 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {/* Add Dish Modal */}
       {isDishFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDishFormOpen(false); }}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingDish ? 'Modifica Piatto' : 'Aggiungi Nuovo Piatto'}</h3>
-              <button type="button" onClick={() => setIsDishFormOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-                <X className="h-5 w-5" />
+        <ModalShell
+          open={isDishFormOpen}
+          onClose={() => setIsDishFormOpen(false)}
+          title={isEditingDish ? 'Modifica piatto' : 'Aggiungi nuovo piatto'}
+          size="md"
+          bodyClassName="p-5 sm:p-6"
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setIsDishFormOpen(false)}
+                className={dsButton.secondary}
+              >
+                Annulla
               </button>
-            </div>
-            <form id="dish-form" onSubmit={handleAddDishSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome</label>
-                <input 
-                  required
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  value={newDish.name}
-                  onChange={e => setNewDish({...newDish, name: e.target.value})}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo (€)</label>
-                  <input 
-                    type="number"
-                    step="0.5"
+              <button
+                type="submit"
+                form="dish-form"
+                disabled={isSavingDish}
+                className={dsButton.primary}
+              >
+                {isSavingDish && <Loader2 className="h-4 w-4 animate-spin" />}
+                Salva piatto
+              </button>
+            </>
+          }
+        >
+          {/* Three cards on the canvas, not one flat run of fields: the shell's
+              body is deliberately unpadded so cards inside it read as raised. */}
+          <form id="dish-form" onSubmit={handleAddDishSubmit} className="space-y-4">
+            <FormCard title="Dettagli">
+              <div className="space-y-4">
+                <Field label="Nome" required>
+                  <input
                     required
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                    value={newDish.price}
-                    onChange={e => setNewDish({...newDish, price: parseFloat(e.target.value)})}
+                    className={dsInput}
+                    value={newDish.name}
+                    onChange={e => setNewDish({ ...newDish, name: e.target.value })}
                   />
-                </div>
-                <div>
-                  <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria</label>
-                  <select 
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                    value={newDish.category}
-                    onChange={e => setNewDish({...newDish, category: e.target.value})}
-                  >
-                    <option>Antipasti</option>
-                    <option>Primi</option>
-                    <option>Secondi</option>
-                    <option>Contorni</option>
-                    <option>Dolci</option>
-                    <option>Bevande</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione</label>
-                <textarea
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
-                  value={newDish.description}
-                  onChange={e => setNewDish({...newDish, description: e.target.value})}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Foto <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                <div className="flex gap-3 items-start">
-                  <div className="flex-1 flex flex-col gap-2">
+                </Field>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Prezzo (€)" required>
                     <input
-                      type="url"
-                      placeholder="https://... oppure carica un file"
-                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                      value={newDish.photo_url?.startsWith('data:') ? '' : (newDish.photo_url || '')}
-                      onChange={e => setNewDish({...newDish, photo_url: e.target.value})}
+                      type="number"
+                      step="0.5"
+                      required
+                      className={dsInput}
+                      value={newDish.price}
+                      onChange={e => setNewDish({ ...newDish, price: parseFloat(e.target.value) })}
                     />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        ref={photoFileInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={handlePhotoFileChange}
-                      />
+                  </Field>
+                  <Field label="Categoria">
+                    <select
+                      className={dsSelect}
+                      value={newDish.category}
+                      onChange={e => setNewDish({ ...newDish, category: e.target.value })}
+                    >
+                      <option>Antipasti</option>
+                      <option>Primi</option>
+                      <option>Secondi</option>
+                      <option>Contorni</option>
+                      <option>Dolci</option>
+                      <option>Bevande</option>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Descrizione">
+                  <textarea
+                    rows={4}
+                    className={`${dsTextarea} resize-none`}
+                    value={newDish.description}
+                    onChange={e => setNewDish({ ...newDish, description: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </FormCard>
+
+            <FormCard title="Foto" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+              <div className="flex items-start gap-4">
+                {newDish.photo_url ? (
+                  <img
+                    src={newDish.photo_url}
+                    alt="Anteprima"
+                    className="h-20 w-20 flex-shrink-0 rounded-[16px] object-cover"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-[16px] bg-[var(--ds-surface-row)]">
+                    <ImageIcon className="h-6 w-6 text-[var(--ds-text-subtle)]" aria-hidden />
+                  </div>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://... oppure carica un file"
+                    className={dsInput}
+                    value={newDish.photo_url?.startsWith('data:') ? '' : (newDish.photo_url || '')}
+                    onChange={e => setNewDish({ ...newDish, photo_url: e.target.value })}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={photoFileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={handlePhotoFileChange}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => photoFileInputRef.current?.click()}
+                      disabled={photoUploading}
+                      className={`${dsButton.quiet} h-9 px-4 text-[13px] disabled:cursor-wait`}
+                    >
+                      {photoUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      {photoUploading ? 'Elaborazione…' : 'Carica foto'}
+                    </button>
+                    {newDish.photo_url && (
                       <button
                         type="button"
-                        onClick={() => photoFileInputRef.current?.click()}
-                        disabled={photoUploading}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-60 disabled:cursor-wait"
+                        onClick={() => setNewDish({ ...newDish, photo_url: '' })}
+                        className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                       >
-                        {photoUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                        {photoUploading ? 'Elaborazione…' : 'Carica foto'}
+                        <X className="h-3.5 w-3.5" />
+                        Rimuovi
                       </button>
-                      {newDish.photo_url && (
-                        <button
-                          type="button"
-                          onClick={() => setNewDish({...newDish, photo_url: ''})}
-                          className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                          Rimuovi
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-[var(--color-fg-subtle)] leading-snug">
-                      JPG, PNG o WebP — viene ridimensionata automaticamente a max 800×800px (~150–200 KB), ottimizzata per il web.
-                    </p>
-                    {photoUploadError && (
-                      <p className="text-[11px] text-rose-600 dark:text-rose-400">{photoUploadError}</p>
                     )}
                   </div>
-                  {newDish.photo_url ? (
-                    <img
-                      src={newDish.photo_url}
-                      alt="Anteprima"
-                      className="w-16 h-16 rounded-lg object-cover border border-[var(--color-line)] flex-shrink-0"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-lg bg-[var(--color-surface-3)] border border-[var(--color-line)] flex items-center justify-center flex-shrink-0">
-                      <ImageIcon className="h-6 w-6 text-[var(--color-fg-subtle)]" />
-                    </div>
+                  <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
+                    JPG, PNG o WebP — ridimensionata automaticamente a max 800×800px, ottimizzata per il web.
+                  </p>
+                  {photoUploadError && (
+                    <p className="text-[13px] text-[var(--ds-critical-text)]">{photoUploadError}</p>
                   )}
                 </div>
               </div>
+            </FormCard>
 
-              <div>
-                 <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-2">Allergeni</label>
-                 <div className="flex flex-wrap gap-2">
-                    {COMMON_ALLERGENS.map(allergen => {
-                        const isSelected = newDish.allergens?.includes(allergen);
-                        return (
-                            <button
-                                key={allergen}
-                                type="button"
-                                onClick={() => toggleAllergen(allergen)}
-                                className={`px-3 py-1 rounded-full text-xs font-medium border transition flex items-center gap-1 ${
-                                    isSelected
-                                    ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'
-                                    : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
-                                }`}
-                            >
-                                {isSelected && <Check size={12} />}
-                                {allergen}
-                            </button>
-                        )
-                    })}
-                 </div>
+            <FormCard
+              title="Allergeni"
+              aside={
+                (newDish.allergens?.length ?? 0) > 0
+                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">{newDish.allergens?.length} selezionati</span>
+                  : undefined
+              }
+            >
+              <div className="flex flex-wrap gap-2">
+                {COMMON_ALLERGENS.map(allergen => {
+                  const isSelected = newDish.allergens?.includes(allergen);
+                  return (
+                    <button
+                      key={allergen}
+                      type="button"
+                      onClick={() => toggleAllergen(allergen)}
+                      aria-pressed={isSelected}
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        isSelected
+                          ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      }`}
+                    >
+                      {isSelected && <Check size={13} />}
+                      {allergen}
+                    </button>
+                  );
+                })}
               </div>
-
-            </form>
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsDishFormOpen(false)}
-                  className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  form="dish-form"
-                  disabled={isSavingDish}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSavingDish && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Salva Piatto
-                </button>
-              </div>
-          </div>
-        </div>
+            </FormCard>
+          </form>
+        </ModalShell>
       )}
 
       {/* Add Banquet Modal */}
       {isBanquetFormOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-stretch justify-center z-50 p-0 sm:p-4">
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-5xl overflow-hidden flex flex-col h-full">
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{isEditingBanquet ? 'Modifica Menu Banchetto' : 'Crea Menu Banchetto'}</h3>
-              <button onClick={closeBanquetForm} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
+        <ModalShell
+          open={isBanquetFormOpen}
+          onClose={closeBanquetForm}
+          title={isEditingBanquet ? 'Modifica menu banchetto' : 'Crea menu banchetto'}
+          subtitle={`Passo ${banquetStep + 1} di ${BANQUET_STEPS.length} · ${BANQUET_STEPS[banquetStep].label}`}
+          size="lg"
+          fixedHeight
+          // No top padding: the pinned stepper above already supplies it.
+          bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
+          footerStart="Aggiungi almeno un piatto per completare il menù."
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setBanquetStep(s => Math.max(0, s - 1))}
+                disabled={banquetStep === 0}
+                className={dsButton.quiet}
+              >
+                <ChevronLeft className="h-4 w-4" /> Indietro
               </button>
+              <button
+                type="button"
+                onClick={closeBanquetForm}
+                className={dsButton.quiet}
+              >
+                Annulla
+              </button>
+              {banquetStep < BANQUET_STEPS.length - 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setBanquetStep(s => Math.min(BANQUET_STEPS.length - 1, s + 1))}
+                  className={dsButton.primary}
+                >
+                  Avanti <ChevronRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleAddBanquetSubmit}
+                  type="button"
+                  disabled={isSavingBanquet}
+                  className={dsButton.primary}
+                >
+                  {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {isEditingBanquet ? 'Salva modifiche' : 'Crea menu'}
+                </button>
+              )}
+            </>
+          }
+          subheader={
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+              {BANQUET_STEPS.map((step, i) => {
+                const isCurrent = i === banquetStep;
+                const isDone = i < banquetStep;
+                return (
+                  <button
+                    key={step.label}
+                    type="button"
+                    onClick={() => setBanquetStep(i)}
+                    className="group flex min-w-[150px] flex-1 flex-col gap-2 text-left focus-visible:outline-none"
+                    aria-current={isCurrent ? 'step' : undefined}
+                  >
+                    <span className={`h-[3px] w-full rounded-full ${isCurrent || isDone ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border)]'}`} />
+                    <span className="flex items-center gap-2">
+                      <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-semibold tabular-nums ${
+                        isDone
+                          ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
+                          : isCurrent
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
+                      }`}>
+                        {isDone ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                      </span>
+                      <span className={`truncate text-[14px] ${isCurrent ? 'font-semibold text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] group-hover:text-[var(--ds-text-primary)]'}`}>
+                        {step.label}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            {!isEditingBanquet && banquetDraftBanner && (
-              <div className="mx-4 sm:mx-6 mt-4 p-3 sm:p-4 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-xl flex items-start gap-3">
-                <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Bozza non salvata trovata</p>
-                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                    Salvata {new Date(banquetDraftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
-                  </p>
-                </div>
-                <div className="flex gap-2 flex-shrink-0">
+          }
+        >
+          {/* Scroll anchor: each step starts at its own top. The shell owns the
+              scroll container, so we bring this sentinel into view rather than
+              reaching for a ref it does not expose. */}
+          <div ref={banquetFormScrollRef} aria-hidden />
+
+
+          {!isEditingBanquet && banquetDraftBanner && (
+            <Callout
+              tone="pending"
+              icon={Info}
+              title="Bozza non salvata trovata"
+              className="mb-4"
+              action={
+                <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={handleRestoreBanquetDraft}
-                    className="px-3 py-1.5 bg-amber-600 text-[#ffffff] text-xs font-semibold rounded-lg hover:bg-amber-700"
+                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-pending-solid)] px-4 text-[13px] font-semibold text-[#ffffff] transition-opacity hover:opacity-90"
                   >
                     Riprendi
                   </button>
                   <button
                     type="button"
                     onClick={handleDiscardBanquetDraft}
-                    className="px-3 py-1.5 bg-white text-amber-700 text-xs font-semibold rounded-lg border border-amber-300 hover:bg-amber-100 dark:bg-[var(--color-surface-3)] dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-[var(--color-surface-hover)]"
+                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface)] px-4 text-[13px] font-semibold text-[var(--ds-pending-text)] transition-opacity hover:opacity-90"
                   >
                     Scarta
                   </button>
                 </div>
-              </div>
-            )}
-            <form onSubmit={handleAddBanquetSubmit} className="flex-1 overflow-y-auto px-5 sm:px-8 py-6 space-y-8">
+              }
+            >
+              Salvata {new Date(banquetDraftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+            </Callout>
+          )}
+
+          <form onSubmit={handleAddBanquetSubmit} className="space-y-4">
 
               {/* SECTION: Cliente */}
-              <section>
-                <header className="mb-3">
-                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Cliente</h4>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Chi ha richiesto il banchetto. Selezionalo dalla rubrica per collegare la prenotazione.</p>
-                </header>
+              <section className={banquetStep === 0 ? 'block' : 'hidden'}>
+                <FormCard title="Cliente">
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Chi ha richiesto il banchetto. Selezionalo dalla rubrica per collegare la prenotazione.</p>
                 {selectedBanquetCustomer ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3">
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-canvas)] p-3">
                     <div className="min-w-0">
-                      <div className="font-semibold text-[var(--color-fg)] text-sm truncate">{selectedBanquetCustomer.name}</div>
-                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
+                      <div className="font-semibold text-[var(--ds-text-primary)] text-sm truncate">{selectedBanquetCustomer.name}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--ds-text-muted)]">
                         {selectedBanquetCustomer.phone && (
                           <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {selectedBanquetCustomer.phone}</span>
                         )}
@@ -1262,7 +1761,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] rounded-md"
+                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] rounded-md"
                       >
                         Cambia
                       </button>
@@ -1272,7 +1771,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           setSelectedBanquetCustomer(null);
                           setNewBanquet(prev => ({ ...prev, customer_id: null }));
                         }}
-                        className="p-1.5 text-[var(--color-fg-muted)] hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 rounded-md"
+                        className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] rounded-md"
                         title="Rimuovi cliente"
                       >
                         <X className="h-4 w-4" />
@@ -1283,31 +1782,30 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-canvas)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
                     <BookUser className="h-4 w-4" />
                     Seleziona dalla rubrica
                   </button>
                 )}
+                </FormCard>
               </section>
 
               {/* SECTION: Evento */}
-              <section className="pt-6 border-t border-[var(--color-line)]">
-                <header className="mb-3">
-                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Evento</h4>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Identifica il banchetto: nome interno, data e turno.</p>
-                </header>
+              <section className={banquetStep === 0 ? 'block' : 'hidden'}>
+                <FormCard title="Evento">
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Identifica il banchetto: nome interno, data e turno.</p>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Nome Menu <span className="text-rose-500">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Nome Menu <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           required
                           placeholder="es. Menu Matrimonio Gold"
-                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Nome Menu')
-                              ? 'border-rose-400 focus:border-rose-500'
-                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
+                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
                           }`}
                           value={newBanquet.name}
                           onChange={e => {
@@ -1317,14 +1815,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data Evento <span className="text-rose-500">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Data Evento <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           type="date"
                           required
-                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Data Evento')
-                              ? 'border-rose-400 focus:border-rose-500'
-                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
+                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
                           }`}
                           value={newBanquet.event_date || ''}
                           onChange={e => {
@@ -1334,97 +1832,78 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
-                      <div className="inline-flex items-center bg-[var(--color-surface)] rounded-full border border-[var(--color-line)] p-1 gap-0.5">
-                        <button
-                            type="button"
-                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.LUNCH})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                newBanquet.shift === Shift.LUNCH
-                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                            }`}
-                        >
-                            <Sun className="h-4 w-4" /> Pranzo
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setNewBanquet({...newBanquet, shift: Shift.DINNER})}
-                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                newBanquet.shift === Shift.DINNER
-                                    ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                            }`}
-                        >
-                            <Sunset className="h-4 w-4" /> Cena
-                        </button>
-                      </div>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Turno</label>
+                      {/* Cast covers the not-yet-chosen case: an empty value
+                          matches no segment, so neither lights up until you pick
+                          one — the form has never defaulted the shift. */}
+                      <SegmentedControl<Shift>
+                        value={(newBanquet.shift ?? '') as Shift}
+                        onChange={next => setNewBanquet({ ...newBanquet, shift: next })}
+                        ariaLabel="Turno"
+                        options={[
+                          { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
+                          { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                        ]}
+                      />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Descrizione Commerciale <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Descrizione Commerciale <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                     <textarea
                       placeholder="Breve descrizione visibile in stampa (es. Cresima, Matrimonio civile…)"
-                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
                       value={newBanquet.description}
                       onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
                     />
                   </div>
                 </div>
+                </FormCard>
               </section>
 
               {/* SECTION: Coperti & Tariffa */}
-              <section className="pt-6 border-t border-[var(--color-line)]">
-                <header className="mb-3">
-                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Coperti e Tariffa</h4>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
-                </header>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Numero Ospiti <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                      <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          placeholder="es. 80"
-                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                          value={newBanquet.guests ?? ''}
-                          onChange={e => {
-                              const parsed = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                              const clampedChildren = parsed != null ? Math.min(newBanquet.children ?? 0, parsed) : (newBanquet.children ?? 0);
-                              setNewBanquet({...newBanquet, guests: parsed, children: clampedChildren});
+              <section className={banquetStep === 1 ? 'block' : 'hidden'}>
+                <FormCard title="Coperti e tariffa">
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="Ospiti totali">
+                      {/* Children stay clamped to the headcount, same rule the
+                          number inputs enforced — lowering guests below the
+                          children count would otherwise price a phantom adult. */}
+                      <Stepper
+                          value={newBanquet.guests ?? undefined}
+                          onChange={next => {
+                              const clampedChildren = next != null ? Math.min(newBanquet.children ?? 0, next) : (newBanquet.children ?? 0);
+                              setNewBanquet({ ...newBanquet, guests: next, children: clampedChildren });
                           }}
+                          min={0}
+                          max={999}
+                          ariaLabel="Ospiti totali"
                       />
-                  </div>
-                  <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Di cui Bambini <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
-                      <input
-                          type="number"
-                          min="0"
-                          max={newBanquet.guests ?? undefined}
-                          step="1"
-                          placeholder="0"
-                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                  </Field>
+                  <Field label="Di cui bambini">
+                      <Stepper
                           value={newBanquet.children ?? 0}
-                          onChange={e => {
-                              const raw = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                              const clamped = Math.max(0, Math.min(raw, newBanquet.guests ?? 0));
-                              setNewBanquet({...newBanquet, children: clamped});
+                          onChange={next => {
+                              const clamped = Math.max(0, Math.min(next ?? 0, newBanquet.guests ?? 0));
+                              setNewBanquet({ ...newBanquet, children: clamped });
                           }}
+                          min={0}
+                          max={newBanquet.guests ?? 0}
+                          ariaLabel="Di cui bambini"
                       />
-                  </div>
+                  </Field>
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Adulti (€) <span className="text-rose-500">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Adulti (€) <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           type="number"
                           required
                           min="0"
                           step="0.01"
-                          className={`w-full bg-[var(--color-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Prezzo Adulti')
-                              ? 'border-rose-400 focus:border-rose-500'
-                              : 'border-[var(--color-line)] focus:border-[var(--color-fg)]'
+                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
+                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
                           }`}
                           value={newBanquet.price_per_person}
                           onChange={e => {
@@ -1436,13 +1915,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Prezzo Bambini (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Bambini (€) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <input
                           type="number"
                           min="0"
                           step="0.01"
                           placeholder="Se vuoto: stesso adulti"
-                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
                           value={newBanquet.children_price ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
                       />
@@ -1450,13 +1929,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Acconto (€) <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Acconto (€) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <input
                           type="number"
                           min="0"
                           step="0.01"
                           placeholder="0.00"
-                          className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
                           value={newBanquet.deposit_amount ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                       />
@@ -1464,19 +1943,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Sconto <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Sconto <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <div className="flex gap-2">
-                          <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden flex-shrink-0">
+                          <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden flex-shrink-0">
                               <button
                                   type="button"
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'PERCENT' ? null : 'PERCENT', discount_value: newBanquet.discount_type === 'PERCENT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'}`}
                                   aria-pressed={newBanquet.discount_type === 'PERCENT'}
                               >%</button>
                               <button
                                   type="button"
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'AMOUNT' ? null : 'AMOUNT', discount_value: newBanquet.discount_type === 'AMOUNT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--color-line)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'}`}
+                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--ds-border)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'}`}
                                   aria-pressed={newBanquet.discount_type === 'AMOUNT'}
                               >€</button>
                           </div>
@@ -1486,7 +1965,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               step="0.01"
                               placeholder={newBanquet.discount_type === 'PERCENT' ? 'es. 10' : '0.00'}
                               disabled={!newBanquet.discount_type}
-                              className="flex-1 min-w-0 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex-1 min-w-0 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
                               value={newBanquet.discount_value ?? ''}
                               onChange={e => setNewBanquet({...newBanquet, discount_value: e.target.value === '' ? null : parseFloat(e.target.value)})}
                           />
@@ -1494,72 +1973,96 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   </div>
                   )}
                 </div>
+
+                {/* What the numbers above add up to, shown where they are
+                    entered rather than only on the card afterwards. */}
+                {canViewBanquetPrice && (() => {
+                  const gross = computeBanquetGrossTotal(newBanquet as BanquetMenu);
+                  const discount = computeBanquetDiscountAmount(newBanquet as BanquetMenu, gross);
+                  const total = Math.max(0, gross - discount);
+                  const guests = Number(newBanquet.guests) || 0;
+                  const adultPrice = Number(newBanquet.price_per_person) || 0;
+                  return (
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-[16px] bg-[var(--ds-seated-tint)] px-4 py-3">
+                      <div>
+                        <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">Totale banchetto</div>
+                        <div className="text-[13px] text-[var(--ds-seated-text)] opacity-80 tabular-nums">
+                          {guests} × € {adultPrice.toFixed(2)}
+                          {discount > 0 && ` − € ${discount.toFixed(2)} di sconto`}
+                        </div>
+                      </div>
+                      <div className="text-[28px] font-bold tabular-nums leading-none text-[var(--ds-seated-text)]">
+                        € {total.toFixed(2)}
+                      </div>
+                    </div>
+                  );
+                })()}
+                </FormCard>
               </section>
 
               {/* SECTION: Note operative */}
-              <section className="pt-6 border-t border-[var(--color-line)]">
-                <header className="mb-3">
-                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Note operative</h4>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
-                </header>
+              <section className={banquetStep === 4 ? 'block' : 'hidden'}>
+                <FormCard title="Note operative">
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
                     <textarea
                       placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
-                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_courses || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
                     />
                   </div>
                   <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
                     <textarea
                       placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
-                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_service || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
                     />
                   </div>
                   <div>
-                    <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Note Mise en Place</label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Mise en Place</label>
                     <textarea
                       placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
-                      className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_mise_en_place || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
                     />
                   </div>
                 </div>
+                </FormCard>
               </section>
 
-              <section className="pt-6 border-t border-[var(--color-line)]">
-                <header className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Composizione del menu</h4>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-1">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addCourse}
-                    className="text-xs font-medium text-[var(--color-fg)] hover:underline flex items-center gap-1 px-2 py-1 rounded-md hover:bg-[var(--color-surface-hover)] flex-shrink-0"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Aggiungi Uscita
-                  </button>
-                </header>
+              <section className={banquetStep === 2 ? 'block' : 'hidden'}>
+                <FormCard
+                  title="Composizione del menù"
+                  aside={
+                    <button
+                      type="button"
+                      onClick={addCourse}
+                      className={`${dsButton.quiet} h-9 flex-shrink-0 px-4 text-[13px]`}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Aggiungi uscita
+                    </button>
+                  }
+                >
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
 
                 <div className="space-y-3">
                   {(newBanquet.courses || []).map((course, courseIndex) => {
                     const totalCourses = (newBanquet.courses || []).length;
                     return (
-                      <div key={courseIndex} className="bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-[var(--color-surface)] border-b border-[var(--color-line)]">
+                      <div key={courseIndex} className="bg-[var(--ds-canvas)] rounded-lg border border-[var(--ds-border)] overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-[var(--ds-surface)] border-b border-[var(--ds-border)]">
                           <div className="flex flex-col">
                             <button
                               type="button"
                               onClick={() => moveCourse(courseIndex, -1)}
                               disabled={courseIndex === 0}
-                              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
                               title="Sposta su"
                             >
                               <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
@@ -1568,7 +2071,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               type="button"
                               onClick={() => moveCourse(courseIndex, 1)}
                               disabled={courseIndex === totalCourses - 1}
-                              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
                               title="Sposta giù"
                             >
                               <ChevronRight className="h-3.5 w-3.5 rotate-90" />
@@ -1579,15 +2082,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             value={course.name}
                             onChange={e => renameCourse(courseIndex, e.target.value)}
                             placeholder={`Nome uscita (es. ${courseIndex + 1}ª Uscita)`}
-                            className="flex-1 bg-transparent border-0 focus:ring-0 outline-none text-sm font-semibold text-[var(--color-fg)] px-1 py-0.5"
+                            className="flex-1 bg-transparent border-0 focus:ring-0 outline-none text-sm font-semibold text-[var(--ds-text-primary)] px-1 py-0.5"
                           />
-                          <span className="text-xs text-[var(--color-fg-muted)] whitespace-nowrap">
+                          <span className="text-xs text-[var(--ds-text-muted)] whitespace-nowrap">
                             {course.dish_ids.length} {course.dish_ids.length === 1 ? 'piatto' : 'piatti'}
                           </span>
                           <button
                             type="button"
                             onClick={() => removeCourse(courseIndex)}
-                            className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-rose-50 dark:hover:bg-rose-500/15 hover:text-rose-600 dark:hover:text-rose-400"
+                            className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
                             title="Elimina uscita"
                           >
                             <X className="h-4 w-4" />
@@ -1600,7 +2103,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             if (categoryDishes.length === 0) return null;
                             return (
                               <div key={category}>
-                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--color-fg-subtle)] mb-1.5">
+                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">
                                   {category}
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1612,18 +2115,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         onClick={() => toggleDishInCourse(courseIndex, dish.id)}
                                         className={`p-2 rounded-md border cursor-pointer transition flex items-start gap-2 ${
                                           checked
-                                            ? 'bg-[var(--color-surface-3)] border-[var(--color-fg)]'
-                                            : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                                            ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]'
+                                            : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                                         }`}
                                       >
                                         <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                          checked ? 'bg-[var(--color-fg)] border-[var(--color-fg)]' : 'border-[var(--color-line-strong)]'
+                                          checked ? 'bg-[var(--ds-action-bg)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border-strong)]'
                                         }`}>
-                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full" />}
+                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full" />}
                                         </div>
                                         <div className="min-w-0">
-                                          <div className="text-sm font-medium text-[var(--color-fg)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--color-fg-muted)]">€{dish.price}</div>
+                                          <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
+                                          <div className="text-xs text-[var(--ds-text-muted)]">€{dish.price}</div>
                                         </div>
                                       </div>
                                     );
@@ -1637,7 +2140,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             if (orphan.length === 0) return null;
                             return (
                               <div>
-                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--color-fg-subtle)] mb-1.5">Altro</div>
+                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">Altro</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                   {orphan.map(dish => {
                                     const checked = course.dish_ids.includes(dish.id);
@@ -1646,17 +2149,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         key={dish.id}
                                         onClick={() => toggleDishInCourse(courseIndex, dish.id)}
                                         className={`p-2 rounded-md border cursor-pointer transition flex items-start gap-2 ${
-                                          checked ? 'bg-[var(--color-surface-3)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                                          checked ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                                         }`}
                                       >
                                         <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                          checked ? 'bg-[var(--color-fg)] border-[var(--color-fg)]' : 'border-[var(--color-line-strong)]'
+                                          checked ? 'bg-[var(--ds-action-bg)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border-strong)]'
                                         }`}>
-                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full" />}
+                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full" />}
                                         </div>
                                         <div className="min-w-0">
-                                          <div className="text-sm font-medium text-[var(--color-fg)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--color-fg-muted)]">{dish.category} · €{dish.price}</div>
+                                          <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
+                                          <div className="text-xs text-[var(--ds-text-muted)]">{dish.category} · €{dish.price}</div>
                                         </div>
                                       </div>
                                     );
@@ -1666,12 +2169,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             );
                           })()}
                           {dishes.length === 0 && (
-                            <div className="text-xs text-[var(--color-fg-subtle)] text-center py-4">Aggiungi prima dei piatti alla carta.</div>
+                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">Aggiungi prima dei piatti alla carta.</div>
                           )}
                         </div>
 
-                        <div className="px-3 pb-3 pt-2 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
-                          <label className="block text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-1.5">
+                        <div className="px-3 pb-3 pt-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
+                          <label className="block text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-1.5">
                             Note uscita (opzionale)
                           </label>
                           <textarea
@@ -1679,36 +2182,35 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             onChange={e => setCourseNotes(courseIndex, e.target.value)}
                             placeholder="Es. servire con pane caldo, abbinare a vino bianco fresco…"
                             rows={2}
-                            className="w-full bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-md p-2 text-sm focus:outline-none focus:border-[var(--color-fg)] resize-y"
+                            className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-md p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
                           />
                         </div>
                       </div>
                     );
                   })}
                   {(newBanquet.courses || []).length === 0 && (
-                    <div className="text-center py-6 bg-[var(--color-surface-2)] rounded-lg border border-dashed border-[var(--color-line)]">
-                      <p className="text-sm text-[var(--color-fg-muted)] mb-2">Nessuna uscita</p>
+                    <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-lg border border-dashed border-[var(--ds-border)]">
+                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">Nessuna uscita</p>
                       <button
                         type="button"
                         onClick={addCourse}
-                        className="text-sm font-medium text-[var(--color-fg)] hover:underline"
+                        className="text-sm font-medium text-[var(--ds-text-primary)] hover:underline"
                       >
                         + Aggiungi la prima uscita
                       </button>
                     </div>
                   )}
                 </div>
+                </FormCard>
               </section>
 
-              <section className="pt-6 border-t border-[var(--color-line)]">
-                <header className="mb-3">
-                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">Tavoli assegnati <span className="text-[var(--color-fg-subtle)] font-normal normal-case tracking-normal">— opzionale</span></h4>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-1">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
-                </header>
+              <section className={banquetStep === 3 ? 'block' : 'hidden'}>
+                <FormCard title="Tavoli assegnati" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
                 {!newBanquet.event_date || !newBanquet.shift ? (
-                  <p className="text-xs text-[var(--color-fg-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
                 ) : tables.length === 0 ? (
-                  <p className="text-xs text-[var(--color-fg-muted)] italic">Nessun tavolo configurato.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">Nessun tavolo configurato.</p>
                 ) : (
                   <div className="space-y-3">
 
@@ -1718,12 +2220,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       if (openRooms.length === 0) return null;
                       return (
                         <div>
-                          <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Sale</p>
+                          <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2">Sale</p>
                           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                             <button
                               type="button"
                               onClick={() => setTablePickerRoomFilter('ALL')}
-                              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                             >
                               Tutte le sale
                             </button>
@@ -1732,7 +2234,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 key={room.id}
                                 type="button"
                                 onClick={() => setTablePickerRoomFilter(room.id)}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                               >
                                 {room.name}
                               </button>
@@ -1743,14 +2245,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     })()}
 
                     {/* Tables grouped by room — same UX as Reservations table picker */}
-                    <div className="bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-line)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
+                    <div className="bg-[var(--ds-canvas)] rounded-lg border border-[var(--ds-border)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
                       {(() => {
                         const openRooms = rooms.filter(r => !r.is_closed);
                         const displayedRooms = tablePickerRoomFilter === 'ALL'
                           ? openRooms
                           : openRooms.filter(r => r.id === tablePickerRoomFilter);
                         if (displayedRooms.length === 0) {
-                          return <div className="text-center py-10 text-[var(--color-fg-subtle)] text-sm">Nessuna sala disponibile.</div>;
+                          return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">Nessuna sala disponibile.</div>;
                         }
                         return displayedRooms.map(room => {
                           const roomTables = [...tables]
@@ -1759,7 +2261,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           if (roomTables.length === 0) return null;
                           return (
                             <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                              <h4 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2 sticky top-0 bg-[var(--color-surface-2)] py-1 z-10">{room.name}</h4>
+                              <h4 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2 sticky top-0 bg-[var(--ds-canvas)] py-1 z-10">{room.name}</h4>
                               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
                                 {roomTables.map(t => {
                                   const isSelected = (newBanquet.table_ids || []).includes(t.id);
@@ -1781,28 +2283,28 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       }}
                                       className={`relative p-2 sm:p-3 rounded-md border text-center transition-colors ${
                                         isSelected
-                                          ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)] ring-1 ring-[var(--color-fg)] z-10'
+                                          ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] ring-1 ring-[var(--ds-text-primary)] z-10'
                                           : isOccupied
-                                            ? 'border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 opacity-90 cursor-not-allowed'
-                                            : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                            ? 'border-[var(--ds-critical-tint)] bg-[var(--ds-critical-tint)] opacity-90 cursor-not-allowed'
+                                            : 'border-[var(--ds-border)] bg-[var(--ds-surface)] hover:border-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
                                       }`}
                                     >
-                                      <div className={`text-xs sm:text-sm font-semibold truncate ${isOccupied ? 'text-rose-700 dark:text-rose-300' : 'text-[var(--color-fg)]'}`}>
+                                      <div className={`text-xs sm:text-sm font-semibold truncate ${isOccupied ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'}`}>
                                         {t.name}
                                       </div>
-                                      <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-rose-700 dark:text-rose-300' : 'text-[var(--color-fg-muted)]'}`}>
+                                      <div className={`text-[9px] sm:text-[10px] flex justify-center items-center gap-0.5 sm:gap-1 mt-0.5 sm:mt-1 ${isOccupied ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}`}>
                                         <Users size={8} className="sm:hidden" />
                                         <Users size={10} className="hidden sm:block" />
                                         {t.seats}
                                       </div>
                                       {isOccupied && occ && (
-                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-rose-600 text-[#ffffff] text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
+                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[var(--ds-critical-solid)] text-[#ffffff] text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
                                           {occ.label}
                                         </div>
                                       )}
                                       {isSelected && (
-                                        <div className="absolute -top-2 -right-2 bg-[var(--color-fg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
-                                          <div className="w-1.5 h-1.5 bg-[var(--color-fg-on-brand)] rounded-full m-1" />
+                                        <div className="absolute -top-2 -right-2 bg-[var(--ds-action-bg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
+                                          <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full m-1" />
                                         </div>
                                       )}
                                     </button>
@@ -1816,16 +2318,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
 
                     {/* Legend */}
-                    <div className="flex flex-wrap gap-4 text-[10px] text-[var(--color-fg-muted)] px-1">
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded"></div> Libero</div>
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--color-surface-3)] border border-[var(--color-fg)] rounded"></div> Selezionato</div>
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 rounded"></div> Occupato</div>
+                    <div className="flex flex-wrap gap-4 text-[10px] text-[var(--ds-text-muted)] px-1">
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded"></div> Libero</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface-row)] border border-[var(--ds-text-primary)] rounded"></div> Selezionato</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-critical-tint)] border  rounded"></div> Occupato</div>
                     </div>
 
                     {(newBanquet.table_ids || []).length > 0 && (
-                      <p className="text-xs text-[var(--color-fg-muted)] px-1">
-                        Selezionati: <span className="font-semibold text-[var(--color-fg)]">{(newBanquet.table_ids || []).length}</span> tavolo/i ·{' '}
-                        <span className="font-semibold text-[var(--color-fg)]">
+                      <p className="text-xs text-[var(--ds-text-muted)] px-1">
+                        Selezionati: <span className="font-semibold text-[var(--ds-text-primary)]">{(newBanquet.table_ids || []).length}</span> tavolo/i ·{' '}
+                        <span className="font-semibold text-[var(--ds-text-primary)]">
                           {(newBanquet.table_ids || []).reduce((sum, tid) => {
                             const t = tables.find(tt => tt.id === tid);
                             return sum + (t ? t.seats : 0);
@@ -1836,39 +2338,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     )}
                   </div>
                 )}
+                </FormCard>
               </section>
 
-            </form>
-            {banquetFormErrors.length > 0 && (
-              <div className="px-5 py-3 border-t border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 text-rose-800 dark:text-rose-300">
-                <div className="text-sm font-semibold mb-1">Compila i campi obbligatori:</div>
-                <ul className="text-sm list-disc list-inside space-y-0.5">
-                  {banquetFormErrors.map(field => (
-                    <li key={field}>{field}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeBanquetForm}
-                  className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                >
-                  Annulla
-                </button>
-                <button
-                  onClick={handleAddBanquetSubmit}
-                  type="submit"
-                  disabled={isSavingBanquet}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isEditingBanquet ? 'Salva Modifiche' : 'Crea Menu'}
-                </button>
-              </div>
-          </div>
-        </div>
+          </form>
+
+          {banquetFormErrors.length > 0 && (
+            <Callout tone="critical" icon={Info} title="Compila i campi obbligatori:" className="mt-4">
+              <ul className="list-inside list-disc space-y-0.5">
+                {banquetFormErrors.map(field => (
+                  <li key={field}>{field}</li>
+                ))}
+              </ul>
+            </Callout>
+          )}
+        </ModalShell>
       )}
 
       <ConfirmDeleteModal
@@ -1910,7 +2394,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         />
       )}
 
-      {viewDish && (
+      {/* Only when the inline panel cannot show — otherwise the same dish would
+          open twice, in a panel and a modal on top of it. */}
+      {viewDish && !detailPanelOpen && (
         <DishDetailModal
           dish={viewDish}
           onClose={() => setViewDish(null)}
@@ -1930,12 +2416,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       {showBanquetSortModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={() => setShowBanquetSortModal(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full sm:max-w-sm bg-[var(--color-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+          <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2 sm:hidden">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-2 pt-2 sm:pt-5">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
             </div>
             <div className="px-3">
               {BANQUET_SORT_OPTIONS.map(opt => (
@@ -1944,11 +2430,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => { setBanquetSortBy(opt.value); setShowBanquetSortModal(false); }}
                   className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
-                    banquetSortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                    banquetSortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
                   {opt.label}
-                  {banquetSortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                  {banquetSortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
                 </button>
               ))}
             </div>
@@ -2006,30 +2492,50 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
   const todayKey = formatLocalDate(new Date());
   const selectedBanquets = selectedDate ? (banquetsByDate.get(selectedDate) || []) : [];
 
+  // Totals for the month on screen, so the header answers "how busy is August"
+  // without counting chips.
+  const monthTotals = useMemo(() => {
+    let count = 0;
+    let covers = 0;
+    for (const [date, list] of banquetsByDate) {
+      const d = new Date(date + 'T00:00');
+      if (d.getMonth() !== monthIndex || d.getFullYear() !== year) continue;
+      count += list.length;
+      covers += list.reduce((s, b) => s + (Number(b.guests) || 0), 0);
+    }
+    return { count, covers };
+  }, [banquetsByDate, monthIndex, year]);
+
   return (
     <div className="flex flex-col lg:flex-row gap-4">
-      <div className="lg:w-3/4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 sm:p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5 lg:w-3/4">
+      <div className="mb-4 flex items-center gap-3">
         <button
           onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
-          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+          className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
           aria-label="Mese precedente"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <h3 className="text-sm font-semibold text-[var(--color-fg)] capitalize">
+        <h3 className="flex-1 text-center text-[19px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
           {ITALIAN_MONTHS[monthIndex]} {year}
         </h3>
+        {monthTotals.count > 0 && (
+          <StatusPill tone="info" className="hidden h-8 px-3 sm:inline-flex">
+            <span className="font-semibold tabular-nums">{monthTotals.count}</span>
+            <span className="font-normal">{monthTotals.count === 1 ? 'banchetto' : 'banchetti'} · {monthTotals.covers} coperti</span>
+          </StatusPill>
+        )}
         <button
           onClick={() => setCursor(new Date(year, monthIndex + 1, 1))}
-          className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
+          className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
           aria-label="Mese successivo"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-[var(--color-fg-subtle)] tracking-[0.02em] mb-2">
+      <div className="mb-2 grid grid-cols-7 text-center text-[13px] font-semibold text-[var(--ds-text-muted)]">
         {ITALIAN_WEEKDAYS.map(d => <div key={d} className="py-1">{d}</div>)}
       </div>
 
@@ -2038,36 +2544,48 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
           const key = formatLocalDate(d);
           const inMonth = d.getMonth() === monthIndex;
           const events = banquetsByDate.get(key) || [];
+          const covers = events.reduce((s, b) => s + (Number(b.guests) || 0), 0);
           const isToday = key === todayKey;
           const isSelected = key === selectedDate;
           return (
             <button
               key={i}
               onClick={() => setSelectedDate(events.length ? key : null)}
-              className={`aspect-square sm:aspect-auto sm:min-h-[68px] p-1.5 rounded-md border text-left flex flex-col transition overflow-hidden ${
+              className={`flex aspect-square flex-col overflow-hidden rounded-[12px] p-1.5 text-left transition-colors sm:aspect-auto sm:min-h-[96px] ${
                 isSelected
-                  ? 'border-[var(--color-fg)] bg-[var(--color-surface-3)]'
-                  : events.length
-                  ? 'border-[var(--color-line-strong)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)]'
-                  : 'border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+                  ? 'bg-[var(--ds-surface-row)] ring-2 ring-inset ring-[var(--ds-text-primary)]'
+                  : isToday
+                  ? 'ring-2 ring-inset ring-[var(--ds-seated-solid)] hover:bg-[var(--ds-surface-row)]'
+                  : 'ring-1 ring-inset ring-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
               } ${inMonth ? '' : 'opacity-40'}`}
             >
-              <span className={`text-xs font-semibold ${isToday ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]'}`}>
-                {d.getDate()}
-              </span>
+              <div className="flex w-full items-center justify-between gap-1">
+                <span className={`text-[13px] tabular-nums ${isToday ? 'font-bold text-[var(--ds-seated-text)]' : 'font-semibold text-[var(--ds-text-primary)]'}`}>
+                  {d.getDate()}
+                </span>
+                {covers > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-[var(--ds-text-muted)]">
+                    <Users className="h-3 w-3" aria-hidden />{covers}
+                  </span>
+                )}
+              </div>
               {events.length > 0 && (
-                <div className="mt-1 w-full flex flex-col gap-0.5 overflow-hidden">
+                <div className="mt-1 flex w-full flex-col gap-0.5 overflow-hidden">
                   {events.slice(0, 2).map(ev => (
                     <span
                       key={ev.id}
-                      className="text-[10px] font-medium text-[var(--color-fg)] bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-1 py-0.5 truncate block"
+                      className={`block truncate rounded-[6px] px-1.5 py-0.5 text-[11px] font-medium ${
+                        ev.shift === Shift.DINNER
+                          ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                          : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                      }`}
                       title={ev.name}
                     >
                       {ev.name}
                     </span>
                   ))}
                   {events.length > 2 && (
-                    <span className="text-[10px] font-medium text-[var(--color-fg-muted)] px-1">
+                    <span className="px-1 text-[11px] font-medium text-[var(--ds-text-muted)]">
                       +{events.length - 2}
                     </span>
                   )}
@@ -2079,91 +2597,85 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
       </div>
       </div>
 
-      <div className="lg:w-1/4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+      <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] lg:w-1/4">
         {selectedDate ? (
           <>
-          <h4 className="text-sm font-semibold text-[var(--color-fg)] mb-3 capitalize">
-            {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+          <h4 className="text-[19px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+            {new Date(selectedDate + 'T00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}
           </h4>
+          <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+            {selectedBanquets.length} {selectedBanquets.length === 1 ? 'banchetto' : 'banchetti'}
+            {' · '}
+            {selectedBanquets.reduce((s, b) => s + (Number(b.guests) || 0), 0)} coperti
+          </p>
           <div className="space-y-2">
             {selectedBanquets.map(menu => {
               const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
-              const timeStatus = computeBanquetTimeStatus(menu);
-              const accent = timeStatus === 'PAST'
-                ? 'border-l-4 border-l-slate-300 bg-slate-50/40'
-                : 'border-l-4 border-l-emerald-400 dark:border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-500/10';
+              const outstanding = Math.max(0, computeBanquetTotalDue(menu) - Number(menu.total_paid || 0));
+              const isLunch = menu.shift === Shift.LUNCH;
               return (
                 <div
                   key={menu.id}
-                  onClick={() => canEdit && onSelectBanquet(menu)}
-                  className={`p-3 rounded-md border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition ${accent} ${canEdit ? 'cursor-pointer' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  // Same rule as the list cards: a row opens the details. Edit
+                  // moved to its own button so clicking a banquet never drops
+                  // you straight into a form you did not ask for.
+                  onClick={() => onViewBanquet(menu)}
+                  onKeyDown={e => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewBanquet(menu); }
+                  }}
+                  className="cursor-pointer rounded-[16px] bg-[var(--ds-surface-row)] p-3 transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium text-[var(--color-fg)] truncate">{menu.name}</p>
-                        {menu.shift === Shift.LUNCH && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-1.5 py-0.5 rounded-full">
-                            <Sun className="h-3 w-3" /> Pranzo
-                          </span>
-                        )}
-                        {menu.shift === Shift.DINNER && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-[#4f46e5]/15 text-indigo-700 dark:text-[#a5b4fc] border border-indigo-100 dark:border-[#4f46e5]/30 px-1.5 py-0.5 rounded-full">
-                            <Sunset className="h-3 w-3" /> Cena
-                          </span>
-                        )}
-                        {canManageBanquetPayments && (() => {
-                          const status = computeBanquetPaymentStatus(menu);
-                          if (status === 'PAID') return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full">
-                              <Check className="h-3 w-3" /> Pagato
-                            </span>
-                          );
-                          if (status === 'PARTIAL') return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-500/30 px-1.5 py-0.5 rounded-full">
-                              <Wallet className="h-3 w-3" /> Acconto
-                            </span>
-                          );
-                          return (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-1.5 py-0.5 rounded-full">
-                              <Wallet className="h-3 w-3" /> Da pagare
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      {menu.description && <p className="text-xs text-[var(--color-fg-muted)] truncate mt-0.5">{menu.description}</p>}
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-[var(--color-fg-muted)] flex-wrap">
-                        {menu.guests != null && menu.guests > 0 && (
-                          <span className="inline-flex items-center gap-1">
-                            <Users className="h-3.5 w-3.5 text-[var(--color-fg-muted)]" />
-                            <span className="font-medium text-[var(--color-fg)]">{menu.guests}</span>
-                            <span>coperti</span>
-                            {menu.children != null && menu.children > 0 && (
-                              <span className="text-[var(--color-fg-subtle)]">({menu.children} bambin{menu.children === 1 ? 'o' : 'i'})</span>
-                            )}
-                          </span>
-                        )}
-                        {hasNotes && (
-                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
-                            <StickyNote className="h-3.5 w-3.5" />
-                            <span>Con note</span>
-                          </span>
-                        )}
-                      </div>
+                  <div className="flex items-start gap-2.5">
+                    <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
+                      !menu.shift
+                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
+                        : isLunch
+                          ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                          : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                    }`}>
+                      {isLunch ? <Sun className="h-4 w-4" /> : <Sunset className="h-4 w-4" />}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{menu.name}</p>
+                      <p className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                        {[
+                          menu.description,
+                          menu.shift ? (isLunch ? 'Pranzo' : 'Cena') : null,
+                          menu.guests != null && Number(menu.guests) > 0 ? `${menu.guests} coperti` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
                       {canViewBanquetPrice && (
-                        <span className="text-sm font-semibold text-[var(--color-fg)] whitespace-nowrap">€{menu.price_per_person}/pax</span>
+                        <p className="mt-1 text-[13px]">
+                          {outstanding > 0 ? (
+                            <>
+                              <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
+                              <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                            </>
+                          ) : (
+                            <span className="font-semibold text-[var(--ds-seated-text)]">Saldato</span>
+                          )}
+                        </p>
                       )}
+                      {hasNotes && (
+                        <span className="mt-1 inline-flex items-center gap-1 text-[13px] text-[var(--ds-pending-text)]">
+                          <StickyNote className="h-3.5 w-3.5" />
+                          Con note
+                        </span>
+                      )}
+                    </div>
+                    {canEdit && (
                       <button
                         type="button"
-                        onClick={e => { e.stopPropagation(); onViewBanquet(menu); }}
-                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]"
-                        title="Visualizza piatti"
+                        onClick={e => { e.stopPropagation(); onSelectBanquet(menu); }}
+                        className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface)] shadow-none`}
+                        title="Modifica banchetto"
                       >
-                        <Eye className="h-4 w-4" />
+                        <Edit2 className="h-4 w-4" />
                       </button>
-                    </div>
+                    )}
                   </div>
                 </div>
               );
@@ -2171,9 +2683,9 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
           </div>
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center text-center py-10 text-[var(--color-fg-subtle)]">
-            <Calendar className="h-8 w-8 mb-2 opacity-60" />
-            <p className="text-sm">Seleziona un giorno con eventi per vedere i dettagli.</p>
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <Calendar className="mb-2 h-8 w-8 text-[var(--ds-text-subtle)]" />
+            <p className="text-[14px] text-[var(--ds-text-muted)]">Seleziona un giorno con eventi per vedere i dettagli.</p>
           </div>
         )}
       </div>
