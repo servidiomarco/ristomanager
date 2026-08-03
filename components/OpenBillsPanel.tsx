@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, Loader2, Printer, QrCode, Receipt, TriangleAlert, X } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
 import { billsApiService, getOpenBills, printBill, type OpenBillRow, type StaleOrderRow } from '../services/billsApiService';
+import { getFeatureFlags } from '../services/apiService';
 
 // ---------------------------------------------------------------------------
 // Conti aperti — elenco per tavolo, con e senza prenotazione.
@@ -23,6 +24,25 @@ export const OpenBillsPanel: React.FC = () => {
   const [selected, setSelected] = useState<OpenBillRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Il pannello esiste solo col conto al tavolo attivo: a modulo spento la
+  // pagina Pagamenti non deve mostrare una sezione vuota. null = flag non
+  // ancora noto (niente flash della sezione durante il caricamento).
+  const [payAtTableEnabled, setPayAtTableEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setPayAtTableEnabled(f.pay_at_table_enabled === true); })
+      .catch(() => { if (!cancelled) setPayAtTableEnabled(false); });
+    const socket = socketClient.getSocket();
+    const onFlags = (flags: any) => {
+      if (flags && typeof flags.pay_at_table_enabled === 'boolean') {
+        setPayAtTableEnabled(flags.pay_at_table_enabled);
+      }
+    };
+    socket?.on('features:updated', onFlags);
+    return () => { cancelled = true; socket?.off('features:updated', onFlags); };
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -72,6 +92,9 @@ export const OpenBillsPanel: React.FC = () => {
     }
   };
 
+  // Conto al tavolo spento (o flag non ancora noto): la sezione non esiste.
+  if (payAtTableEnabled !== true) return null;
+
   if (loading) {
     return <div className="p-6 flex items-center gap-2 text-slate-500"><Loader2 className="animate-spin" size={16} /> Caricamento conti…</div>;
   }
@@ -97,8 +120,9 @@ export const OpenBillsPanel: React.FC = () => {
         <div className="mb-4 rounded-xl border-2 border-amber-400 bg-amber-50/60 dark:bg-amber-950/20 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
             <TriangleAlert size={15} />
-            {stale.length === 1 ? 'Una comanda' : `${stale.length} comande`} di servizi precedenti mai chiusa
-            {stale.length === 1 ? '' : 'e'}
+            {stale.length === 1
+              ? 'Una comanda di servizi precedenti mai chiusa'
+              : `${stale.length} comande di servizi precedenti mai chiuse`}
           </div>
           <ul className="mt-2 text-sm space-y-1">
             {stale.map(o => (
