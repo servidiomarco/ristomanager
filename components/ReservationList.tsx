@@ -4479,7 +4479,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <input
                                             type="date"
                                             required
-                                            className={dsInput}
+                                            className={`${dsInput} ds-date-input`}
                                             value={formData.reservation_time?.split('T')[0] || ''}
                                             onChange={e => {
                                                 const currentTime = formData.reservation_time?.split('T')[1] || '20:00';

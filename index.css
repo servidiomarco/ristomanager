@@ -933,6 +933,15 @@ body {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
 }
 
+/* Native date inputs: Android/iOS give the field an intrinsic min-width and
+   generous internal chrome, so inside narrow two-column grids (~360px CSS
+   viewports) the value gets clipped mid-digit. Trim padding and the picker
+   indicator so the date always fits the pill. */
+.ds-date-input { min-width: 0; padding-left: 12px; padding-right: 8px; }
+.ds-date-input::-webkit-date-and-time-value { text-align: left; min-width: 0; }
+.ds-date-input::-webkit-calendar-picker-indicator { margin: 0; padding: 0 2px; }
+@media (max-width: 420px) { .ds-date-input { font-size: 14px; } }
+
 /* The Stepper's value is a real number input so it stays typeable, but the
    native spinners would collide with the − / + buttons flanking it. */
 .ds-stepper-input::-webkit-outer-spin-button,
