@@ -841,12 +841,12 @@ body {
   --ds-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
-/* Clearance for the floating mobile bottom bar: bar height (68px) + its 16px
-   offset + the raised "+" overhang + the iOS safe-area inset. Exposed as a
-   variable so the bar, the scroll region and any sheet anchored above the bar
-   all derive from ONE number instead of drifting apart. Track this against the
-   bar's own bottom offset in App.tsx — they move together. */
-:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 108px); }
+/* Clearance for the flush mobile bottom bar: bar height (68px) + the raised
+   "+" overhang + breathing room + the iOS safe-area inset (internal padding
+   of the bar). Exposed as a variable so the bar, the scroll region and any
+   sheet anchored above the bar all derive from ONE number instead of drifting
+   apart. Track this against the bar's markup in App.tsx — they move together. */
+:root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 92px); }
 .pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
 @media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
 

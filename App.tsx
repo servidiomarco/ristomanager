@@ -2566,24 +2566,25 @@ const App: React.FC = () => {
         </div>{/* /view container */}
 
         {/* Bottom Navigation - Visible only on mobile */}
-        {/* Scrim under the floating bar: content scrolling past fades into
-            the canvas instead of being cut raw at the screen edge. On iOS the
-            safe-area inset masks most of this; on Android the inset is 0 and
-            the page shows through the gap below the bar. */}
+        {/* Short fade above the bar so the raised "+" and its ring melt into
+            the scrolling content instead of colliding with it. The bar itself
+            is opaque, so only the strip above its top edge matters. */}
         <div
           aria-hidden
           className="fixed inset-x-0 bottom-0 z-20 pointer-events-none lg:hidden"
           style={{
-            height: 'calc(env(safe-area-inset-bottom, 0px) + 112px)',
-            background: 'linear-gradient(to top, var(--ds-canvas) 45%, transparent)',
+            height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
+            background: 'linear-gradient(to top, var(--ds-canvas) 62%, transparent)',
           }}
         />
-        {/* Floating bottom bar — a card on the canvas, matching the desktop
-            chrome. Offset by the safe-area inset so it clears the iOS home
-            indicator instead of sitting under it. */}
+        {/* Flush bottom bar — full width, glued to the screen edge like a
+            native tab bar. A floating card left a see-through gap underneath
+            that looked broken on Android, where there is no safe-area inset
+            to visually justify it. Safe-area becomes internal padding, so on
+            iOS the items still clear the home indicator. */}
         <nav
-          className="fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+          className="fixed inset-x-0 bottom-0 rounded-t-[24px] border-t border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
           aria-label="Navigazione mobile"
         >
           <div className="flex items-stretch py-2 px-2 gap-1">
