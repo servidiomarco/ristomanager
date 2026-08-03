@@ -2933,11 +2933,14 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
     aria-label={label}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[15px] rounded-[14px] transition-colors ${
-      active ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-[14px] transition-colors ${
+      active
+        ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+        : 'text-[var(--ds-text-muted)]'
     }`}
   >
-    <span className="relative">
+    {/* Icon-only mode trades labels for a bit more icon: 20 → 24px. */}
+    <span className="relative max-[420px]:[&>svg]:size-6">
       {icon}
       {badge !== undefined && badge > 0 && (
         <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
