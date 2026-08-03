@@ -1247,6 +1247,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               // reservation_time is timestamptz; read it in Europe/Rome or a
               // 20:30 booking renders as its UTC hour.
               const timeLabel = getRomeTimePart(res.reservation_time);
+              // The list spans the whole DB, not just today — without the
+              // requested date, a 21:00 booking for next month reads as
+              // tonight's. "oggi"/"domani" keep the common cases short.
+              const resDateStr = getRomeDatePart(res.reservation_time);
+              const todayStr = getRomeDatePart(new Date());
+              const tomorrowStr = getRomeDatePart(new Date(Date.now() + 24 * 60 * 60 * 1000));
+              const dateLabel = resDateStr === todayStr ? 'oggi'
+                : resDateStr === tomorrowStr ? 'domani'
+                : new Date(`${resDateStr}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
               const busy = inlinePendingBusy === res.id;
               return (
                 <div key={res.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
@@ -1258,8 +1267,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
                       {toTitleCase(res.customer_name) || '—'}
                     </p>
-                    <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                      {timeLabel} · {res.guests || 0} coperti · {channelLabel}
+                    <p
+                      className="text-[13px] text-[var(--ds-text-muted)] truncate"
+                      title={`${dateLabel} · ${timeLabel} · ${res.guests || 0} coperti · ${channelLabel}`}
+                    >
+                      {dateLabel} · {timeLabel} · {res.guests || 0} coperti · {channelLabel}
                     </p>
                   </button>
                   <PaymentBadge reservation={res} />
