@@ -99,12 +99,61 @@ export const OpenBillsPanel: React.FC = () => {
     return <div className="p-6 flex items-center gap-2 text-slate-500"><Loader2 className="animate-spin" size={16} /> Caricamento conti…</div>;
   }
 
+  // Il servizio corrente in evidenza, il resto ripiegato: la pagina serve a
+  // incassare i tavoli di ADESSO, non a fare l'archivio. I conti di servizi
+  // passati però sono crediti non chiusi: spariti del tutto, nessuno li
+  // incasserebbe più — restano a portata di click.
+  const currentBills = bills.filter(b => b.is_current_service);
+  const previousBills = bills.filter(b => !b.is_current_service);
+
+  const renderBill = (b: OpenBillRow) => {
+    const settled = b.residual_cents === 0;
+    return (
+      <button key={b.id} onClick={() => setSelected(b)}
+              className={`text-left rounded-xl border-2 p-3 transition hover:border-slate-400
+                ${settled ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
+                          : 'border-slate-200 dark:border-slate-700'}`}>
+        <div className="flex items-baseline gap-2">
+          <span className="text-lg font-bold">Tav. {b.table_name ?? '—'}</span>
+          <span className="text-xs text-slate-500 truncate">
+            {b.customer_name ?? 'senza prenotazione'}
+          </span>
+        </div>
+        <div className="mt-1 text-sm">
+          <span className="font-semibold">{euro(b.total_cents)}</span>
+          <span className="text-slate-500"> · {b.covers} cop.</span>
+        </div>
+        <div className="mt-1 text-xs">
+          {settled ? (
+            <span className="text-emerald-700 dark:text-emerald-300 font-medium">saldato</span>
+          ) : (
+            <span className="text-slate-500">
+              incassato {euro(b.paid_cents)} · residuo {euro(b.residual_cents)}
+            </span>
+          )}
+        </div>
+        {/* Il tavolo sta ancora ordinando: il totale non è definitivo. */}
+        {b.open_orders > 0 && (
+          <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+            comanda ancora aperta
+          </div>
+        )}
+        {!b.is_current_service && (
+          <div className="mt-1 text-[11px] text-slate-500">
+            {new Date(`${b.service_date}T12:00:00`).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}
+            {' · '}{b.shift === 'LUNCH' ? 'pranzo' : 'cena'}
+          </div>
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="p-4 lg:p-6">
       <div className="flex items-center gap-2 mb-4">
         <Receipt size={18} />
         <h2 className="text-lg font-semibold">Conti aperti</h2>
-        <span className="text-sm text-slate-500">{bills.length}</span>
+        <span className="text-sm text-slate-500">{currentBills.length}</span>
         {service && (
           <span className="text-xs text-slate-400 ml-1">
             servizio {service.shift === 'LUNCH' ? 'pranzo' : 'cena'} ·{' '}
@@ -148,54 +197,28 @@ export const OpenBillsPanel: React.FC = () => {
         </div>
       )}
 
-      {bills.length === 0 ? (
+      {currentBills.length === 0 ? (
         <p className="text-sm text-slate-500">
-          Nessun conto aperto. Si apre chiudendo una comanda da <strong>Comande</strong>.
+          Nessun conto aperto in questo servizio. Si apre chiudendo una comanda da <strong>Comande</strong>.
         </p>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {bills.map(b => {
-            const settled = b.residual_cents === 0;
-            return (
-              <button key={b.id} onClick={() => setSelected(b)}
-                      className={`text-left rounded-xl border-2 p-3 transition hover:border-slate-400
-                        ${settled ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
-                                  : 'border-slate-200 dark:border-slate-700'}`}>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-lg font-bold">Tav. {b.table_name ?? '—'}</span>
-                  <span className="text-xs text-slate-500 truncate">
-                    {b.customer_name ?? 'senza prenotazione'}
-                  </span>
-                </div>
-                <div className="mt-1 text-sm">
-                  <span className="font-semibold">{euro(b.total_cents)}</span>
-                  <span className="text-slate-500"> · {b.covers} cop.</span>
-                </div>
-                <div className="mt-1 text-xs">
-                  {settled ? (
-                    <span className="text-emerald-700 dark:text-emerald-300 font-medium">saldato</span>
-                  ) : (
-                    <span className="text-slate-500">
-                      incassato {euro(b.paid_cents)} · residuo {euro(b.residual_cents)}
-                    </span>
-                  )}
-                </div>
-                {/* Il tavolo sta ancora ordinando: il totale non è definitivo. */}
-                {b.open_orders > 0 && (
-                  <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                    comanda ancora aperta
-                  </div>
-                )}
-                {!b.is_current_service && (
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    {new Date(`${b.service_date}T12:00:00`).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}
-                    {' · '}{b.shift === 'LUNCH' ? 'pranzo' : 'cena'}
-                  </div>
-                )}
-              </button>
-            );
-          })}
+          {currentBills.map(renderBill)}
         </div>
+      )}
+
+      {previousBills.length > 0 && (
+        <details className="mt-5 group">
+          <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1.5">
+            <span className="inline-block transition-transform group-open:rotate-90">▸</span>
+            {previousBills.length === 1
+              ? 'Un conto di servizi precedenti non chiuso'
+              : `${previousBills.length} conti di servizi precedenti non chiusi`}
+          </summary>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 mt-3">
+            {previousBills.map(renderBill)}
+          </div>
+        </details>
       )}
 
       {selected && (
